@@ -1,0 +1,139 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .csv-upload-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(18, 28, 22, 0.35);
+    backdrop-filter: blur(1px);
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .csv-upload-overlay.show {
+    display: flex;
+  }
+  .csv-upload-overlay-card {
+    background: #fff;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #1f3f2d;
+    font-weight: 600;
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_batch_list' %}">Back to Batches</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_template_download' import_slug %}">
+        Download Template
+      </a>
+      <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:import_upload' import_slug %}">
+        Reset Upload Form
+      </a>
+    </div>
+    <form id="csv-upload-form" method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.csv_file.id_for_label }}">{{ form.csv_file.label }}</label>
+        {{ form.csv_file }}
+        {% if form.csv_file.help_text %}<div class="form-text">{{ form.csv_file.help_text }}</div>{% endif %}
+        {% for error in form.csv_file.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <button class="btn btn-primary d-inline-flex align-items-center gap-2" id="csv-upload-submit" type="submit">
+        <span class="spinner-border spinner-border-sm d-none" id="csv-upload-btn-spinner" role="status" aria-hidden="true"></span>
+        <span id="csv-upload-btn-text">Upload + Validate</span>
+      </button>
+    </form>
+  </div>
+</div>
+
+{% if import_guide %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <h3 class="h6 mb-2">Format Standards and Record Relationships</h3>
+    {% if import_guide.summary %}
+    <p class="text-muted mb-2">{{ import_guide.summary }}</p>
+    {% endif %}
+    {% if import_guide.relationships %}
+    <div class="mb-2">
+      <div class="small fw-semibold text-uppercase text-muted mb-1">Relationship Flow</div>
+      <ul class="mb-0 small">
+        {% for relation in import_guide.relationships %}
+        <li>{{ relation }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if import_guide.code_rules %}
+    <div>
+      <div class="small fw-semibold text-uppercase text-muted mb-1">Code Formatting Rules</div>
+      <ul class="mb-0 small">
+        {% for rule in import_guide.code_rules %}
+        <li>{{ rule }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <h3 class="h6 mb-3">Required CSV Template Format</h3>
+    <div class="table-responsive">
+      <table class="table table-sm">
+        <thead><tr>{% for h in template_headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          <tr>{% for s in template_sample %}<td>{{ s }}</td>{% endfor %}</tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small text-muted mb-0">
+      Header match is strict. Column order and names must be exactly the same as the official template.
+    </p>
+  </div>
+</div>
+
+<div class="csv-upload-overlay" id="csv-upload-overlay" aria-hidden="true">
+  <div class="csv-upload-overlay-card">
+    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+    <span>Uploading and validating CSV...</span>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("csv-upload-form");
+    const submitBtn = document.getElementById("csv-upload-submit");
+    const btnSpinner = document.getElementById("csv-upload-btn-spinner");
+    const btnText = document.getElementById("csv-upload-btn-text");
+    const overlay = document.getElementById("csv-upload-overlay");
+
+    if (!form || !submitBtn || !overlay) return;
+
+    form.addEventListener("submit", function () {
+      submitBtn.disabled = true;
+      if (btnSpinner) btnSpinner.classList.remove("d-none");
+      if (btnText) btnText.textContent = "Processing...";
+      overlay.classList.add("show");
+      overlay.setAttribute("aria-hidden", "false");
+    });
+  });
+</script>
+{% endblock %}

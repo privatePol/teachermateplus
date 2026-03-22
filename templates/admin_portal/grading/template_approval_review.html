@@ -1,0 +1,56 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grading_template_list' %}">Back</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="row g-2">
+      <div class="col-md-3"><strong>Template:</strong> {{ template_obj.code }}</div>
+      <div class="col-md-3"><strong>Name:</strong> {{ template_obj.name }}</div>
+      <div class="col-md-3"><strong>Tenant:</strong> {{ template_obj.tenant.code }}</div>
+      <div class="col-md-3"><strong>Base Value:</strong> {{ template_obj.default_base_value }}</div>
+    </div>
+    <hr>
+    <div class="small text-muted">Requested by {{ template_obj.approval_requested_by|default:"N/A" }} at {{ template_obj.approval_requested_at|date:"Y-m-d H:i"|default:"N/A" }}</div>
+    {% if template_obj.approval_remarks %}
+    <div class="small mt-2"><strong>Request notes:</strong> {{ template_obj.approval_remarks }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="alert alert-light border mb-3">
+  <div class="fw-semibold mb-1">Approver Personalities</div>
+  <div class="small text-muted mb-2">Typical approvers: Dean, Registrar, Campus Admin, Super Admin.</div>
+  <div class="small">
+    {% for p in involved_personalities %}
+      {% if p.role != "FACULTY" %}
+      <span class="badge text-bg-secondary me-1">{{ p.role }}</span>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+      {% for field in form %}
+      <div class="mb-3">
+        <label class="form-label">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+        {% for err in field.errors %}<div class="text-danger small">{{ err }}</div>{% endfor %}
+      </div>
+      {% endfor %}
+      <button class="btn btn-primary" type="submit">Submit Decision</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

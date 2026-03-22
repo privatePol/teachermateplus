@@ -1,0 +1,160 @@
+from django.db import models
+
+from apps.core.models import ActivatableModel, TimeStampedModel
+
+
+class AcademicYear(TimeStampedModel, ActivatableModel):
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="academic_years")
+    code = models.CharField(max_length=50)
+    name = models.CharField(max_length=150)
+    start_date = models.DateField()
+    end_date = models.DateField()
+
+    class Meta:
+        db_table = "academic_years"
+        ordering = ["-start_date", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "code"], name="uq_academic_years_tenant_code"),
+        ]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class Term(TimeStampedModel, ActivatableModel):
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="terms")
+    academic_year = models.ForeignKey("academics.AcademicYear", on_delete=models.PROTECT, related_name="terms")
+    code = models.CharField(max_length=50)
+    name = models.CharField(max_length=150)
+    sequence_no = models.PositiveIntegerField(default=1)
+    start_date = models.DateField(blank=True, null=True)
+    end_date = models.DateField(blank=True, null=True)
+
+    class Meta:
+        db_table = "terms"
+        ordering = ["tenant", "academic_year", "sequence_no", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "academic_year", "code"], name="uq_terms_tenant_ay_code"),
+        ]
+
+    def __str__(self):
+        return f"{self.academic_year.code}:{self.code}"
+
+
+class Course(TimeStampedModel, ActivatableModel):
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="courses")
+    campus = models.ForeignKey(
+        "tenants.Campus", on_delete=models.PROTECT, related_name="courses", blank=True, null=True
+    )
+    department = models.ForeignKey(
+        "tenants.Department", on_delete=models.PROTECT, related_name="courses", blank=True, null=True
+    )
+    code = models.CharField(max_length=50)
+    title = models.CharField(max_length=255)
+    units = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+    course_type = models.CharField(max_length=50, blank=True, null=True)
+    default_base_value = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+
+    class Meta:
+        db_table = "courses"
+        ordering = ["code"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "code"], name="uq_courses_tenant_code"),
+        ]
+
+    def __str__(self):
+        return f"{self.code} - {self.title}"
+
+
+class Section(TimeStampedModel, ActivatableModel):
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="sections")
+    campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT, related_name="sections")
+    department = models.ForeignKey("tenants.Department", on_delete=models.PROTECT, related_name="sections")
+    program = models.ForeignKey("tenants.Program", on_delete=models.PROTECT, related_name="sections")
+    code = models.CharField(max_length=50)
+    name = models.CharField(max_length=150)
+    year_level = models.CharField(max_length=50, blank=True, null=True)
+
+    class Meta:
+        db_table = "sections"
+        ordering = ["campus", "program", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "campus", "department", "program", "code"],
+                name="uq_sections_scope_code",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class CourseOffering(TimeStampedModel, ActivatableModel):
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Open"
+        CLOSED = "CLOSED", "Closed"
+        ARCHIVED = "ARCHIVED", "Archived"
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="course_offerings")
+    campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT, related_name="course_offerings")
+    department = models.ForeignKey("tenants.Department", on_delete=models.PROTECT, related_name="course_offerings")
+    program = models.ForeignKey(
+        "tenants.Program", on_delete=models.PROTECT, related_name="course_offerings", blank=True, null=True
+    )
+    academic_year = models.ForeignKey(
+        "academics.AcademicYear", on_delete=models.PROTECT, related_name="course_offerings"
+    )
+    term = models.ForeignKey("academics.Term", on_delete=models.PROTECT, related_name="course_offerings")
+    course = models.ForeignKey("academics.Course", on_delete=models.PROTECT, related_name="course_offerings")
+    section = models.ForeignKey("academics.Section", on_delete=models.PROTECT, related_name="course_offerings")
+    room = models.CharField(max_length=80, blank=True, null=True)
+    schedule_text = models.CharField(max_length=255, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+
+    class Meta:
+        db_table = "course_offerings"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "campus", "department", "term", "course", "section"],
+                name="uq_offerings_scope_term_course_section",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.term.code} {self.course.code} {self.section.code}"
+
+
+class FacultyAssignment(TimeStampedModel, ActivatableModel):
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="faculty_assignments",
+        blank=True,
+        null=True,
+    )
+    campus = models.ForeignKey(
+        "tenants.Campus",
+        on_delete=models.PROTECT,
+        related_name="faculty_assignments",
+        blank=True,
+        null=True,
+    )
+    offering = models.ForeignKey(
+        "academics.CourseOffering", on_delete=models.PROTECT, related_name="faculty_assignments"
+    )
+    faculty_user = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="faculty_assignments"
+    )
+    is_primary = models.BooleanField(default=False)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "faculty_assignments"
+        ordering = ["-assigned_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["offering", "faculty_user"], name="uq_faculty_assignments_offering_user"),
+        ]
+
+    def __str__(self):
+        return f"{self.offering_id}:{self.faculty_user.username}"

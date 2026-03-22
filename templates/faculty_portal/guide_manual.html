@@ -1,0 +1,365 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .manual-shell {
+    max-width: 1120px;
+    margin: 0 auto;
+  }
+  .manual-hero {
+    border: 0;
+    border-radius: 1.4rem;
+    background: linear-gradient(135deg, #143a25 0%, #1a5e38 48%, #8fa737 100%);
+    color: #f6fff8;
+    box-shadow: 0 18px 34px rgba(15, 51, 30, 0.18);
+  }
+  .manual-hero .card-body {
+    padding: 1.45rem;
+  }
+  .manual-eyebrow {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(246, 255, 248, 0.78);
+    margin-bottom: 0.4rem;
+  }
+  .manual-title {
+    font-size: 2rem;
+    font-weight: 800;
+    margin-bottom: 0.45rem;
+  }
+  .manual-subtitle {
+    color: rgba(246, 255, 248, 0.86);
+    margin-bottom: 1rem;
+    max-width: 800px;
+  }
+  .manual-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+  .manual-actions a {
+    text-decoration: none;
+    padding: 0.55rem 0.9rem;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+  .manual-actions .manual-primary {
+    background: #ffffff;
+    color: #153d26;
+  }
+  .manual-actions .manual-secondary {
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    color: #ffffff;
+  }
+  .manual-anchor-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin-top: 1rem;
+  }
+  .manual-anchor-nav a {
+    text-decoration: none;
+    padding: 0.48rem 0.85rem;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #173e27;
+    font-weight: 700;
+  }
+  .manual-section-card {
+    border: 0;
+    border-radius: 1.1rem;
+    box-shadow: 0 12px 24px rgba(16, 50, 30, 0.06);
+    height: 100%;
+  }
+  .manual-section-card .card-body {
+    padding: 1.2rem;
+  }
+  .manual-section-title {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-bottom: 0.8rem;
+  }
+  .manual-copy {
+    color: #566d5e;
+  }
+  .manual-policy-list {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: #556c5d;
+  }
+  .manual-policy-list li + li {
+    margin-top: 0.45rem;
+  }
+  .manual-rule-grid {
+    display: grid;
+    gap: 0.8rem;
+  }
+  .manual-rule {
+    border-radius: 1rem;
+    padding: 0.95rem 1rem;
+    background: linear-gradient(180deg, #fffef8 0%, #faf4dd 100%);
+    border: 1px solid #efe1a5;
+  }
+  .manual-rule strong {
+    color: #4f4114;
+  }
+  .manual-rule p {
+    margin: 0.35rem 0 0;
+    color: #605631;
+  }
+  .manual-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  .manual-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .manual-table th,
+  .manual-table td {
+    border: 1px solid #dbe6dd;
+    padding: 0.7rem 0.8rem;
+    vertical-align: top;
+  }
+  .manual-table th {
+    background: #f4f8f5;
+    color: #1a402a;
+    font-weight: 800;
+  }
+  .manual-table td {
+    color: #556d5d;
+  }
+  .manual-note {
+    margin-top: 0.9rem;
+    padding: 0.85rem 0.95rem;
+    border-radius: 0.95rem;
+    background: #f6faf6;
+    color: #53695c;
+  }
+  @media (max-width: 991.98px) {
+    .manual-grid-2 {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="manual-shell">
+  <div class="card manual-hero mb-4">
+    <div class="card-body">
+      <div class="manual-eyebrow">Formal Reference Manual</div>
+      <div class="manual-title">EduGradesPro Faculty Portal Policies and Governance Manual</div>
+      <p class="manual-subtitle">
+        This page is written in a more formal tone for academic officers, deans, registrars, and management teams who need
+        a structured reference for workflow, controls, and governance expectations.
+      </p>
+      <div class="manual-actions">
+        <a class="manual-primary" href="{% url 'faculty_portal:guide' %}">Back to Faculty Help Center</a>
+        <a class="manual-secondary" href="https://ncba.edu.ph/ncba-privacy-notice/" target="_blank" rel="noopener noreferrer">Open NCBA Privacy Notice</a>
+      </div>
+      <div class="manual-anchor-nav">
+        <a href="#manual-purpose">Purpose</a>
+        <a href="#manual-workflow">Workflow</a>
+        <a href="#manual-submission">Submission Governance</a>
+        <a href="#manual-corrections">Corrections and Reopen</a>
+        <a href="#manual-status">Student Status Rules</a>
+        <a href="#manual-privacy">Privacy and Audit</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="manual-grid-2 mb-4" id="manual-purpose">
+    <div class="card manual-section-card">
+      <div class="card-body">
+        <div class="manual-section-title">1. Purpose and Scope</div>
+        <p class="manual-copy">
+          EduGradesPro Faculty Portal is intended to support assigned faculty members in managing grading activities, attendance,
+          summary review, class list status updates, submissions, and governed corrections for officially assigned classes.
+        </p>
+        <ul class="manual-policy-list">
+          <li>The portal is role-aware and limited to faculty-assigned offerings.</li>
+          <li>Its purpose is academic operations, not general student record administration.</li>
+          <li>Institutional governance settings determine deadline behavior, reopen behavior, and correction handling.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card manual-section-card">
+      <div class="card-body">
+        <div class="manual-section-title">2. Role Positioning</div>
+        <table class="manual-table">
+          <thead>
+            <tr>
+              <th>Role</th>
+              <th>Primary Responsibility</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Faculty</td>
+              <td>Creates activities, encodes scores, records attendance, reviews summaries, submits grades, and requests corrections when needed.</td>
+            </tr>
+            <tr>
+              <td>Campus Admin / Dean</td>
+              <td>Reviews governed requests, monitors deadlines, and manages institutional oversight where permissions allow.</td>
+            </tr>
+            <tr>
+              <td>Super Admin / Operations</td>
+              <td>Maintains settings, security, permissions, print headers, and system-level governance controls.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card manual-section-card mb-4" id="manual-workflow">
+    <div class="card-body">
+      <div class="manual-section-title">3. Faculty Workflow Standard</div>
+      <table class="manual-table">
+        <thead>
+          <tr>
+            <th>Stage</th>
+            <th>Expected Action</th>
+            <th>Governance Rationale</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Class Selection</td>
+            <td>Faculty opens only assigned offerings in the current academic scope.</td>
+            <td>Prevents unauthorized access outside assignment scope.</td>
+          </tr>
+          <tr>
+            <td>Activity Setup</td>
+            <td>Faculty creates activities under the proper component, subcomponent, and detail path.</td>
+            <td>Protects grading consistency and reporting accuracy.</td>
+          </tr>
+          <tr>
+            <td>Score Encoding</td>
+            <td>Faculty encodes only available scores and leaves missing items blank until ready.</td>
+            <td>Distinguishes unencoded records from zero or actual performance values.</td>
+          </tr>
+          <tr>
+            <td>Summary Review</td>
+            <td>Faculty reviews computed outputs before submission.</td>
+            <td>Reduces avoidable correction requests and mis-submissions.</td>
+          </tr>
+          <tr>
+            <td>Submission</td>
+            <td>Faculty finalizes only when records are sufficiently complete for the period.</td>
+            <td>Submission is treated as a governance checkpoint, not merely a save action.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="manual-grid-2 mb-4" id="manual-submission">
+    <div class="card manual-section-card">
+      <div class="card-body">
+        <div class="manual-section-title">4. Submission Governance</div>
+        <div class="manual-rule-grid">
+          <div class="manual-rule">
+            <strong>Submission Readiness</strong>
+            <p>Faculty should review active students, missing records, and summary outputs before submission. EduGradesPro surfaces readiness indicators to support this review.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Deadline Enforcement</strong>
+            <p>Submission windows are governed by period lock rules and may be auto-locked based on configured deadlines.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Print Record</strong>
+            <p>The print sheet serves as a formal companion document for review, sign-off, and institutional filing.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card manual-section-card" id="manual-corrections">
+      <div class="card-body">
+        <div class="manual-section-title">5. Corrections and Reopen Governance</div>
+        <div class="manual-rule-grid">
+          <div class="manual-rule">
+            <strong>Before Deadline</strong>
+            <p>Institutional policy may allow faculty self-reopen before deadline or may require correction workflow review, depending on tenant settings.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>After Deadline</strong>
+            <p>Correction and reopen actions become governed requests and should be reviewed by authorized personnel according to assigned permissions.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Audit Traceability</strong>
+            <p>Requests, approvals, rejections, reopen actions, and resubmissions are captured for accountability and monitoring.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="manual-grid-2 mb-4" id="manual-status">
+    <div class="card manual-section-card">
+      <div class="card-body">
+        <div class="manual-section-title">6. Student Status Rules</div>
+        <table class="manual-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Meaning</th>
+              <th>Expected Effect</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ACTIVE</td>
+              <td>Student remains part of the graded class list.</td>
+              <td>Included in normal grading coverage and readiness checks.</td>
+            </tr>
+            <tr>
+              <td>DR</td>
+              <td>Student is dropped from class coverage.</td>
+              <td>Excluded from active grading coverage and readiness calculations.</td>
+            </tr>
+            <tr>
+              <td>W</td>
+              <td>Student is withdrawn from class coverage.</td>
+              <td>Excluded from active grading coverage and tracked separately from dropped students.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card manual-section-card" id="manual-privacy">
+      <div class="card-body">
+        <div class="manual-section-title">7. Privacy, Security, and Audit Controls</div>
+        <ul class="manual-policy-list">
+          <li>Faculty access is limited to assigned offerings and authorized portal functions.</li>
+          <li>Password, consent, and access settings are governed centrally.</li>
+          <li>Operational actions may be audited, including submission, reopen, correction, and related record changes.</li>
+          <li>Printed or exported records should be handled according to institutional data privacy requirements.</li>
+          <li>The institutional privacy statement remains the authoritative privacy reference.</li>
+        </ul>
+        <div class="manual-note">
+          Official reference:
+          <a href="https://ncba.edu.ph/ncba-privacy-notice/" target="_blank" rel="noopener noreferrer">NCBA Data Privacy Notice</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card manual-section-card">
+    <div class="card-body">
+      <div class="manual-section-title">8. Management Discussion Note</div>
+      <p class="manual-copy">
+        This manual is intentionally structured to support later policy walkthroughs with academic leadership and management.
+        As EduGradesPro governance is finalized, we can continue expanding this manual into a more formal institutional reference
+        with approval matrices, deadline charts, and role-by-role accountability tables.
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

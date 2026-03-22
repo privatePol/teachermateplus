@@ -1,0 +1,619 @@
+{% extends "faculty_portal/base.html" %}
+{% load static %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .guide-shell {
+    max-width: 1220px;
+    margin: 0 auto;
+  }
+  .guide-hero {
+    border: 0;
+    border-radius: 1.5rem;
+    background:
+      radial-gradient(circle at top right, rgba(232, 197, 89, 0.18), transparent 28%),
+      linear-gradient(135deg, #f6fbf6 0%, #eef7ef 54%, #fbf4d8 100%);
+    box-shadow: 0 22px 38px rgba(18, 56, 34, 0.08);
+    overflow: hidden;
+  }
+  .guide-hero .card-body {
+    padding: 1.5rem;
+  }
+  .guide-hero-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 1.25rem;
+    align-items: center;
+  }
+  .guide-eyebrow {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #708877;
+    margin-bottom: 0.45rem;
+  }
+  .guide-title {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #143b25;
+    margin-bottom: 0.5rem;
+  }
+  .guide-subtitle {
+    color: #536b5b;
+    max-width: 760px;
+    margin-bottom: 1rem;
+  }
+  .guide-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+    margin-bottom: 1rem;
+  }
+  .guide-anchor-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+  }
+  .guide-anchor-nav a,
+  .guide-hero-actions a {
+    text-decoration: none;
+    padding: 0.55rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid #dbe6dd;
+    background: #ffffff;
+    color: #234b33;
+    font-weight: 700;
+  }
+  .guide-hero-actions .guide-cta-primary {
+    background: linear-gradient(90deg, #1b6a40 0%, #8fab30 100%);
+    border-color: transparent;
+    color: #ffffff;
+  }
+  .guide-hero-actions .guide-cta-primary:hover {
+    color: #ffffff;
+  }
+  .guide-anchor-nav a:hover,
+  .guide-hero-actions a:hover {
+    background: #eef5ef;
+  }
+  .guide-visual-card {
+    border-radius: 1.35rem;
+    overflow: hidden;
+    background: #ffffff;
+    box-shadow: 0 16px 28px rgba(19, 57, 34, 0.12);
+    position: relative;
+  }
+  .guide-visual-card img {
+    width: 100%;
+    height: 300px;
+    object-fit: cover;
+    display: block;
+  }
+  .guide-visual-caption {
+    position: absolute;
+    left: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .guide-float-pill {
+    padding: 0.5rem 0.85rem;
+    border-radius: 999px;
+    background: rgba(20, 61, 39, 0.88);
+    color: #ffffff;
+    font-size: 0.83rem;
+    font-weight: 700;
+    box-shadow: 0 8px 18px rgba(16, 52, 30, 0.18);
+  }
+  .guide-highlight-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.9rem;
+    margin: 1.2rem 0 1.5rem;
+  }
+  .guide-highlight-card {
+    border: 0;
+    border-radius: 1.1rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f7fbf7 100%);
+    box-shadow: 0 12px 22px rgba(16, 50, 30, 0.06);
+    height: 100%;
+  }
+  .guide-highlight-card .card-body {
+    padding: 1rem 1rem 0.95rem;
+  }
+  .guide-icon-badge {
+    width: 46px;
+    height: 46px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #185d38 0%, #a8b92e 100%);
+    color: #ffffff;
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    box-shadow: 0 10px 20px rgba(24, 86, 48, 0.18);
+    margin-bottom: 0.75rem;
+  }
+  .guide-highlight-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #183e27;
+    margin-bottom: 0.35rem;
+  }
+  .guide-highlight-copy {
+    color: #586f60;
+    margin-bottom: 0;
+    font-size: 0.93rem;
+  }
+  .guide-section-card {
+    border: 0;
+    border-radius: 1.15rem;
+    box-shadow: 0 14px 28px rgba(16, 50, 30, 0.06);
+    height: 100%;
+  }
+  .guide-section-card .card-body {
+    padding: 1.2rem;
+  }
+  .guide-section-title {
+    font-size: 1.08rem;
+    font-weight: 700;
+    color: #173d27;
+    margin-bottom: 0.85rem;
+  }
+  .guide-list {
+    margin: 0;
+    padding-left: 1.15rem;
+    color: #53695c;
+  }
+  .guide-list li + li {
+    margin-top: 0.45rem;
+  }
+  .guide-mini-note {
+    margin-top: 0.8rem;
+    padding: 0.8rem 0.9rem;
+    border-radius: 0.9rem;
+    background: #f7faf7;
+    color: #4f6758;
+    font-size: 0.94rem;
+  }
+  .guide-steps {
+    display: grid;
+    gap: 0.8rem;
+  }
+  .guide-step {
+    display: grid;
+    grid-template-columns: 52px 1fr;
+    gap: 0.8rem;
+    align-items: start;
+    padding: 0.95rem 1rem;
+    border-radius: 1rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f7fbf7 100%);
+    border: 1px solid #e2ece3;
+  }
+  .guide-step-number {
+    width: 52px;
+    height: 52px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #1f6a40 0%, #a7b92d 100%);
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 1rem;
+    box-shadow: 0 10px 20px rgba(30, 92, 52, 0.18);
+  }
+  .guide-step-title {
+    font-weight: 700;
+    color: #183e27;
+    margin-bottom: 0.2rem;
+  }
+  .guide-step-copy {
+    color: #566d5e;
+    margin-bottom: 0;
+  }
+  .guide-image-panel {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.95rem;
+  }
+  .guide-image-card {
+    border-radius: 1rem;
+    overflow: hidden;
+    background: #ffffff;
+    box-shadow: 0 12px 22px rgba(18, 53, 32, 0.08);
+  }
+  .guide-image-card img {
+    width: 100%;
+    height: 210px;
+    object-fit: cover;
+    display: block;
+  }
+  .guide-image-copy {
+    padding: 0.85rem 0.95rem 0.95rem;
+  }
+  .guide-image-title {
+    font-weight: 700;
+    color: #173d27;
+    margin-bottom: 0.25rem;
+  }
+  .guide-image-note {
+    color: #5c7363;
+    margin-bottom: 0;
+    font-size: 0.92rem;
+  }
+  .guide-policy-grid {
+    display: grid;
+    gap: 0.85rem;
+  }
+  .guide-policy-item {
+    padding: 0.95rem 1rem;
+    border-radius: 1rem;
+    background: linear-gradient(180deg, #fffef9 0%, #fbf4dd 100%);
+    border: 1px solid #efe2ac;
+  }
+  .guide-policy-item strong {
+    color: #4f4013;
+  }
+  .guide-policy-item p {
+    color: #5d5532;
+    margin: 0.35rem 0 0;
+  }
+  .guide-management-card {
+    border: 0;
+    border-radius: 1.25rem;
+    background: linear-gradient(135deg, #143a25 0%, #1a5f39 45%, #8fa838 100%);
+    color: #f5fff7;
+    box-shadow: 0 18px 34px rgba(16, 53, 31, 0.18);
+    overflow: hidden;
+  }
+  .guide-management-card .card-body {
+    padding: 1.35rem 1.35rem 1.25rem;
+  }
+  .guide-management-title {
+    font-size: 1.2rem;
+    font-weight: 800;
+    margin-bottom: 0.45rem;
+  }
+  .guide-management-copy {
+    color: rgba(245, 255, 247, 0.86);
+    margin-bottom: 1rem;
+    max-width: 760px;
+  }
+  .guide-management-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.8rem;
+  }
+  .guide-management-item {
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    padding: 0.95rem 1rem;
+  }
+  .guide-management-item h3 {
+    font-size: 1rem;
+    margin-bottom: 0.4rem;
+    font-weight: 700;
+  }
+  .guide-management-item p {
+    margin-bottom: 0;
+    color: rgba(245, 255, 247, 0.84);
+    font-size: 0.92rem;
+  }
+  @media (max-width: 991.98px) {
+    .guide-hero-grid,
+    .guide-management-grid,
+    .guide-highlight-grid {
+      grid-template-columns: 1fr;
+    }
+    .guide-image-panel {
+      grid-template-columns: 1fr;
+    }
+    .guide-visual-card img {
+      height: 240px;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="guide-shell">
+  <div class="card guide-hero mb-4">
+    <div class="card-body">
+      <div class="guide-hero-grid">
+        <div>
+          <div class="guide-eyebrow">Faculty Help Center</div>
+          <div class="guide-title">EduGradesPro Faculty Portal Guide</div>
+          <p class="guide-subtitle">
+            This help center blends daily workflow guidance, score-encoding reminders, submission governance, and
+            policy checkpoints so faculty members can work confidently and consistently across the term.
+          </p>
+          <div class="guide-hero-actions">
+            <a class="guide-cta-primary" href="#guide-workflow">Start With the Workflow</a>
+            <a href="{% url 'faculty_portal:guide_manual' %}">Open Formal Policy Manual</a>
+          </div>
+          <div class="guide-anchor-nav">
+            <a href="#guide-workflow">Daily Workflow</a>
+            <a href="#guide-activities">Activities and Scores</a>
+            <a href="#guide-submission">Submission Rules</a>
+            <a href="#guide-corrections">Corrections and Reopen</a>
+            <a href="#guide-classlist">Class List Status</a>
+            <a href="#guide-password">Password Help</a>
+            <a href="#guide-privacy">Privacy and Governance</a>
+          </div>
+        </div>
+        <div>
+          <div class="guide-visual-card">
+            <img src="{% get_media_prefix %}imahe/facultygrades.jpg" alt="Faculty grade book preview">
+            <div class="guide-visual-caption">
+              <div class="guide-float-pill">Daily Encoding</div>
+              <div class="guide-float-pill">Submission Review</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="guide-highlight-grid">
+        <div class="card guide-highlight-card">
+          <div class="card-body">
+            <div class="guide-icon-badge">WF</div>
+            <div class="guide-highlight-title">Follow the Daily Flow</div>
+            <p class="guide-highlight-copy">Open the right class, create activities carefully, encode cleanly, then review before final submission.</p>
+          </div>
+        </div>
+        <div class="card guide-highlight-card">
+          <div class="card-body">
+            <div class="guide-icon-badge">SC</div>
+            <div class="guide-highlight-title">Check Scores Closely</div>
+            <p class="guide-highlight-copy">Blank means unencoded. Direct percentage and raw-score items follow different rules inside the template.</p>
+          </div>
+        </div>
+        <div class="card guide-highlight-card">
+          <div class="card-body">
+            <div class="guide-icon-badge">SB</div>
+            <div class="guide-highlight-title">Submit With Confidence</div>
+            <p class="guide-highlight-copy">Use the summary and print sheet as your final checkpoint before you lock in a grading period.</p>
+          </div>
+        </div>
+        <div class="card guide-highlight-card">
+          <div class="card-body">
+            <div class="guide-icon-badge">GV</div>
+            <div class="guide-highlight-title">Stay Within Governance</div>
+            <p class="guide-highlight-copy">Deadlines, reopen rules, and correction policies are controlled for accountability and academic quality.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4" id="guide-workflow">
+    <div class="col-xl-7">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Recommended Daily Faculty Workflow</div>
+          <div class="guide-steps">
+            <div class="guide-step">
+              <div class="guide-step-number">1</div>
+              <div>
+                <div class="guide-step-title">Open My Classes</div>
+                <p class="guide-step-copy">Start in <strong>My Classes</strong> and choose the correct course, section, academic year, and term assignment.</p>
+              </div>
+            </div>
+            <div class="guide-step">
+              <div class="guide-step-number">2</div>
+              <div>
+                <div class="guide-step-title">Review the Period Card</div>
+                <p class="guide-step-copy">Open the period you are currently working on, such as Prelim, Midterm, Pre-final, or Final.</p>
+              </div>
+            </div>
+            <div class="guide-step">
+              <div class="guide-step-number">3</div>
+              <div>
+                <div class="guide-step-title">Create Activities Carefully</div>
+                <p class="guide-step-copy">Use short activity labels like <strong>Q1</strong>, <strong>R1</strong>, <strong>A1</strong>, or <strong>AC1</strong> so the grade summary remains readable.</p>
+              </div>
+            </div>
+            <div class="guide-step">
+              <div class="guide-step-number">4</div>
+              <div>
+                <div class="guide-step-title">Encode Scores and Attendance</div>
+                <p class="guide-step-copy">Save only the scores you are ready to encode. Blank fields stay unencoded and can be completed later.</p>
+              </div>
+            </div>
+            <div class="guide-step">
+              <div class="guide-step-number">5</div>
+              <div>
+                <div class="guide-step-title">Check the Summary Before Submission</div>
+                <p class="guide-step-copy">Use the Summary page to review computed grades, missing records, and printable submission sheets before finalizing.</p>
+              </div>
+            </div>
+            <div class="guide-step">
+              <div class="guide-step-number">6</div>
+              <div>
+                <div class="guide-step-title">Finalize Submission Only When Ready</div>
+                <p class="guide-step-copy">Submit the grading period only after verifying that the activity setup, encoded scores, class list status, and summary output are correct.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-5">
+      <div class="guide-image-panel">
+        <div class="guide-image-card">
+          <img src="{% get_media_prefix %}imahe/dailywork.jpg" alt="Daily faculty workflow">
+          <div class="guide-image-copy">
+            <div class="guide-image-title">Daily Work Rhythm</div>
+            <p class="guide-image-note">A gentle reminder that the portal is meant to support routine class work, not create pressure.</p>
+          </div>
+        </div>
+        <div class="guide-image-card">
+          <img src="{% get_media_prefix %}imahe/focused.jpg" alt="Focused faculty work">
+          <div class="guide-image-copy">
+            <div class="guide-image-title">Focused Checking</div>
+            <p class="guide-image-note">Reviewing structure, scores, and summary results before submission prevents avoidable corrections later.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4" id="guide-activities">
+    <div class="col-lg-6">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Creating Activities and Encoding Scores</div>
+          <ul class="guide-list">
+            <li>Choose the <strong>Component</strong> first. Subcomponent and detail controls open only when the selected structure requires them.</li>
+            <li>Use short activity titles to avoid crowding the summary and printed grade book.</li>
+            <li>The <strong>Date</strong> field helps EduGradesPro keep the class record in proper activity order and supports audit clarity.</li>
+            <li>If the item uses <strong>Raw Score</strong>, the score cannot go beyond the activity total score.</li>
+            <li>If the item uses <strong>Direct Percentage</strong>, enter a percentage directly from 0 to 100.</li>
+            <li>Blank score fields remain unencoded. Clearing a previously saved score removes it for that activity.</li>
+          </ul>
+          <div class="guide-mini-note">
+            Tip: If you only want to encode one or two students first, enter values only for those students and leave the others blank.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">How the Summary Helps You</div>
+          <ul class="guide-list">
+            <li>The summary mirrors the configured grading template hierarchy for the selected period.</li>
+            <li>Activity averages and class standing values are shown separately so faculty can trace where a result came from.</li>
+            <li>The print button produces a compact grade-book style submission sheet for formal review and filing.</li>
+            <li>The summary also shows submission readiness, including active students with missing records.</li>
+          </ul>
+          <div class="guide-mini-note">
+            If a value looks unexpected, review the activity setup, score entry method, total score, and class list status before submitting.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4" id="guide-submission">
+    <div class="col-lg-6">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Submission Rules</div>
+          <ul class="guide-list">
+            <li>Submitted grading periods become view-only for normal editing.</li>
+            <li>EduGradesPro blocks submission if there are no encoded grade or attendance records for active students.</li>
+            <li>If some active students still have missing records, the system warns you before submission so you can review the class list carefully.</li>
+            <li>Always review the printed sheet or on-screen summary before finalizing.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6" id="guide-corrections">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Corrections and Reopen Governance</div>
+          <div class="guide-policy-grid">
+            <div class="guide-policy-item">
+              <strong>Before Deadline</strong>
+              <p>If tenant policy allows faculty self-reopen, a submitted period may be reopened directly by the teacher before the deadline. Otherwise, the correction request workflow applies.</p>
+            </div>
+            <div class="guide-policy-item">
+              <strong>After Deadline</strong>
+              <p>Reopen and correction actions are governed. The faculty member should use the correction request process and wait for authorized review.</p>
+            </div>
+            <div class="guide-policy-item">
+              <strong>Audit Trail</strong>
+              <p>Submissions, reopen actions, correction requests, approvals, and follow-up actions are logged for monitoring and accountability.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4" id="guide-classlist">
+    <div class="col-lg-6">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Class List Status: ACTIVE, DR, and W</div>
+          <ul class="guide-list">
+            <li><strong>ACTIVE</strong> means the student remains part of the grading coverage.</li>
+            <li><strong>DR</strong> means the student is dropped and should no longer be treated as an active graded student for the class.</li>
+            <li><strong>W</strong> means the student is withdrawn and is also excluded from normal active grading coverage.</li>
+            <li>Use the class list carefully before submission because class list status affects readiness, summary interpretation, and final grade handling.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6" id="guide-password">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">If You Lost Your Password</div>
+          <ul class="guide-list">
+            <li>Go to the Faculty Portal sign-in page and use the <strong>Forgot Password</strong> option.</li>
+            <li>Enter your official faculty email address that is registered in EduGradesPro.</li>
+            <li>Check your email inbox for the password reset message from the system.</li>
+            <li>If the email does not arrive, check your spam or junk folder first.</li>
+            <li>If you still cannot reset your password, contact your campus administrator, registrar support, or the assigned EduGradesPro operations team.</li>
+          </ul>
+          <div class="guide-mini-note">
+            For security, faculty members should not request passwords from co-teachers or share login credentials. Use the reset process or ask the authorized support team for assistance.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6" id="guide-privacy">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Privacy, Data Protection, and Accountability</div>
+          <ul class="guide-list">
+            <li>Use only your assigned faculty credentials. Do not share your password with anyone.</li>
+            <li>Review student data only for officially assigned classes.</li>
+            <li>Changes in scores, attendance, submissions, corrections, and reopen actions are monitored for governance and audit purposes.</li>
+            <li>Respect institutional data privacy requirements when viewing, printing, or discussing student records.</li>
+          </ul>
+          <div class="guide-mini-note">
+            For the official privacy statement, refer to the
+            <a href="https://ncba.edu.ph/ncba-privacy-notice/" target="_blank" rel="noopener noreferrer">NCBA Data Privacy Notice</a>.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card guide-management-card">
+    <div class="card-body">
+      <div class="guide-management-title">For Academic Officers and Management</div>
+      <p class="guide-management-copy">
+        EduGradesPro now has a dedicated formal manual version for governance conversations, approval discussions, and policy review.
+        Use it when you need a cleaner reference for institutional rules rather than the day-to-day faculty help flow.
+      </p>
+      <div class="guide-management-grid">
+        <div class="guide-management-item">
+          <h3>Policy Framing</h3>
+          <p>Summarizes submission, reopen, correction, status, and privacy expectations in a more formal structure.</p>
+        </div>
+        <div class="guide-management-item">
+          <h3>Governance Reference</h3>
+          <p>Useful when discussing who approves, who monitors, and how audit trails protect academic integrity.</p>
+        </div>
+        <div class="guide-management-item">
+          <h3>Management-Ready</h3>
+          <p>Prepared to support later review with academics, deans, registrars, and institutional decision-makers.</p>
+        </div>
+      </div>
+      <div class="guide-hero-actions mt-3 mb-0">
+        <a class="guide-cta-primary" href="{% url 'faculty_portal:guide_manual' %}">Open Formal Policy Manual</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

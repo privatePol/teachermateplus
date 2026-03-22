@@ -1,0 +1,184 @@
+{% extends "admin_portal/base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .structure-preview .meta-muted {
+    color: #6c757d;
+  }
+  .structure-preview .sub-table th {
+    color: #5f6b76;
+    font-weight: 600;
+    font-size: 0.92rem;
+    background: #f8f9fa;
+  }
+  .structure-preview .sub-table td {
+    vertical-align: top;
+  }
+  .structure-preview .detail-mini-table th {
+    color: #7b8590;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+  .structure-preview .detail-mini-table td {
+    padding-top: 0.22rem;
+    padding-bottom: 0.22rem;
+  }
+  .structure-preview .detail-code {
+    color: #8a949e;
+    font-size: 0.82rem;
+  }
+  .structure-preview .no-detail-text {
+    color: #7a848e;
+    font-size: 0.93rem;
+  }
+</style>
+{% endblock %}
+
+{% block admin_content %}
+<div class="structure-preview">
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Template Structure Preview</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grading_template_list' %}">Back</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="row g-2">
+      <div class="col-md-3"><strong>Tenant:</strong> {{ template_obj.tenant.code }}</div>
+      <div class="col-md-3"><strong>Template:</strong> {{ template_obj.code }}</div>
+      <div class="col-md-3"><strong>Name:</strong> {{ template_obj.name }}</div>
+      <div class="col-md-3"><strong>Base Value:</strong> {{ template_obj.default_base_value }}</div>
+    </div>
+  </div>
+</div>
+
+{% if validation_errors %}
+<div class="alert alert-warning">
+  <strong>Publish Validation Warnings:</strong>
+  <ul class="mb-0 mt-2">
+    {% for err in validation_errors %}
+    <li>{{ err }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="alert alert-success">Template is currently publishable based on structure and weights.</div>
+{% endif %}
+
+{% for period in period_rows %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <div>
+      <strong>{{ period.row.name }}</strong>
+      <span class="text-muted">({{ period.row.code }})</span>
+    </div>
+    <div>
+      Component Total:
+      <strong>{{ period.component_total }}%</strong>
+      {% if period.component_total_ok %}
+      <span class="badge text-bg-success">OK</span>
+      {% else %}
+      <span class="badge text-bg-danger">Check</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card-body">
+    {% for component in period.components %}
+    <div class="border rounded p-2 mb-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <div><strong>{{ component.row.name }}</strong> ({{ component.row.code }})</div>
+        <div>Weight: <strong>{{ component.weight }}%</strong></div>
+      </div>
+
+      {% if component.subcomponents %}
+      <div class="small text-muted mt-1 mb-2">
+        Subcomponent Total: {{ component.subcomponent_total }}%
+        {% if component.subcomponent_total_ok %}
+        <span class="badge text-bg-success">OK</span>
+        {% else %}
+        <span class="badge text-bg-danger">Check</span>
+        {% endif %}
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0 sub-table">
+          <thead>
+            <tr>
+              <th>Subcomponent</th>
+              <th>Weight</th>
+              <th>Detail Total</th>
+              <th>Detail Breakdown</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for sub in component.subcomponents %}
+            <tr>
+              <td>
+                <div>{{ sub.row.name }}</div>
+                <div class="meta-muted">{{ sub.row.code }}</div>
+                {% if sub.row.is_attendance_component %}
+                <span class="badge text-bg-info mt-1">Attendance</span>
+                {% endif %}
+              </td>
+              <td>{{ sub.weight }}%</td>
+              <td>
+                {% if sub.detail_total is not None %}
+                  {{ sub.detail_total }}%
+                  {% if sub.detail_total_ok %}
+                  <span class="badge text-bg-success">OK</span>
+                  {% else %}
+                  <span class="badge text-bg-danger">Check</span>
+                  {% endif %}
+                {% else %}
+                  <span class="text-muted">N/A</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if sub.details %}
+                  <div class="table-responsive">
+                    <table class="table table-sm table-borderless mb-0 detail-mini-table">
+                      <thead>
+                        <tr>
+                          <th>Detail</th>
+                          <th class="text-end">Weight</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for detail in sub.details %}
+                        <tr>
+                          <td>
+                            <div>{{ detail.row.name }}</div>
+                            <div class="detail-code">{{ detail.row.code }}</div>
+                          </td>
+                          <td class="text-end fw-semibold">{{ detail.weight }}%</td>
+                        </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% else %}
+                  <span class="no-detail-text">No level-3 details (2-layer path)</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="small text-muted mt-2">No subcomponents. This component uses direct activities (1-layer path).</div>
+      {% endif %}
+    </div>
+    {% empty %}
+      <div class="text-muted">No components yet.</div>
+    {% endfor %}
+  </div>
+</div>
+{% empty %}
+<div class="alert alert-info">No periods found in this template.</div>
+{% endfor %}
+</div>
+{% endblock %}

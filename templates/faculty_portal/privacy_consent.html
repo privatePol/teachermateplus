@@ -1,0 +1,53 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 mb-0">Privacy Consent Required</h1>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-4">
+    <p class="mb-2">
+      Before proceeding, please review and accept the Faculty Data Privacy Consent for EduGradesPro.
+    </p>
+    <p class="text-muted small mb-3">
+      Consent version: <strong>{{ consent_version }}</strong>
+    </p>
+    <div class="alert alert-light border mb-4">
+      <h2 class="h6 mb-2">Faculty Data Privacy Consent</h2>
+      <p class="small mb-2">
+        As a faculty user, I understand that EduGradesPro processes academic and personal information necessary for
+        teaching operations, including:
+      </p>
+      <ul class="small mb-3">
+        <li>Grade encoding entries, computed grades, and submission history</li>
+        <li>Attendance records, classlist actions, and correction requests</li>
+        <li>System audit logs (timestamp, IP address, user activity, and transaction trail)</li>
+        <li>Account security actions such as login events and password updates</li>
+      </ul>
+      <p class="small mb-1">
+        This processing is required to enforce academic governance, traceability, and official records integrity.
+      </p>
+      <p class="small mb-0">
+        Read the official NCBA Data Privacy Notice:
+        <a href="https://ncba.edu.ph/ncba-privacy-notice/" target="_blank" rel="noopener noreferrer">
+          https://ncba.edu.ph/ncba-privacy-notice/
+        </a>
+      </p>
+    </div>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      <div class="form-check mb-3">
+        {{ form.consent }}
+        <label class="form-check-label" for="{{ form.consent.id_for_label }}">
+          {{ form.consent.label }}
+        </label>
+        <div>{{ form.consent.errors }}</div>
+      </div>
+      <button class="btn btn-success" type="submit">Accept and Continue</button>
+      <a class="btn btn-outline-secondary" href="{% url 'accounts:faculty_logout' %}">Logout</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

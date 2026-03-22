@@ -1,0 +1,187 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .courses-header {
+    margin-bottom: 1rem;
+  }
+  .courses-title {
+    font-weight: 700;
+    color: #163f28;
+    margin-bottom: 0.2rem;
+  }
+  .courses-subtitle {
+    color: #5f7568;
+    font-size: 0.92rem;
+  }
+  .courses-chip {
+    border-radius: 999px;
+    padding: 0.38rem 0.75rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    border: 1px solid #cddacd;
+    color: #355240;
+    background: #f9fcf9;
+    text-decoration: none;
+  }
+  .courses-chip.active {
+    background: linear-gradient(90deg, #dcefd9 0%, #e9f2d4 58%, #f3e8bf 100%);
+    color: #163f28;
+    border-color: #b6cba6;
+  }
+  .course-card {
+    border: 1px solid #d7e2d6;
+    border-radius: 0.95rem;
+    overflow: hidden;
+    background: #ffffff;
+    box-shadow: 0 5px 16px rgba(26, 59, 38, 0.08);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .course-card-header {
+    min-height: 112px;
+    padding: 0.95rem 1rem 0.8rem;
+    color: #ffffff;
+    position: relative;
+  }
+  .course-card-header.theme-a {
+    background: linear-gradient(130deg, #184f30 0%, #21683d 50%, #a4b53f 88%, #d8c260 100%);
+  }
+  .course-card-header.theme-b {
+    background: linear-gradient(130deg, #134331 0%, #1d5f4c 48%, #52853c 84%, #cfbb5e 100%);
+  }
+  .course-card-header.theme-c {
+    background: linear-gradient(130deg, #0f3c2d 0%, #24573a 44%, #49733a 74%, #d1b45a 100%);
+  }
+  .course-card-code {
+    font-size: 1.45rem;
+    font-weight: 700;
+    margin-bottom: 0.18rem;
+    line-height: 1.15;
+  }
+  .course-card-title {
+    font-size: 0.95rem;
+    opacity: 0.96;
+    line-height: 1.3;
+    margin-bottom: 0.35rem;
+  }
+  .course-card-meta {
+    font-size: 0.84rem;
+    opacity: 0.94;
+  }
+  .course-card-body {
+    flex: 1;
+    padding: 0.9rem 1rem 0.75rem;
+    color: #2e4d3a;
+  }
+  .course-card-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: 0.84rem;
+    padding: 0.2rem 0;
+  }
+  .course-card-row .label {
+    color: #6b8175;
+  }
+  .course-card-footer {
+    border-top: 1px solid #e2ebe1;
+    padding: 0.55rem 0.75rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 0.4rem;
+  }
+  .course-card-footer .btn {
+    border-radius: 999px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    padding: 0.3rem 0.65rem;
+  }
+  .campus-group-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #1f4c33;
+    margin-bottom: 0.7rem;
+    letter-spacing: 0.01em;
+  }
+  .campus-group-separator {
+    border: 0;
+    border-top: 1px solid #d6e2d4;
+    margin: 1.25rem 0;
+  }
+</style>
+
+<div class="courses-header d-flex flex-wrap justify-content-between align-items-start gap-2">
+  <div>
+    <h2 class="h5 courses-title mb-1">
+      {% if show_archived %}Archived Classes{% else %}My Classes{% endif %}
+    </h2>
+    <div class="courses-subtitle">
+      {% if show_archived %}
+      Archived class records are read-only and kept for historical reference.
+      {% else %}
+      Open your assigned classes and continue grading, attendance, and submissions.
+      {% endif %}
+    </div>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    <a class="courses-chip {% if not show_archived %}active{% endif %}" href="{% url 'faculty_portal:my_courses' %}">
+      Active ({{ active_count }})
+    </a>
+    <a class="courses-chip {% if show_archived %}active{% endif %}" href="{% url 'faculty_portal:my_courses' %}?archived=1">
+      Archived ({{ archived_count }})
+    </a>
+  </div>
+</div>
+
+{% for group in grouped_offerings %}
+  <div class="campus-group-title">
+    {{ group.tenant.code }} / {{ group.campus.code }}
+  </div>
+  <div class="row g-3">
+    {% for offering in group.offerings %}
+      {% cycle 'theme-a' 'theme-b' 'theme-c' as card_theme silent %}
+      <div class="col-md-6 col-xl-4">
+        <article class="course-card">
+          <header class="course-card-header {{ card_theme }}">
+            <div class="course-card-code">{{ offering.course.code }}</div>
+            <div class="course-card-title">{{ offering.course.title }}</div>
+            <div class="course-card-meta">{{ offering.section.code }}</div>
+            <div class="course-card-meta">{{ offering.academic_year.name|default:offering.academic_year.code }} / {{ offering.term.code }}</div>
+          </header>
+
+          <div class="course-card-body">
+            <div class="course-card-row"><span class="label">Room</span><span>{{ offering.room|default:"-" }}</span></div>
+            <div class="course-card-row"><span class="label">Schedule</span><span>{{ offering.schedule_text|default:"-" }}</span></div>
+            <div class="course-card-row"><span class="label">Class Size</span><span>{{ offering.enrollment_count }}</span></div>
+            <div class="course-card-row"><span class="label">Status</span><span>{{ offering.status|default:"-" }}</span></div>
+          </div>
+
+          <footer class="course-card-footer">
+            <a class="btn btn-outline-success" href="{% url 'faculty_portal:offering_periods' offering.id %}">
+              Grading
+            </a>
+            <a class="btn btn-outline-secondary" href="{% url 'faculty_portal:offering_enrollment' offering.id %}">
+              Class List / DR-W
+            </a>
+          </footer>
+        </article>
+      </div>
+    {% endfor %}
+  </div>
+  {% if not forloop.last %}
+    <hr class="campus-group-separator">
+  {% endif %}
+{% empty %}
+    <div class="col-12">
+      <div class="alert alert-secondary mb-0">
+        {% if show_archived %}
+        No archived classes found.
+        {% else %}
+        No active classes assigned yet.
+        {% endif %}
+      </div>
+    </div>
+{% endfor %}
+{% endblock %}

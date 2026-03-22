@@ -1,0 +1,51 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a href="{% url 'admin_portal:grade_submission_reopen_request_list' %}" class="btn btn-sm btn-outline-secondary">Back</a>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Request Details</strong></div>
+      <div class="card-body">
+        <div class="mb-2"><strong>Offering:</strong> {{ reopen_request.offering.course.code }} / {{ reopen_request.offering.section.code }}</div>
+        <div class="mb-2"><strong>Period:</strong> {{ reopen_request.template_period.code }}</div>
+        <div class="mb-2"><strong>Requestor:</strong> {{ reopen_request.requested_by_user.username }}</div>
+        <div class="mb-2"><strong>Status:</strong> {{ reopen_request.status }}</div>
+        <div class="mb-2"><strong>Justification:</strong><br>{{ reopen_request.justification }}</div>
+        <div class="mb-0">
+          <strong>Submission Status:</strong> {{ reopen_request.submission.status }}
+          {% if reopen_request.submission.submitted_at %}
+            <span class="text-muted">| Submitted {{ reopen_request.submission.submitted_at|date:"Y-m-d H:i" }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Review Action</strong></div>
+      <div class="card-body">
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+          <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+          {% endif %}
+          {% for field in form %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+            {% for error in field.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          {% endfor %}
+          <button class="btn btn-primary" type="submit">Submit Review</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

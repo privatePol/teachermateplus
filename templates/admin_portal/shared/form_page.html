@@ -1,0 +1,30 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
+</div>
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <form method="post" {% if form_enctype %}enctype="{{ form_enctype }}"{% endif %} novalidate>
+      {% csrf_token %}
+      {% if request.GET.next or request.POST.next %}
+      <input type="hidden" name="next" value="{{ request.POST.next|default:request.GET.next }}">
+      {% endif %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+      {% for field in form %}
+      <div class="mb-3">
+        <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+        {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      {% endfor %}
+      <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

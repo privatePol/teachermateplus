@@ -1,0 +1,263 @@
+{% extends "shared/base_public.html" %}
+{% load static %}
+
+{% block title %}EduGradesPro Faculty Portal{% endblock %}
+
+{% block extra_head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'faculty_portal/css/public_index.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="faculty-public-page">
+  <!-- Top Navbar -->
+  <header class="fp-topbar sticky-top">
+    <nav class="navbar navbar-expand-lg fp-navbar">
+      <div class="container-fluid fp-fluid px-3 px-xl-4">
+        <a class="navbar-brand fp-brand" href="#top">
+          <span class="fp-brand-main">EduGradesPro</span>
+          <span class="fp-brand-sub">Faculty Portal</span>
+        </a>
+
+        <button class="navbar-toggler fp-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#facultyPublicNav" aria-controls="facultyPublicNav" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="facultyPublicNav">
+          <ul class="navbar-nav mx-auto mb-3 mb-lg-0 fp-links">
+            <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
+            <li class="nav-item"><a class="nav-link" href="#workflow">Workflow</a></li>
+            <li class="nav-item"><a class="nav-link" href="#features">Features</a></li>
+            <li class="nav-item"><a class="nav-link" href="#support">Support</a></li>
+          </ul>
+
+          <form method="post" action="{% url 'accounts:faculty_login' %}" class="fp-login-form d-none d-lg-flex" novalidate>
+            {% csrf_token %}
+            <label for="id_nav_username" class="visually-hidden">Username</label>
+            <input id="id_nav_username" type="text" name="username" class="form-control fp-nav-input" placeholder="Username" autocomplete="username" required>
+            <label for="id_nav_password" class="visually-hidden">Password</label>
+            <input id="id_nav_password" type="password" name="password" class="form-control fp-nav-input" placeholder="Password" autocomplete="current-password" required>
+            <button type="submit" class="btn fp-login-btn">Login</button>
+          </form>
+          <a href="{% url 'accounts:faculty_forgot_password' %}" class="fp-forgot-link d-none d-lg-inline-flex ms-2">Forgot password?</a>
+
+          <form method="post" action="{% url 'accounts:faculty_login' %}" class="fp-login-form-mobile d-lg-none mt-2" novalidate>
+            {% csrf_token %}
+            <div class="row g-2">
+              <div class="col-12">
+                <label for="id_nav_username_mobile" class="visually-hidden">Username</label>
+                <input id="id_nav_username_mobile" type="text" name="username" class="form-control fp-nav-input" placeholder="Username" autocomplete="username" required>
+              </div>
+              <div class="col-12">
+                <label for="id_nav_password_mobile" class="visually-hidden">Password</label>
+                <input id="id_nav_password_mobile" type="password" name="password" class="form-control fp-nav-input" placeholder="Password" autocomplete="current-password" required>
+              </div>
+              <div class="col-12 d-grid">
+                <button type="submit" class="btn fp-login-btn">Login</button>
+              </div>
+              <div class="col-12 text-end">
+                <a href="{% url 'accounts:faculty_forgot_password' %}" class="fp-forgot-link">Forgot password?</a>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </nav>
+  </header>
+
+  <!-- Hero -->
+  <section id="top" class="fp-hero-section">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <div class="row align-items-center g-4 g-xl-5">
+        <div class="col-lg-6">
+          <div class="fp-eyebrow">EDUGRADESPRO - FACULTY PORTAL</div>
+          <h1 class="fp-hero-title">Welcome to EduGradesPro</h1>
+          <p class="fp-hero-subtitle">
+            EduGradesPro helps faculty manage teaching loads, class records, attendance, grading components,
+            score encoding, and final grade submission through one secure academic platform.
+          </p>
+          <div class="fp-pill-list">
+            <span class="fp-pill">Faculty Load</span>
+            <span class="fp-pill">Class Record</span>
+            <span class="fp-pill">Attendance</span>
+            <span class="fp-pill">Grade Encoding</span>
+            <span class="fp-pill">Summary of Grades</span>
+            <span class="fp-pill">Submission Tracking</span>
+            <span class="fp-pill">Student Performance</span>
+            <span class="fp-pill">Secure Access</span>
+          </div>
+          <div class="fp-hero-cta">
+            <a href="#top" class="btn fp-cta-primary">Start with Login</a>
+            <a href="#workflow" class="btn fp-cta-secondary">Explore Workflow</a>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div>
+            <div class="fp-image-holder has-image fp-hero-logo-holder">
+              <img class="fp-hero-logo-image" src="{% get_media_prefix %}logos/egp_logo_official.png" alt="EduGradesPro Faculty Portal hero visual">
+            </div>
+            {% comment %} <div class="fp-float-chip">Live Grading Status</div>
+            <div class="fp-float-chip alt">Term Progress View</div> {% endcomment %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- About -->
+  <section id="about" class="fp-section fp-section-soft">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <div class="row g-4 align-items-center">
+        <div class="col-lg-6">
+          <div class="fp-eyebrow">FACULTY WORKSPACE</div>
+          <h2 class="fp-section-title">A Focused Portal for Day-to-Day Teaching Operations</h2>
+          <p class="fp-section-text">
+            Built for faculty users, EduGradesPro Faculty Portal provides a clear, structured,
+            and policy-aligned workspace for classroom performance tracking and grade delivery.
+          </p>
+          <p class="fp-section-text muted mb-0">
+            The interface is designed for quick access, fewer errors, and complete visibility from
+            class activities to period submission.
+          </p>
+        </div>
+        <div class="col-lg-6">
+          <div class="fp-image-holder soft has-image">
+            <img src="{% get_media_prefix %}imahe/focused.jpg" alt="Faculty experience">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Workflow -->
+  <section id="workflow" class="fp-section">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <div class="fp-eyebrow">FACULTY WORKFLOW OVERVIEW</div>
+      <h2 class="fp-section-title">How EduGradesPro Supports the Faculty Grading Lifecycle</h2>
+      <p class="fp-section-text mw-xxl">
+        EduGradesPro follows the actual grading flow of faculty members, from viewing assigned subjects to
+        encoding scores, reviewing computed grades, and submitting final grades with visibility, control,
+        and academic accuracy.
+      </p>
+      <div class="fp-workflow-grid">
+        <div class="fp-step"><span>1</span>Faculty Login</div>
+        <div class="fp-step"><span>2</span>View Teaching Load</div>
+        <div class="fp-step"><span>3</span>Open Assigned Course</div>
+        <div class="fp-step"><span>4</span>Select Grading Period</div>
+        <div class="fp-step"><span>5</span>Set Activities and Components</div>
+        <div class="fp-step"><span>6</span>Encode Scores</div>
+        <div class="fp-step"><span>7</span>Record Attendance</div>
+        <div class="fp-step"><span>8</span>Review Summary of Grades</div>
+        <div class="fp-step"><span>9</span>Submit Final Grades</div>
+        <div class="fp-step"><span>10</span>Monitor Locking and Submission Status</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="fp-section fp-section-soft">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <div class="row g-4 g-xl-5 align-items-center">
+        <div class="col-lg-6 order-2 order-lg-1">
+          <h2 class="fp-section-title">Built for Daily Faculty Work</h2>
+          <p class="fp-section-text">
+            The Faculty Portal is designed around the real teaching workflow, making it easier to manage
+            academic records accurately and efficiently throughout the term.
+          </p>
+          <ul class="fp-feature-list">
+            <li>View assigned classes, schedules, and sections</li>
+            <li>Open grading periods for active courses</li>
+            <li>Encode raw scores by activity and component</li>
+            <li>Track attendance with weighted academic rules</li>
+            <li>Review computed grades instantly</li>
+            <li>Monitor grade submission progress</li>
+            <li>Access summary of grades anytime</li>
+            <li>Work within secure and controlled academic rules</li>
+          </ul>
+        </div>
+        <div class="col-lg-6 order-1 order-lg-2">
+          <div class="fp-image-holder has-image">
+            <img src="{% get_media_prefix %}imahe/facultygrades.jpg" alt="Faculty workflow and grading screenshot">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Policy -->
+  <section class="fp-section">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <h2 class="fp-section-title">Secure, Controlled, and Policy-Driven Grading</h2>
+      <p class="fp-section-text mw-xxl">
+        EduGradesPro helps institutions enforce grading discipline through controlled access,
+        academic locks, and clearly defined submission rules.
+      </p>
+      <div class="fp-rules-grid">
+        <div class="fp-rule-item">Faculty can encode grades only while the grading period is open.</div>
+        <div class="fp-rule-item">Closed grading periods are locked from editing.</div>
+        <div class="fp-rule-item">Submitted grades cannot be changed without authorized reopening.</div>
+        <div class="fp-rule-item">Reopening actions are logged for monitoring and audit.</div>
+        <div class="fp-rule-item">Grade computation follows school-defined academic weights.</div>
+        <div class="fp-rule-item">Access is limited by faculty assignment, campus, and department scope.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Coverage -->
+  <section class="fp-section fp-section-soft">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <h2 class="fp-section-title">Everything Faculty Need in One Connected Portal</h2>
+      <p class="fp-section-text mw-xxl">
+        EduGradesPro connects the key faculty functions needed for everyday academic work in one secure and organized environment.
+      </p>
+      <div class="fp-coverage-cloud">
+        <span>Faculty Load</span>
+        <span>Class Record</span>
+        <span>Attendance</span>
+        <span>Grade Components</span>
+        <span>Grade Computation</span>
+        <span>Summary of Grades</span>
+        <span>Submission Status</span>
+        <span>Student Performance</span>
+        <span>Academic Term Monitoring</span>
+        <span>Secure Access</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Support -->
+  <section id="support" class="fp-section">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <div class="row g-4 align-items-center">
+        <div class="col-lg-7">
+          <h2 class="fp-section-title">Need Assistance?</h2>
+          <p class="fp-section-text mb-0">
+            For account concerns, access issues, or grade submission support, contact your MIS Department
+            or portal administrator. Keep your faculty credentials secure and up to date.
+          </p>
+        </div>
+        <div class="col-lg-5">
+          <div class="fp-image-holder soft has-image">
+            <img src="{% get_media_prefix %}imahe/techsupp.jpg" alt="Support and helpdesk">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section class="fp-final-cta">
+    <div class="container-fluid fp-fluid px-3 px-xl-4 text-center">
+      <h2>Proceed to Login</h2>
+      <p>Use your assigned faculty credentials to access your EduGradesPro Faculty Portal.</p>
+      <a href="#top" class="btn fp-cta-primary fp-cta-final">Proceed to Login</a>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'faculty_portal/js/public_index.js' %}"></script>
+{% endblock %}

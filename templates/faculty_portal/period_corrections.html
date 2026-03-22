@@ -1,0 +1,187 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">
+    Corrections | {{ offering.course.code }} | {{ period.name }}
+  </h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+</div>
+
+{% if is_correction_active and active_correction_request %}
+<div class="alert alert-warning">
+  Correction window is active for request #{{ active_correction_request.id }}.
+  Apply scoped edits in Activities/Attendance, then finalize below.
+</div>
+{% elif can_self_reopen_before_deadline %}
+<div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-3">
+  <div>
+    <strong>Before-deadline correction mode:</strong> Faculty Self-Reopen.<br>
+    This period is still within the submission deadline window.
+    {% if submission_deadline %}Deadline: <strong>{{ submission_deadline|date:"Y-m-d H:i" }}</strong>.{% endif %}
+    Use the button to reopen this submitted period immediately, then return to Activities or Attendance to update records.
+  </div>
+  <form method="post" action="{% url 'faculty_portal:period_self_reopen' offering.id period.id %}">
+    {% csrf_token %}
+    <button class="btn btn-warning" type="submit">Reopen Before Deadline</button>
+  </form>
+</div>
+{% elif submission_status == "REOPENED" %}
+<div class="alert alert-success">
+  This period has already been reopened. Continue editing in Activities or Attendance, then resubmit when ready.
+</div>
+{% elif not is_submitted %}
+<div class="alert alert-info">Correction requests can be filed after period submission.</div>
+{% elif predeadline_correction_mode == "REQUEST_REVIEW" and submission_deadline %}
+<div class="alert alert-info">
+  Before-deadline correction mode is set to <strong>Request Review</strong>.
+  Faculty must submit a correction request even before the deadline.
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><strong>My Correction Requests</strong></div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0 align-middle">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Status</th>
+          <th>Scope</th>
+          <th>Requested</th>
+          <th>Window</th>
+          <th class="text-end">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for req in requests %}
+        <tr>
+          <td>#{{ req.id }}</td>
+          <td>
+            {% if req.status == "APPROVED" %}
+              <span class="badge text-bg-warning">{{ req.status }}</span>
+            {% elif req.status == "REJECTED" %}
+              <span class="badge text-bg-danger">{{ req.status }}</span>
+            {% elif req.status == "CLOSED" %}
+              <span class="badge text-bg-secondary">{{ req.status }}</span>
+            {% else %}
+              <span class="badge text-bg-info">{{ req.status }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% for item in req.items.all %}
+              <div class="small">
+                {{ item.requested_action }}
+                {% if item.student %}| {{ item.student.student_no }}{% endif %}
+                {% if item.grade_activity %}| {{ item.grade_activity.title }}{% endif %}
+              </div>
+            {% empty %}
+              <span class="text-muted">-</span>
+            {% endfor %}
+          </td>
+          <td>{{ req.created_at|date:"Y-m-d H:i" }}</td>
+          <td>
+            {% if req.unlock_window %}
+              {{ req.unlock_window.start_at|date:"Y-m-d H:i" }}<br>
+              {{ req.unlock_window.end_at|date:"Y-m-d H:i" }}
+            {% else %}
+              <span class="text-muted">Not opened</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            {% if req.status == "APPROVED" and req.unlock_window and req.unlock_window.is_active and not req.unlock_window.is_consumed %}
+            <form method="post" action="{% url 'faculty_portal:period_correction_finalize' offering.id period.id req.id %}">
+              {% csrf_token %}
+              <button class="btn btn-sm btn-success" type="submit">Finalize & Re-lock</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% if req.justification %}
+        <tr>
+          <td colspan="6" class="small text-muted">
+            <strong>Justification:</strong> {{ req.justification }}<br>
+            {% if req.review_remarks %}<strong>Review:</strong> {{ req.review_remarks }}<br>{% endif %}
+            {% if req.attachments.all %}
+              <strong>Attachments:</strong>
+              {% for a in req.attachments.all %}
+                <a href="{{ a.file.url }}" target="_blank">{{ a.file.name }}</a>{% if not forloop.last %}, {% endif %}
+              {% endfor %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endif %}
+      {% empty %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No correction requests yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white"><strong>File New Request</strong></div>
+  <div class="card-body">
+    {% if can_self_reopen_before_deadline %}
+      <div class="text-muted">
+        Direct self-reopen is enabled before deadline for this tenant, so the correction request form is temporarily hidden.
+      </div>
+    {% elif submission_status == "REOPENED" %}
+      <div class="text-muted">
+        This period is already reopened. Continue editing in the period workflow and resubmit after your corrections.
+      </div>
+    {% elif not is_submitted %}
+      <div class="text-muted">
+        Submit the grading period first before filing a correction request.
+      </div>
+    {% else %}
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+      <div class="row g-2">
+        <div class="col-md-4">
+          <label class="form-label">Action</label>
+          {{ form.requested_action }}
+          {% for e in form.requested_action.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Student</label>
+          {{ form.student }}
+          {% for e in form.student.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Activity (for score correction)</label>
+          {{ form.grade_activity }}
+          {% for e in form.grade_activity.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Old Value (optional)</label>
+          {{ form.old_value }}
+          {% for e in form.old_value.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">New Value (optional)</label>
+          {{ form.new_value }}
+          {% for e in form.new_value.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+        </div>
+        <div class="col-12">
+          <label class="form-label">Justification</label>
+          {{ form.justification }}
+          {% for e in form.justification.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Attachment (optional)</label>
+          {{ form.attachment }}
+          {% for e in form.attachment.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <button class="btn btn-primary w-100" type="submit">Submit Request</button>
+        </div>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

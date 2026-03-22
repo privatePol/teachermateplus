@@ -1,0 +1,411 @@
+{% extends "admin_portal/base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .builder-muted { color: #6c757d; }
+  .builder-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  .builder-node {
+    border-left: 3px solid #dbe2d7;
+    padding-left: 1rem;
+    margin-left: 0.15rem;
+  }
+  .builder-chip { font-size: 0.75rem; }
+  .builder-level-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+  .builder-level-period { background: #d7efe2; color: #175233; }
+  .builder-level-1 { background: #dfeee2; color: #1f5a35; }
+  .builder-level-2 { background: #eef4db; color: #6f5a12; }
+  .builder-level-3 { background: #eef2f6; color: #45576b; }
+  .builder-scope-card {
+    background: linear-gradient(135deg, #f7fbf8 0%, #fcfdf8 100%);
+    border: 1px solid #e0e9df;
+    border-radius: 1rem;
+    padding: 1rem 1.1rem;
+  }
+  .builder-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin-top: 0.75rem;
+  }
+  .builder-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.45rem 0.8rem;
+    margin-top: 0.45rem;
+  }
+  .builder-meta-card {
+    background: #f8fbf7;
+    border: 1px solid #e2ebe0;
+    border-radius: 0.75rem;
+    padding: 0.5rem 0.7rem;
+  }
+  .builder-meta-label {
+    display: block;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #77867b;
+    margin-bottom: 0.15rem;
+    font-weight: 700;
+  }
+  .builder-meta-value {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: #21352a;
+  }
+  .builder-shell {
+    background: #ffffff;
+    border: 1px solid #e6ece4;
+    border-radius: 1rem;
+    padding: 1rem 1rem 0.9rem;
+    box-shadow: 0 10px 28px rgba(35, 56, 41, 0.04);
+  }
+  .builder-node-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  .builder-node-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .builder-node-title-text {
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: #203728;
+  }
+  .builder-node-subtitle {
+    margin-top: 0.2rem;
+    font-size: 0.82rem;
+    color: #6d7e72;
+  }
+  .builder-weight-line {
+    margin-top: 0.65rem;
+    padding: 0.6rem 0.8rem;
+    border-radius: 0.8rem;
+    background: #f8fbf7;
+    border: 1px solid #e5ece3;
+    font-size: 0.9rem;
+    color: #31473a;
+  }
+  .builder-weight-label {
+    font-weight: 700;
+    color: #1f3a2b;
+  }
+  .builder-child-stack {
+    margin-top: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+  .builder-empty {
+    margin-top: 0.75rem;
+    padding: 0.7rem 0.85rem;
+    border-radius: 0.8rem;
+    background: #f8faf8;
+    color: #6c7a70;
+    font-size: 0.88rem;
+  }
+  .builder-detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 0.7rem 0.85rem;
+    border-radius: 0.8rem;
+    background: #fbfcfd;
+    border: 1px solid #e6eaef;
+  }
+  .builder-detail-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .builder-detail-name {
+    font-weight: 600;
+    color: #24333f;
+  }
+  .builder-section-note {
+    font-size: 0.84rem;
+    color: #6f8074;
+  }
+  .builder-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.85rem;
+    align-items: start;
+  }
+  @media (max-width: 767.98px) {
+    .builder-node-header,
+    .builder-detail-grid {
+      display: block;
+    }
+    .builder-node-header > div:last-child,
+    .builder-detail-grid > div:last-child {
+      margin-top: 0.85rem;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Template Builder: {{ template_obj.code }}</h2>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grading_template_list' %}">Back</a>
+    <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_period_create' %}?template_id={{ template_obj.id }}">Add Period</a>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="row g-2">
+      <div class="col-md-3"><strong>Tenant:</strong> {{ template_obj.tenant.code }}</div>
+      <div class="col-md-3"><strong>Name:</strong> {{ template_obj.name }}</div>
+      <div class="col-md-2"><strong>Base:</strong> {{ template_obj.default_base_value }}</div>
+      <div class="col-md-2">
+        <strong>Publish:</strong>
+        {% if template_obj.is_published %}
+          <span class="badge text-bg-success builder-chip">Published</span>
+        {% else %}
+          <span class="badge text-bg-secondary builder-chip">Draft</span>
+        {% endif %}
+      </div>
+      <div class="col-md-2">
+        <strong>Approval:</strong>
+        {% if template_obj.approval_status == "APPROVED" %}
+          <span class="badge text-bg-success builder-chip">Approved</span>
+        {% elif template_obj.approval_status == "FOR_APPROVAL" %}
+          <span class="badge text-bg-warning builder-chip">For Approval</span>
+        {% elif template_obj.approval_status == "REJECTED" %}
+          <span class="badge text-bg-danger builder-chip">Rejected</span>
+        {% else %}
+          <span class="badge text-bg-secondary builder-chip">Draft</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="builder-scope-card mb-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+    <div>
+      <div class="fw-semibold text-dark mb-1">Builder Reading Guide</div>
+      <div class="builder-section-note mb-0">
+        Read the structure from top to bottom: <strong>Period Container</strong> -> <strong>Major Component</strong> -> <strong>Subcomponent</strong> -> <strong>Detail Item</strong>.
+        Each lower level contributes its weight upward until the final period grade is computed.
+      </div>
+    </div>
+    <div class="builder-legend">
+      <span class="builder-level-badge builder-level-period">Period Container</span>
+      <span class="builder-level-badge builder-level-1">Major Component</span>
+      <span class="builder-level-badge builder-level-2">Subcomponent</span>
+      <span class="builder-level-badge builder-level-3">Detail Item</span>
+    </div>
+  </div>
+</div>
+
+<div class="accordion" id="builder-accordion">
+  {% for period in period_rows %}
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="period-heading-{{ period.row.id }}">
+      <button class="accordion-button {% if not forloop.first %}collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#period-collapse-{{ period.row.id }}" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}" aria-controls="period-collapse-{{ period.row.id }}">
+        <span class="builder-level-badge builder-level-period me-2">Period Container</span>
+        <span class="fw-semibold">{{ period.row.name }}</span>
+        <span class="builder-muted ms-2 builder-code">{{ period.row.code }}</span>
+      </button>
+    </h2>
+    <div id="period-collapse-{{ period.row.id }}" class="accordion-collapse collapse {% if forloop.first %}show{% endif %}" aria-labelledby="period-heading-{{ period.row.id }}" data-bs-parent="#builder-accordion">
+      <div class="accordion-body">
+        <div class="builder-shell">
+        <div class="builder-section-note mb-3">
+          <strong>What this level means:</strong> This period contains the top-level grading groups for this stage of the term. The combined weight of the major components under this period should define how the period grade is formed.
+        </div>
+        <div class="d-flex gap-2 mb-3">
+          {% if "template_periods.update" in effective_permissions %}
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_period_update' period.row.id %}">Edit Period</a>
+          {% endif %}
+          {% if "template_components.read" in effective_permissions %}
+          <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_component_list' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}">View Components</a>
+          {% endif %}
+          {% if "template_components.create" in effective_permissions %}
+          <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_component_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}">Add Component</a>
+          {% endif %}
+        </div>
+
+        {% if period.components %}
+          {% for component in period.components %}
+          <div class="builder-node mb-3">
+            <div class="builder-node-header">
+              <div>
+                <div class="builder-node-title">
+                  <span class="builder-level-badge builder-level-1">Major Component</span>
+                  <span class="builder-node-title-text">{{ component.row.name }}</span>
+                  <span class="builder-muted builder-code">({{ component.row.code }})</span>
+                </div>
+                <div class="builder-node-subtitle">
+                  Primary grading bucket directly under <strong>{{ period.row.name }}</strong>.
+                </div>
+                <div class="builder-weight-line">
+                  <span class="builder-weight-label">Contribution to {{ period.row.name }}:</span> {{ component.row.weight_percentage }}%
+                </div>
+                <div class="builder-meta-grid">
+                  <div class="builder-meta-card">
+                    <span class="builder-meta-label">Weight</span>
+                    <span class="builder-meta-value">{{ component.row.weight_percentage }}%</span>
+                  </div>
+                  <div class="builder-meta-card">
+                    <span class="builder-meta-label">Sort Order</span>
+                    <span class="builder-meta-value">{{ component.row.sort_order }}</span>
+                  </div>
+                  <div class="builder-meta-card">
+                    <span class="builder-meta-label">Active</span>
+                    <span class="builder-meta-value">{% if component.row.is_active %}Yes{% else %}No{% endif %}</span>
+                  </div>
+                  <div class="builder-meta-card">
+                    <span class="builder-meta-label">Build Path</span>
+                    <span class="builder-meta-value">{% if component.subcomponents %}Uses subcomponents{% else %}Direct activity entry{% endif %}</span>
+                  </div>
+                  <div class="builder-meta-card">
+                    <span class="builder-meta-label">Score Entry Method</span>
+                    <span class="builder-meta-value">{{ component.get_score_input_mode_display }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="d-flex gap-2">
+                {% if "template_components.update" in effective_permissions %}
+                <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_component_update' component.row.id %}">Edit</a>
+                {% endif %}
+                {% if "template_subcomponents.read" in effective_permissions %}
+                <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_subcomponent_list' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}">Subcomponents</a>
+                {% endif %}
+                {% if "template_subcomponents.create" in effective_permissions %}
+                <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_subcomponent_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}">Add Subcomponent</a>
+                {% endif %}
+              </div>
+            </div>
+
+            {% if component.subcomponents %}
+              <div class="builder-child-stack">
+                {% for sub in component.subcomponents %}
+                <div class="builder-node mb-2">
+                  <div class="builder-node-header">
+                    <div>
+                      <div class="builder-node-title">
+                        <span class="builder-level-badge builder-level-2">Subcomponent</span>
+                        <span class="builder-node-title-text">{{ sub.row.name }}</span>
+                        <span class="builder-muted builder-code">({{ sub.row.code }})</span>
+                      </div>
+                      <div class="builder-node-subtitle">
+                        Breakdown item inside <strong>{{ component.row.name }}</strong>.
+                      </div>
+                      <div class="builder-weight-line">
+                        <span class="builder-weight-label">Contribution to {{ component.row.name }}:</span> {{ sub.row.weight_percentage }}%
+                      </div>
+                      <div class="builder-meta-grid">
+                        <div class="builder-meta-card">
+                          <span class="builder-meta-label">Weight</span>
+                          <span class="builder-meta-value">{{ sub.row.weight_percentage }}%</span>
+                        </div>
+                        <div class="builder-meta-card">
+                          <span class="builder-meta-label">Attendance Item</span>
+                          <span class="builder-meta-value">{% if sub.row.is_attendance_component %}Yes{% else %}No{% endif %}</span>
+                        </div>
+                        <div class="builder-meta-card">
+                          <span class="builder-meta-label">Active</span>
+                          <span class="builder-meta-value">{% if sub.row.is_active %}Yes{% else %}No{% endif %}</span>
+                        </div>
+                        <div class="builder-meta-card">
+                          <span class="builder-meta-label">Build Path</span>
+                          <span class="builder-meta-value">{% if sub.details %}Uses detail items{% else %}Direct activity entry{% endif %}</span>
+                        </div>
+                        <div class="builder-meta-card">
+                          <span class="builder-meta-label">Score Entry Method</span>
+                          <span class="builder-meta-value">{{ sub.row.get_score_input_mode_display }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                      {% if "template_subcomponents.update" in effective_permissions %}
+                      <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_subcomponent_update' sub.row.id %}">Edit</a>
+                      {% endif %}
+                      {% if "template_details.read" in effective_permissions %}
+                      <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_detail_list' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}&subcomponent_id={{ sub.row.id }}">Details</a>
+                      {% endif %}
+                      {% if "template_details.create" in effective_permissions %}
+                      <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_detail_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}&subcomponent_id={{ sub.row.id }}">Add Detail</a>
+                      {% endif %}
+                    </div>
+                  </div>
+
+                  {% if sub.details %}
+                  <div class="builder-child-stack">
+                    {% for detail in sub.details %}
+                    <div class="builder-node">
+                      <div class="builder-detail-row">
+                        <div class="builder-detail-grid w-100">
+                        <div class="builder-detail-main">
+                          <div class="builder-node-title">
+                            <span class="builder-level-badge builder-level-3">Detail Item</span>
+                            <span class="builder-detail-name">{{ detail.name }}</span>
+                            <span class="builder-muted builder-code">({{ detail.code }})</span>
+                          </div>
+                          <div class="builder-node-subtitle">
+                            Lowest scoring line under <strong>{{ sub.row.name }}</strong>. Activities encoded here roll up into the subcomponent total.
+                          </div>
+                        </div>
+                        <div class="d-flex align-items-start gap-2">
+                          <div class="builder-meta-card">
+                            <span class="builder-meta-label">Weight</span>
+                            <span class="builder-meta-value">{{ detail.weight_percentage }}%</span>
+                          </div>
+                          <div class="builder-meta-card">
+                            <span class="builder-meta-label">Score Entry Method</span>
+                            <span class="builder-meta-value">{{ detail.get_score_input_mode_display }}</span>
+                          </div>
+                          {% if "template_details.update" in effective_permissions %}
+                          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_detail_update' detail.id %}">Edit</a>
+                          {% endif %}
+                        </div>
+                        </div>
+                      </div>
+                    </div>
+                    {% endfor %}
+                  </div>
+                  {% else %}
+                  <div class="builder-empty">No detail items yet. Activities encoded under this subcomponent will compute directly here.</div>
+                  {% endif %}
+                </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="builder-empty">No subcomponents yet. This major component is currently set up for direct activity entry.</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="builder-empty">No major components yet for this period.</div>
+        {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="alert alert-info">No periods yet. Start by adding template periods.</div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,1690 @@
+from __future__ import annotations
+
+import csv
+import io
+import re
+from decimal import Decimal, InvalidOperation
+
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
+from django.db import IntegrityError, transaction
+from django.db.models import Q
+from django.http import HttpResponse
+from django.utils import timezone
+
+from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.core.services.audit import AuditService
+from apps.core.services.settings import SystemSettingService
+from apps.enrollment.models import Enrollment
+from apps.enrollment.services import EnrollmentService
+from apps.imports.models import ImportBatch, ImportBatchRow
+from apps.rbac.models import UserRole
+from apps.students.models import Student
+from apps.tenants.models import Campus, Department, Program, Tenant
+
+User = get_user_model()
+
+
+class ImportTemplateService:
+    TEMPLATES = {
+        ImportBatch.ImportType.SECTIONS: {
+            "headers": [
+                "tenant_code",
+                "campus_code",
+                "department_code",
+                "program_code",
+                "academic_year_code",
+                "term_code",
+                "course_code",
+                "section_code",
+                "room",
+                "schedule_text",
+                "status",
+            ],
+            "sample_row": [
+                "DEMO",
+                "MAIN",
+                "COLLEGE",
+                "BSIT",
+                "AY2526",
+                "1ST",
+                "IT101",
+                "BSIT-1A",
+                "R101",
+                "MWF 8:00-9:00",
+                "OPEN",
+            ],
+        },
+        ImportBatch.ImportType.COURSES: {
+            "headers": [
+                "tenant_code",
+                "campus_code",
+                "department_code",
+                "course_code",
+                "course_title",
+                "units",
+                "course_type",
+                "default_base_value",
+                "is_active",
+            ],
+            "sample_row": [
+                "DEMO",
+                "MAIN",
+                "COLLEGE",
+                "IT101",
+                "Introduction to IT",
+                "3",
+                "CORE",
+                "50",
+                "TRUE",
+            ],
+        },
+        ImportBatch.ImportType.COURSE_OFFERINGS: {
+            "headers": [
+                "tenant_code",
+                "campus_code",
+                "department_code",
+                "program_code",
+                "academic_year_code",
+                "term_code",
+                "course_code",
+                "section_code",
+                "room",
+                "schedule_text",
+                "status",
+            ],
+            "sample_row": [
+                "DEMO",
+                "MAIN",
+                "COLLEGE",
+                "BSIT",
+                "AY2526",
+                "1ST",
+                "IT101",
+                "BSIT-1A",
+                "R101",
+                "MWF 8:00-9:00",
+                "OPEN",
+            ],
+        },
+        ImportBatch.ImportType.FACULTY_ASSIGNMENTS: {
+            "headers": [
+                "tenant_code",
+                "campus_code",
+                "academic_year_code",
+                "term_code",
+                "course_code",
+                "section_code",
+                "faculty_username",
+                "is_primary",
+            ],
+            "sample_row": [
+                "DEMO",
+                "MAIN",
+                "AY2526",
+                "1ST",
+                "IT101",
+                "BSIT-1A",
+                "faculty1",
+                "TRUE",
+            ],
+        },
+        ImportBatch.ImportType.ENROLLMENT: {
+            "headers": [
+                "tenant_code",
+                "campus_code",
+                "academic_year_code",
+                "term_code",
+                "student_no",
+                "student_last_name",
+                "student_first_name",
+                "student_middle_name",
+                "student_sex",
+                "student_year_level",
+                "course_code",
+                "section_code",
+                "enrollment_status",
+            ],
+            "sample_row": [
+                "DEMO",
+                "MAIN",
+                "AY2526",
+                "1ST",
+                "20250001",
+                "DELA CRUZ",
+                "JUAN",
+                "SANTOS",
+                "M",
+                "1",
+                "IT101",
+                "BSIT-1A",
+                "ENROLLED",
+            ],
+        },
+    }
+
+    REFERENCE_GUIDES = {
+        ImportBatch.ImportType.SECTIONS: {
+            "summary": "Use this when your sections are derived from course offerings. Duplicate rows are auto-deduplicated.",
+            "relationships": [
+                "tenant_code -> campuses -> departments -> programs -> sections",
+                "If program_code is blank, the system attempts inference from section_code prefix.",
+            ],
+            "code_rules": [
+                "tenant_code: must exist in Tenants",
+                "campus_code: must exist under the tenant",
+                "department_code: must exist under the tenant+campus",
+                "program_code: recommended; if blank, system will infer where possible",
+                "section_code: exact section code/name used by offerings (e.g. AB ENG-LANG 1-AB1_ENGLANG)",
+            ],
+        },
+        ImportBatch.ImportType.COURSE_OFFERINGS: {
+            "summary": "Course offerings require all master references to exist first.",
+            "relationships": [
+                "tenant_code + campus_code + department_code define organizational scope",
+                "academic_year_code + term_code define term scope",
+                "course_code and section_code must already exist in master tables",
+            ],
+            "code_rules": [
+                "academic_year_code: use AY Code from Academic Years (e.g. AY2526) or exact AY Name if configured",
+                "term_code: use Term Code from Terms (e.g. 1ST, 2ND)",
+                "course_code: must match Courses.code",
+                "section_code: must match Sections.code",
+                "program_code: optional unless section_code is ambiguous across programs",
+            ],
+        },
+        ImportBatch.ImportType.FACULTY_ASSIGNMENTS: {
+            "summary": "Links faculty users to already-created offerings.",
+            "relationships": [
+                "offering reference = tenant + campus + academic year + term + course + section",
+                "faculty_username must belong to an active user with FACULTY role",
+            ],
+            "code_rules": [
+                "faculty_username: accepts username or email, exact match recommended",
+                "is_primary: TRUE/FALSE",
+            ],
+        },
+        ImportBatch.ImportType.ENROLLMENT: {
+            "summary": "Enrolls students into existing course offerings.",
+            "relationships": [
+                "offering reference = tenant + campus + academic year + term + course + section",
+                "student handling depends on ENROLLMENT_STUDENT_MODE (STRICT_EXISTING or AUTO_CREATE)",
+            ],
+            "code_rules": [
+                "enrollment_status: ENROLLED/ACTIVE/DR/W (mapped by system rules)",
+                "academic_year_code and term_code must exist first",
+                "If ENROLLMENT_STUDENT_MODE=AUTO_CREATE and student is missing, student_last_name and student_first_name are required",
+            ],
+        },
+        ImportBatch.ImportType.COURSES: {
+            "summary": "Creates course master records per tenant.",
+            "relationships": [
+                "tenant is required",
+                "campus/department can be blank for shared tenant-wide course definitions",
+            ],
+            "code_rules": [
+                "course_code: unique per tenant",
+                "default_base_value: decimal (e.g. 50)",
+                "is_active: TRUE/FALSE",
+            ],
+        },
+    }
+
+    @classmethod
+    def get_headers(cls, import_type: str) -> list[str]:
+        if import_type not in cls.TEMPLATES:
+            raise ValidationError("Unsupported import type.")
+        return list(cls.TEMPLATES[import_type]["headers"])
+
+    @classmethod
+    def get_sample_row(cls, import_type: str) -> list[str]:
+        if import_type not in cls.TEMPLATES:
+            raise ValidationError("Unsupported import type.")
+        return list(cls.TEMPLATES[import_type]["sample_row"])
+
+    @classmethod
+    def get_template_config(cls, import_type: str) -> dict:
+        if import_type not in cls.TEMPLATES:
+            raise ValidationError("Unsupported import type.")
+        return {
+            "headers": cls.get_headers(import_type),
+            "sample_row": cls.get_sample_row(import_type),
+            "guide": cls.REFERENCE_GUIDES.get(import_type, {}),
+        }
+
+    @classmethod
+    def generate_csv_response(cls, import_type: str, include_sample: bool = True) -> HttpResponse:
+        headers = cls.get_headers(import_type)
+        response = HttpResponse(content_type="text/csv")
+        filename = f"edugradespro_{import_type}_template.csv"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        if include_sample:
+            writer.writerow(cls.get_sample_row(import_type))
+        return response
+
+
+class BulkImportService:
+    AUTO_DEDUP_IMPORT_TYPES = {ImportBatch.ImportType.SECTIONS}
+    ENROLLMENT_STUDENT_MODE_KEY = "ENROLLMENT_STUDENT_MODE"
+    ENROLLMENT_STUDENT_MODE_STRICT = "STRICT_EXISTING"
+    ENROLLMENT_STUDENT_MODE_AUTO_CREATE = "AUTO_CREATE"
+
+    IMPORT_PERMISSION_MAP = {
+        ImportBatch.ImportType.SECTIONS: "sections.import",
+        ImportBatch.ImportType.COURSES: "courses.import",
+        ImportBatch.ImportType.COURSE_OFFERINGS: "course_offerings.import",
+        ImportBatch.ImportType.FACULTY_ASSIGNMENTS: "faculty_assignments.import",
+        ImportBatch.ImportType.ENROLLMENT: "enrollment.import",
+    }
+
+    @classmethod
+    def required_permission(cls, import_type: str) -> str:
+        if import_type not in cls.IMPORT_PERMISSION_MAP:
+            raise ValidationError("Unsupported import type.")
+        return cls.IMPORT_PERMISSION_MAP[import_type]
+
+    @classmethod
+    def list_import_types(cls):
+        return [
+            ImportBatch.ImportType.SECTIONS,
+            ImportBatch.ImportType.COURSES,
+            ImportBatch.ImportType.COURSE_OFFERINGS,
+            ImportBatch.ImportType.FACULTY_ASSIGNMENTS,
+            ImportBatch.ImportType.ENROLLMENT,
+        ]
+
+    @classmethod
+    def get_enrollment_student_mode(cls, tenant_id: int | None):
+        mode = SystemSettingService.get(
+            cls.ENROLLMENT_STUDENT_MODE_KEY,
+            tenant_id=tenant_id,
+            default=cls.ENROLLMENT_STUDENT_MODE_STRICT,
+        )
+        mode = (
+            str(mode or cls.ENROLLMENT_STUDENT_MODE_STRICT)
+            .strip()
+            .upper()
+            .replace("-", "_")
+            .replace(" ", "_")
+        )
+        mode_aliases = {
+            "STRICT": cls.ENROLLMENT_STUDENT_MODE_STRICT,
+            "EXISTING_ONLY": cls.ENROLLMENT_STUDENT_MODE_STRICT,
+            "AUTO": cls.ENROLLMENT_STUDENT_MODE_AUTO_CREATE,
+            "AUTOCREATE": cls.ENROLLMENT_STUDENT_MODE_AUTO_CREATE,
+        }
+        mode = mode_aliases.get(mode, mode)
+        if mode not in {cls.ENROLLMENT_STUDENT_MODE_STRICT, cls.ENROLLMENT_STUDENT_MODE_AUTO_CREATE}:
+            return cls.ENROLLMENT_STUDENT_MODE_STRICT
+        return mode
+
+    @staticmethod
+    def slug_to_import_type(import_slug: str) -> str | None:
+        mapping = {
+            "sections": ImportBatch.ImportType.SECTIONS,
+            "courses": ImportBatch.ImportType.COURSES,
+            "course-offerings": ImportBatch.ImportType.COURSE_OFFERINGS,
+            "faculty-assignments": ImportBatch.ImportType.FACULTY_ASSIGNMENTS,
+            "enrollment": ImportBatch.ImportType.ENROLLMENT,
+        }
+        return mapping.get(import_slug)
+
+    @staticmethod
+    def import_type_to_slug(import_type: str) -> str:
+        mapping = {
+            ImportBatch.ImportType.SECTIONS: "sections",
+            ImportBatch.ImportType.COURSES: "courses",
+            ImportBatch.ImportType.COURSE_OFFERINGS: "course-offerings",
+            ImportBatch.ImportType.FACULTY_ASSIGNMENTS: "faculty-assignments",
+            ImportBatch.ImportType.ENROLLMENT: "enrollment",
+        }
+        return mapping.get(import_type, import_type)
+
+    @staticmethod
+    def _normalize_value(value) -> str:
+        return (value or "").strip()
+
+    @staticmethod
+    def _read_csv_from_bytes(content: bytes) -> list[list[str]]:
+        decoded = None
+        for encoding in ("utf-8-sig", "utf-8"):
+            try:
+                decoded = content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if decoded is None:
+            raise ValidationError("CSV must be UTF-8 encoded.")
+        reader = csv.reader(io.StringIO(decoded))
+        return [[cell.strip() for cell in row] for row in reader]
+
+    @staticmethod
+    def _build_runtime(user, request):
+        scope = getattr(request, "scope", {}) if request else {}
+        tenant_ids = set(scope.get("tenant_ids", []))
+        campus_ids = set(scope.get("campus_ids", []))
+        return {
+            "tenant_ids": None if getattr(user, "is_superuser", False) else tenant_ids,
+            "campus_ids": None if getattr(user, "is_superuser", False) else campus_ids,
+            "tenant_cache": {},
+            "campus_cache": {},
+            "department_cache": {},
+            "program_cache": {},
+            "academic_year_cache": {},
+            "term_cache": {},
+            "course_cache": {},
+            "section_cache": {},
+            "student_cache": {},
+            "faculty_cache": {},
+            "offering_cache": {},
+        }
+
+    @staticmethod
+    def _is_blank_row(row: list[str]) -> bool:
+        return not any((cell or "").strip() for cell in row)
+
+    @staticmethod
+    def _parse_bool(value: str, field_name: str, errors: list[str], default=None):
+        if value == "":
+            return default
+        normalized = value.strip().upper()
+        if normalized in {"TRUE", "1", "YES", "Y"}:
+            return True
+        if normalized in {"FALSE", "0", "NO", "N"}:
+            return False
+        errors.append(f"{field_name}: invalid boolean value '{value}'. Use TRUE/FALSE.")
+        return default
+
+    @staticmethod
+    def _parse_decimal(value: str, field_name: str, errors: list[str], default=None):
+        if value == "":
+            return default
+        try:
+            return Decimal(value)
+        except (InvalidOperation, TypeError):
+            errors.append(f"{field_name}: invalid decimal value '{value}'.")
+            return default
+
+    @staticmethod
+    def _resolve_tenant(tenant_code: str, runtime: dict, errors: list[str]):
+        tenant_code = tenant_code.strip()
+        if not tenant_code:
+            errors.append("tenant_code is required.")
+            return None
+        key = tenant_code.upper()
+        if key not in runtime["tenant_cache"]:
+            runtime["tenant_cache"][key] = Tenant.objects.filter(code__iexact=tenant_code, is_active=True).first()
+        tenant = runtime["tenant_cache"][key]
+        if not tenant:
+            errors.append(f"tenant_code '{tenant_code}' not found.")
+            return None
+        if runtime["tenant_ids"] is not None and tenant.id not in runtime["tenant_ids"]:
+            errors.append(f"tenant_code '{tenant_code}' is outside your scope.")
+            return None
+        return tenant
+
+    @staticmethod
+    def _resolve_campus(campus_code: str, tenant, runtime: dict, errors: list[str], required: bool = True):
+        campus_code = campus_code.strip()
+        if not campus_code:
+            if required:
+                errors.append("campus_code is required.")
+            return None
+        key = (tenant.id, campus_code.upper())
+        if key not in runtime["campus_cache"]:
+            runtime["campus_cache"][key] = Campus.objects.filter(
+                tenant=tenant, code__iexact=campus_code, is_active=True
+            ).first()
+        campus = runtime["campus_cache"][key]
+        if not campus:
+            errors.append(f"campus_code '{campus_code}' not found for tenant '{tenant.code}'.")
+            return None
+        if runtime["campus_ids"] is not None and campus.id not in runtime["campus_ids"]:
+            errors.append(f"campus_code '{campus_code}' is outside your scope.")
+            return None
+        return campus
+
+    @staticmethod
+    def _resolve_department(department_code: str, tenant, campus, runtime: dict, errors: list[str], required: bool = True):
+        department_code = department_code.strip()
+        if not department_code:
+            if required:
+                errors.append("department_code is required.")
+            return None
+        key = (tenant.id, campus.id if campus else None, department_code.upper())
+        if key not in runtime["department_cache"]:
+            query = Department.objects.filter(tenant=tenant, code__iexact=department_code, is_active=True)
+            if campus:
+                query = query.filter(campus=campus)
+            runtime["department_cache"][key] = query.first()
+        department = runtime["department_cache"][key]
+        if not department:
+            errors.append(
+                f"department_code '{department_code}' not found for tenant '{tenant.code}'"
+                + (f" and campus '{campus.code}'." if campus else ".")
+            )
+            return None
+        return department
+
+    @staticmethod
+    def _resolve_program(program_code: str, tenant, campus, department, runtime: dict, errors: list[str], required: bool = True):
+        program_code = program_code.strip()
+        if not program_code:
+            if required:
+                errors.append("program_code is required.")
+            return None
+        key = (
+            tenant.id,
+            campus.id if campus else None,
+            department.id if department else None,
+            program_code.upper(),
+        )
+        if key not in runtime["program_cache"]:
+            query = Program.objects.filter(tenant=tenant, code__iexact=program_code, is_active=True)
+            if campus:
+                query = query.filter(campus=campus)
+            if department:
+                query = query.filter(department=department)
+            runtime["program_cache"][key] = query.first()
+        program = runtime["program_cache"][key]
+        if not program:
+            errors.append(f"program_code '{program_code}' not found for selected tenant/campus/department.")
+            return None
+        return program
+
+    @staticmethod
+    def _infer_program_code_from_section(section_code: str) -> str | None:
+        section_code = (section_code or "").strip()
+        if not section_code:
+            return None
+        match = re.match(r"^(.*?)(?:\s+\d.*)?$", section_code)
+        if not match:
+            return None
+        inferred = (match.group(1) or "").strip()
+        return inferred or None
+
+    @staticmethod
+    def _normalized_code_token(value: str) -> str:
+        return re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
+
+    @classmethod
+    def _resolve_program_for_section_row(
+        cls,
+        *,
+        program_code: str,
+        section_code: str,
+        tenant,
+        campus,
+        department,
+        runtime: dict,
+        errors: list[str],
+    ) -> tuple[Program | None, str | None]:
+        normalized_program = (program_code or "").strip()
+        if normalized_program:
+            program = cls._resolve_program(
+                normalized_program,
+                tenant,
+                campus,
+                department,
+                runtime,
+                errors,
+                required=False,
+            )
+            if program:
+                return program, None
+            errors.append(
+                f"program_code '{normalized_program}' not found for selected tenant/campus/department."
+            )
+            return None, None
+
+        inferred_program_code = cls._infer_program_code_from_section(section_code)
+        if inferred_program_code:
+            inferred_errors = []
+            inferred_program = cls._resolve_program(
+                inferred_program_code,
+                tenant,
+                campus,
+                department,
+                runtime,
+                inferred_errors,
+                required=False,
+            )
+            if inferred_program:
+                return inferred_program, None
+            inferred_token = cls._normalized_code_token(inferred_program_code)
+            if inferred_token:
+                candidate_programs = list(
+                    Program.objects.filter(
+                        tenant=tenant,
+                        campus=campus,
+                        department=department,
+                        is_active=True,
+                    ).order_by("code")
+                )
+                exact_token_matches = [
+                    row
+                    for row in candidate_programs
+                    if cls._normalized_code_token(row.code) == inferred_token
+                ]
+                if len(exact_token_matches) == 1:
+                    return exact_token_matches[0], None
+                near_matches = [
+                    row
+                    for row in candidate_programs
+                    if cls._normalized_code_token(row.code).startswith(inferred_token)
+                    or inferred_token.startswith(cls._normalized_code_token(row.code))
+                ]
+                if len(near_matches) == 1:
+                    return near_matches[0], None
+            # No existing match: allow deferred program auto-create on confirm step.
+            return None, inferred_program_code
+
+        available_programs = Program.objects.filter(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            is_active=True,
+        ).order_by("code")
+        if available_programs.count() == 1:
+            return available_programs.first(), None
+
+        errors.append(
+            "program_code is required for sections import when it cannot be inferred from section_code."
+        )
+        return None, None
+
+    @staticmethod
+    def _resolve_academic_year(academic_year_code: str, tenant, runtime: dict, errors: list[str]):
+        academic_year_code = academic_year_code.strip()
+        if not academic_year_code:
+            errors.append("academic_year_code is required.")
+            return None
+        key = (tenant.id, academic_year_code.upper())
+        if key not in runtime["academic_year_cache"]:
+            academic_year = AcademicYear.objects.filter(
+                tenant=tenant, code__iexact=academic_year_code, is_active=True
+            ).first()
+            if not academic_year:
+                by_name = list(
+                    AcademicYear.objects.filter(tenant=tenant, name__iexact=academic_year_code, is_active=True).order_by("id")
+                )
+                if len(by_name) == 1:
+                    academic_year = by_name[0]
+                elif len(by_name) > 1:
+                    errors.append(
+                        f"academic_year_code '{academic_year_code}' matched multiple academic year names. Use AY code instead."
+                    )
+            runtime["academic_year_cache"][key] = academic_year
+        academic_year = runtime["academic_year_cache"][key]
+        if not academic_year:
+            errors.append(f"academic_year_code '{academic_year_code}' not found for tenant '{tenant.code}'.")
+            return None
+        return academic_year
+
+    @staticmethod
+    def _resolve_term(term_code: str, tenant, academic_year, runtime: dict, errors: list[str]):
+        term_code = term_code.strip()
+        if not term_code:
+            errors.append("term_code is required.")
+            return None
+        key = (tenant.id, academic_year.id if academic_year else None, term_code.upper())
+        if key not in runtime["term_cache"]:
+            query = Term.objects.filter(tenant=tenant, is_active=True)
+            if academic_year:
+                query = query.filter(academic_year=academic_year)
+            term = query.filter(code__iexact=term_code).first()
+            if not term:
+                by_name = list(query.filter(name__iexact=term_code).order_by("id"))
+                if len(by_name) == 1:
+                    term = by_name[0]
+                elif len(by_name) > 1:
+                    errors.append(
+                        f"term_code '{term_code}' matched multiple term names. Use Term code instead."
+                    )
+            runtime["term_cache"][key] = term
+        term = runtime["term_cache"][key]
+        if not term:
+            errors.append(f"term_code '{term_code}' not found for tenant '{tenant.code}'.")
+            return None
+        return term
+
+    @staticmethod
+    def _resolve_course(course_code: str, tenant, runtime: dict, errors: list[str]):
+        course_code = course_code.strip()
+        if not course_code:
+            errors.append("course_code is required.")
+            return None
+        key = (tenant.id, course_code.upper())
+        if key not in runtime["course_cache"]:
+            runtime["course_cache"][key] = Course.objects.filter(
+                tenant=tenant, code__iexact=course_code, is_active=True
+            ).first()
+        course = runtime["course_cache"][key]
+        if not course:
+            errors.append(f"course_code '{course_code}' not found for tenant '{tenant.code}'.")
+            return None
+        return course
+
+    @staticmethod
+    def _resolve_section(section_code: str, tenant, campus, department, program, runtime: dict, errors: list[str], required: bool = True):
+        section_code = section_code.strip()
+        if not section_code:
+            if required:
+                errors.append("section_code is required.")
+            return None
+        key = (
+            tenant.id,
+            campus.id if campus else None,
+            department.id if department else None,
+            program.id if program else None,
+            section_code.upper(),
+        )
+        if key not in runtime["section_cache"]:
+            query = Section.objects.filter(tenant=tenant, code__iexact=section_code, is_active=True)
+            if campus:
+                query = query.filter(campus=campus)
+            if department:
+                query = query.filter(department=department)
+            if program:
+                query = query.filter(program=program)
+            runtime["section_cache"][key] = query.first()
+        section = runtime["section_cache"][key]
+        if not section:
+            errors.append("section_code not found for selected tenant/campus/department/program.")
+            return None
+        return section
+
+    @staticmethod
+    def _resolve_student(
+        student_no: str,
+        tenant,
+        runtime: dict,
+        errors: list[str],
+        *,
+        student_mode: str | None = None,
+    ):
+        student_no = student_no.strip()
+        if not student_no:
+            errors.append("student_no is required.")
+            return None
+        key = (tenant.id, student_no.upper())
+        if key not in runtime["student_cache"]:
+            runtime["student_cache"][key] = Student.objects.filter(
+                tenant=tenant, student_no__iexact=student_no, is_active=True
+            ).first()
+        student = runtime["student_cache"][key]
+        if not student:
+            mode_note = (
+                f" Current ENROLLMENT_STUDENT_MODE is {student_mode}."
+                if student_mode
+                else ""
+            )
+            errors.append(f"student_no '{student_no}' not found for tenant '{tenant.code}'.{mode_note}")
+            return None
+        return student
+
+    @staticmethod
+    def _find_student(student_no: str, tenant, runtime: dict):
+        student_no = student_no.strip()
+        if not student_no:
+            return None
+        key = (tenant.id, student_no.upper())
+        if key not in runtime["student_cache"]:
+            runtime["student_cache"][key] = Student.objects.filter(
+                tenant=tenant,
+                student_no__iexact=student_no,
+                is_active=True,
+            ).first()
+        return runtime["student_cache"][key]
+
+    @staticmethod
+    def _resolve_faculty_user(identifier: str, tenant, campus, runtime: dict, errors: list[str]):
+        identifier = identifier.strip()
+        if not identifier:
+            errors.append("faculty_username is required.")
+            return None
+        key = identifier.lower()
+        if key not in runtime["faculty_cache"]:
+            runtime["faculty_cache"][key] = (
+                User.objects.filter(Q(username__iexact=identifier) | Q(email__iexact=identifier), is_active=True)
+                .order_by("id")
+                .first()
+            )
+        user = runtime["faculty_cache"][key]
+        if not user:
+            errors.append(f"faculty_username '{identifier}' does not match any username/email.")
+            return None
+
+        has_faculty_role = (
+            UserRole.objects.filter(user=user, role__code="FACULTY", is_active=True)
+            .filter(Q(tenant_id=tenant.id) | Q(tenant__isnull=True))
+            .filter(Q(campus_id=campus.id) | Q(campus__isnull=True))
+            .exists()
+        )
+        if not has_faculty_role:
+            errors.append(f"User '{identifier}' is not an active faculty for the selected scope.")
+            return None
+        return user
+
+    @staticmethod
+    def _resolve_offering_for_reference(
+        *,
+        tenant,
+        campus,
+        academic_year,
+        term,
+        course,
+        section_code: str,
+        runtime: dict,
+        errors: list[str],
+    ):
+        section_code = section_code.strip()
+        if not section_code:
+            errors.append("section_code is required.")
+            return None
+        key = (tenant.id, campus.id, academic_year.id, term.id, course.id, section_code.upper())
+        if key not in runtime["offering_cache"]:
+            matches = list(
+                CourseOffering.objects.filter(
+                    tenant=tenant,
+                    campus=campus,
+                    academic_year=academic_year,
+                    term=term,
+                    course=course,
+                    section__code__iexact=section_code,
+                    is_active=True,
+                )
+                .select_related("section")
+                .order_by("id")
+            )
+            runtime["offering_cache"][key] = matches
+        matches = runtime["offering_cache"][key]
+        if not matches:
+            errors.append("No course offering matches the tenant/campus/ay/term/course/section combination.")
+            return None
+        if len(matches) > 1:
+            errors.append(
+                "Multiple offerings match the tenant/campus/ay/term/course/section combination."
+                " Add stricter setup to avoid ambiguous section codes."
+            )
+            return None
+        return matches[0]
+
+    @classmethod
+    def _validate_section_row(cls, row: dict, runtime: dict):
+        errors = []
+        tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
+        campus = department = program = None
+        auto_program_code = None
+        skip_existing = False
+        if tenant:
+            campus = cls._resolve_campus(row["campus_code"], tenant, runtime, errors, required=True)
+        if tenant and campus:
+            department = cls._resolve_department(
+                row["department_code"],
+                tenant,
+                campus,
+                runtime,
+                errors,
+                required=True,
+            )
+        section_code = cls._normalize_value(row["section_code"])
+        if not section_code:
+            errors.append("section_code is required.")
+
+        if tenant and campus and department and section_code:
+            program, auto_program_code = cls._resolve_program_for_section_row(
+                program_code=row["program_code"],
+                section_code=section_code,
+                tenant=tenant,
+                campus=campus,
+                department=department,
+                runtime=runtime,
+                errors=errors,
+            )
+
+        is_active = cls._parse_bool(cls._normalize_value(row.get("is_active", "")), "is_active", errors, default=True)
+        section_name = section_code
+        year_match = re.search(r"\b([1-6])(?:st|nd|rd|th)?\b", section_code, flags=re.IGNORECASE)
+        year_level = year_match.group(1) if year_match else None
+
+        if tenant and campus and department and program and section_code:
+            duplicate_exists = Section.objects.filter(
+                tenant=tenant,
+                campus=campus,
+                department=department,
+                program=program,
+                code__iexact=section_code,
+            ).exists()
+            if duplicate_exists:
+                skip_existing = True
+
+        normalized = {
+            "tenant_id": tenant.id if tenant else None,
+            "campus_id": campus.id if campus else None,
+            "department_id": department.id if department else None,
+            "program_id": program.id if program else None,
+            "program_code_auto": auto_program_code,
+            "code": section_code,
+            "name": section_name,
+            "year_level": year_level,
+            "is_active": bool(is_active),
+            "skip_existing": skip_existing,
+        }
+        unique_program_key = str(program.id) if program else (auto_program_code or "")
+        unique_key = (
+            f"{tenant.id}:{campus.id}:{department.id}:{unique_program_key}:{section_code.upper()}"
+            if tenant and campus and department and unique_program_key and section_code
+            else None
+        )
+        return normalized, errors, unique_key
+
+    @classmethod
+    def _validate_course_row(cls, row: dict, runtime: dict):
+        errors = []
+        tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
+        campus = None
+        department = None
+
+        if tenant:
+            campus = cls._resolve_campus(row["campus_code"], tenant, runtime, errors, required=False)
+            if row["department_code"] and not row["campus_code"]:
+                errors.append("department_code requires campus_code.")
+            if row["department_code"]:
+                department = cls._resolve_department(
+                    row["department_code"], tenant, campus, runtime, errors, required=False
+                )
+                if department and campus and department.campus_id != campus.id:
+                    errors.append("department_code does not belong to selected campus.")
+
+        course_code = cls._normalize_value(row["course_code"])
+        course_title = cls._normalize_value(row["course_title"])
+        if not course_code:
+            errors.append("course_code is required.")
+        if not course_title:
+            errors.append("course_title is required.")
+
+        units = cls._parse_decimal(cls._normalize_value(row["units"]), "units", errors, default=None)
+        default_base = cls._parse_decimal(
+            cls._normalize_value(row["default_base_value"]), "default_base_value", errors, default=None
+        )
+        is_active = cls._parse_bool(cls._normalize_value(row["is_active"]), "is_active", errors, default=True)
+        course_type = cls._normalize_value(row["course_type"]) or None
+
+        if tenant and course_code and Course.objects.filter(tenant=tenant, code__iexact=course_code).exists():
+            errors.append(f"Course '{course_code}' already exists for tenant '{tenant.code}'.")
+
+        normalized = {
+            "tenant_id": tenant.id if tenant else None,
+            "campus_id": campus.id if campus else None,
+            "department_id": department.id if department else None,
+            "code": course_code,
+            "title": course_title,
+            "units": str(units) if units is not None else None,
+            "course_type": course_type,
+            "default_base_value": str(default_base) if default_base is not None else None,
+            "is_active": bool(is_active),
+        }
+        unique_key = f"{tenant.id}:{course_code.upper()}" if tenant and course_code else None
+        return normalized, errors, unique_key
+
+    @classmethod
+    def _validate_course_offering_row(cls, row: dict, runtime: dict):
+        errors = []
+        tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
+        campus = department = program = academic_year = term = course = section = None
+        if tenant:
+            campus = cls._resolve_campus(row["campus_code"], tenant, runtime, errors, required=True)
+        if tenant and campus:
+            department = cls._resolve_department(row["department_code"], tenant, campus, runtime, errors, required=True)
+            # program_code is optional for open/shared offerings; section resolution will guard ambiguity.
+            program = cls._resolve_program(row["program_code"], tenant, campus, department, runtime, errors, required=False)
+            section = cls._resolve_section(
+                row["section_code"],
+                tenant,
+                campus,
+                department,
+                program,
+                runtime,
+                errors,
+                required=True,
+            )
+            if section and not program:
+                section_matches = Section.objects.filter(
+                    tenant=tenant,
+                    campus=campus,
+                    department=department,
+                    code__iexact=cls._normalize_value(row["section_code"]),
+                    is_active=True,
+                )
+                if section_matches.count() > 1:
+                    errors.append(
+                        "program_code is required because section_code is ambiguous across multiple programs."
+                    )
+                else:
+                    # Derive program when a unique section row exists.
+                    program = section.program
+        if tenant:
+            academic_year = cls._resolve_academic_year(row["academic_year_code"], tenant, runtime, errors)
+        if tenant and academic_year:
+            term = cls._resolve_term(row["term_code"], tenant, academic_year, runtime, errors)
+            if term and term.academic_year_id != academic_year.id:
+                errors.append("term_code does not belong to selected academic_year_code.")
+        if tenant:
+            course = cls._resolve_course(row["course_code"], tenant, runtime, errors)
+
+        status = cls._normalize_value(row["status"]).upper() or CourseOffering.Status.OPEN
+        if status not in {choice for choice, _ in CourseOffering.Status.choices}:
+            errors.append(f"status must be one of {[choice for choice, _ in CourseOffering.Status.choices]}.")
+
+        if tenant and campus and department and term and course and section:
+            duplicate_exists = CourseOffering.objects.filter(
+                tenant=tenant,
+                campus=campus,
+                department=department,
+                term=term,
+                course=course,
+                section=section,
+            ).exists()
+            if duplicate_exists:
+                errors.append(
+                    "Course offering already exists for tenant/campus/department/term/course/section."
+                )
+
+        normalized = {
+            "tenant_id": tenant.id if tenant else None,
+            "campus_id": campus.id if campus else None,
+            "department_id": department.id if department else None,
+            "program_id": program.id if program else None,
+            "academic_year_id": academic_year.id if academic_year else None,
+            "term_id": term.id if term else None,
+            "course_id": course.id if course else None,
+            "section_id": section.id if section else None,
+            "room": cls._normalize_value(row["room"]) or None,
+            "schedule_text": cls._normalize_value(row["schedule_text"]) or None,
+            "status": status,
+            "is_active": True,
+        }
+        unique_key = (
+            f"{tenant.id}:{campus.id}:{department.id}:{term.id}:{course.id}:{section.id}"
+            if tenant and campus and department and term and course and section
+            else None
+        )
+        return normalized, errors, unique_key
+
+    @classmethod
+    def _validate_faculty_assignment_row(cls, row: dict, runtime: dict):
+        errors = []
+        tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
+        campus = academic_year = term = course = offering = faculty_user = None
+        if tenant:
+            campus = cls._resolve_campus(row["campus_code"], tenant, runtime, errors, required=True)
+            academic_year = cls._resolve_academic_year(row["academic_year_code"], tenant, runtime, errors)
+            if academic_year:
+                term = cls._resolve_term(row["term_code"], tenant, academic_year, runtime, errors)
+            course = cls._resolve_course(row["course_code"], tenant, runtime, errors)
+        if tenant and campus and academic_year and term and course:
+            offering = cls._resolve_offering_for_reference(
+                tenant=tenant,
+                campus=campus,
+                academic_year=academic_year,
+                term=term,
+                course=course,
+                section_code=row["section_code"],
+                runtime=runtime,
+                errors=errors,
+            )
+        if tenant and campus:
+            faculty_user = cls._resolve_faculty_user(row["faculty_username"], tenant, campus, runtime, errors)
+
+        is_primary = cls._parse_bool(cls._normalize_value(row["is_primary"]), "is_primary", errors, default=False)
+        if offering and faculty_user:
+            if FacultyAssignment.objects.filter(offering=offering, faculty_user=faculty_user).exists():
+                errors.append("Faculty assignment already exists for this offering and faculty user.")
+
+        normalized = {
+            "offering_id": offering.id if offering else None,
+            "faculty_user_id": faculty_user.id if faculty_user else None,
+            "is_primary": bool(is_primary),
+            "is_active": True,
+        }
+        unique_key = f"{offering.id}:{faculty_user.id}" if offering and faculty_user else None
+        return normalized, errors, unique_key
+
+    @classmethod
+    def _validate_enrollment_row(cls, row: dict, runtime: dict):
+        errors = []
+        tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
+        campus = academic_year = term = course = offering = student = None
+        student_mode = cls.ENROLLMENT_STUDENT_MODE_STRICT
+        student_no = cls._normalize_value(row["student_no"])
+        if tenant:
+            campus = cls._resolve_campus(row["campus_code"], tenant, runtime, errors, required=True)
+            academic_year = cls._resolve_academic_year(row["academic_year_code"], tenant, runtime, errors)
+            if academic_year:
+                term = cls._resolve_term(row["term_code"], tenant, academic_year, runtime, errors)
+            course = cls._resolve_course(row["course_code"], tenant, runtime, errors)
+            student_mode = cls.get_enrollment_student_mode(tenant.id)
+            mode = EnrollmentService.get_enrollment_mode(tenant.id)
+            if mode not in {EnrollmentService.ADMIN_ONLY, EnrollmentService.FACULTY_ALLOWED}:
+                errors.append("ENROLLMENT_OWNERSHIP_MODE is invalid for tenant.")
+            if student_mode not in {cls.ENROLLMENT_STUDENT_MODE_STRICT, cls.ENROLLMENT_STUDENT_MODE_AUTO_CREATE}:
+                errors.append("ENROLLMENT_STUDENT_MODE is invalid for tenant.")
+        if tenant and campus and academic_year and term and course:
+            offering = cls._resolve_offering_for_reference(
+                tenant=tenant,
+                campus=campus,
+                academic_year=academic_year,
+                term=term,
+                course=course,
+                section_code=row["section_code"],
+                runtime=runtime,
+                errors=errors,
+            )
+
+        if tenant:
+            if student_mode == cls.ENROLLMENT_STUDENT_MODE_STRICT:
+                student = cls._resolve_student(
+                    student_no,
+                    tenant,
+                    runtime,
+                    errors,
+                    student_mode=student_mode,
+                )
+            else:
+                student = cls._find_student(student_no, tenant, runtime)
+                if not student:
+                    existing_any_status = Student.objects.filter(
+                        tenant=tenant,
+                        student_no__iexact=student_no,
+                    ).first()
+                    if existing_any_status and not existing_any_status.is_active:
+                        errors.append("student_no exists but is inactive. Reactivate student first.")
+                    if not student_no:
+                        errors.append("student_no is required.")
+                    if not cls._normalize_value(row.get("student_last_name")):
+                        errors.append("student_last_name is required when student is missing and AUTO_CREATE is enabled.")
+                    if not cls._normalize_value(row.get("student_first_name")):
+                        errors.append("student_first_name is required when student is missing and AUTO_CREATE is enabled.")
+
+        raw_status = cls._normalize_value(row["enrollment_status"]).upper() or Enrollment.Status.ACTIVE
+        status_map = {"ENROLLED": Enrollment.Status.ACTIVE}
+        normalized_status = status_map.get(raw_status, raw_status)
+        allowed_statuses = {choice for choice, _ in Enrollment.Status.choices}
+        if normalized_status not in allowed_statuses:
+            errors.append(f"enrollment_status must be one of {sorted(allowed_statuses | {'ENROLLED'})}.")
+
+        if student and campus and student.campus_id != campus.id:
+            errors.append("student_no campus does not match campus_code.")
+
+        if offering and student and Enrollment.objects.filter(course_offering=offering, student=student).exists():
+            errors.append("Enrollment already exists for this student and offering.")
+        elif offering and tenant and not student and student_no:
+            if Enrollment.objects.filter(
+                course_offering=offering,
+                student__tenant=tenant,
+                student__student_no__iexact=student_no,
+                student__is_active=True,
+            ).exists():
+                errors.append("Enrollment already exists for this student_no and offering.")
+
+        normalized = {
+            "tenant_id": tenant.id if tenant else None,
+            "campus_id": campus.id if campus else None,
+            "academic_year_id": academic_year.id if academic_year else None,
+            "term_id": term.id if term else None,
+            "course_offering_id": offering.id if offering else None,
+            "student_id": student.id if student else None,
+            "student_no": student_no,
+            "student_mode": student_mode,
+            "student_payload": {
+                "last_name": cls._normalize_value(row.get("student_last_name")),
+                "first_name": cls._normalize_value(row.get("student_first_name")),
+                "middle_name": cls._normalize_value(row.get("student_middle_name")) or None,
+                "sex": cls._normalize_value(row.get("student_sex")) or None,
+                "year_level": cls._normalize_value(row.get("student_year_level")) or None,
+            },
+            "enrollment_status": normalized_status,
+            "is_active": True,
+            "encoded_via_portal": Enrollment.SourcePortal.ADMIN,
+        }
+        student_key = str(student.id) if student else student_no.upper()
+        unique_key = f"{offering.id}:{student_key}" if offering and student_key else None
+        return normalized, errors, unique_key
+
+    @classmethod
+    def _validate_row(cls, import_type: str, row: dict, runtime: dict):
+        if import_type == ImportBatch.ImportType.SECTIONS:
+            return cls._validate_section_row(row, runtime)
+        if import_type == ImportBatch.ImportType.COURSES:
+            return cls._validate_course_row(row, runtime)
+        if import_type == ImportBatch.ImportType.COURSE_OFFERINGS:
+            return cls._validate_course_offering_row(row, runtime)
+        if import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS:
+            return cls._validate_faculty_assignment_row(row, runtime)
+        if import_type == ImportBatch.ImportType.ENROLLMENT:
+            return cls._validate_enrollment_row(row, runtime)
+        raise ValidationError("Unsupported import type.")
+
+    @staticmethod
+    def _build_error_summary(rows: list[ImportBatchRow], extra_messages: list[str] | None = None):
+        field_error_counter = {}
+        for row in rows:
+            for message in (row.errors_json or []):
+                key = str(message)
+                field_error_counter[key] = field_error_counter.get(key, 0) + 1
+        summary = {
+            "top_errors": sorted(
+                [{"message": message, "count": count} for message, count in field_error_counter.items()],
+                key=lambda item: (-item["count"], item["message"]),
+            )[:10]
+        }
+        if extra_messages:
+            summary["messages"] = extra_messages
+        return summary
+
+    @classmethod
+    def validate_and_stage_upload(cls, *, import_type: str, uploaded_file, user, request):
+        if import_type not in cls.list_import_types():
+            raise ValidationError("Unsupported import type.")
+
+        expected_headers = ImportTemplateService.get_headers(import_type)
+        scope = getattr(request, "scope", {}) if request else {}
+        content = uploaded_file.read()
+        original_filename = uploaded_file.name
+        source_file = ContentFile(content, name=original_filename)
+
+        batch = ImportBatch.objects.create(
+            import_type=import_type,
+            uploaded_by_user=user,
+            tenant_id=scope.get("tenant_id"),
+            campus_id=scope.get("campus_id"),
+            status=ImportBatch.Status.VALIDATED,
+            source_file=source_file,
+            original_filename=original_filename,
+            expected_headers_json=expected_headers,
+            actual_headers_json=[],
+            metadata_json={"scope": scope},
+        )
+
+        try:
+            csv_rows = cls._read_csv_from_bytes(content)
+        except ValidationError as exc:
+            batch.status = ImportBatch.Status.VALIDATION_FAILED
+            batch.error_summary_json = {"messages": [str(exc)]}
+            batch.save(update_fields=["status", "error_summary_json", "updated_at"])
+            return batch
+
+        if not csv_rows:
+            batch.status = ImportBatch.Status.VALIDATION_FAILED
+            batch.error_summary_json = {"messages": ["CSV is empty."]}
+            batch.save(update_fields=["status", "error_summary_json", "updated_at"])
+            return batch
+
+        actual_headers = [cell.strip() for cell in csv_rows[0]]
+        batch.actual_headers_json = actual_headers
+        if actual_headers != expected_headers:
+            batch.status = ImportBatch.Status.VALIDATION_FAILED
+            batch.error_summary_json = {
+                "messages": [
+                    "Invalid template headers. Please download and use the official template.",
+                ],
+                "expected_headers": expected_headers,
+                "actual_headers": actual_headers,
+            }
+            batch.save(
+                update_fields=[
+                    "status",
+                    "actual_headers_json",
+                    "error_summary_json",
+                    "updated_at",
+                ]
+            )
+            return batch
+
+        runtime = cls._build_runtime(user=user, request=request)
+        row_objects = []
+        seen_keys = set()
+        dedup_skipped_count = 0
+        existing_skipped_count = 0
+
+        line_no = 1
+        for line_no, row_values in enumerate(csv_rows[1:], start=2):
+            if cls._is_blank_row(row_values):
+                continue
+            row_data = {}
+            errors = []
+            if len(row_values) != len(expected_headers):
+                errors.append(
+                    f"Expected {len(expected_headers)} columns based on template, got {len(row_values)}."
+                )
+            for index, header in enumerate(expected_headers):
+                row_data[header] = cls._normalize_value(row_values[index] if index < len(row_values) else "")
+
+            normalized = {}
+            unique_key = None
+            if not errors:
+                normalized, row_errors, unique_key = cls._validate_row(import_type, row_data, runtime)
+                errors.extend(row_errors)
+                if (
+                    import_type == ImportBatch.ImportType.SECTIONS
+                    and not errors
+                    and normalized.get("skip_existing")
+                ):
+                    existing_skipped_count += 1
+                    continue
+
+            if unique_key and unique_key in seen_keys:
+                if import_type in cls.AUTO_DEDUP_IMPORT_TYPES:
+                    dedup_skipped_count += 1
+                    continue
+                errors.append("Duplicate row in this upload file.")
+            if unique_key and not errors:
+                seen_keys.add(unique_key)
+
+            row_objects.append(
+                ImportBatchRow(
+                    batch=batch,
+                    row_number=line_no,
+                    row_status=ImportBatchRow.RowStatus.ERROR if errors else ImportBatchRow.RowStatus.VALID,
+                    raw_data_json=row_data,
+                    normalized_data_json=normalized or None,
+                    errors_json=errors or None,
+                )
+            )
+
+        if not row_objects:
+            no_new_rows_messages = []
+            if dedup_skipped_count:
+                no_new_rows_messages.append(
+                    f"Deduplicated rows skipped before staging: {dedup_skipped_count}."
+                )
+            if existing_skipped_count:
+                no_new_rows_messages.append(
+                    f"Rows already existing in sections table and skipped: {existing_skipped_count}."
+                )
+            batch.status = (
+                ImportBatch.Status.VALIDATED
+                if no_new_rows_messages
+                else ImportBatch.Status.VALIDATION_FAILED
+            )
+            batch.total_rows = 0
+            batch.valid_rows = 0
+            batch.invalid_rows = 0
+            batch.error_summary_json = {
+                "messages": no_new_rows_messages or ["No data rows found below the header row."]
+            }
+            metadata = dict(batch.metadata_json or {})
+            metadata["dedup_skipped_rows"] = dedup_skipped_count
+            metadata["existing_skipped_rows"] = existing_skipped_count
+            batch.metadata_json = metadata
+            batch.save(
+                update_fields=[
+                    "status",
+                    "actual_headers_json",
+                    "total_rows",
+                    "valid_rows",
+                    "invalid_rows",
+                    "error_summary_json",
+                    "metadata_json",
+                    "updated_at",
+                ]
+            )
+            return batch
+
+        ImportBatchRow.objects.bulk_create(row_objects)
+        invalid_rows = sum(1 for row in row_objects if row.row_status == ImportBatchRow.RowStatus.ERROR)
+        valid_rows = len(row_objects) - invalid_rows
+        batch.total_rows = len(row_objects)
+        batch.valid_rows = valid_rows
+        batch.invalid_rows = invalid_rows
+        batch.status = ImportBatch.Status.VALIDATED
+        summary_messages = []
+        if dedup_skipped_count:
+            summary_messages.append(
+                f"Deduplicated rows skipped before staging: {dedup_skipped_count}."
+            )
+        if existing_skipped_count:
+            summary_messages.append(
+                f"Rows already existing in sections table and skipped: {existing_skipped_count}."
+            )
+        batch.error_summary_json = cls._build_error_summary(
+            row_objects,
+            extra_messages=summary_messages or None,
+        )
+        metadata = dict(batch.metadata_json or {})
+        metadata["dedup_skipped_rows"] = dedup_skipped_count
+        metadata["existing_skipped_rows"] = existing_skipped_count
+        batch.metadata_json = metadata
+        batch.save(
+            update_fields=[
+                "actual_headers_json",
+                "total_rows",
+                "valid_rows",
+                "invalid_rows",
+                "status",
+                "error_summary_json",
+                "metadata_json",
+                "updated_at",
+            ]
+        )
+        return batch
+
+    @classmethod
+    def _create_course(cls, normalized: dict):
+        units = normalized.get("units")
+        default_base_value = normalized.get("default_base_value")
+        row = Course.objects.create(
+            tenant_id=normalized["tenant_id"],
+            campus_id=normalized.get("campus_id"),
+            department_id=normalized.get("department_id"),
+            code=normalized["code"],
+            title=normalized["title"],
+            units=Decimal(units) if units is not None else None,
+            course_type=normalized.get("course_type"),
+            default_base_value=Decimal(default_base_value) if default_base_value is not None else None,
+            is_active=bool(normalized.get("is_active", True)),
+        )
+        return "Course", row
+
+    @classmethod
+    def _create_section(cls, normalized: dict):
+        program_id = normalized.get("program_id")
+        if not program_id:
+            auto_code = cls._normalize_value(normalized.get("program_code_auto"))
+            if not auto_code:
+                raise ValidationError("Unable to resolve program for section import row.")
+            program, _ = Program.objects.get_or_create(
+                tenant_id=normalized["tenant_id"],
+                campus_id=normalized["campus_id"],
+                department_id=normalized["department_id"],
+                code=auto_code,
+                defaults={
+                    "name": auto_code,
+                    "level": None,
+                    "is_active": True,
+                },
+            )
+            program_id = program.id
+
+        row = Section.objects.create(
+            tenant_id=normalized["tenant_id"],
+            campus_id=normalized["campus_id"],
+            department_id=normalized["department_id"],
+            program_id=program_id,
+            code=normalized["code"],
+            name=normalized["name"],
+            year_level=normalized.get("year_level"),
+            is_active=bool(normalized.get("is_active", True)),
+        )
+        return "Section", row
+
+    @classmethod
+    def _create_course_offering(cls, normalized: dict):
+        row = CourseOffering.objects.create(
+            tenant_id=normalized["tenant_id"],
+            campus_id=normalized["campus_id"],
+            department_id=normalized["department_id"],
+            program_id=normalized.get("program_id"),
+            academic_year_id=normalized["academic_year_id"],
+            term_id=normalized["term_id"],
+            course_id=normalized["course_id"],
+            section_id=normalized["section_id"],
+            room=normalized.get("room"),
+            schedule_text=normalized.get("schedule_text"),
+            status=normalized["status"],
+            is_active=bool(normalized.get("is_active", True)),
+        )
+        return "CourseOffering", row
+
+    @classmethod
+    def _create_faculty_assignment(cls, normalized: dict):
+        row = FacultyAssignment.objects.create(
+            offering_id=normalized["offering_id"],
+            tenant_id=normalized.get("tenant_id"),
+            campus_id=normalized.get("campus_id"),
+            faculty_user_id=normalized["faculty_user_id"],
+            is_primary=bool(normalized.get("is_primary", False)),
+            is_active=bool(normalized.get("is_active", True)),
+        )
+        return "FacultyAssignment", row
+
+    @classmethod
+    def _resolve_or_create_enrollment_student(cls, normalized: dict, *, actor):
+        student_id = normalized.get("student_id")
+        student_mode = normalized.get("student_mode") or cls.ENROLLMENT_STUDENT_MODE_STRICT
+        student_no = cls._normalize_value(normalized.get("student_no"))
+        tenant_id = normalized.get("tenant_id")
+        campus_id = normalized.get("campus_id")
+        offering_id = normalized.get("course_offering_id")
+
+        if student_id:
+            student = Student.objects.filter(id=student_id, is_active=True).first()
+            if not student:
+                raise ValidationError("Student reference is invalid or inactive.")
+            return student
+
+        if student_mode != cls.ENROLLMENT_STUDENT_MODE_AUTO_CREATE:
+            raise ValidationError("Student does not exist and ENROLLMENT_STUDENT_MODE is STRICT_EXISTING.")
+
+        if not student_no:
+            raise ValidationError("student_no is required for AUTO_CREATE mode.")
+        if not offering_id:
+            raise ValidationError("Unable to auto-create student without a valid offering reference.")
+
+        student = Student.objects.filter(
+            tenant_id=tenant_id,
+            student_no__iexact=student_no,
+            is_active=True,
+        ).first()
+        if student:
+            if campus_id and student.campus_id != campus_id:
+                raise ValidationError("student_no campus does not match campus_code.")
+            return student
+
+        existing_inactive = Student.objects.filter(
+            tenant_id=tenant_id,
+            student_no__iexact=student_no,
+            is_active=False,
+        ).first()
+        if existing_inactive:
+            raise ValidationError("student_no exists but is inactive. Reactivate student first.")
+
+        student_payload = normalized.get("student_payload") or {}
+        last_name = cls._normalize_value(student_payload.get("last_name"))
+        first_name = cls._normalize_value(student_payload.get("first_name"))
+        if not last_name or not first_name:
+            raise ValidationError(
+                "student_last_name and student_first_name are required when AUTO_CREATE creates new students."
+            )
+
+        offering = (
+            CourseOffering.objects.select_related("section")
+            .filter(id=offering_id, is_active=True)
+            .first()
+        )
+        if not offering:
+            raise ValidationError("Offering is invalid for enrollment row.")
+
+        year_level = cls._normalize_value(student_payload.get("year_level")) or offering.section.year_level
+        created_student = Student.objects.create(
+            tenant_id=tenant_id,
+            campus_id=campus_id or offering.campus_id,
+            department_id=offering.section.department_id,
+            # Do not auto-derive program from section; a section can contain mixed-program students.
+            program_id=None,
+            student_no=student_no,
+            last_name=last_name,
+            first_name=first_name,
+            middle_name=cls._normalize_value(student_payload.get("middle_name")) or None,
+            sex=cls._normalize_value(student_payload.get("sex")) or None,
+            year_level=year_level or None,
+            status=Student.Status.ACTIVE,
+            is_active=True,
+        )
+        AuditService.log_event(
+            action="CREATE",
+            portal="ADMIN",
+            entity_type="Student",
+            entity_id=created_student.id,
+            actor=actor,
+            tenant=created_student.tenant_id,
+            campus=created_student.campus_id,
+            after_data={
+                "student_no": created_student.student_no,
+                "last_name": created_student.last_name,
+                "first_name": created_student.first_name,
+                "program_id": created_student.program_id,
+                "source": "ENROLLMENT_IMPORT_AUTO_CREATE",
+            },
+            metadata={"source": "ENROLLMENT_IMPORT_AUTO_CREATE"},
+            request=None,
+        )
+        return created_student
+
+    @classmethod
+    def _create_enrollment(cls, normalized: dict, *, actor):
+        student = cls._resolve_or_create_enrollment_student(normalized, actor=actor)
+        if Enrollment.objects.filter(
+            course_offering_id=normalized["course_offering_id"],
+            student=student,
+        ).exists():
+            raise ValidationError("Enrollment already exists for this student and offering.")
+
+        row = Enrollment.objects.create(
+            tenant_id=normalized["tenant_id"],
+            campus_id=normalized["campus_id"],
+            academic_year_id=normalized["academic_year_id"],
+            term_id=normalized["term_id"],
+            student=student,
+            course_offering_id=normalized["course_offering_id"],
+            enrollment_status=normalized["enrollment_status"],
+            encoded_by_user=actor,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=bool(normalized.get("is_active", True)),
+        )
+        return "Enrollment", row
+
+    @classmethod
+    def _audit_import_row_write(
+        cls,
+        *,
+        batch: ImportBatch,
+        batch_row: ImportBatchRow,
+        actor,
+        entity_type: str,
+        entity_obj,
+        normalized: dict,
+    ):
+        tenant_id = getattr(entity_obj, "tenant_id", None) or normalized.get("tenant_id")
+        campus_id = getattr(entity_obj, "campus_id", None) or normalized.get("campus_id")
+        entity_id = getattr(entity_obj, "id", None)
+        AuditService.log_event(
+            action="CREATE",
+            portal="ADMIN",
+            entity_type=entity_type,
+            entity_id=entity_id,
+            actor=actor,
+            tenant=tenant_id,
+            campus=campus_id,
+            after_data={
+                "import_type": batch.import_type,
+                "entity_id": entity_id,
+                "normalized": normalized,
+            },
+            metadata={
+                "source": "BULK_IMPORT_CONFIRM",
+                "batch_id": batch.id,
+                "row_number": batch_row.row_number,
+                "import_type": batch.import_type,
+            },
+            request=None,
+        )
+
+    @classmethod
+    def _create_from_row(cls, import_type: str, normalized: dict, *, actor):
+        if import_type == ImportBatch.ImportType.SECTIONS:
+            return cls._create_section(normalized)
+        if import_type == ImportBatch.ImportType.COURSES:
+            return cls._create_course(normalized)
+        if import_type == ImportBatch.ImportType.COURSE_OFFERINGS:
+            return cls._create_course_offering(normalized)
+        if import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS:
+            return cls._create_faculty_assignment(normalized)
+        if import_type == ImportBatch.ImportType.ENROLLMENT:
+            return cls._create_enrollment(normalized, actor=actor)
+        raise ValidationError("Unsupported import type.")
+
+    @classmethod
+    def confirm_batch(cls, *, batch: ImportBatch, actor):
+        if batch.status == ImportBatch.Status.CONFIRMED:
+            raise ValidationError("This batch is already confirmed.")
+        candidate_rows = list(batch.rows.filter(row_status=ImportBatchRow.RowStatus.VALID).order_by("row_number"))
+        if not candidate_rows:
+            raise ValidationError("No valid rows available for import.")
+
+        imported_count = 0
+        failed_count = 0
+        for row in candidate_rows:
+            normalized = row.normalized_data_json or {}
+            try:
+                with transaction.atomic():
+                    entity_type, entity_obj = cls._create_from_row(batch.import_type, normalized, actor=actor)
+                    cls._audit_import_row_write(
+                        batch=batch,
+                        batch_row=row,
+                        actor=actor,
+                        entity_type=entity_type,
+                        entity_obj=entity_obj,
+                        normalized=normalized,
+                    )
+            except (ValidationError, IntegrityError, ValueError) as exc:
+                row_errors = list(row.errors_json or [])
+                row_errors.append(f"Import failed: {exc}")
+                row.row_status = ImportBatchRow.RowStatus.ERROR
+                row.errors_json = row_errors
+                row.save(update_fields=["row_status", "errors_json", "updated_at"])
+                failed_count += 1
+                continue
+
+            row.row_status = ImportBatchRow.RowStatus.IMPORTED
+            row.imported_entity_type = entity_type
+            row.imported_entity_id = str(getattr(entity_obj, "id", ""))
+            row.errors_json = None
+            row.save(
+                update_fields=[
+                    "row_status",
+                    "imported_entity_type",
+                    "imported_entity_id",
+                    "errors_json",
+                    "updated_at",
+                ]
+            )
+            imported_count += 1
+
+        batch.confirmed_by_user = actor
+        batch.confirmed_at = timezone.now()
+        batch.imported_rows = (batch.imported_rows or 0) + imported_count
+        batch.invalid_rows = batch.rows.filter(row_status=ImportBatchRow.RowStatus.ERROR).count()
+        batch.valid_rows = batch.rows.filter(row_status=ImportBatchRow.RowStatus.VALID).count()
+        batch.status = ImportBatch.Status.CONFIRMED if failed_count == 0 else ImportBatch.Status.CONFIRM_FAILED
+        batch.error_summary_json = cls._build_error_summary(
+            list(batch.rows.filter(row_status=ImportBatchRow.RowStatus.ERROR)),
+            extra_messages=[f"Imported rows: {imported_count}", f"Failed rows: {failed_count}"],
+        )
+        batch.save(
+            update_fields=[
+                "confirmed_by_user",
+                "confirmed_at",
+                "imported_rows",
+                "invalid_rows",
+                "valid_rows",
+                "status",
+                "error_summary_json",
+                "updated_at",
+            ]
+        )
+        return batch

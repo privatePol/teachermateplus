@@ -1,0 +1,37 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Menu Items</h2>
+  {% if "menus.update" in effective_permissions %}
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:menu_item_create' %}">Add Menu Item</a>
+  {% endif %}
+</div>
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Portal</th><th>Group</th><th>Code</th><th>Label</th><th>Route</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for i in items %}
+        <tr>
+          <td>{{ i.portal }}</td>
+          <td>{{ i.menu_group.label }}</td>
+          <td>{{ i.code }}</td>
+          <td>{{ i.label }}</td>
+          <td><code>{{ i.route_name|default:"-" }}</code></td>
+          <td>{% if i.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+          <td class="text-end">
+            {% if "menus.update" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:menu_item_update' i.id %}">Edit</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7" class="text-center text-muted py-4">No menu items found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+

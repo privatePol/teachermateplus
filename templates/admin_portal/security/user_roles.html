@@ -1,0 +1,64 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">User Roles: {{ target_user.username }}</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:user_list' %}">Back to Users</a>
+</div>
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Assign Role</strong></div>
+      <div class="card-body">
+        <form method="post">
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+          <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+          {% endif %}
+          {% for field in form %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          {% endfor %}
+          <button class="btn btn-primary" type="submit">Assign</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Current Assignments</strong></div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Role</th><th>Tenant</th><th>Campus</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+          {% for a in assignments %}
+            <tr>
+              <td>{{ a.role.code }}</td>
+              <td>{{ a.tenant.code|default:"GLOBAL" }}</td>
+              <td>{{ a.campus.code|default:"ALL" }}</td>
+              <td>{% if a.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+              <td class="text-end">
+                {% if a.is_active %}
+                <form method="post" class="d-inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="deactivate">
+                  <input type="hidden" name="assignment_id" value="{{ a.id }}">
+                  <button class="btn btn-sm btn-outline-danger">Deactivate</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="text-center text-muted py-3">No role assignments yet.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

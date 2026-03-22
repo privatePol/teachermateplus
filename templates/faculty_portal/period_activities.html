@@ -1,0 +1,238 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">
+    {{ offering.course.code }} | {{ period.name }} | Activities
+  </h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+</div>
+
+{% if is_correction_active %}
+<div class="alert alert-warning">
+  Approved correction window is active. Only scoped correction items can be edited.
+  {% if "corrections.create" in effective_permissions %}
+    <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">View request</a>
+  {% endif %}
+</div>
+{% elif is_submitted %}
+<div class="alert alert-info">This period is already submitted. Editing is disabled.</div>
+{% elif is_locked %}
+<div class="alert alert-danger">This period is locked by admin. Editing is disabled.</div>
+{% endif %}
+
+{% if can_create_activity %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <strong>{% if editing_activity %}Edit Activity{% else %}Create Activity{% endif %}</strong>
+    {% if editing_activity %}
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:period_activities' offering.id period.id %}">Cancel Edit</a>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    {% if editing_activity %}
+    <div class="alert alert-light border small">
+      Updating <strong>{{ editing_activity.title }}</strong>. If encoded scores already exist, EduGradesPro will recompute them using the updated activity settings.
+    </div>
+    {% endif %}
+    <form method="post" class="row g-2" novalidate action="{% if editing_activity %}{% url 'faculty_portal:period_activity_edit' offering.id period.id editing_activity.id %}{% else %}{% url 'faculty_portal:period_activities' offering.id period.id %}{% endif %}">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="col-12">
+        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      </div>
+      {% endif %}
+      <div class="col-md-4">
+        <label class="form-label">Component</label>
+        {{ form.template_component }}
+        <div class="form-text">Start with the main grading part, such as Class Standing or Prelim Exam.</div>
+        {% for e in form.template_component.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Subcomponent</label>
+        {{ form.template_subcomponent }}
+        <div class="form-text">This opens only when the selected component has a lower-level group, such as Quizzes or Participation/Output.</div>
+        {% for e in form.template_subcomponent.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Detail (optional)</label>
+        {{ form.template_detail }}
+        <div class="form-text">This opens only when the chosen subcomponent breaks down into detail items, such as Recitation, Assignment, or Activity.</div>
+        {% for e in form.template_detail.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Activity Title</label>
+        {{ form.title }}
+        {% if form.title.help_text %}<div class="form-text">{{ form.title.help_text }}</div>{% endif %}
+        {% for e in form.title.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Total Score</label>
+        {{ form.total_score }}
+        <div class="form-text">For Direct Percentage items, EduGradesPro automatically uses 100.</div>
+        {% for e in form.total_score.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Date</label>
+        {{ form.activity_date }}
+        {% if form.activity_date.help_text %}<div class="form-text">{{ form.activity_date.help_text }}</div>{% endif %}
+        {% for e in form.activity_date.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-md-3 d-flex align-items-end">
+        <button class="btn btn-success w-100" type="submit">{% if editing_activity %}Update Activity{% else %}Save Activity{% endif %}</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{{ component_option_data|json_script:"activity-component-options" }}
+{{ subcomponent_option_data|json_script:"activity-subcomponent-options" }}
+{{ detail_option_data|json_script:"activity-detail-options" }}
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <strong>Activities</strong>
+    <small class="text-muted">Active Students: {{ active_enrollment_count }}</small>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Title</th>
+          <th>Component</th>
+          <th>Subcomponent</th>
+          <th>Detail</th>
+          <th>Entry Method</th>
+          <th>Total</th>
+          <th>Encoded</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in activities %}
+        <tr>
+          <td>{{ row.activity_date|default:"-" }}</td>
+          <td>{{ row.title }}</td>
+          <td>{{ row.template_component.name }}</td>
+          <td>{{ row.template_subcomponent.name|default:"-" }}</td>
+          <td>{{ row.template_detail.name|default:"-" }}</td>
+          <td>
+            <span class="badge text-bg-light border">{{ row.resolved_score_input_mode_label }}</span>
+          </td>
+          <td>{{ row.total_score }}</td>
+          <td>{{ row.score_count }}</td>
+          <td class="text-end">
+            <div class="d-inline-flex gap-2">
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'faculty_portal:activity_scores' offering.id period.id row.id %}">
+                Encode Scores
+              </a>
+              {% if can_create_activity %}
+              <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:period_activity_edit' offering.id period.id row.id %}">
+                Edit
+              </a>
+              <form method="post" action="{% url 'faculty_portal:period_activity_delete' offering.id period.id row.id %}" onsubmit="return confirm('Delete activity {{ row.title|escapejs }}? Existing encoded scores under this activity will be removed from computation.');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="9" class="text-center text-muted py-4">No activities yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const componentSelect = document.getElementById("id_template_component");
+    const subcomponentSelect = document.getElementById("id_template_subcomponent");
+    const detailSelect = document.getElementById("id_template_detail");
+    if (!componentSelect || !subcomponentSelect || !detailSelect) return;
+
+    const componentOptions = JSON.parse(document.getElementById("activity-component-options").textContent);
+    const subcomponentOptions = JSON.parse(document.getElementById("activity-subcomponent-options").textContent);
+    const detailOptions = JSON.parse(document.getElementById("activity-detail-options").textContent);
+    const selectedComponentId = "{{ selected_component_id|default:''|escapejs }}";
+    const selectedSubcomponentId = "{{ selected_subcomponent_id|default:''|escapejs }}";
+    const selectedDetailId = "{{ selected_detail_id|default:''|escapejs }}";
+
+    function replaceOptions(selectEl, options, placeholderLabel, selectedValue, keepDisabled) {
+      selectEl.innerHTML = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = placeholderLabel;
+      selectEl.appendChild(placeholder);
+
+      options.forEach((optionData) => {
+        const option = document.createElement("option");
+        option.value = optionData.id;
+        option.textContent = optionData.name;
+        if (selectedValue && String(selectedValue) === String(optionData.id)) {
+          option.selected = true;
+        }
+        selectEl.appendChild(option);
+      });
+
+      if (!options.length) {
+        selectEl.value = "";
+      }
+      selectEl.disabled = !!keepDisabled;
+    }
+
+    replaceOptions(
+      componentSelect,
+      componentOptions,
+      "Select component",
+      selectedComponentId,
+      false
+    );
+
+    function refreshDetailOptions(componentId, subcomponentId, selectedValue) {
+      const availableSubcomponents = subcomponentOptions.filter((option) => option.component_id === String(componentId));
+      const selectedSubcomponent = availableSubcomponents.find((option) => option.id === String(subcomponentId));
+      const availableDetails = detailOptions.filter((option) => option.subcomponent_id === String(subcomponentId));
+      const shouldEnable = !!selectedSubcomponent && !!selectedSubcomponent.has_details && availableDetails.length > 0;
+      replaceOptions(
+        detailSelect,
+        availableDetails,
+        shouldEnable ? "Select detail" : "No detail required",
+        shouldEnable ? selectedValue : "",
+        !shouldEnable
+      );
+    }
+
+    function refreshSubcomponentOptions(componentId, selectedSubId, selectedDetailId) {
+      const selectedComponent = componentOptions.find((option) => option.id === String(componentId));
+      const availableSubcomponents = subcomponentOptions.filter((option) => option.component_id === String(componentId));
+      const shouldEnable = !!selectedComponent && !!selectedComponent.has_subcomponents && availableSubcomponents.length > 0;
+      replaceOptions(
+        subcomponentSelect,
+        availableSubcomponents,
+        shouldEnable ? "Select subcomponent" : "No subcomponent required",
+        shouldEnable ? selectedSubId : "",
+        !shouldEnable
+      );
+      refreshDetailOptions(componentId, shouldEnable ? subcomponentSelect.value : "", selectedDetailId);
+    }
+
+    componentSelect.addEventListener("change", function () {
+      refreshSubcomponentOptions(componentSelect.value, "", "");
+    });
+
+    subcomponentSelect.addEventListener("change", function () {
+      refreshDetailOptions(componentSelect.value, subcomponentSelect.value, "");
+    });
+
+    refreshSubcomponentOptions(selectedComponentId, selectedSubcomponentId, selectedDetailId);
+  });
+</script>
+{% endblock %}

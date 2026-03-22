@@ -1,0 +1,107 @@
+{% extends "shared/base_public.html" %}
+{% load static %}
+
+{% block title %}Admin Login | EduGradesPro{% endblock %}
+
+{% block extra_head %}
+<style>
+  :root {
+    --brand-gold: #d2bf2b;
+    --brand-lime: #83ad34;
+    --brand-green: #3f7f2e;
+    --brand-deep: #1f5427;
+  }
+  body {
+    background: linear-gradient(165deg, #ebf1e7 0%, #f6f8f3 44%, #edf4e8 100%);
+  }
+  .login-shell {
+    border: 1px solid #d0dacb;
+    border-radius: 1rem;
+    overflow: hidden;
+    box-shadow: 0 16px 36px rgba(20, 57, 30, 0.13);
+    background: #ffffff;
+  }
+  .brand-panel {
+    background: linear-gradient(145deg, var(--brand-gold) 0%, var(--brand-lime) 34%, var(--brand-green) 67%, var(--brand-deep) 100%);
+    color: #f7ffef;
+  }
+  .image-holder {
+    height: 240px;
+    min-height: 240px;
+    border: 0;
+    border-radius: 0.75rem;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .image-holder img {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+  .sign-in-btn {
+    background: #2f7132;
+    border-color: #2f7132;
+  }
+  .sign-in-btn:hover {
+    background: #245826;
+    border-color: #245826;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4 py-lg-5">
+  <div class="row justify-content-center">
+    <div class="col-12 col-xl-10">
+      <div class="login-shell">
+        <div class="row g-0">
+          <div class="col-lg-5">
+            <div class="brand-panel p-4 p-lg-5 h-100">
+              <h1 class="h3 fw-bold mb-3">Admin Portal Login</h1>
+              <p class="mb-4">
+                Sign in as registrar, campus admin, dean, or authorized governance personnel.
+              </p>
+              <div class="image-holder mb-3">
+                <img
+                  src="{% get_media_prefix %}logos/edugradepro_logo.png"
+                  alt="EduGradesPro logo"
+                >
+              </div>
+              <p class="small mb-0">
+                Protected portal with role-based access, audit trail, and tenant scoping.
+              </p>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="p-4 p-lg-5">
+              <h2 class="h4 fw-bold mb-2">Welcome Back</h2>
+              <p class="text-secondary mb-4">Enter your admin credentials to continue.</p>
+              <form method="post" novalidate>
+                {% csrf_token %}
+                {{ form.non_field_errors }}
+                <div class="mb-3">
+                  <label class="form-label" for="{{ form.username.id_for_label }}">Username</label>
+                  {{ form.username }}
+                  {{ form.username.errors }}
+                </div>
+                <div class="mb-3">
+                  <label class="form-label" for="{{ form.password.id_for_label }}">Password</label>
+                  {{ form.password }}
+                  {{ form.password.errors }}
+                </div>
+                <button type="submit" class="btn sign-in-btn text-white w-100">Sign in</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

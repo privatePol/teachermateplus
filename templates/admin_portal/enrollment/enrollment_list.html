@@ -1,0 +1,106 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Enrollment</h2>
+  <div class="d-flex gap-2">
+    {% if "enrollment.import" in effective_permissions %}
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_template_download' 'enrollment' %}">Download Template</a>
+    <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:import_upload' 'enrollment' %}">Upload CSV</a>
+    {% endif %}
+    {% if "enrollment.create" in effective_permissions %}
+    <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:enrollment_create' %}">Add Enrollment</a>
+    {% endif %}
+  </div>
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <select class="form-select" name="campus_id">
+      <option value="">All Campuses</option>
+      {% for c in scope_campuses %}
+        <option value="{{ c.id }}" {% if c.id|stringformat:'s' == campus_id %}selected{% endif %}>{{ c.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="academic_year_id">
+      <option value="">All Academic Years</option>
+      {% for ay in academic_years %}
+        <option value="{{ ay.id }}" {% if ay.id|stringformat:'s' == academic_year_id %}selected{% endif %}>{{ ay.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="term_id">
+      <option value="">All Terms</option>
+      {% for t in terms %}
+        <option value="{{ t.id }}" {% if t.id|stringformat:'s' == term_id %}selected{% endif %}>{{ t.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <select class="form-select" name="section_id">
+      <option value="">All Sections</option>
+      {% for s in sections %}
+        <option value="{{ s.id }}" {% if s.id|stringformat:'s' == section_id %}selected{% endif %}>{{ s.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <select class="form-select" name="course_id">
+      <option value="">All Courses</option>
+      {% for c in courses %}
+        <option value="{{ c.id }}" {% if c.id|stringformat:'s' == course_id %}selected{% endif %}>{{ c.code }} - {{ c.title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="col-md-4">
+    <select class="form-select" name="offering_id">
+      <option value="">All Offerings</option>
+      {% for o in offerings %}
+        <option value="{{ o.id }}" {% if o.id|stringformat:'s' == offering_id %}selected{% endif %}>
+          {{ o.academic_year.code }}-{{ o.term.code }} | {{ o.course.code }} | {{ o.section.code }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="status">
+      <option value="">All Status</option>
+      <option value="ACTIVE" {% if status == "ACTIVE" %}selected{% endif %}>ACTIVE</option>
+      <option value="DR" {% if status == "DR" %}selected{% endif %}>DR</option>
+      <option value="W" {% if status == "W" %}selected{% endif %}>W</option>
+    </select>
+  </div>
+  <div class="col-md-4"><input class="form-control" name="q" value="{{ q }}" placeholder="Student / course / section"></div>
+  <div class="col-md-1"><button class="btn btn-outline-secondary w-100">Filter</button></div>
+  <div class="col-md-1"><a class="btn btn-outline-dark w-100" href="{% url 'admin_portal:enrollment_list' %}">Reset</a></div>
+</form>
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Student</th><th>Offering</th><th>Status</th><th>Source</th><th>Active</th><th></th></tr></thead>
+      <tbody>
+      {% for row in page_obj %}
+        <tr>
+          <td>{{ row.student.student_no }} - {{ row.student.last_name }}, {{ row.student.first_name }}</td>
+          <td>{{ row.course_offering.course.code }} | {{ row.course_offering.section.code }}</td>
+          <td><span class="badge text-bg-info">{{ row.enrollment_status }}</span></td>
+          <td>{{ row.encoded_via_portal }}</td>
+          <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+          <td class="text-end">
+            {% if "enrollment.update" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:enrollment_update' row.id %}">Edit</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No enrollment records found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

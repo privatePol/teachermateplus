@@ -1,0 +1,247 @@
+{% extends "shared/base_public.html" %}
+{% load static %}
+
+{% block title %}Admin Portal | EduGradesPro{% endblock %}
+{% block extra_head %}
+<style>
+  :root {
+    --admin-nav-bg: #f6f8f4;
+    --admin-sidebar-bg: #eef2ec;
+    --admin-surface: #ffffff;
+    --admin-nav-border: #d2dbd0;
+    --admin-nav-text: #2e4e3b;
+    --admin-nav-accent: #3a7a53;
+  }
+  .admin-shell {
+    background: var(--admin-nav-bg);
+  }
+  .admin-sidebar {
+    background:
+      radial-gradient(circle at 86% 8%, rgba(214, 196, 35, 0.22) 0%, rgba(214, 196, 35, 0.08) 28%, rgba(214, 196, 35, 0) 60%),
+      linear-gradient(180deg, #d2bf2b 0%, #83ad34 36%, #3f7f2e 68%, #1f5427 100%);
+    box-shadow: inset -1px 0 0 #35603a;
+    position: relative;
+    overflow: hidden;
+  }
+  .admin-logo-wrap {
+    position: relative;
+    z-index: 1;
+    padding: 0.5rem 0.4rem;
+    text-align: center;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .admin-sidebar .group-label {
+    color: #f6f4df;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    position: relative;
+    z-index: 1;
+  }
+  .admin-sidebar .group-toggle {
+    width: 100%;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    color: #f6f4df;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+  }
+  .admin-sidebar .group-toggle:hover {
+    color: #fffbe8;
+  }
+  .admin-sidebar .group-chevron {
+    font-size: 0.75rem;
+    color: #dfebd9;
+    transition: transform 0.2s ease;
+  }
+  .admin-sidebar .group-toggle[aria-expanded="true"] .group-chevron {
+    transform: rotate(180deg);
+  }
+  .admin-sidebar .sidebar-link {
+    color: #f0f6ea;
+    border-radius: 0.45rem;
+    transition: all 0.2s ease;
+    position: relative;
+    z-index: 1;
+  }
+  .admin-sidebar .sidebar-link:hover {
+    color: #ffffff;
+    background: rgba(17, 45, 24, 0.36);
+    padding-left: 0.5rem;
+  }
+  .admin-topbar {
+    background: #f4f6f1 !important;
+    border-bottom: 1px solid var(--admin-nav-border);
+  }
+  .admin-brand {
+    color: var(--admin-nav-text);
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+  .admin-logout {
+    border-color: var(--admin-nav-accent);
+    color: var(--admin-nav-accent);
+    background: #ffffff;
+  }
+  .admin-logout:hover {
+    background: var(--admin-nav-accent);
+    border-color: var(--admin-nav-accent);
+    color: #ffffff;
+  }
+  .admin-topbar .form-select {
+    border-color: var(--admin-nav-border);
+    color: #315f46;
+    background-color: #ffffff;
+  }
+  .admin-topbar .form-select:focus {
+    border-color: #9ac6a5;
+    box-shadow: 0 0 0 0.2rem rgba(55, 138, 87, 0.12);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid admin-shell">
+  <div class="row min-vh-100">
+    <aside class="col-12 col-md-3 col-lg-2 admin-sidebar p-3">
+      <div class="mb-4 admin-logo-wrap">
+        <img src="{% get_media_prefix %}logos/edugradepro_logo.png" alt="EduGradesPro" class="img-fluid" style="max-width: 180px;">
+      </div>
+      {% for group in portal_menu %}
+        <div class="mt-3 mb-2">
+          <button
+            class="group-toggle text-uppercase small"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#sidebar-group-{{ forloop.counter }}"
+            aria-expanded="true"
+            aria-controls="sidebar-group-{{ forloop.counter }}"
+            data-group-key="{{ group.group.code|default:group.group.label }}"
+          >
+            <span>{{ group.group.label }}</span>
+            <span class="group-chevron">▼</span>
+          </button>
+        </div>
+        <div class="collapse show sidebar-group-collapse" id="sidebar-group-{{ forloop.counter }}">
+          <ul class="nav flex-column">
+            {% for node in group.items %}
+              <li class="nav-item mb-1">
+                <a class="nav-link sidebar-link px-2 py-1" href="{{ node.url }}">{{ node.item.label }}</a>
+                {% if node.children %}
+                  <ul class="nav flex-column ms-3">
+                    {% for child in node.children %}
+                      <li class="nav-item">
+                        <a class="nav-link sidebar-link py-1 px-2" href="{{ child.url }}">{{ child.item.label }}</a>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% empty %}
+        <p class="small" style="color: #4b7c5e; position:relative; z-index:1;">No menu available.</p>
+      {% endfor %}
+    </aside>
+    <main class="col-12 col-md-9 col-lg-10 p-0">
+      <nav class="navbar navbar-expand-lg navbar-light admin-topbar px-3">
+        <span class="navbar-brand mb-0 h1 admin-brand">Admin Portal</span>
+        {% if scope_tenants %}
+        <form method="get" class="d-flex gap-2 ms-3">
+          {% for key, value in request.GET.items %}
+            {% if key != "scope_tenant_id" and key != "scope_campus_id" %}
+              <input type="hidden" name="{{ key }}" value="{{ value }}">
+            {% endif %}
+          {% endfor %}
+          <select class="form-select form-select-sm" name="scope_tenant_id" onchange="this.form.submit()">
+            <option value="">Tenant</option>
+            {% for tenant in scope_tenants %}
+              <option value="{{ tenant.id }}" {% if tenant.id == current_tenant_id %}selected{% endif %}>{{ tenant.code }}</option>
+            {% endfor %}
+          </select>
+          <select class="form-select form-select-sm" name="scope_campus_id" onchange="this.form.submit()">
+            <option value="">Campus</option>
+            {% for campus in scope_campuses %}
+              <option value="{{ campus.id }}" {% if campus.id == current_campus_id %}selected{% endif %}>{{ campus.code }}</option>
+            {% endfor %}
+          </select>
+        </form>
+        {% endif %}
+        <div class="ms-auto d-flex gap-2 align-items-center">
+          <span class="small" style="color:var(--admin-nav-text);">{{ request.user.full_name|default:request.user.username }}</span>
+          <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_change_password' %}">Change Password</a>
+          <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_logout' %}">Logout</a>
+        </div>
+      </nav>
+      <section class="p-4">
+        {% block admin_content %}{% endblock %}
+      </section>
+    </main>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const storageKey = "edugradespro_admin_sidebar_groups";
+    let savedState = {};
+    try {
+      savedState = JSON.parse(localStorage.getItem(storageKey) || "{}");
+    } catch (e) {
+      savedState = {};
+    }
+
+    const toggles = document.querySelectorAll(".group-toggle");
+    toggles.forEach((toggle) => {
+      const targetSelector = toggle.getAttribute("data-bs-target");
+      const target = targetSelector ? document.querySelector(targetSelector) : null;
+      const groupKey = toggle.getAttribute("data-group-key") || targetSelector;
+      if (!target || !groupKey) return;
+
+      const shouldExpand = savedState[groupKey] !== false;
+      if (!shouldExpand) {
+        target.classList.remove("show");
+        toggle.setAttribute("aria-expanded", "false");
+      }
+
+      target.addEventListener("shown.bs.collapse", function () {
+        savedState[groupKey] = true;
+        localStorage.setItem(storageKey, JSON.stringify(savedState));
+      });
+      target.addEventListener("hidden.bs.collapse", function () {
+        savedState[groupKey] = false;
+        localStorage.setItem(storageKey, JSON.stringify(savedState));
+      });
+    });
+
+    // Persist filter state for list -> create/edit/update flows.
+    const currentPathWithQuery = window.location.pathname + window.location.search;
+    const searchParams = new URLSearchParams(window.location.search);
+    const sourceNext = searchParams.get("next") || currentPathWithQuery;
+    const actionLinkRegex = /(\/create\/|\/edit\/|\/change-password\/)$/;
+    const adminLinks = document.querySelectorAll('a[href^="/admin-portal/"]');
+    adminLinks.forEach((link) => {
+      const rawHref = link.getAttribute("href");
+      if (!rawHref || rawHref.includes("next=")) return;
+      let targetUrl;
+      try {
+        targetUrl = new URL(rawHref, window.location.origin);
+      } catch (e) {
+        return;
+      }
+      if (!actionLinkRegex.test(targetUrl.pathname)) return;
+      targetUrl.searchParams.set("next", sourceNext);
+      link.setAttribute("href", targetUrl.pathname + targetUrl.search);
+    });
+  });
+</script>
+{% endblock %}

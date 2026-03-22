@@ -1,0 +1,78 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">
+    Enrollment: {{ offering.course.code }} | {{ offering.section.code }} | {{ offering.term.code }}
+  </h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:my_courses' %}">Back</a>
+</div>
+<div class="alert {% if mode == 'FACULTY_ALLOWED' %}alert-success{% else %}alert-warning{% endif %}">
+  Enrollment Mode: <strong>{{ mode }}</strong>
+  {% if mode != 'FACULTY_ALLOWED' %}
+    - New enrollment creation is admin-only, but faculty may still update class list status to <strong>DR</strong> or <strong>W</strong>.
+  {% else %}
+    - Use the status dropdown in the class list below to mark students as <strong>ACTIVE</strong>, <strong>DR</strong>, or <strong>W</strong>.
+  {% endif %}
+</div>
+
+{% if can_manage %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><strong>Add or Update Enrollment</strong></div>
+  <div class="card-body">
+    <form method="post" class="row g-2">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="upsert_student">
+      <div class="col-md-6">
+        <label class="form-label">Student</label>
+        {{ form.student }}
+        {% for e in form.student.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Status</label>
+        {{ form.enrollment_status }}
+        {% for e in form.enrollment_status.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      </div>
+      <div class="col-md-3 d-flex align-items-end">
+        <button class="btn btn-success w-100" type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Student No</th><th>Name</th><th>Status</th><th>Source</th>{% if can_update_status %}<th class="text-end">Action</th>{% endif %}</tr></thead>
+      <tbody>
+      {% for row in enrollments %}
+        <tr>
+          <td>{{ row.student.student_no }}</td>
+          <td>{{ row.student.last_name }}, {{ row.student.first_name }}</td>
+          <td><span class="badge text-bg-info">{{ row.enrollment_status }}</span></td>
+          <td>{{ row.encoded_via_portal }}</td>
+          {% if can_update_status %}
+          <td class="text-end">
+            <form method="post" class="d-inline-flex align-items-center gap-2">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="update_status">
+              <input type="hidden" name="enrollment_id" value="{{ row.id }}">
+              <select name="enrollment_status" class="form-select form-select-sm" style="min-width: 120px;">
+                <option value="ACTIVE" {% if row.enrollment_status == "ACTIVE" %}selected{% endif %}>ACTIVE</option>
+                <option value="DR" {% if row.enrollment_status == "DR" %}selected{% endif %}>DR</option>
+                <option value="W" {% if row.enrollment_status == "W" %}selected{% endif %}>W</option>
+              </select>
+              <button class="btn btn-sm btn-outline-primary" type="submit">Save</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+      {% empty %}
+        <tr><td colspan="{% if can_update_status %}5{% else %}4{% endif %}" class="text-center text-muted py-4">No enrollment records yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

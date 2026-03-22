@@ -1,0 +1,48 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Audit Logs</h2>
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <select class="form-select" name="portal">
+      <option value="">All Portals</option>
+      <option value="ADMIN" {% if portal == "ADMIN" %}selected{% endif %}>ADMIN</option>
+      <option value="FACULTY" {% if portal == "FACULTY" %}selected{% endif %}>FACULTY</option>
+      <option value="SYSTEM" {% if portal == "SYSTEM" %}selected{% endif %}>SYSTEM</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <input class="form-control" name="action" value="{{ action }}" placeholder="Action">
+  </div>
+  <div class="col-md-4">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Search entity/actor/id">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead><tr><th>Timestamp</th><th>Portal</th><th>Action</th><th>Entity</th><th>Actor</th><th>Scope</th></tr></thead>
+      <tbody>
+      {% for log in page_obj %}
+        <tr>
+          <td>{{ log.created_at|date:"Y-m-d H:i:s" }}</td>
+          <td>{{ log.portal }}</td>
+          <td>{{ log.action }}</td>
+          <td>{{ log.entity_type }}{% if log.entity_id %}#{{ log.entity_id }}{% endif %}</td>
+          <td>{{ log.actor_user.username|default:"-" }}</td>
+          <td>{{ log.tenant.code|default:"GLOBAL" }} / {{ log.campus.code|default:"ALL" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No audit logs found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

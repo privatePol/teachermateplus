@@ -1,0 +1,127 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Import Batch #{{ batch.id }}</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_batch_list' %}">Back to Batches</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-md-3">
+        <div class="small text-muted">Import Type</div>
+        <div>{{ batch.get_import_type_display }}</div>
+      </div>
+      <div class="col-md-2">
+        <div class="small text-muted">Status</div>
+        <div><span class="badge {{ status_badge_class }}">{{ batch.status }}</span></div>
+      </div>
+      <div class="col-md-4">
+        <div class="small text-muted">Source File</div>
+        <div>{{ batch.original_filename|default:"-" }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="small text-muted">Rows</div>
+        <div>{{ batch.total_rows }} total / {{ batch.valid_rows }} valid / {{ batch.invalid_rows }} invalid / {{ batch.imported_rows }} imported</div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_template_download' import_slug %}">Download Template</a>
+      <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:import_upload' import_slug %}">Upload Another CSV</a>
+      {% if can_confirm %}
+      <form method="post" action="{% url 'admin_portal:import_batch_confirm' batch.id %}">
+        {% csrf_token %}
+        <button class="btn btn-sm btn-success" type="submit">Confirm Import</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if batch.error_summary_json.messages %}
+<div class="alert alert-warning">
+  {% for msg in batch.error_summary_json.messages %}
+    <div>{{ msg }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if error_tips %}
+<div class="alert alert-info">
+  <div class="fw-semibold mb-1">Quick Fix Tips</div>
+  <ul class="mb-0">
+    {% for tip in error_tips %}
+    <li>{{ tip }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if import_guide %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="small fw-semibold text-uppercase text-muted mb-2">Relationship Reference</div>
+    {% if import_guide.relationships %}
+    <ul class="mb-2 small">
+      {% for relation in import_guide.relationships %}
+      <li>{{ relation }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if import_guide.code_rules %}
+    <ul class="mb-0 small text-muted">
+      {% for rule in import_guide.code_rules %}
+      <li>{{ rule }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+      <tr>
+        <th>Line</th>
+        <th>Status</th>
+        <th>Data</th>
+        <th>Errors</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in page_obj %}
+      <tr>
+        <td>{{ row.row_number }}</td>
+        <td>
+          {% if row.row_status == "IMPORTED" %}
+          <span class="badge text-bg-success">IMPORTED</span>
+          {% elif row.row_status == "VALID" %}
+          <span class="badge text-bg-primary">VALID</span>
+          {% else %}
+          <span class="badge text-bg-danger">ERROR</span>
+          {% endif %}
+        </td>
+        <td><code class="small">{{ row.raw_data_json }}</code></td>
+        <td>
+          {% if row.errors_json %}
+            {% for err in row.errors_json %}
+            <div class="text-danger small">{{ err }}</div>
+            {% endfor %}
+          {% else %}
+            <span class="text-muted small">-</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="text-center text-muted py-4">No rows found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

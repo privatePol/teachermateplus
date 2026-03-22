@@ -1,0 +1,256 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .period-page-title {
+    font-weight: 700;
+    color: #123b25;
+  }
+  .period-meta {
+    border: 1px solid #d9e6d7;
+    border-radius: 0.7rem;
+    background: #fbfdfb;
+  }
+  .period-card {
+    border: 1px solid #d6e2d4;
+    border-radius: 0.9rem;
+    overflow: hidden;
+    box-shadow: 0 6px 16px rgba(23, 58, 36, 0.08);
+    background: #fff;
+    height: 100%;
+  }
+  .period-card-header {
+    padding: 0.9rem 1rem 0.8rem;
+    color: #fff;
+    position: relative;
+  }
+  .period-head-prelim {
+    background: linear-gradient(125deg, #1f5d36 0%, #2d7d48 58%, #8eb844 100%);
+  }
+  .period-head-midterm {
+    background: linear-gradient(125deg, #20553a 0%, #2b6d49 50%, #7aa53b 100%);
+  }
+  .period-head-prefinal {
+    background: linear-gradient(125deg, #244e39 0%, #2f6247 48%, #b4a240 100%);
+  }
+  .period-head-final {
+    background: linear-gradient(125deg, #1f4634 0%, #3e6f3e 54%, #d1b85b 100%);
+  }
+  .period-head-title {
+    font-weight: 800;
+    font-size: 1.25rem;
+    margin-bottom: 0.1rem;
+    line-height: 1.1;
+    letter-spacing: 0.01em;
+  }
+  .period-head-code {
+    font-size: 0.83rem;
+    opacity: 0.92;
+  }
+  .period-gear {
+    position: absolute;
+    right: 0.8rem;
+    top: 0.65rem;
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .period-card-body {
+    padding: 0.95rem 1rem 1rem;
+  }
+  .period-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.6rem;
+  }
+  .period-guidance {
+    border: 1px solid #e2ebe1;
+    border-radius: 0.65rem;
+    background: #f9fcf9;
+    padding: 0.65rem 0.75rem;
+    margin-bottom: 0.8rem;
+    font-size: 0.83rem;
+  }
+  .period-guidance .label {
+    font-weight: 700;
+    color: #355845;
+  }
+  .period-guidance .text {
+    color: #5b7465;
+  }
+  .period-actions .btn {
+    width: 40px;
+    height: 36px;
+    border-radius: 0.55rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 1rem;
+  }
+  .period-actions {
+    display: flex;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+  }
+  .period-actions .btn-outline-success,
+  .period-actions .btn-outline-primary,
+  .period-actions .btn-outline-dark,
+  .period-actions .btn-outline-warning {
+    border: none !important;
+    background: transparent;
+    box-shadow: none;
+  }
+  .period-actions .btn-outline-success {
+    color: #1f8a4d;
+  }
+  .period-actions .btn-outline-primary {
+    color: #2563eb;
+  }
+  .period-actions .btn-outline-dark {
+    color: #2f3a32;
+  }
+  .period-actions .btn-outline-warning {
+    color: #c08a1a;
+  }
+  .period-actions .btn:hover,
+  .period-actions .btn:focus {
+    background: #eef4ef;
+    box-shadow: none;
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h4 mb-0 period-page-title">
+    {{ offering.course.code }} | {{ offering.section.code }} | {{ offering.term.code }}
+  </h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:my_courses' %}">Back</a>
+</div>
+
+{% if template %}
+<div class="alert period-meta mb-3">
+  Template: <strong>{{ template.code }}</strong> - {{ template.name }} | Students: <strong>{{ enrollment_count }}</strong>
+</div>
+{% endif %}
+
+<div class="row g-3">
+  {% for item in period_cards %}
+    {% with code=item.period.code|upper %}
+    <div class="col-md-6 col-xl-4">
+      <article class="period-card">
+        <header class="period-card-header
+          {% if 'PREFINAL' in code %}period-head-prefinal
+          {% elif 'MIDTERM' in code %}period-head-midterm
+          {% elif 'FINAL' in code %}period-head-final
+          {% else %}period-head-prelim{% endif %}">
+          <div class="period-head-title">
+            {% if 'PREFINAL' in code %}
+              PRE-FINAL
+            {% elif 'MIDTERM' in code %}
+              MIDTERM
+            {% elif 'FINAL' in code %}
+              FINAL
+            {% else %}
+              PRELIM
+            {% endif %}
+          </div>
+          <div class="period-head-code">Code: {{ item.period.code }}</div>
+          <span class="period-gear" title="Period setup and workflow">&#9881;</span>
+        </header>
+
+        <div class="period-card-body">
+          <div class="period-state">
+            {% if item.is_correction_active %}
+              <span class="badge text-bg-warning">Correction Window Open</span>
+            {% elif item.submission_status == "REOPENED" %}
+              <span class="badge text-bg-primary">Reopened</span>
+            {% elif item.is_submitted %}
+              <span class="badge text-bg-info">Submitted</span>
+            {% elif item.is_locked %}
+              <span class="badge text-bg-danger">Locked</span>
+            {% else %}
+              <span class="badge text-bg-success">Open</span>
+            {% endif %}
+          </div>
+          <div class="small text-muted mb-2">
+            Submission deadline:
+            {% if item.deadline_at %}
+              <strong>{{ item.deadline_at|date:"Y-m-d H:i" }}</strong>
+            {% else %}
+              <span>Not set by admin yet</span>
+            {% endif %}
+          </div>
+
+          <div class="period-guidance">
+            {% if 'PREFINAL' in code %}
+              <div><span class="label">What to do:</span> <span class="text">Complete remaining activities, encode attendance, and verify grade summary before final grading.</span></div>
+              <div><span class="label">Why set this:</span> <span class="text">Pre-final quality checks prevent last-minute errors before final submission.</span></div>
+            {% elif 'MIDTERM' in code %}
+              <div><span class="label">What to do:</span> <span class="text">Set midterm activities, encode scores promptly, and keep attendance updated.</span></div>
+              <div><span class="label">Why set this:</span> <span class="text">Midterm grading tracks student progress and triggers early academic interventions.</span></div>
+            {% elif 'FINAL' in code %}
+              <div><span class="label">What to do:</span> <span class="text">Finalize all records, review summary values, and submit the official period result.</span></div>
+              <div><span class="label">Why set this:</span> <span class="text">Final period output is part of the official grade trail and audit record.</span></div>
+            {% else %}
+              <div><span class="label">What to do:</span> <span class="text">Create prelim activities, encode initial scores, and record attendance consistently.</span></div>
+              <div><span class="label">Why set this:</span> <span class="text">Prelim establishes grading baseline for reliable period-to-period progression.</span></div>
+            {% endif %}
+          </div>
+
+          <div class="period-actions">
+            <a
+              class="btn btn-sm btn-outline-success"
+              href="{% url 'faculty_portal:period_activities' offering.id item.period.id %}"
+              title="Grade Activities"
+              aria-label="Grade Activities"
+            >
+              &#9881;
+            </a>
+            <a
+              class="btn btn-sm btn-outline-primary"
+              href="{% url 'faculty_portal:period_attendance' offering.id item.period.id %}"
+              title="Attendance"
+              aria-label="Attendance"
+            >
+              &#128338;
+            </a>
+            <a
+              class="btn btn-sm btn-outline-dark"
+              href="{% url 'faculty_portal:period_summary' offering.id item.period.id %}"
+              title="Summary"
+              aria-label="Summary"
+            >
+              &#128202;
+            </a>
+            {% if "corrections.create" in effective_permissions %}
+              <a
+                class="btn btn-sm btn-outline-warning"
+                href="{% url 'faculty_portal:period_corrections' offering.id item.period.id %}"
+                title="Corrections"
+                aria-label="Corrections"
+              >
+                &#9998;
+              </a>
+            {% endif %}
+          </div>
+        </div>
+      </article>
+    </div>
+    {% endwith %}
+  {% empty %}
+    <div class="col-12">
+      <div class="alert alert-warning mb-0">
+        No active periods available. Ask admin to publish and assign a grading template.
+      </div>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

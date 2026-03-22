@@ -1,0 +1,684 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .summary-toolbar {
+    gap: 0.75rem;
+  }
+  .summary-toolbar .summary-toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .summary-toolbar .summary-primary-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .summary-toolbar .summary-search-form {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .summary-toolbar .summary-search-form .form-control {
+    min-width: 220px;
+  }
+  .gradebook-print-header {
+    display: none;
+  }
+  .gradebook-print-sheet {
+    display: none;
+  }
+  .gradebook-print-footer {
+    display: none;
+  }
+  .class-record-card {
+    overflow: hidden;
+  }
+  .class-record-table {
+    min-width: 1320px;
+  }
+  .class-record-table thead th {
+    font-size: 0.9rem;
+    vertical-align: middle;
+    white-space: nowrap;
+    border-color: #d8e4d8;
+    text-align: center;
+  }
+  .class-record-table tbody td {
+    white-space: nowrap;
+  }
+  .class-record-table .sticky-col {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background: #ffffff;
+  }
+  .class-record-table .sticky-col-2 {
+    position: sticky;
+    left: 64px;
+    z-index: 3;
+    background: #ffffff;
+  }
+  .class-record-table .sticky-col-3 {
+    position: sticky;
+    left: 190px;
+    z-index: 3;
+    background: #ffffff;
+  }
+  .class-record-table .sticky-col-4 {
+    position: sticky;
+    left: 470px;
+    z-index: 3;
+    background: #ffffff;
+  }
+  .class-record-table thead .sticky-col,
+  .class-record-table thead .sticky-col-2,
+  .class-record-table thead .sticky-col-3,
+  .class-record-table thead .sticky-col-4 {
+    z-index: 5;
+  }
+  .class-record-table .row-no-col {
+    min-width: 64px;
+    text-align: center;
+  }
+  .class-record-table .student-no-col {
+    min-width: 126px;
+  }
+  .class-record-table .student-name-col {
+    min-width: 280px;
+  }
+  .class-record-table .status-col {
+    min-width: 110px;
+  }
+  .class-record-table .band-class-standing {
+    background: linear-gradient(180deg, #eef6ee 0%, #e4f0e5 100%);
+    color: #20442d;
+  }
+  .class-record-table .band-section {
+    background: #f7faf6;
+    color: #31513f;
+  }
+  .class-record-table .band-subsection {
+    background: #fbfdf9;
+    color: #4c6556;
+  }
+  .class-record-table .band-exam {
+    background: linear-gradient(180deg, #fbf6de 0%, #f4e7ad 100%);
+    color: #5b4a14;
+  }
+  .class-record-table .metric-col {
+    background: #f1f6f1;
+    font-weight: 700;
+  }
+  .class-record-table .metric-col.metric-final {
+    background: #f7efd0;
+    color: #4f441a;
+  }
+  .class-record-table .perfect-score-row td {
+    background: #f9fbf8;
+    font-size: 0.82rem;
+    color: #647567;
+  }
+  .class-record-table .perfect-score-row .metric-col {
+    background: #edf3ed;
+  }
+  .class-record-table .row-number-cell {
+    text-align: center;
+    font-weight: 600;
+    color: #4c6556;
+  }
+  .class-record-caption {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    gap: 1rem;
+    padding: 1rem 1rem 0.75rem;
+  }
+  .class-record-caption h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #173b25;
+  }
+  .class-record-caption .caption-meta {
+    margin-top: 0.25rem;
+    color: #526b5d;
+    font-size: 0.92rem;
+  }
+  .class-record-caption .caption-side {
+    text-align: right;
+    color: #526b5d;
+    font-size: 0.88rem;
+  }
+  .print-trigger-btn {
+    min-width: 150px;
+  }
+  @media (max-width: 991.98px) {
+    .summary-toolbar {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    .summary-toolbar .summary-toolbar-actions {
+      width: 100%;
+      justify-content: flex-start;
+    }
+    .summary-toolbar .summary-search-form {
+      width: 100%;
+    }
+    .summary-toolbar .summary-search-form .form-control {
+      min-width: 0;
+      flex: 1 1 100%;
+    }
+    .class-record-caption {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .class-record-caption .caption-side {
+      text-align: left;
+    }
+  }
+  @media print {
+    @page {
+      size: portrait;
+      margin: 0.45in;
+    }
+    body,
+    .faculty-app,
+    .faculty-main {
+      background: #ffffff !important;
+    }
+    .faculty-topbar,
+    .faculty-sidebar,
+    .help-fab,
+    .privacy-chip,
+    .no-print {
+      display: none !important;
+    }
+    .faculty-layout {
+      display: block !important;
+      min-height: auto !important;
+    }
+    .faculty-main {
+      padding: 0 !important;
+    }
+    .gradebook-print-header {
+      display: block;
+      text-align: center;
+      margin-bottom: 0.75rem;
+    }
+    .gradebook-print-sheet {
+      display: block;
+      margin-top: 0.5rem;
+    }
+    .gradebook-print-sheet table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.86rem;
+    }
+    .gradebook-print-sheet th,
+    .gradebook-print-sheet td {
+      border: 1px solid #7f8d84;
+      padding: 0.3rem 0.38rem;
+      color: #000000;
+      background: #ffffff;
+    }
+    .gradebook-print-sheet thead th {
+      background: #f2f2f2;
+      text-align: center;
+      font-weight: 700;
+    }
+    .gradebook-print-sheet .print-row-no {
+      width: 52px;
+      text-align: center;
+    }
+    .gradebook-print-sheet .print-student-no {
+      width: 125px;
+    }
+    .gradebook-print-sheet .print-grade,
+    .gradebook-print-sheet .print-grade-status {
+      text-align: center;
+      width: 110px;
+    }
+    .gradebook-print-header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #000000;
+    }
+    .gradebook-print-header .print-address {
+      margin-top: 0.2rem;
+      font-size: 0.95rem;
+      color: #333333;
+    }
+    .gradebook-print-header .print-subtitle {
+      margin-top: 0.6rem;
+      font-size: 0.95rem;
+      color: #222222;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .gradebook-print-header .print-metadata {
+      margin-top: 0.55rem;
+      font-size: 0.9rem;
+      color: #222222;
+      line-height: 1.45;
+    }
+    .gradebook-print-footer {
+      display: block;
+      margin-top: 1rem;
+      color: #111111;
+      font-size: 0.9rem;
+    }
+    .gradebook-print-footer .none-follows {
+      text-align: center;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin-top: 0.85rem;
+    }
+    .gradebook-print-footer .submitted-by {
+      margin-top: 2rem;
+    }
+    .gradebook-print-footer .submitted-by-label {
+      font-weight: 700;
+      margin-bottom: 2.1rem;
+    }
+    .gradebook-print-footer .submitted-by-name {
+      display: inline-block;
+      min-width: 280px;
+      text-align: center;
+      border-top: 1px solid #111111;
+      padding-top: 0.35rem;
+      font-weight: 600;
+    }
+    .class-record-card,
+    .alert,
+    .card {
+      border: 0 !important;
+      box-shadow: none !important;
+    }
+    .class-record-card {
+      display: none !important;
+    }
+    .table-responsive {
+      overflow: visible !important;
+    }
+    .class-record-table {
+      min-width: 0 !important;
+      width: 100% !important;
+      font-size: 0.72rem;
+    }
+    .class-record-table .sticky-col,
+    .class-record-table .sticky-col-2,
+    .class-record-table .sticky-col-3,
+    .class-record-table .sticky-col-4 {
+      position: static !important;
+    }
+    .class-record-table th,
+    .class-record-table td {
+      border: 1px solid #9ea9a1 !important;
+      padding: 0.22rem 0.28rem !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+    }
+    .class-record-table .metric-col,
+    .class-record-table .metric-col.metric-final,
+    .class-record-table .perfect-score-row td {
+      background: #f4f4f4 !important;
+    }
+    .class-record-table .status-active-label {
+      display: none !important;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+  <h2 class="h5 mb-0">
+    Summary | {{ offering.course.code }} | {{ period.name }}
+  </h2>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+    <button class="btn btn-sm btn-outline-primary print-trigger-btn" type="button" onclick="window.print();">Print Grade Book</button>
+    {% if "corrections.create" in effective_permissions %}
+      <a class="btn btn-sm btn-outline-warning" href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Correction Requests</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if is_correction_active %}
+<div class="alert alert-warning no-print">
+  Approved correction window is active.
+  {% if "corrections.create" in effective_permissions %}
+    You can apply scoped edits then finalize in
+    <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Corrections</a>.
+  {% endif %}
+</div>
+{% elif can_self_reopen_before_deadline %}
+<div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-3 no-print">
+  <div>
+    This period has been submitted, but your tenant policy allows <strong>faculty self-reopen before deadline</strong>.
+    {% if submission_deadline %}Deadline: <strong>{{ submission_deadline|date:"Y-m-d H:i" }}</strong>.{% endif %}
+  </div>
+  <form method="post" action="{% url 'faculty_portal:period_self_reopen' offering.id period.id %}">
+    {% csrf_token %}
+    <button class="btn btn-warning" type="submit">Reopen Before Deadline</button>
+  </form>
+</div>
+{% elif is_submitted %}
+<div class="alert alert-info no-print">This period has been submitted. Summary is view-only.</div>
+{% elif is_locked %}
+<div class="alert alert-danger no-print">This period is locked by admin. Summary is view-only.</div>
+{% endif %}
+
+<div class="alert alert-light border d-flex justify-content-between align-items-center flex-wrap summary-toolbar no-print">
+  <span>
+    Computation base value: <strong>{{ base_value }}</strong>
+    {% if submission_deadline %}
+      | Submission deadline: <strong>{{ submission_deadline|date:"Y-m-d H:i" }}</strong>
+    {% else %}
+      | <span class="text-warning">Deadline not set by admin</span>
+    {% endif %}
+  </span>
+  <div class="summary-toolbar-actions">
+    <form class="summary-search-form">
+      <input class="form-control form-control-sm" name="q" value="{{ q }}" placeholder="Search student">
+      <button class="btn btn-sm btn-outline-secondary">Filter</button>
+    </form>
+  </div>
+</div>
+
+{% if not is_locked and not is_submitted %}
+<div class="card border-0 shadow-sm mb-3 no-print">
+  <div class="card-body">
+    <div class="mb-3">
+      <div class="small text-muted text-uppercase fw-semibold mb-1">Submission Readiness Check</div>
+      <div class="small">
+        ACTIVE students: <strong>{{ submit_readiness.eligible_student_count }}</strong> |
+        With at least 1 encoded grade/attendance: <strong>{{ submit_readiness.students_with_any_grade }}</strong> |
+        Missing records: <strong>{{ submit_readiness.students_missing_any_grade }}</strong> |
+        Coverage: <strong>{{ submit_readiness.coverage_percent }}%</strong>
+      </div>
+      {% if submit_readiness.students_with_any_grade == 0 %}
+      <div class="alert alert-danger py-2 mt-2 mb-0">
+        No encoded records found for ACTIVE students. Submission is blocked.
+        Encode at least one record, or mark applicable students as DR/W in
+        <a href="{% url 'faculty_portal:offering_enrollment' offering.id %}">Enrollment</a>.
+      </div>
+      {% elif submit_readiness.students_missing_any_grade > 0 %}
+      <div class="alert alert-warning py-2 mt-2 mb-0">
+        Some ACTIVE students still have no encoded records.
+        You can proceed after confirmation, or update statuses to DR/W in
+        <a href="{% url 'faculty_portal:offering_enrollment' offering.id %}">Enrollment</a>.
+      </div>
+      {% endif %}
+    </div>
+
+    <form id="period-submit-form" method="post" action="{% url 'faculty_portal:period_submit' offering.id period.id %}">
+      {% csrf_token %}
+      <input type="hidden" name="confirm_submit" id="confirm-submit-input" value="0">
+      <label class="form-label">Submission Remarks (optional)</label>
+      <input class="form-control mb-2" name="remarks" placeholder="Short note for submission">
+      <button
+        class="btn btn-success"
+        type="button"
+        data-bs-toggle="modal"
+        data-bs-target="#submitConfirmModal"
+        {% if submit_readiness.students_with_any_grade == 0 %}disabled{% endif %}
+      >
+        Finalize and Submit {{ period.name }} Grades
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="submitConfirmModal" tabindex="-1" aria-labelledby="submitConfirmModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="submitConfirmModalLabel">Confirm Final Period Submission</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">
+          You are about to finalize and submit <strong>{{ period.name }}</strong>.
+          Submitted periods are locked for normal editing.
+        </p>
+        <ul class="small mb-0">
+          <li>ACTIVE students: <strong>{{ submit_readiness.eligible_student_count }}</strong></li>
+          <li>With at least 1 encoded record: <strong>{{ submit_readiness.students_with_any_grade }}</strong></li>
+          <li>Missing encoded records: <strong>{{ submit_readiness.students_missing_any_grade }}</strong></li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="confirm-submit-btn">Finalize Submission</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("period-submit-form");
+    const confirmInput = document.getElementById("confirm-submit-input");
+    const confirmBtn = document.getElementById("confirm-submit-btn");
+    if (!form || !confirmInput || !confirmBtn) return;
+    confirmBtn.addEventListener("click", function () {
+      confirmInput.value = "1";
+      form.submit();
+    });
+  });
+</script>
+{% endif %}
+
+<div class="gradebook-print-header">
+  <h1>{{ print_header_name }}</h1>
+  {% if print_header_address %}
+  <div class="print-address">{{ print_header_address }}</div>
+  {% endif %}
+  <div class="print-subtitle">{{ period.name|upper }} GRADES</div>
+  <div class="print-metadata">
+    Course Code: <strong>{{ offering.course.code }}</strong> |
+    Course Title: <strong>{{ offering.course.title }}</strong> |
+    Units: <strong>{{ offering.course.units }}</strong>
+    <br>
+    Section: <strong>{{ offering.section.code }}</strong> |
+    Academic Year: <strong>{{ offering.term.academic_year.code }}</strong> |
+    Term: <strong>{{ offering.term.code }}</strong>
+  </div>
+</div>
+
+<div class="gradebook-print-sheet">
+  <table>
+    <thead>
+      <tr>
+        <th class="print-row-no">No.</th>
+        <th class="print-student-no">Student No</th>
+        <th>Student Name</th>
+        <th class="print-grade">Periodic Grade</th>
+        <th class="print-grade-status">Grade Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="print-row-no">{{ forloop.counter }}</td>
+        <td class="print-student-no">{{ row.student.student_no }}</td>
+        <td>{{ row.student.last_name }}, {{ row.student.first_name }}</td>
+        <td class="print-grade">{{ row.period_grade|default:"" }}</td>
+        <td class="print-grade-status">{{ row.print_grade_status }}</td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="5" class="text-center">No summary rows available.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card border-0 shadow-sm class-record-card">
+  <div class="class-record-caption">
+    <div>
+      <h3>{{ offering.course.code }} - {{ offering.course.title }}</h3>
+      <div class="caption-meta">
+        Section: {{ offering.section.code }} |
+        Term: {{ offering.term.academic_year.code }} / {{ offering.term.code }} |
+        Period: {{ period.name }}
+      </div>
+    </div>
+    <div class="caption-side">
+      <div>Tenant: <strong>{{ offering.tenant.code }}</strong></div>
+      <div>Campus: <strong>{{ offering.campus.code }}</strong></div>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0 align-middle class-record-table">
+      <thead>
+        <tr>
+          <th rowspan="4" class="sticky-col row-no-col">No.</th>
+          <th rowspan="4" class="sticky-col-2 student-no-col">Student No</th>
+          <th rowspan="4" class="sticky-col-3 student-name-col">Student Name</th>
+          <th rowspan="4" class="sticky-col-4 status-col">Status</th>
+          {% for block in summary_layout.class_standing_blocks %}
+            <th colspan="{{ block.colspan }}" class="band-class-standing">{{ block.label }}</th>
+          {% endfor %}
+          {% for exam in summary_layout.exam_components %}
+            <th rowspan="4" class="band-exam metric-col metric-final">{{ exam.label }}</th>
+          {% endfor %}
+          <th rowspan="4" class="metric-col metric-final">{{ period.name|upper }} Grade</th>
+        </tr>
+        <tr>
+          {% for block in summary_layout.class_standing_blocks %}
+            {% for section in block.sections %}
+              <th colspan="{{ section.colspan }}" class="band-section">{{ section.label }}</th>
+            {% endfor %}
+            <th class="metric-col"></th>
+          {% endfor %}
+        </tr>
+        <tr>
+          {% for block in summary_layout.class_standing_blocks %}
+            {% for section in block.sections %}
+              {% if section.uses_nested %}
+                {% for group in section.groups %}
+                  <th colspan="{{ group.colspan }}" class="band-subsection">{{ group.label }}</th>
+                {% endfor %}
+              {% else %}
+                <th colspan="{{ section.colspan }}" class="band-subsection"></th>
+              {% endif %}
+            {% endfor %}
+            <th class="metric-col"></th>
+          {% endfor %}
+        </tr>
+        <tr>
+          {% for block in summary_layout.class_standing_blocks %}
+            {% for section in block.sections %}
+              {% if section.uses_nested %}
+                {% for group in section.groups %}
+                  {% for column in group.activity_columns %}
+                    <th>{{ column.label }}</th>
+                  {% endfor %}
+                  <th class="metric-col">{{ group.avg_label }}</th>
+                {% endfor %}
+              {% else %}
+                {% for column in section.activity_columns %}
+                  <th>{{ column.label }}</th>
+                {% endfor %}
+                <th class="metric-col">{{ section.avg_label }}</th>
+              {% endif %}
+            {% endfor %}
+            <th class="metric-col">{{ block.total_label }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+      <tr class="perfect-score-row">
+        <td class="sticky-col row-no-col"></td>
+        <td class="sticky-col-2 student-no-col"></td>
+        <td class="sticky-col-3 student-name-col fw-semibold">Highest Possible Score</td>
+        <td class="sticky-col-4 status-col"></td>
+        {% for block in summary_layout.class_standing_blocks %}
+          {% for section in block.sections %}
+            {% if section.uses_nested %}
+              {% for group in section.groups %}
+                {% for column in group.activity_columns %}
+                  <td>{{ column.total_score|default:"" }}</td>
+                {% endfor %}
+                <td class="metric-col"></td>
+              {% endfor %}
+            {% else %}
+              {% for column in section.activity_columns %}
+                <td>{{ column.total_score|default:"" }}</td>
+              {% endfor %}
+              <td class="metric-col"></td>
+            {% endif %}
+          {% endfor %}
+          <td class="metric-col"></td>
+        {% endfor %}
+        {% for exam in summary_layout.exam_components %}
+          <td class="metric-col metric-final">
+            {% if exam.sections and exam.sections.0.activity_columns %}
+              {{ exam.sections.0.activity_columns.0.total_score|default:"" }}
+            {% endif %}
+          </td>
+        {% endfor %}
+        <td class="metric-col metric-final"></td>
+      </tr>
+      {% for row in rows %}
+        <tr>
+          <td class="sticky-col row-no-col row-number-cell">{{ forloop.counter }}</td>
+          <td class="sticky-col-2 student-no-col">{{ row.student.student_no }}</td>
+          <td class="sticky-col-3 student-name-col">{{ row.student.last_name }}, {{ row.student.first_name }}</td>
+          <td class="sticky-col-4 status-col">
+            {% if row.enrollment_status == "ACTIVE" %}
+              <span class="badge text-bg-success status-active-label">{{ row.enrollment_status }}</span>
+            {% else %}
+              <span class="badge text-bg-warning">{{ row.enrollment_status }}</span>
+            {% endif %}
+          </td>
+          {% for block in row.class_standing_blocks %}
+            {% for section in block.sections %}
+              {% if section.uses_nested %}
+                {% for group in section.groups %}
+                  {% for value in group.activity_values %}
+                    <td>{{ value|default:"" }}</td>
+                  {% endfor %}
+                  <td class="metric-col">{{ group.average|default:"" }}</td>
+                {% endfor %}
+              {% else %}
+                {% for value in section.activity_values %}
+                  <td>{{ value|default:"" }}</td>
+                {% endfor %}
+                <td class="metric-col">{{ section.average|default:"" }}</td>
+              {% endif %}
+            {% endfor %}
+            <td class="metric-col"><strong>{{ block.total|default:"" }}</strong></td>
+          {% endfor %}
+          {% for value in row.exam_values %}
+            <td class="metric-col metric-final">{{ value|default:"" }}</td>
+          {% endfor %}
+          <td class="metric-col metric-final"><strong>{{ row.period_grade|default:"" }}</strong></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="24" class="text-center text-muted py-4">No summary rows available.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="gradebook-print-footer">
+  <div class="none-follows">**** NONE FOLLOWS *****</div>
+  <div class="submitted-by">
+    <div class="submitted-by-label">SUBMITTED BY:</div>
+    <div class="submitted-by-name">{{ request.user.full_name|default:request.user.username }}</div>
+  </div>
+</div>
+{% endblock %}

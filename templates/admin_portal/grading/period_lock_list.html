@@ -1,0 +1,110 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Grading Period Locks</h2>
+  {% if "grading_periods.lock" in effective_permissions %}
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:grading_period_lock_create' %}">Add Lock Rule</a>
+  {% endif %}
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <select class="form-select" name="campus_id">
+      <option value="">All Campuses</option>
+      {% for campus in scope_campuses %}
+        <option value="{{ campus.id }}" {% if campus.id|stringformat:'s' == request.GET.campus_id %}selected{% endif %}>{{ campus.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="term_id">
+      <option value="">All Terms</option>
+      {% for t in terms %}
+        <option value="{{ t.id }}" {% if t.id|stringformat:'s' == request.GET.term_id %}selected{% endif %}>{{ t.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="scope_type">
+      <option value="">All Scopes</option>
+      <option value="CAMPUS" {% if request.GET.scope_type == "CAMPUS" %}selected{% endif %}>Campus</option>
+      <option value="COURSE" {% if request.GET.scope_type == "COURSE" %}selected{% endif %}>Course</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="is_locked">
+      <option value="">All Status</option>
+      <option value="1" {% if request.GET.is_locked == "1" %}selected{% endif %}>Locked</option>
+      <option value="0" {% if request.GET.is_locked == "0" %}selected{% endif %}>Open</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Period/course/remarks">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Campus</th>
+          <th>Term</th>
+          <th>Period</th>
+          <th>Scope</th>
+          <th>Offering</th>
+          <th>Deadline</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in page_obj %}
+        <tr>
+          <td>{{ row.campus.code }}</td>
+          <td>{{ row.term.code }}</td>
+          <td>{{ row.period_code }}</td>
+          <td>{{ row.scope_type }}</td>
+          <td>{% if row.course_offering %}{{ row.course_offering.course.code }} / {{ row.course_offering.section.code }}{% else %}-{% endif %}</td>
+          <td>
+            {% if row.deadline_at %}
+              {{ row.deadline_at|date:"Y-m-d H:i" }}
+            {% else %}
+              <span class="text-muted">Not set</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.is_locked %}
+              <span class="badge text-bg-danger">Locked</span>
+            {% else %}
+              <span class="badge text-bg-success">Open</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            {% if "grading_periods.lock" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grading_period_lock_update' row.id %}">Edit</a>
+            {% endif %}
+            {% if row.is_locked and "grading_periods.reopen" in effective_permissions %}
+            <form method="post" action="{% url 'admin_portal:grading_period_lock_reopen' row.id %}" class="d-inline">
+              {% csrf_token %}
+              <button class="btn btn-sm btn-outline-warning">Reopen</button>
+            </form>
+            {% elif not row.is_locked and "grading_periods.lock" in effective_permissions %}
+            <form method="post" action="{% url 'admin_portal:grading_period_lock_close' row.id %}" class="d-inline">
+              {% csrf_token %}
+              <button class="btn btn-sm btn-outline-danger">Lock</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8" class="text-center text-muted py-4">No period lock records found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

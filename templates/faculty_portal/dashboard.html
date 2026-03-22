@@ -1,0 +1,314 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .faculty-kpi-card {
+    border: 0;
+    border-radius: 1.1rem;
+    box-shadow: 0 14px 26px rgba(20, 58, 36, 0.08);
+    overflow: hidden;
+    height: 100%;
+  }
+  .faculty-kpi-card .card-body {
+    padding: 1.15rem 1.2rem 1.1rem;
+  }
+  .faculty-kpi-eyebrow {
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #6b8273;
+    margin-bottom: 0.45rem;
+  }
+  .faculty-kpi-value {
+    font-size: 2rem;
+    line-height: 1;
+    font-weight: 800;
+    color: #143c25;
+  }
+  .faculty-kpi-label {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1f432f;
+    margin-top: 0.55rem;
+  }
+  .faculty-kpi-note {
+    color: #587061;
+    font-size: 0.9rem;
+    margin-top: 0.35rem;
+  }
+  .faculty-kpi-card.kpi-green {
+    background: linear-gradient(180deg, #ffffff 0%, #f4faf4 100%);
+  }
+  .faculty-kpi-card.kpi-gold {
+    background: linear-gradient(180deg, #fffef7 0%, #fbf3d4 100%);
+  }
+  .faculty-kpi-card.kpi-red {
+    background: linear-gradient(180deg, #fffdfc 0%, #fae8e4 100%);
+  }
+  .faculty-kpi-card.kpi-blue {
+    background: linear-gradient(180deg, #ffffff 0%, #eef7fb 100%);
+  }
+  .faculty-kpi-card.kpi-neutral {
+    background: linear-gradient(180deg, #ffffff 0%, #f6f8f7 100%);
+  }
+  .faculty-dashboard-section {
+    margin-top: 1.25rem;
+  }
+  .faculty-dashboard-section .section-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #173d27;
+    margin-bottom: 0.4rem;
+  }
+  .faculty-dashboard-section .section-note {
+    color: #5b7263;
+    margin-bottom: 1rem;
+  }
+  .faculty-mini-card {
+    border: 0;
+    border-radius: 1rem;
+    box-shadow: 0 10px 18px rgba(18, 51, 31, 0.06);
+    height: 100%;
+  }
+  .faculty-mini-card .card-body {
+    padding: 1rem 1.1rem;
+  }
+  .faculty-mini-card .mini-label {
+    color: #617a6a;
+    font-size: 0.84rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .faculty-mini-card .mini-value {
+    margin-top: 0.3rem;
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: #163d26;
+  }
+  .faculty-deadline-card {
+    border: 0;
+    border-radius: 1.2rem;
+    overflow: hidden;
+    box-shadow: 0 16px 30px rgba(18, 52, 31, 0.08);
+    margin-bottom: 1rem;
+  }
+  .faculty-deadline-card .card-body {
+    padding: 1.15rem 1.2rem;
+  }
+  .faculty-deadline-card.reminder-warning {
+    background: linear-gradient(135deg, #fffef6 0%, #fbf2cf 100%);
+  }
+  .faculty-deadline-card.reminder-danger {
+    background: linear-gradient(135deg, #fffdfb 0%, #f8e1da 100%);
+  }
+  .faculty-deadline-card.reminder-neutral {
+    background: linear-gradient(135deg, #ffffff 0%, #f5f8f6 100%);
+  }
+  .faculty-deadline-eyebrow {
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6d8374;
+    margin-bottom: 0.35rem;
+  }
+  .faculty-deadline-title {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-bottom: 0.35rem;
+  }
+  .faculty-deadline-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem 1rem;
+    color: #375240;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+  }
+  .faculty-deadline-note {
+    color: #5a7263;
+    margin-bottom: 0;
+  }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="h4 mb-1">Faculty Dashboard</h2>
+    <div class="text-muted">Quick visibility into class submission progress, student outcomes, and missing records.</div>
+  </div>
+</div>
+
+<div class="card faculty-deadline-card reminder-{{ stats.deadline_reminder.variant }}">
+  <div class="card-body">
+    <div class="faculty-deadline-eyebrow">Submission Reminder</div>
+    <div class="faculty-deadline-title">{{ stats.deadline_reminder.title }}</div>
+    {% if stats.deadline_reminder.has_deadline %}
+      <div class="faculty-deadline-meta">
+        <span>Period: {{ stats.deadline_reminder.period_name }}</span>
+        <span>Deadline: {{ stats.deadline_reminder.deadline_at|date:"F j, Y g:i A" }}</span>
+        <span>Classes Affected: {{ stats.deadline_reminder.affected_classes }}</span>
+      </div>
+    {% endif %}
+    <p class="faculty-deadline-note">{{ stats.deadline_reminder.note }}</p>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-3 col-md-6">
+    <div class="card faculty-kpi-card kpi-gold">
+      <div class="card-body">
+        <div class="faculty-kpi-eyebrow">Submission Workload</div>
+        <div class="faculty-kpi-value">{{ stats.classes_not_submitted }}</div>
+        <div class="faculty-kpi-label">Classes Not Yet Submitted</div>
+        <div class="faculty-kpi-note">Active classes with at least one grading period still pending submission.</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card faculty-kpi-card kpi-red">
+      <div class="card-body">
+        <div class="faculty-kpi-eyebrow">Student Outcomes</div>
+        <div class="faculty-kpi-value">{{ stats.failed_period_grade_count }}</div>
+        <div class="faculty-kpi-label">Failed Students Per Periodic Grades</div>
+        <div class="faculty-kpi-note">Count of active student-period grades currently below 75.</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card faculty-kpi-card kpi-blue">
+      <div class="card-body">
+        <div class="faculty-kpi-eyebrow">Classlist Status</div>
+        <div class="faculty-kpi-value">{{ stats.dropped_students }}</div>
+        <div class="faculty-kpi-label">Dropped Students</div>
+        <div class="faculty-kpi-note">Students currently marked as DR across your active classes.</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card faculty-kpi-card kpi-green">
+      <div class="card-body">
+        <div class="faculty-kpi-eyebrow">Missing Records</div>
+        <div class="faculty-kpi-value">{{ stats.active_students_without_grades }}</div>
+        <div class="faculty-kpi-label">Active Students Without Grades</div>
+        <div class="faculty-kpi-note">Active student-period rows that still have no computed periodic grade.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="faculty-dashboard-section">
+  <div class="section-title">Deadline and Status Snapshot</div>
+  <div class="section-note">These cards help you spot submission urgency and student movement before they turn into end-of-term issues.</div>
+  <div class="row g-3">
+    <div class="col-lg-4 col-md-6">
+      <div class="card faculty-kpi-card kpi-gold">
+        <div class="card-body">
+          <div class="faculty-kpi-eyebrow">Deadline Watch</div>
+          <div class="faculty-kpi-value">{{ stats.periods_near_deadline }}</div>
+          <div class="faculty-kpi-label">Periods Near Deadline</div>
+          <div class="faculty-kpi-note">Unsubmitted grading periods with a submission deadline within the next 48 hours.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4 col-md-6">
+      <div class="card faculty-kpi-card kpi-green">
+        <div class="card-body">
+          <div class="faculty-kpi-eyebrow">Completion Progress</div>
+          <div class="faculty-kpi-value">{{ stats.submitted_periods }}</div>
+          <div class="faculty-kpi-label">Periods Already Submitted</div>
+          <div class="faculty-kpi-note">Submitted grading periods across your active classes in the current academic scope.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4 col-md-6">
+      <div class="card faculty-kpi-card kpi-blue">
+        <div class="card-body">
+          <div class="faculty-kpi-eyebrow">Classlist Movement</div>
+          <div class="faculty-kpi-value">{{ stats.withdrawn_students }}</div>
+          <div class="faculty-kpi-label">Withdrawn Students</div>
+          <div class="faculty-kpi-note">Students currently marked as <strong>W</strong> across your active classes.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="faculty-dashboard-section">
+  <div class="section-title">Additional Faculty Snapshot</div>
+  <div class="section-note">These supporting numbers help you gauge workload across the current active teaching scope.</div>
+  <div class="row g-3">
+    <div class="col-lg-3 col-md-6">
+      <div class="card faculty-mini-card">
+        <div class="card-body">
+          <div class="mini-label">Assigned Classes</div>
+          <div class="mini-value">{{ stats.assigned_courses }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+      <div class="card faculty-mini-card">
+        <div class="card-body">
+          <div class="mini-label">Active Classes</div>
+          <div class="mini-value">{{ stats.active_classes }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+      <div class="card faculty-mini-card">
+        <div class="card-body">
+          <div class="mini-label">Active Enrollments</div>
+          <div class="mini-value">{{ stats.active_enrollments }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+      <div class="card faculty-mini-card">
+        <div class="card-body">
+          <div class="mini-label">Activities Created</div>
+          <div class="mini-value">{{ stats.activities_encoded }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="faculty-dashboard-section">
+  <div class="section-title">Immediate Action Watchlist</div>
+  <div class="section-note">These are the fastest issues to act on before deadlines, submissions, and academic review meetings.</div>
+  <div class="row g-3">
+    <div class="col-lg-4 col-md-6">
+      <div class="card faculty-kpi-card kpi-neutral">
+        <div class="card-body">
+          <div class="faculty-kpi-eyebrow">Activity Readiness</div>
+          <div class="faculty-kpi-value">{{ stats.activities_without_scores }}</div>
+          <div class="faculty-kpi-label">Activities Without Scores Yet</div>
+          <div class="faculty-kpi-note">Created activities that still have no active saved score entries.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4 col-md-6">
+      <div class="card faculty-kpi-card kpi-red">
+        <div class="card-body">
+          <div class="faculty-kpi-eyebrow">Grade Completion</div>
+          <div class="faculty-kpi-value">{{ stats.classes_with_missing_grades }}</div>
+          <div class="faculty-kpi-label">Classes With Missing Grades</div>
+          <div class="faculty-kpi-note">Active classes where at least one active student-period record still has no periodic grade.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4 col-md-6">
+      <div class="card faculty-kpi-card kpi-blue">
+        <div class="card-body">
+          <div class="faculty-kpi-eyebrow">Governance Follow-up</div>
+          <div class="faculty-kpi-value">{{ stats.pending_correction_requests }}</div>
+          <div class="faculty-kpi-label">Pending Correction Requests</div>
+          <div class="faculty-kpi-note">Correction requests you filed that are still awaiting review or action.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

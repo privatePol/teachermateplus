@@ -1,0 +1,71 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a href="{% url 'admin_portal:grade_correction_request_list' %}" class="btn btn-sm btn-outline-secondary">Back</a>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Request Details</strong></div>
+      <div class="card-body">
+        <div class="mb-2"><strong>Offering:</strong> {{ correction_request.offering.course.code }} / {{ correction_request.offering.section.code }}</div>
+        <div class="mb-2"><strong>Period:</strong> {{ correction_request.template_period.code }}</div>
+        <div class="mb-2"><strong>Faculty:</strong> {{ correction_request.requested_by_user.username }}</div>
+        <div class="mb-2"><strong>Status:</strong> {{ correction_request.status }}</div>
+        <div class="mb-2"><strong>Justification:</strong><br>{{ correction_request.justification }}</div>
+        <div class="mb-2">
+          <strong>Scope:</strong>
+          <ul class="mb-0">
+            {% for item in correction_request.items.all %}
+              <li>
+                {{ item.requested_action }}
+                {% if item.student %}| {{ item.student.student_no }}{% endif %}
+                {% if item.grade_activity %}| {{ item.grade_activity.title }}{% endif %}
+                {% if item.old_value or item.new_value %}
+                  | {{ item.old_value|default:"-" }} → {{ item.new_value|default:"-" }}
+                {% endif %}
+              </li>
+            {% empty %}
+              <li>No scope items.</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% if correction_request.attachments.all %}
+        <div>
+          <strong>Attachments:</strong>
+          <ul class="mb-0">
+            {% for file in correction_request.attachments.all %}
+            <li><a href="{{ file.file.url }}" target="_blank">{{ file.file.name }}</a></li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Review Action</strong></div>
+      <div class="card-body">
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+          <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+          {% endif %}
+          {% for field in form %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% for error in field.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          {% endfor %}
+          <button class="btn btn-primary" type="submit">Submit Review</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Template Subcomponents</h2>
+  {% if "template_subcomponents.create" in effective_permissions %}
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_subcomponent_create' %}?template_id={{ selected_template_id }}&period_id={{ selected_period_id }}&component_id={{ selected_component_id }}">Add Subcomponent</a>
+  {% endif %}
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-md-4">
+    <select class="form-select" name="component_id">
+      <option value="">All Components</option>
+      {% for component in components %}
+      <option value="{{ component.id }}" {% if component.id|stringformat:'s' == selected_component_id %}selected{% endif %}>
+        {{ component.template_period.template.code }} - {{ component.code }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-4">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Search subcomponent/component/template">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Template</th>
+          <th>Component</th>
+          <th>Code</th>
+          <th>Name</th>
+          <th>Weight %</th>
+          <th>Score Entry</th>
+          <th>Attendance</th>
+          <th>Admin Locked</th>
+          <th>Record State</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in page_obj %}
+        <tr>
+          <td>{{ row.template_component.template_period.template.code }}</td>
+          <td>{{ row.template_component.code }}</td>
+          <td>{{ row.code }}</td>
+          <td>{{ row.name }}</td>
+          <td>{{ row.weight_percentage }}</td>
+          <td>{{ row.get_score_input_mode_display }}</td>
+          <td>{% if row.is_attendance_component %}Yes{% else %}No{% endif %}</td>
+          <td>{% if row.admin_locked %}Yes{% else %}No{% endif %}</td>
+          <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+          <td class="text-end">
+            {% if "template_details.read" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_detail_list' %}?template_id={{ row.template_component.template_period.template_id }}&period_id={{ row.template_component.template_period_id }}&component_id={{ row.template_component_id }}&subcomponent_id={{ row.id }}">Details</a>
+            {% endif %}
+            {% if "template_subcomponents.update" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_subcomponent_update' row.id %}">Edit</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="10" class="text-center text-muted py-4">No template subcomponents found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

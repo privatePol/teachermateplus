@@ -1,0 +1,177 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">
+    Encode Scores | {{ offering.course.code }} | {{ period.name }} | {{ activity.title }}
+  </h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:period_activities' offering.id period.id %}">Back to Activities</a>
+</div>
+
+<div class="alert alert-light border">
+  Entry Method: <strong>{{ score_input_mode_label }}</strong>
+  {% if score_input_mode == "RAW_BASE50" %}
+    | Total Score: <strong>{{ activity.total_score }}</strong>
+  {% else %}
+    | Encode percentage directly from <strong>0 to 100</strong>
+  {% endif %}
+  {% if activity.template_subcomponent %}
+    | {{ activity.template_component.name }} / {{ activity.template_subcomponent.name }}
+    {% if activity.template_detail %} / {{ activity.template_detail.name }}{% endif %}
+  {% else %}
+    | {{ activity.template_component.name }}
+  {% endif %}
+</div>
+
+<div class="alert alert-secondary small">
+  Enter a score only for students you want to record now. Leave the field blank to keep the student unencoded.
+  If you clear an already saved score and click Save Scores, EduGradesPro will remove that saved score from this activity.
+</div>
+
+{% if is_correction_active %}
+<div class="alert alert-warning">
+  Approved correction window is active. Only scoped students/activities can be edited.
+  {% if "corrections.create" in effective_permissions %}
+    <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">View request</a>
+  {% endif %}
+</div>
+{% elif is_submitted %}
+<div class="alert alert-info">This period is already submitted. Score editing is disabled.</div>
+{% elif is_locked %}
+<div class="alert alert-danger">This period is locked by admin. Score editing is disabled.</div>
+{% endif %}
+
+<form method="post" novalidate id="activity-scores-form">
+  {% csrf_token %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-body pb-0">
+      <div class="alert alert-danger d-none" id="score-validation-message" role="alert"></div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead>
+          <tr>
+            <th style="width: 72px;">No.</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th style="width: 180px;">
+              {% if score_input_mode == "RAW_BASE50" %}
+                Raw Score
+              {% else %}
+                Percentage
+              {% endif %}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ forloop.counter }}</td>
+            <td>{{ row.enrollment.student.last_name }}, {{ row.enrollment.student.first_name }}</td>
+            <td>
+              {% if row.enrollment.enrollment_status == "ACTIVE" %}
+                <span class="badge text-bg-success">{{ row.enrollment.enrollment_status }}</span>
+              {% else %}
+                <span class="badge text-bg-warning">{{ row.enrollment.enrollment_status }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.enrollment.enrollment_status == "ACTIVE" %}
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="{{ score_input_max }}"
+                  class="form-control form-control-sm"
+                  name="raw_{{ row.enrollment.student_id }}"
+                  value="{% if row.score %}{{ row.score.raw_score }}{% endif %}"
+                  placeholder="{% if score_input_mode == 'RAW_BASE50' %}0 to {{ activity.total_score }}{% else %}0 to 100{% endif %}"
+                >
+              {% else %}
+                <input class="form-control form-control-sm" value="N/A" disabled>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="text-center text-muted py-4">No enrolled students found.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer d-flex justify-content-end">
+      {% if is_editable %}
+      <button type="submit" class="btn btn-success">Save Scores</button>
+      {% endif %}
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("activity-scores-form");
+    const messageBox = document.getElementById("score-validation-message");
+    if (!form || !messageBox) return;
+    const scoreInputs = Array.from(form.querySelectorAll('input[name^="raw_"]:not([disabled])'));
+
+    function clearInvalidState() {
+      scoreInputs.forEach((input) => input.classList.remove("is-invalid"));
+    }
+
+    scoreInputs.forEach((input) => {
+      input.addEventListener("input", function () {
+        input.classList.remove("is-invalid");
+        if (!form.querySelector('input.is-invalid')) {
+          messageBox.classList.add("d-none");
+          messageBox.textContent = "";
+        }
+      });
+    });
+
+    form.addEventListener("submit", function (event) {
+      clearInvalidState();
+      let invalidInput = null;
+
+      for (const input of scoreInputs) {
+        const rawValue = (input.value || "").trim();
+        if (!rawValue) {
+          continue;
+        }
+
+        const maxValue = Number(input.getAttribute("max"));
+        const numericValue = Number(rawValue);
+        if (Number.isNaN(numericValue)) {
+          invalidInput = {
+            element: input,
+            message: "Please enter a valid numeric score or leave the field blank.",
+          };
+          break;
+        }
+
+        if (numericValue < 0 || numericValue > maxValue) {
+          invalidInput = {
+            element: input,
+            message: `A score cannot be lower than 0 or higher than ${maxValue}. Please review the highlighted entry.`,
+          };
+          break;
+        }
+      }
+
+      if (invalidInput) {
+        event.preventDefault();
+        messageBox.textContent = invalidInput.message;
+        messageBox.classList.remove("d-none");
+        invalidInput.element.classList.add("is-invalid");
+        invalidInput.element.focus();
+        invalidInput.element.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+
+      messageBox.classList.add("d-none");
+      messageBox.textContent = "";
+    });
+  });
+</script>
+{% endblock %}

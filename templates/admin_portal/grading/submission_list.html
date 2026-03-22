@@ -1,0 +1,95 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Grade Submissions</h2>
+  {% if "reopen_requests.read" in effective_permissions %}
+    <a href="{% url 'admin_portal:grade_submission_reopen_request_list' %}" class="btn btn-sm btn-outline-secondary">
+      Reopen Request Log
+    </a>
+  {% endif %}
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <select class="form-select" name="term_id">
+      <option value="">All Terms</option>
+      {% for t in terms %}
+        <option value="{{ t.id }}" {% if t.id|stringformat:'s' == request.GET.term_id %}selected{% endif %}>{{ t.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="status">
+      <option value="">All Status</option>
+      <option value="DRAFT" {% if status == "DRAFT" %}selected{% endif %}>Draft</option>
+      <option value="SUBMITTED" {% if status == "SUBMITTED" %}selected{% endif %}>Submitted</option>
+      <option value="REOPENED" {% if status == "REOPENED" %}selected{% endif %}>Reopened</option>
+    </select>
+  </div>
+  <div class="col-md-4">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Course/section/period">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Term</th>
+          <th>Course</th>
+          <th>Section</th>
+          <th>Period</th>
+          <th>Deadline</th>
+          <th>Status</th>
+          <th>Submitted</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in page_obj %}
+        <tr>
+          <td>{{ row.offering.term.code }}</td>
+          <td>{{ row.offering.course.code }}</td>
+          <td>{{ row.offering.section.code }}</td>
+          <td>{{ row.template_period.code }}</td>
+          <td>
+            {% if row.revert_deadline_at %}
+              {{ row.revert_deadline_at|date:"Y-m-d H:i" }}
+              {% if row.revert_deadline_passed %}
+                <span class="badge text-bg-danger ms-1">Passed</span>
+              {% else %}
+                <span class="badge text-bg-success ms-1">Open</span>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">Not set</span>
+            {% endif %}
+          </td>
+          <td><span class="badge text-bg-info">{{ row.status }}</span></td>
+          <td>{{ row.submitted_at|default:"-" }}</td>
+          <td class="text-end">
+            {% if row.pending_reopen_request %}
+              <span class="badge text-bg-warning">Pending request #{{ row.pending_reopen_request.id }}</span>
+            {% elif row.can_request_reopen %}
+              <a
+                class="btn btn-sm btn-outline-warning"
+                href="{% url 'admin_portal:grade_submission_reopen' row.id %}?next={{ request.get_full_path|urlencode }}"
+              >
+                Request Reopen
+              </a>
+            {% elif row.status == "SUBMITTED" and can_create_reopen_request %}
+              <span class="small text-muted">No request action available</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8" class="text-center text-muted py-4">No submissions found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
+</div>
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if request.GET.next or request.POST.next %}
+      <input type="hidden" name="next" value="{{ request.POST.next|default:request.GET.next }}">
+      {% endif %}
+
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      {% for field in form %}
+        {% if field.name != "password" %}
+        <div class="mb-3">
+          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+          {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        {% endif %}
+      {% endfor %}
+
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.password.id_for_label }}">{{ form.password.label }}</label>
+        <div class="input-group">
+          {{ form.password }}
+          <button type="button" class="btn btn-outline-secondary" id="generate-password-btn">Generate Password</button>
+        </div>
+        <div class="form-text">
+          The generated password follows complexity rules. You can regenerate before saving.
+        </div>
+        {% if form.password.help_text %}<div class="form-text">{{ form.password.help_text }}</div>{% endif %}
+        {% for error in form.password.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  (function () {
+    const btn = document.getElementById("generate-password-btn");
+    const input = document.getElementById("id_password");
+    if (!btn || !input) return;
+
+    function pick(str) {
+      return str[Math.floor(Math.random() * str.length)];
+    }
+
+    function shuffle(chars) {
+      for (let i = chars.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [chars[i], chars[j]] = [chars[j], chars[i]];
+      }
+      return chars;
+    }
+
+    function generatePassword(length) {
+      const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+      const lower = "abcdefghijkmnopqrstuvwxyz";
+      const digits = "23456789";
+      const symbols = "!@#$%^&*()-_=+";
+      const all = upper + lower + digits + symbols;
+      const chars = [
+        pick(upper),
+        pick(lower),
+        pick(digits),
+        pick(symbols),
+      ];
+      while (chars.length < length) {
+        chars.push(pick(all));
+      }
+      return shuffle(chars).join("");
+    }
+
+    btn.addEventListener("click", function () {
+      input.value = generatePassword(14);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.focus();
+      input.select();
+    });
+  })();
+</script>
+{% endblock %}

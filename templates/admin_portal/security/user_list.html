@@ -1,0 +1,65 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Users</h2>
+  {% if "users.create" in effective_permissions %}
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:user_create' %}">Add User</a>
+  {% endif %}
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <select class="form-select" name="tenant_id">
+      <option value="">All Tenants</option>
+      {% for tenant in scope_tenants %}
+        <option value="{{ tenant.id }}" {% if tenant.id|stringformat:'s' == tenant_filter %}selected{% endif %}>{{ tenant.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="campus_id">
+      <option value="">All Campuses</option>
+      {% for campus in scope_campuses %}
+        <option value="{{ campus.id }}" {% if campus.id|stringformat:'s' == campus_filter %}selected{% endif %}>{{ campus.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-4">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Search username, email, name">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Username</th><th>Email</th><th>Default Tenant</th><th>Default Campus</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for row in page_obj %}
+        <tr>
+          <td>{{ row.username }}</td>
+          <td>{{ row.email }}</td>
+          <td>{{ row.default_tenant.code|default:"-" }}</td>
+          <td>{{ row.default_campus.code|default:"-" }}</td>
+          <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+          <td class="text-end">
+            {% if "users.update" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:user_update' row.id %}">Edit</a>
+            <a class="btn btn-sm btn-outline-warning" href="{% url 'admin_portal:user_change_password' row.id %}">Password</a>
+            {% endif %}
+            {% if "roles.update" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:user_roles' row.id %}">Roles</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No users found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}
+

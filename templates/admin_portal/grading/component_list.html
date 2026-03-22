@@ -1,0 +1,103 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Template Components</h2>
+  {% if "template_components.create" in effective_permissions %}
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_component_create' %}?template_id={{ selected_template_id }}&period_id={{ selected_period_id }}">Add Component</a>
+  {% endif %}
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-md-3">
+    <select class="form-select" name="template_id">
+      <option value="">All Templates</option>
+      {% for template in templates %}
+      <option value="{{ template.id }}" {% if template.id|stringformat:'s' == selected_template_id %}selected{% endif %}>
+        {{ template.code }} - {{ template.name }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-4">
+    <select class="form-select" name="period_id">
+      <option value="">All Periods</option>
+      {% for period in periods %}
+      <option value="{{ period.id }}" {% if period.id|stringformat:'s' == selected_period_id %}selected{% endif %}>
+        {{ period.template.code }} - {{ period.code }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="status">
+      <option value="active" {% if status == "active" %}selected{% endif %}>Active Only</option>
+      <option value="inactive" {% if status == "inactive" %}selected{% endif %}>Inactive Only</option>
+      <option value="all" {% if status == "all" %}selected{% endif %}>All</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Search component/period/template">
+  </div>
+  <div class="col-md-1">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Template</th>
+          <th>Period</th>
+          <th>Code</th>
+          <th>Name</th>
+          <th>Weight %</th>
+          <th>Score Entry</th>
+          <th>Sort</th>
+          <th>Active</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in page_obj %}
+        <tr>
+          <td>{{ row.template_period.template.code }}</td>
+          <td>{{ row.template_period.code }}</td>
+          <td>{{ row.code }}</td>
+          <td>{{ row.name }}</td>
+          <td>{{ row.weight_percentage }}</td>
+          <td>{{ row.get_score_input_mode_display }}</td>
+          <td>{{ row.sort_order }}</td>
+          <td>
+            {% if row.is_active %}
+              <span class="badge text-bg-success">Active</span>
+            {% else %}
+              <span class="badge text-bg-warning text-dark">Inactive</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            {% if "template_subcomponents.read" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_subcomponent_list' %}?template_id={{ row.template_period.template_id }}&period_id={{ row.template_period_id }}&component_id={{ row.id }}">Subcomponents</a>
+            {% endif %}
+            {% if "template_components.update" in effective_permissions %}
+            <div class="d-inline-flex gap-1">
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_component_update' row.id %}">Edit</a>
+              {% if row.is_active %}
+              <form method="post" action="{% url 'admin_portal:template_component_delete' row.id %}" onsubmit="return confirm('Delete component {{ row.code }}? This will soft-delete it and deactivate its child entries.');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+              </form>
+              {% endif %}
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="9" class="text-center text-muted py-4">No template components found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

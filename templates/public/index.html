@@ -1,0 +1,166 @@
+{% extends "shared/base_public.html" %}
+
+{% block title %}EduGradesPro | Academic Operations Platform{% endblock %}
+
+{% block extra_head %}
+<style>
+  :root {
+    --brand-gold: #d2bf2b;
+    --brand-lime: #83ad34;
+    --brand-green: #3f7f2e;
+    --brand-deep: #1f5427;
+    --brand-paper: #f6f8f3;
+    --brand-ink: #1f2e25;
+  }
+  body {
+    background: var(--brand-paper);
+    color: var(--brand-ink);
+  }
+  .hero-shell {
+    background: linear-gradient(140deg, var(--brand-gold) 0%, var(--brand-lime) 34%, var(--brand-green) 68%, var(--brand-deep) 100%);
+    color: #f7ffef;
+    border-radius: 1rem;
+    overflow: hidden;
+    box-shadow: 0 14px 35px rgba(22, 55, 30, 0.2);
+  }
+  .hero-shell .lead {
+    color: #edf8db;
+  }
+  .quick-link {
+    border-color: rgba(247, 255, 239, 0.7);
+    color: #f7ffef;
+    background: rgba(17, 37, 22, 0.18);
+  }
+  .quick-link:hover {
+    border-color: #ffffff;
+    color: #ffffff;
+    background: rgba(14, 31, 18, 0.32);
+  }
+  .section-card {
+    border: 1px solid #d3decd;
+    border-radius: 0.9rem;
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(33, 71, 42, 0.07);
+  }
+  .section-title {
+    color: var(--brand-deep);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .image-holder {
+    min-height: 180px;
+    border: 2px dashed #99b08d;
+    border-radius: 0.8rem;
+    background:
+      linear-gradient(145deg, rgba(209, 224, 199, 0.45), rgba(248, 252, 244, 0.9));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4e6653;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.85rem;
+  }
+  .feature-item {
+    border: 1px solid #dce7d5;
+    border-radius: 0.75rem;
+    background: #f9fcf6;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-4 py-lg-5">
+  <section class="hero-shell p-4 p-lg-5 mb-4">
+    <div class="row g-4 align-items-center">
+      <div class="col-lg-7">
+        <p class="small text-uppercase mb-2 fw-semibold">EduGradesPro V1</p>
+        <h1 class="display-6 fw-bold mb-3">Governed Academic Grading and Operations Platform</h1>
+        <p class="lead mb-4">
+          EduGradesPro helps schools run controlled, auditable, and scalable grading operations
+          across multiple campuses and departments through a configuration-driven model.
+        </p>
+        <div class="d-flex flex-wrap gap-2">
+          <a class="btn quick-link" href="{% url 'accounts:public_login' %}">Go to Login</a>
+          <a class="btn quick-link" href="{% url 'accounts:admin_login' %}">Admin Portal</a>
+          <a class="btn quick-link" href="{% url 'accounts:faculty_login' %}">Faculty Portal</a>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="image-holder">Hero Image Placeholder</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-card p-4 mb-4">
+    <div class="row g-4 align-items-center">
+      <div class="col-lg-6">
+        <h2 class="h4 section-title mb-3">Why Institutions Choose EduGradesPro</h2>
+        <p class="mb-2">Built for governance-first operations, not spreadsheet replacement alone.</p>
+        <ul class="mb-0">
+          <li>Two-portal architecture with strict role separation</li>
+          <li>Tenant and campus scoping for controlled access</li>
+          <li>Audit logs for sensitive and regulated actions</li>
+          <li>Template-driven grading for policy consistency</li>
+        </ul>
+      </div>
+      <div class="col-lg-6">
+        <div class="image-holder">Institution Image Placeholder</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-card p-4 mb-4">
+    <h2 class="h4 section-title mb-3">Core Modules</h2>
+    <div class="row g-3">
+      <div class="col-md-6 col-lg-3">
+        <div class="feature-item h-100 p-3">
+          <h3 class="h6 fw-bold">Organization Setup</h3>
+          <p class="small mb-0">Manage tenants, campuses, departments, and programs with scoped controls.</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="feature-item h-100 p-3">
+          <h3 class="h6 fw-bold">Academic Structure</h3>
+          <p class="small mb-0">Configure years, terms, courses, sections, and faculty assignments.</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="feature-item h-100 p-3">
+          <h3 class="h6 fw-bold">Grading Governance</h3>
+          <p class="small mb-0">Use templates, lock periods, and control correction workflows with full traceability.</p>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-3">
+        <div class="feature-item h-100 p-3">
+          <h3 class="h6 fw-bold">Import and Audit</h3>
+          <p class="small mb-0">Upload data through validated templates and monitor all critical system actions.</p>
+        </div>
+      </div>
+    </div>
+    <div class="mt-3">
+      <div class="image-holder">Modules Illustration Placeholder</div>
+    </div>
+  </section>
+
+  <section class="section-card p-4">
+    <div class="row g-4">
+      <div class="col-lg-6">
+        <h2 class="h4 section-title mb-3">Operational Workflow</h2>
+        <p class="mb-2">From setup to final grades, each step is controlled and auditable.</p>
+        <ol class="mb-0">
+          <li>Configure organizational and academic master data</li>
+          <li>Set grading templates and publish approved structures</li>
+          <li>Assign offerings, faculty, and enrollments</li>
+          <li>Encode grades, submit periods, and monitor locks</li>
+          <li>Handle controlled corrections with governance approval</li>
+        </ol>
+      </div>
+      <div class="col-lg-6">
+        <div class="image-holder">Workflow Diagram Placeholder</div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

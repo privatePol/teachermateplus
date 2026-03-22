@@ -1,0 +1,90 @@
+{% if messages %}
+<div class="d-none" id="message-source">
+  {% for message in messages %}
+  <div class="message-item" data-tags="{{ message.tags|default:'info' }}">{{ message }}</div>
+  {% endfor %}
+</div>
+
+<div
+  class="position-fixed top-0 start-50 translate-middle-x p-3"
+  style="z-index: 1080; width: min(960px, 95vw);"
+  id="inline-message-container"
+></div>
+
+<div class="modal fade" id="system-error-modal" tabindex="-1" aria-labelledby="system-error-modal-label" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="system-error-modal-label">Please Fix These Issues</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted mb-3">The action was not completed. Review the validation messages below.</p>
+        <ul class="list-group list-group-flush" id="system-error-list"></ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const source = document.getElementById("message-source");
+    const inlineContainer = document.getElementById("inline-message-container");
+    const errorList = document.getElementById("system-error-list");
+    const errorModalElement = document.getElementById("system-error-modal");
+    if (!source || !inlineContainer || !errorList || !errorModalElement || typeof bootstrap === "undefined") {
+      return;
+    }
+    let hasInlineMessages = false;
+    let errorCount = 0;
+    const resolveBootstrapAlertClass = (rawTags) => {
+      const tags = (rawTags || "").split(/\s+/).filter(Boolean);
+      if (tags.includes("error")) return "danger";
+      if (tags.includes("warning")) return "warning";
+      if (tags.includes("success")) return "success";
+      if (tags.includes("info")) return "info";
+      if (tags.includes("debug")) return "secondary";
+      return "info";
+    };
+
+    source.querySelectorAll(".message-item").forEach((item) => {
+      const tags = (item.dataset.tags || "info").trim();
+      const text = (item.textContent || "").trim();
+      if (!text) return;
+
+      if (tags.includes("error")) {
+        const li = document.createElement("li");
+        li.className = "list-group-item px-0 py-2 text-danger";
+        li.textContent = text;
+        errorList.appendChild(li);
+        errorCount += 1;
+      } else {
+        const wrapper = document.createElement("div");
+        wrapper.className = `alert alert-${resolveBootstrapAlertClass(tags)} alert-dismissible fade show`;
+        wrapper.setAttribute("role", "alert");
+
+        const textSpan = document.createElement("span");
+        textSpan.textContent = text;
+        wrapper.appendChild(textSpan);
+
+        const closeButton = document.createElement("button");
+        closeButton.type = "button";
+        closeButton.className = "btn-close";
+        closeButton.setAttribute("data-bs-dismiss", "alert");
+        closeButton.setAttribute("aria-label", "Close");
+        wrapper.appendChild(closeButton);
+
+        inlineContainer.appendChild(wrapper);
+        hasInlineMessages = true;
+      }
+    });
+
+    if (errorCount > 0) {
+      const modal = new bootstrap.Modal(errorModalElement);
+      modal.show();
+    }
+  });
+</script>
+{% endif %}

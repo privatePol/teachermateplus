@@ -1,0 +1,76 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Email Diagnostics</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_batch_list' %}">Back to Bulk Imports</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white fw-semibold">Send SMTP Test</div>
+  <div class="card-body">
+    <form method="post" class="row g-3">
+      {% csrf_token %}
+      <div class="col-md-6">
+        <label class="form-label" for="{{ form.to_email.id_for_label }}">{{ form.to_email.label }}</label>
+        {{ form.to_email }}
+        {% if form.to_email.help_text %}<div class="form-text">{{ form.to_email.help_text }}</div>{% endif %}
+        {% for err in form.to_email.errors %}<div class="text-danger small">{{ err }}</div>{% endfor %}
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="{{ form.subject.id_for_label }}">{{ form.subject.label }}</label>
+        {{ form.subject }}
+        {% for err in form.subject.errors %}<div class="text-danger small">{{ err }}</div>{% endfor %}
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="{{ form.message.id_for_label }}">{{ form.message.label }}</label>
+        {{ form.message }}
+        {% for err in form.message.errors %}<div class="text-danger small">{{ err }}</div>{% endfor %}
+      </div>
+      {% for err in form.non_field_errors %}<div class="col-12 text-danger small">{{ err }}</div>{% endfor %}
+      <div class="col-12">
+        <button class="btn btn-primary">Send Test Email</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if last_result %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white fw-semibold">Last Attempt</div>
+  <div class="card-body">
+    {% if last_result.ok %}
+      <div class="alert alert-success mb-0">
+        Sent successfully to <strong>{{ last_result.recipient }}</strong>.
+      </div>
+    {% else %}
+      <div class="alert alert-danger mb-0">
+        Failed for <strong>{{ last_result.recipient }}</strong>: {{ last_result.error }}
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white fw-semibold">Current Email Settings Snapshot</div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+      <tr>
+        <th>Key</th>
+        <th>Value</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for key, value in smtp_meta.items %}
+      <tr>
+        <td class="text-muted">{{ key }}</td>
+        <td>{{ value }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Menu Groups</h2>
+  {% if "menus.update" in effective_permissions %}
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:menu_group_create' %}">Add Menu Group</a>
+  {% endif %}
+</div>
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>Portal</th><th>Code</th><th>Label</th><th>Order</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for g in groups %}
+        <tr>
+          <td>{{ g.portal }}</td>
+          <td>{{ g.code }}</td>
+          <td>{{ g.label }}</td>
+          <td>{{ g.sort_order }}</td>
+          <td>{% if g.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+          <td class="text-end">
+            {% if "menus.update" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:menu_group_update' g.id %}">Edit</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="text-center text-muted py-4">No menu groups found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+

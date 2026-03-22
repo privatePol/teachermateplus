@@ -1,0 +1,96 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Bulk Import Batches</h2>
+  <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:email_diagnostics' %}">Email Diagnostics</a>
+</div>
+
+<div class="row g-3 mb-4">
+  {% for card in import_cards %}
+  <div class="col-12 col-md-6 col-lg-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body d-flex flex-column">
+        <h3 class="h6">{{ card.label }}</h3>
+        <p class="small text-muted mb-3">Use the official template, upload, validate, then confirm import.</p>
+        <div class="mt-auto d-flex gap-2">
+          <a class="btn btn-sm btn-outline-secondary"
+             href="{% url 'admin_portal:import_template_download' card.slug %}">
+            Download Template
+          </a>
+          <a class="btn btn-sm btn-primary"
+             href="{% url 'admin_portal:import_upload' card.slug %}">
+            Upload CSV
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="col-12">
+    <div class="alert alert-warning mb-0">No import modules available for your permissions.</div>
+  </div>
+  {% endfor %}
+</div>
+
+<form class="row g-2 mb-3">
+  <div class="col-md-3">
+    <select class="form-select" name="import_type">
+      <option value="">All Import Types</option>
+      {% for code, label in import_type_choices %}
+      <option value="{{ code }}" {% if import_type == code %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <select class="form-select" name="status">
+      <option value="">All Status</option>
+      {% for code, label in status_choices %}
+      <option value="{{ code }}" {% if status == code %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Filename or uploader">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+      <tr>
+        <th>ID</th>
+        <th>Type</th>
+        <th>Status</th>
+        <th>Rows</th>
+        <th>Uploader</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in page_obj %}
+      <tr>
+        <td>#{{ row.id }}</td>
+        <td>{{ row.get_import_type_display }}</td>
+        <td><span class="badge text-bg-secondary">{{ row.status }}</span></td>
+        <td>{{ row.total_rows }} (valid: {{ row.valid_rows }}, invalid: {{ row.invalid_rows }}, imported: {{ row.imported_rows }})</td>
+        <td>{{ row.uploaded_by_user.username }}</td>
+        <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
+        <td class="text-end">
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:import_batch_detail' row.id %}">View</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="text-center text-muted py-4">No import batches found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

@@ -1,0 +1,364 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Faculty Assignments</h2>
+  <div class="d-flex gap-2">
+    {% if "faculty_assignments.import" in effective_permissions %}
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_template_download' 'faculty-assignments' %}">Download Template</a>
+    <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:import_upload' 'faculty-assignments' %}">Upload CSV</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <form class="row g-2 align-items-end" id="faculty-search-form">
+      <div class="col-md-4">
+        <label class="form-label">Search Faculty</label>
+        <input class="form-control" id="faculty-search-input" type="text" name="faculty_q" value="{{ faculty_q }}" placeholder="Type to filter faculty by username, name, or email" autocomplete="off">
+      </div>
+      <div class="col-md-5">
+        <label class="form-label">Select Faculty</label>
+        <select class="form-select" id="faculty-select-input" name="faculty_user_id">
+          <option value="">-- Select Faculty --</option>
+          {% for user in faculty_candidates %}
+            <option value="{{ user.id }}" {% if selected_faculty and selected_faculty.id == user.id %}selected{% endif %}>
+              {{ user.username }}{% if user.get_full_name %} - {{ user.get_full_name }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 d-flex gap-2">
+        <button class="btn btn-outline-secondary flex-fill" type="submit">Search</button>
+        <a class="btn btn-outline-dark flex-fill" href="{% url 'admin_portal:faculty_assignment_list' %}">Reset</a>
+      </div>
+    </form>
+
+    {% if selected_faculty %}
+    <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top">
+      <div>
+        <div class="small text-muted">Selected Faculty</div>
+        <div class="fw-semibold">{{ selected_faculty.username }}{% if selected_faculty.get_full_name %} - {{ selected_faculty.get_full_name }}{% endif %}</div>
+      </div>
+      {% if "faculty_assignments.create" in effective_permissions %}
+      <a
+        class="btn btn-primary"
+        href="{% url 'admin_portal:faculty_assignment_list' %}?faculty_user_id={{ selected_faculty.id }}&faculty_q={{ faculty_q|urlencode }}&assign=1{% if selected_section_id %}&section_id={{ selected_section_id }}{% endif %}"
+      >
+        ASSIGN COURSE OFFERINGS
+      </a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if show_assign_box and selected_faculty %}
+<div class="d-flex flex-column gap-3">
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="h6 mb-0">Unassigned Course Offerings</h3>
+        <div class="d-flex gap-2 align-items-center">
+          <span class="badge text-bg-info">{{ assignable_count }} available</span>
+          <span class="badge text-bg-secondary" id="selected-assign-count">0 selected</span>
+        </div>
+      </div>
+
+      <form class="mb-3" id="offering-search-form">
+        <input type="hidden" name="faculty_q" value="{{ faculty_q }}">
+        <input type="hidden" name="faculty_user_id" value="{{ selected_faculty.id }}">
+        <input type="hidden" name="assign" value="1">
+        <div class="row g-2">
+          <div class="col-md-8">
+            <input
+              class="form-control"
+              id="offering-search-input"
+              type="text"
+              name="offering_q"
+              value="{{ offering_q }}"
+              placeholder="Type to filter by course code or course title"
+              autocomplete="off"
+            >
+          </div>
+          <div class="col-md-4">
+            <select class="form-select" id="offering-section-filter" name="section_id">
+              <option value="">All Sections</option>
+              {% for s in sections %}
+                <option value="{{ s.id }}" {% if selected_section_id == s.id %}selected{% endif %}>{{ s.code }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-text">Filtering runs automatically while typing.</div>
+      </form>
+
+      <form method="post" action="{% url 'admin_portal:faculty_assignment_assign' %}">
+        {% csrf_token %}
+        <input type="hidden" name="faculty_user_id" value="{{ selected_faculty.id }}">
+        <input type="hidden" name="faculty_q" value="{{ faculty_q }}">
+        <input type="hidden" name="offering_q" value="{{ offering_q }}">
+        <input type="hidden" name="section_id" value="{{ selected_section_id|default:'' }}">
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="select-all-offerings">
+            <label class="form-check-label" for="select-all-offerings">Select all visible offerings</label>
+          </div>
+          <small class="text-muted">Tip: choose multiple offerings then click ASSIGN SELECTED.</small>
+        </div>
+
+        <div class="table-responsive" style="max-height: 420px;">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th style="width: 48px;"></th>
+                <th>Course Code</th>
+                <th>Course Title</th>
+                <th>Section</th>
+                <th>Schedule / Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for o in assignable_offerings %}
+              <tr>
+                <td>
+                  <input class="form-check-input offering-checkbox" type="checkbox" name="offering_ids" value="{{ o.id }}">
+                </td>
+                <td>{{ o.course.code }}</td>
+                <td>{{ o.course.title }}</td>
+                <td>{{ o.section.code }}</td>
+                <td>{{ o.schedule_text|default:"-" }}</td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="5" class="text-center text-muted py-4">
+                  No unassigned offerings found.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="d-flex justify-content-end mt-3">
+          {% if "faculty_assignments.create" in effective_permissions %}
+          <button type="submit" class="btn btn-success">ASSIGN SELECTED</button>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="h6 mb-0">Assigned Offerings</h3>
+        <div class="d-flex gap-2 align-items-center">
+          <span class="badge text-bg-primary">{{ assigned_count }} assigned</span>
+          <span class="badge text-bg-secondary" id="selected-unassign-count">0 selected</span>
+        </div>
+      </div>
+      <form method="post" action="{% url 'admin_portal:faculty_assignment_unassign' %}">
+        {% csrf_token %}
+        <input type="hidden" name="faculty_user_id" value="{{ selected_faculty.id }}">
+        <input type="hidden" name="faculty_q" value="{{ faculty_q }}">
+        <input type="hidden" name="offering_q" value="{{ offering_q }}">
+        <input type="hidden" name="section_id" value="{{ selected_section_id|default:'' }}">
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="select-all-assigned">
+            <label class="form-check-label" for="select-all-assigned">Select all assigned offerings</label>
+          </div>
+          {% if "faculty_assignments.update" in effective_permissions %}
+          <button type="submit" class="btn btn-outline-danger btn-sm">UNASSIGN SELECTED</button>
+          {% endif %}
+        </div>
+
+        <div class="table-responsive" style="max-height: 420px;">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th style="width: 48px;"></th>
+                <th>Course Code</th>
+                <th>Course Title</th>
+                <th>Section</th>
+                <th>Schedule / Time</th>
+                <th>Primary</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in selected_faculty_assignments %}
+              <tr>
+                <td>
+                  <input class="form-check-input assigned-checkbox" type="checkbox" name="assignment_ids" value="{{ row.id }}">
+                </td>
+                <td>{{ row.offering.course.code }}</td>
+                <td>{{ row.offering.course.title }}</td>
+                <td>{{ row.offering.section.code }}</td>
+                <td>{{ row.offering.schedule_text|default:"-" }}</td>
+                <td>
+                  <div class="d-flex align-items-center gap-2">
+                    {% if row.is_primary %}
+                      <span class="badge text-bg-success">Primary</span>
+                    {% else %}
+                      <span class="badge text-bg-secondary">Secondary</span>
+                    {% endif %}
+                    {% if "faculty_assignments.update" in effective_permissions %}
+                    <button
+                      type="button"
+                      class="btn btn-sm {% if row.is_primary %}btn-outline-secondary{% else %}btn-outline-success{% endif %} js-toggle-primary"
+                      data-assignment-id="{{ row.id }}"
+                    >
+                      {% if row.is_primary %}Unset{% else %}Set Primary{% endif %}
+                    </button>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="6" class="text-center text-muted py-4">No assigned offerings yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<form id="toggle-primary-form" method="post" action="{% url 'admin_portal:faculty_assignment_toggle_primary' %}" class="d-none">
+  {% csrf_token %}
+  <input type="hidden" name="assignment_id" id="toggle-primary-assignment-id" value="">
+  <input type="hidden" name="faculty_user_id" value="{{ selected_faculty.id }}">
+  <input type="hidden" name="faculty_q" value="{{ faculty_q }}">
+  <input type="hidden" name="offering_q" value="{{ offering_q }}">
+  <input type="hidden" name="section_id" value="{{ selected_section_id|default:'' }}">
+</form>
+{% endif %}
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const facultySearchForm = document.getElementById("faculty-search-form");
+    const facultySearchInput = document.getElementById("faculty-search-input");
+    const facultySelectInput = document.getElementById("faculty-select-input");
+
+    if (facultySearchForm && facultySearchInput) {
+      let facultyDebounce = null;
+      facultySearchInput.addEventListener("input", function () {
+        clearTimeout(facultyDebounce);
+        facultyDebounce = setTimeout(function () {
+          facultySearchForm.submit();
+        }, 350);
+      });
+    }
+
+    if (facultySearchForm && facultySelectInput) {
+      facultySelectInput.addEventListener("change", function () {
+        facultySearchForm.submit();
+      });
+    }
+
+    const selectAll = document.getElementById("select-all-offerings");
+    const checkboxes = Array.from(document.querySelectorAll(".offering-checkbox"));
+    const selectedAssignCountEl = document.getElementById("selected-assign-count");
+
+    const refreshAssignSelectedCounter = function () {
+      if (!selectedAssignCountEl) {
+        return;
+      }
+      const selectedCount = checkboxes.filter((item) => item.checked).length;
+      selectedAssignCountEl.textContent = `${selectedCount} selected`;
+    };
+
+    if (selectAll && checkboxes.length > 0) {
+      selectAll.addEventListener("change", function () {
+        checkboxes.forEach((cb) => {
+          cb.checked = selectAll.checked;
+        });
+        refreshAssignSelectedCounter();
+      });
+
+      checkboxes.forEach((cb) => {
+        cb.addEventListener("change", function () {
+          const allChecked = checkboxes.length > 0 && checkboxes.every((item) => item.checked);
+          selectAll.checked = allChecked;
+          refreshAssignSelectedCounter();
+        });
+      });
+
+      refreshAssignSelectedCounter();
+    } else if (selectedAssignCountEl) {
+      selectedAssignCountEl.textContent = "0 selected";
+    }
+
+    const selectAllAssigned = document.getElementById("select-all-assigned");
+    const assignedCheckboxes = Array.from(document.querySelectorAll(".assigned-checkbox"));
+    const selectedUnassignCountEl = document.getElementById("selected-unassign-count");
+
+    const refreshUnassignSelectedCounter = function () {
+      if (!selectedUnassignCountEl) {
+        return;
+      }
+      const selectedCount = assignedCheckboxes.filter((item) => item.checked).length;
+      selectedUnassignCountEl.textContent = `${selectedCount} selected`;
+    };
+
+    if (selectAllAssigned && assignedCheckboxes.length > 0) {
+      selectAllAssigned.addEventListener("change", function () {
+        assignedCheckboxes.forEach((cb) => {
+          cb.checked = selectAllAssigned.checked;
+        });
+        refreshUnassignSelectedCounter();
+      });
+
+      assignedCheckboxes.forEach((cb) => {
+        cb.addEventListener("change", function () {
+          const allChecked = assignedCheckboxes.length > 0 && assignedCheckboxes.every((item) => item.checked);
+          selectAllAssigned.checked = allChecked;
+          refreshUnassignSelectedCounter();
+        });
+      });
+
+      refreshUnassignSelectedCounter();
+    } else if (selectedUnassignCountEl) {
+      selectedUnassignCountEl.textContent = "0 selected";
+    }
+
+    const searchForm = document.getElementById("offering-search-form");
+    const searchInput = document.getElementById("offering-search-input");
+    const sectionFilter = document.getElementById("offering-section-filter");
+    if (searchForm && searchInput) {
+      let debounceTimer = null;
+      searchInput.addEventListener("input", function () {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(function () {
+          searchForm.submit();
+        }, 350);
+      });
+    }
+    if (searchForm && sectionFilter) {
+      sectionFilter.addEventListener("change", function () {
+        searchForm.submit();
+      });
+    }
+
+    const togglePrimaryButtons = document.querySelectorAll(".js-toggle-primary");
+    const togglePrimaryForm = document.getElementById("toggle-primary-form");
+    const togglePrimaryAssignmentIdInput = document.getElementById("toggle-primary-assignment-id");
+    if (togglePrimaryButtons.length > 0 && togglePrimaryForm && togglePrimaryAssignmentIdInput) {
+      togglePrimaryButtons.forEach((btn) => {
+        btn.addEventListener("click", function () {
+          togglePrimaryAssignmentIdInput.value = btn.dataset.assignmentId || "";
+          if (togglePrimaryAssignmentIdInput.value) {
+            togglePrimaryForm.submit();
+          }
+        });
+      });
+    }
+  });
+</script>
+{% endblock %}

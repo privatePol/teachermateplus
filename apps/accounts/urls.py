@@ -1,0 +1,44 @@
+from django.urls import path
+
+from .views import (
+    AdminLoginView,
+    FacultyLoginView,
+    FacultyForgotPasswordView,
+    PublicIndexView,
+    PublicLoginView,
+    admin_change_password_view,
+    admin_privacy_consent_view,
+    admin_logout_view,
+    faculty_change_password_view,
+    faculty_forgot_password_done_view,
+    faculty_logout_view,
+    faculty_privacy_consent_view,
+    faculty_password_reset_complete_view,
+    faculty_password_reset_confirm_view,
+)
+
+app_name = "accounts"
+
+urlpatterns = [
+    path("", PublicIndexView.as_view(), name="public_index"),
+    path("index/", PublicIndexView.as_view(), name="public_index_alias"),
+    path("index.php", PublicIndexView.as_view(), name="public_index_php"),
+    path("login/", PublicLoginView.as_view(), name="public_login"),
+    path("login.php", PublicLoginView.as_view(), name="public_login_php"),
+    path("admin-portal/login/", AdminLoginView.as_view(), name="admin_login"),
+    path("admin-portal/logout/", admin_logout_view, name="admin_logout"),
+    path("admin-portal/change-password/", admin_change_password_view, name="admin_change_password"),
+    path("admin-portal/privacy-consent/", admin_privacy_consent_view, name="admin_privacy_consent"),
+    path("faculty/login/", FacultyLoginView.as_view(), name="faculty_login"),
+    path("faculty/logout/", faculty_logout_view, name="faculty_logout"),
+    path("faculty/privacy-consent/", faculty_privacy_consent_view, name="faculty_privacy_consent"),
+    path("faculty/forgot-password/", FacultyForgotPasswordView.as_view(), name="faculty_forgot_password"),
+    path("faculty/forgot-password/sent/", faculty_forgot_password_done_view, name="faculty_forgot_password_done"),
+    path(
+        "faculty/reset/<uidb64>/<token>/",
+        faculty_password_reset_confirm_view,
+        name="faculty_password_reset_confirm",
+    ),
+    path("faculty/reset/done/", faculty_password_reset_complete_view, name="faculty_password_reset_complete"),
+    path("faculty/change-password/", faculty_change_password_view, name="faculty_change_password"),
+]
