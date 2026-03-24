@@ -35,7 +35,7 @@
     color: #ffffff;
   }
   .faculty-logo {
-    height: 34px;
+    height: 80px;
     width: auto;
     object-fit: contain;
     display: block;
@@ -50,9 +50,10 @@
   }
   .faculty-brand-title {
     color: #ffffff;
-    font-weight: 700;
+    font-size: 1.55rem;
+    font-weight: 800;
     letter-spacing: 0.01em;
-    line-height: 1.2;
+    line-height: 1.05;
   }
   .faculty-layout {
     display: flex;
@@ -208,6 +209,11 @@
       font-size: 0.72rem;
     }
   }
+  @media (max-width: 575.98px) {
+    .faculty-brand-title {
+      font-size: 1.2rem;
+    }
+  }
 </style>
 {% endblock %}
 
@@ -221,7 +227,7 @@
           <img src="{% get_media_prefix %}logos/egp_logo_official.png" alt="EduGradesPro" class="faculty-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/egp_logo.jpg';">
         </span>
         <div class="d-none d-sm-block">
-          <div class="faculty-brand-title">EduGradesPro</div>
+          <div class="faculty-brand-title">NCBA | EduGradesPro</div>
           <div class="faculty-brand-subtitle">Faculty Portal</div>
         </div>
       </div>

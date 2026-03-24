@@ -23,6 +23,8 @@ class Command(BaseCommand):
         ("admin_portal.access", "admin_portal", "access"),
         ("faculty_portal.access", "faculty_portal", "access"),
         ("dashboard.read", "dashboard", "read"),
+        ("grading_analytics.read", "grading_analytics", "read"),
+        ("faculty_analytics.read", "faculty_analytics", "read"),
         ("users.read", "users", "read"),
         ("users.create", "users", "create"),
         ("users.update", "users", "update"),
@@ -201,6 +203,24 @@ class Command(BaseCommand):
             },
         )
         SystemSetting.objects.update_or_create(
+            tenant=None,
+            setting_key="CORRECTION_MODE",
+            defaults={
+                "setting_value": "SYSTEM_REQUEST",
+                "value_type": SystemSetting.ValueType.STRING,
+                "is_active": True,
+            },
+        )
+        SystemSetting.objects.update_or_create(
+            tenant=None,
+            setting_key="PASSING_GRADE_THRESHOLD",
+            defaults={
+                "setting_value": "75",
+                "value_type": SystemSetting.ValueType.STRING,
+                "is_active": True,
+            },
+        )
+        SystemSetting.objects.update_or_create(
             tenant=tenant,
             setting_key="ENROLLMENT_OWNERSHIP_MODE",
             defaults={
@@ -250,6 +270,24 @@ class Command(BaseCommand):
             setting_key="PREDEADLINE_CORRECTION_MODE",
             defaults={
                 "setting_value": "REQUEST_REVIEW",
+                "value_type": SystemSetting.ValueType.STRING,
+                "is_active": True,
+            },
+        )
+        SystemSetting.objects.update_or_create(
+            tenant=tenant,
+            setting_key="CORRECTION_MODE",
+            defaults={
+                "setting_value": "SYSTEM_REQUEST",
+                "value_type": SystemSetting.ValueType.STRING,
+                "is_active": True,
+            },
+        )
+        SystemSetting.objects.update_or_create(
+            tenant=tenant,
+            setting_key="PASSING_GRADE_THRESHOLD",
+            defaults={
+                "setting_value": "75",
                 "value_type": SystemSetting.ValueType.STRING,
                 "is_active": True,
             },
@@ -549,6 +587,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "GRADING_ANALYTICS",
+                groups["GRADING"],
+                "Grading Analytics",
+                "admin_portal:grading_analytics",
+                75,
+                "grading_analytics.read",
+            ),
+            (
+                "ADMIN",
                 "GRADE_SUBMISSIONS",
                 groups["GRADING"],
                 "Submissions",
@@ -618,6 +665,15 @@ class Command(BaseCommand):
                 "faculty_portal:dashboard",
                 10,
                 "dashboard.read",
+            ),
+            (
+                "FACULTY",
+                "FACULTY_ANALYTICS",
+                groups["FACULTY_DASHBOARD"],
+                "Grading Analytics",
+                "faculty_portal:analytics",
+                15,
+                "faculty_analytics.read",
             ),
             (
                 "FACULTY",

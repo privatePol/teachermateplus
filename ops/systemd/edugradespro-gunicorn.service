@@ -1,0 +1,18 @@
+[Unit]
+Description=EduGradesPro Gunicorn Service
+After=network.target
+
+[Service]
+Type=simple
+User=edugradespro
+Group=edugradespro
+WorkingDirectory=/opt/edugradespro
+EnvironmentFile=/etc/edugradespro/edugradespro.env
+ExecStart=/opt/edugradespro/.venv/bin/gunicorn config.wsgi:application --workers 3 --timeout 120 --bind unix:/run/edugradespro/gunicorn.sock --access-logfile - --error-logfile -
+RuntimeDirectory=edugradespro
+RuntimeDirectoryMode=0755
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

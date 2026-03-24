@@ -1,8 +1,10 @@
 from django.contrib import admin
 
 from .models import (
+    CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
+    GradeCorrectionApprovalStep,
     GradeCorrectionAttachment,
     GradeCorrectionRequest,
     GradeCorrectionRequestItem,
@@ -95,6 +97,7 @@ class TenantGradingProfileAdmin(admin.ModelAdmin):
         "course_type",
         "grading_template",
         "priority",
+        "passing_grade_threshold",
         "is_default",
         "is_active",
     )
@@ -187,9 +190,37 @@ class GradeSubmissionReopenRequestAdmin(admin.ModelAdmin):
 
 @admin.register(GradeCorrectionRequest)
 class GradeCorrectionRequestAdmin(admin.ModelAdmin):
-    list_display = ("offering", "template_period", "requested_by_user", "status", "created_at", "reviewed_at")
+    list_display = (
+        "offering",
+        "template_period",
+        "requested_by_user",
+        "faculty_department",
+        "approval_route",
+        "status",
+        "created_at",
+        "reviewed_at",
+    )
     search_fields = ("offering__course__code", "offering__section__code", "requested_by_user__username")
     list_filter = ("status", "offering__tenant", "offering__campus")
+
+
+@admin.register(GradeCorrectionApprovalStep)
+class GradeCorrectionApprovalStepAdmin(admin.ModelAdmin):
+    list_display = (
+        "correction_request",
+        "step_order",
+        "approver_role",
+        "requires_same_department",
+        "status",
+        "reviewed_by_user",
+        "reviewed_at",
+    )
+    search_fields = (
+        "correction_request__offering__course__code",
+        "correction_request__offering__section__code",
+        "approver_role__code",
+    )
+    list_filter = ("status", "approver_role", "requires_same_department")
 
 
 @admin.register(GradeCorrectionRequestItem)
@@ -226,3 +257,23 @@ class TemplateHotfixRequestAdmin(admin.ModelAdmin):
     )
     search_fields = ("template__code", "requested_by_user__username")
     list_filter = ("status", "apply_mode", "tenant")
+
+
+@admin.register(CorrectionApprovalRouteRule)
+class CorrectionApprovalRouteRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "tenant",
+        "faculty_department",
+        "route_mode",
+        "step1_role",
+        "final_role",
+        "is_active",
+    )
+    search_fields = (
+        "tenant__code",
+        "faculty_department__code",
+        "faculty_department__name",
+        "step1_role__code",
+        "final_role__code",
+    )
+    list_filter = ("tenant", "route_mode", "is_active")

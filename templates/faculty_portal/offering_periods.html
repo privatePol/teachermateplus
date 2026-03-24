@@ -230,7 +230,7 @@
             >
               &#128202;
             </a>
-            {% if "corrections.create" in effective_permissions %}
+            {% if "corrections.create" in effective_permissions and system_correction_enabled %}
               <a
                 class="btn btn-sm btn-outline-warning"
                 href="{% url 'faculty_portal:period_corrections' offering.id item.period.id %}"

@@ -3,11 +3,16 @@
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Grade Submissions</h2>
-  {% if "reopen_requests.read" in effective_permissions %}
-    <a href="{% url 'admin_portal:grade_submission_reopen_request_list' %}" class="btn btn-sm btn-outline-secondary">
-      Reopen Request Log
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{% url 'admin_portal:overdue_unsubmitted_report' %}" class="btn btn-sm btn-outline-danger">
+      Overdue Unsubmitted Report
     </a>
-  {% endif %}
+    {% if "reopen_requests.read" in effective_permissions %}
+      <a href="{% url 'admin_portal:grade_submission_reopen_request_list' %}" class="btn btn-sm btn-outline-secondary">
+        Reopen Request Log
+      </a>
+    {% endif %}
+  </div>
 </div>
 <form class="row g-2 mb-3">
   <div class="col-md-2">

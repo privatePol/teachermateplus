@@ -1,0 +1,408 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h4 mb-0">Grading Analytics</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label mb-1">Campus</label>
+        <select class="form-select" name="campus_id">
+          <option value="">All Campuses</option>
+          {% for campus in campus_options %}
+          <option value="{{ campus.id }}" {% if selected_campus_id == campus.id %}selected{% endif %}>{{ campus.code }} - {{ campus.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label mb-1">Academic Year</label>
+        <select class="form-select" name="academic_year_id">
+          <option value="">All Academic Years</option>
+          {% for ay in academic_year_options %}
+          <option value="{{ ay.id }}" {% if selected_ay_id == ay.id %}selected{% endif %}>{{ ay.code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label mb-1">Term</label>
+        <select class="form-select" name="term_id">
+          <option value="">All Terms</option>
+          {% for term in term_options %}
+          <option value="{{ term.id }}" {% if selected_term_id == term.id %}selected{% endif %}>{{ term.academic_year.code }} / {{ term.code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 d-flex gap-2">
+        <button class="btn btn-outline-success w-100" type="submit">Apply Filters</button>
+        <a class="btn btn-outline-secondary" href="{% url 'admin_portal:grading_analytics' %}">Reset</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Offerings</div>
+        <div class="h5 mb-0">{{ summary.offerings }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Active Students</div>
+        <div class="h5 mb-0">{{ summary.active_students }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Submitted Periods</div>
+        <div class="h5 mb-0">{{ summary.submitted_periods }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Pending Corrections</div>
+        <div class="h5 mb-0">{{ summary.pending_corrections }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Pending Reopen</div>
+        <div class="h5 mb-0">{{ summary.pending_reopen_requests }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Avg Period Grade</div>
+        <div class="h5 mb-0">{% if summary.avg_period_grade is not None %}{{ summary.avg_period_grade|floatformat:2 }}{% else %}-{% endif %}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="fw-semibold mb-1">Passing Threshold Governance</div>
+    <div class="small text-muted mb-2">{{ summary.threshold_policy }}</div>
+    <div class="d-flex flex-wrap gap-2">
+      <span class="badge text-bg-success">Profile Threshold Offerings: {{ summary.profile_threshold_offerings }}</span>
+      <span class="badge text-bg-secondary">Tenant Default Threshold Offerings: {{ summary.tenant_threshold_offerings }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white fw-semibold">Submission Status Mix</div>
+      <div class="card-body">
+        {% for row in submission_status_rows %}
+        <div class="mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="badge {{ row.badge_class }}">{{ row.status }}</span>
+            <span class="fw-semibold">{{ row.total }}</span>
+          </div>
+          <div class="progress" role="progressbar" aria-label="{{ row.status }}" aria-valuenow="{{ row.width_pct|floatformat:0 }}" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar bg-success" style="width: {{ row.width_pct }}%"></div>
+          </div>
+        </div>
+        {% empty %}
+        <div class="text-muted">No submission records in this scope.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white fw-semibold">Grade Distribution</div>
+      <div class="card-body">
+        {% for row in grade_distribution_rows %}
+        <div class="mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span>{{ row.label }}</span>
+            <span class="fw-semibold">{{ row.count }} <small class="text-muted">({{ row.share_pct }}%)</small></span>
+          </div>
+          <div class="progress">
+            <div class="progress-bar bg-primary" style="width: {{ row.width_pct }}%"></div>
+          </div>
+        </div>
+        {% empty %}
+        <div class="text-muted">No graded rows available.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white fw-semibold">Campus Performance Snapshot</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Campus</th>
+        <th>Offerings</th>
+        <th>Active Students</th>
+        <th>Submitted</th>
+        <th>Reopened</th>
+        <th>Avg Grade</th>
+        <th>Pass Rate</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in campus_rows %}
+      <tr>
+        <td>{{ row.campus_code }}{% if row.campus_name %} - {{ row.campus_name }}{% endif %}</td>
+        <td>{{ row.offerings }}</td>
+        <td>{{ row.active_students }}</td>
+        <td>{{ row.submitted }}</td>
+        <td>{{ row.reopened }}</td>
+        <td>{% if row.avg_grade is not None %}{{ row.avg_grade|floatformat:2 }}{% else %}-{% endif %}</td>
+        <td>{{ row.pass_rate }}%</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="text-center text-muted py-3">No campus analytics rows available.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white fw-semibold">Top Offerings with Failed Students</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Course</th>
+        <th>Section</th>
+        <th>AY / Term</th>
+        <th>Failed Students</th>
+        <th>Avg Grade</th>
+        <th>Threshold</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in top_failing_offerings %}
+      <tr>
+        <td>
+          <div class="fw-semibold">{{ row.offering__course__code }}</div>
+          <div class="small text-muted">{{ row.offering__course__title }}</div>
+        </td>
+        <td>{{ row.offering__section__code }}</td>
+        <td>{{ row.offering__academic_year__code }} / {{ row.offering__term__code }}</td>
+        <td>{{ row.failed_students }}</td>
+        <td>{% if row.avg_grade is not None %}{{ row.avg_grade|floatformat:2 }}{% else %}-{% endif %}</td>
+        <td>{{ row.threshold|floatformat:2 }} <span class="text-muted small">({{ row.threshold_source }})</span></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="text-center text-muted py-3">No failing offerings detected in this scope.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-3">
+  <div class="card-header bg-white fw-semibold">Failed Students by Period</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Period</th>
+        <th>Students Graded</th>
+        <th>Passed</th>
+        <th>Failed</th>
+        <th>Fail Rate</th>
+        <th>Threshold</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in period_fail_rows %}
+      <tr>
+        <td>{{ row.period_code }}{% if row.period_name %} - {{ row.period_name }}{% endif %}</td>
+        <td>{{ row.graded }}</td>
+        <td>{{ row.passed }}</td>
+        <td>{{ row.failed }}</td>
+        <td>{{ row.fail_rate }}%</td>
+        <td>{{ row.threshold_display }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="text-center text-muted py-3">No period-level failure analytics available.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-3">
+  <div class="card-header bg-white fw-semibold">Failed Students by Component</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Period</th>
+        <th>Component</th>
+        <th>Students Graded</th>
+        <th>Passed</th>
+        <th>Failed</th>
+        <th>Fail Rate</th>
+        <th>Threshold</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in component_fail_rows %}
+      <tr>
+        <td>{{ row.period_code }}</td>
+        <td>{{ row.component_name }} <span class="text-muted">({{ row.component_code }})</span></td>
+        <td>{{ row.graded }}</td>
+        <td>{{ row.passed }}</td>
+        <td>{{ row.failed }}</td>
+        <td>{{ row.fail_rate }}%</td>
+        <td>{{ row.threshold_display }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="text-center text-muted py-3">No component-level failure analytics available.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-3">
+  <div class="card-header bg-white fw-semibold">Failed Students by Detail</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Period</th>
+        <th>Component</th>
+        <th>Subcomponent</th>
+        <th>Detail</th>
+        <th>Students Graded</th>
+        <th>Passed</th>
+        <th>Failed</th>
+        <th>Fail Rate</th>
+        <th>Threshold</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in detail_fail_rows %}
+      <tr>
+        <td>{{ row.period_code }}</td>
+        <td>{{ row.component_name }}</td>
+        <td>{{ row.subcomponent_name }}</td>
+        <td>{{ row.detail_name }}</td>
+        <td>{{ row.graded }}</td>
+        <td>{{ row.passed }}</td>
+        <td>{{ row.failed }}</td>
+        <td>{{ row.fail_rate }}%</td>
+        <td>{{ row.threshold_display }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="9" class="text-center text-muted py-3">No detail-level failure analytics available.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-3">
+  <div class="card-header bg-white fw-semibold">Top 10 Faculty Class Fail Rates (Per Campus)</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Campus</th>
+        <th>Class</th>
+        <th>Faculty</th>
+        <th>AY / Term</th>
+        <th>Students Graded</th>
+        <th>Passed</th>
+        <th>Failed</th>
+        <th>Pass:Fail Ratio</th>
+        <th>Fail Rate</th>
+        <th>Threshold</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in faculty_class_fail_rows %}
+      <tr>
+        <td>{{ row.campus_code }}</td>
+        <td>
+          <div class="fw-semibold">{{ row.course_code }} - {{ row.section_code }}</div>
+          <div class="small text-muted">{{ row.course_title }}</div>
+        </td>
+        <td>{{ row.faculty_name }}</td>
+        <td>{{ row.academic_year_code }} / {{ row.term_code }}</td>
+        <td>{{ row.graded }}</td>
+        <td>{{ row.passed }}</td>
+        <td>{{ row.failed }}</td>
+        <td>{{ row.pass_fail_ratio }}</td>
+        <td>{{ row.fail_rate }}%</td>
+        <td>{{ row.threshold_display }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="10" class="text-center text-muted py-3">No faculty class fail-rate analytics available.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-3">
+  <div class="card-header bg-white fw-semibold">Top 10 Faculty Comparisons (Same Course, Higher Fail Rate)</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Campus</th>
+        <th>Course</th>
+        <th>Faculty</th>
+        <th>Students Graded</th>
+        <th>Passed</th>
+        <th>Failed</th>
+        <th>Pass:Fail Ratio</th>
+        <th>Fail Rate</th>
+        <th>Compared Faculty</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in faculty_course_compare_rows %}
+      <tr>
+        <td>{{ row.campus_code }}</td>
+        <td>
+          <div class="fw-semibold">{{ row.course_code }}</div>
+          <div class="small text-muted">{{ row.course_title }}</div>
+        </td>
+        <td>{{ row.faculty_name }}</td>
+        <td>{{ row.graded }}</td>
+        <td>{{ row.passed }}</td>
+        <td>{{ row.failed }}</td>
+        <td>{{ row.pass_fail_ratio }}</td>
+        <td>{{ row.fail_rate }}%</td>
+        <td>{{ row.compared_faculty_count }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="9" class="text-center text-muted py-3">No same-course multi-faculty comparison rows available in this scope.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

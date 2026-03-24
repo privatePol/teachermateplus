@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 from collections import defaultdict
+from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -15,8 +16,10 @@ from apps.core.services.settings import SystemSettingService
 from apps.core.services.audit import AuditService
 from apps.enrollment.models import Enrollment
 from apps.grading.models import (
+    CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
+    GradeCorrectionApprovalStep,
     GradeCorrectionRequestItem,
     GradeCorrectionRequest,
     GradeCorrectionUnlockWindow,
@@ -35,6 +38,7 @@ from apps.grading.models import (
     StudentFinalGrade,
     StudentPeriodGrade,
 )
+from apps.rbac.models import Role, UserRole
 
 
 class GradingTemplateService:
@@ -375,9 +379,13 @@ class TemplateHotfixService:
 
 
 class GradingGovernanceService:
+    CORRECTION_MODE_KEY = "CORRECTION_MODE"
+    CORRECTION_MODE_SYSTEM_REQUEST = "SYSTEM_REQUEST"
+    CORRECTION_MODE_MANUAL_ONLY = "MANUAL_ONLY"
     PREDEADLINE_CORRECTION_MODE_KEY = "PREDEADLINE_CORRECTION_MODE"
     PREDEADLINE_CORRECTION_MODE_REQUEST = "REQUEST_REVIEW"
     PREDEADLINE_CORRECTION_MODE_SELF_REOPEN = "FACULTY_SELF_REOPEN"
+    CORRECTION_WINDOW_HOURS = 24
 
     @staticmethod
     def _round(value: Decimal) -> Decimal:
@@ -411,12 +419,195 @@ class GradingGovernanceService:
         return mode
 
     @classmethod
+    def get_correction_mode(cls, *, tenant_id: int | None):
+        mode = SystemSettingService.get(
+            cls.CORRECTION_MODE_KEY,
+            tenant_id=tenant_id,
+            default=cls.CORRECTION_MODE_SYSTEM_REQUEST,
+        )
+        if mode not in {
+            cls.CORRECTION_MODE_SYSTEM_REQUEST,
+            cls.CORRECTION_MODE_MANUAL_ONLY,
+        }:
+            return cls.CORRECTION_MODE_SYSTEM_REQUEST
+        return mode
+
+    @classmethod
+    def is_system_correction_enabled(cls, *, tenant_id: int | None):
+        return cls.get_correction_mode(tenant_id=tenant_id) == cls.CORRECTION_MODE_SYSTEM_REQUEST
+
+    @staticmethod
+    def resolve_requesting_faculty_department(*, user, tenant_id: int | None):
+        department = getattr(user, "default_department", None)
+        if not department:
+            return None
+        if tenant_id and getattr(department, "tenant_id", None) != tenant_id:
+            return None
+        if hasattr(department, "is_active") and not department.is_active:
+            return None
+        return department
+
+    @classmethod
+    def resolve_correction_route_rule(cls, *, tenant_id: int, faculty_department_id: int | None):
+        dept_rule = None
+        if faculty_department_id:
+            dept_rule = (
+                CorrectionApprovalRouteRule.objects.filter(
+                    tenant_id=tenant_id,
+                    faculty_department_id=faculty_department_id,
+                    is_active=True,
+                )
+                .select_related("step1_role", "final_role", "faculty_department")
+                .first()
+            )
+        if dept_rule:
+            return dept_rule
+        return (
+            CorrectionApprovalRouteRule.objects.filter(
+                tenant_id=tenant_id,
+                faculty_department__isnull=True,
+                is_active=True,
+            )
+            .select_related("step1_role", "final_role", "faculty_department")
+            .first()
+        )
+
+    @classmethod
+    def _build_correction_route_steps(cls, *, route_rule: CorrectionApprovalRouteRule):
+        steps = [
+            {
+                "step_order": 1,
+                "role": route_rule.step1_role,
+                "label": route_rule.step1_role.name or route_rule.step1_role.code,
+                "requires_same_department": route_rule.step1_requires_same_department,
+            }
+        ]
+        if route_rule.route_mode == CorrectionApprovalRouteRule.RouteMode.TWO_STEP:
+            if not route_rule.final_role_id:
+                raise ValidationError("Two-step route requires a final approver role.")
+            steps.append(
+                {
+                    "step_order": 2,
+                    "role": route_rule.final_role,
+                    "label": route_rule.final_role.name or route_rule.final_role.code,
+                    "requires_same_department": route_rule.final_requires_same_department,
+                }
+            )
+        return steps
+
+    @classmethod
+    def initialize_correction_route(cls, *, request_obj: GradeCorrectionRequest):
+        faculty_department = cls.resolve_requesting_faculty_department(
+            user=request_obj.requested_by_user,
+            tenant_id=request_obj.tenant_id,
+        )
+        faculty_department_id = faculty_department.id if faculty_department else None
+        route_rule = cls.resolve_correction_route_rule(
+            tenant_id=request_obj.tenant_id,
+            faculty_department_id=faculty_department_id,
+        )
+        if route_rule:
+            steps = cls._build_correction_route_steps(route_rule=route_rule)
+        else:
+            fallback_role_codes = ["CAO", "REGISTRAR", "DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN"]
+            fallback_role = None
+            for role_code in fallback_role_codes:
+                role_candidate = Role.objects.filter(code=role_code, is_active=True).first()
+                if role_candidate:
+                    fallback_role = role_candidate
+                    break
+            if not fallback_role:
+                raise ValidationError(
+                    "No active correction route is configured and no fallback approver role was found."
+                )
+            steps = [
+                {
+                    "step_order": 1,
+                    "role": fallback_role,
+                    "label": fallback_role.name or fallback_role.code,
+                    "requires_same_department": False,
+                }
+            ]
+        request_obj.faculty_department_id = faculty_department_id
+        request_obj.approval_route_id = route_rule.id if route_rule else None
+        request_obj.save(update_fields=["faculty_department", "approval_route", "updated_at"])
+
+        step_rows = [
+            GradeCorrectionApprovalStep(
+                correction_request=request_obj,
+                step_order=step["step_order"],
+                approver_role_id=step["role"].id,
+                approver_label=step["label"],
+                requires_same_department=step["requires_same_department"],
+                status=GradeCorrectionApprovalStep.Status.PENDING,
+            )
+            for step in steps
+        ]
+        GradeCorrectionApprovalStep.objects.bulk_create(step_rows)
+
+    @staticmethod
+    def get_pending_correction_step(*, request_obj: GradeCorrectionRequest):
+        return (
+            request_obj.approval_steps.filter(status=GradeCorrectionApprovalStep.Status.PENDING)
+            .order_by("step_order")
+            .select_related("approver_role")
+            .first()
+        )
+
+    @staticmethod
+    def _user_has_role_for_correction_step(*, user, request_obj: GradeCorrectionRequest, step: GradeCorrectionApprovalStep):
+        if user.is_superuser:
+            return True
+        return UserRole.objects.filter(
+            user=user,
+            role_id=step.approver_role_id,
+            is_active=True,
+        ).filter(
+            Q(tenant_id=request_obj.tenant_id) | Q(tenant__isnull=True)
+        ).filter(
+            Q(campus_id=request_obj.campus_id) | Q(campus__isnull=True)
+        ).exists()
+
+    @classmethod
+    def can_user_review_correction_request(cls, *, request_obj: GradeCorrectionRequest, user):
+        pending_step = cls.get_pending_correction_step(request_obj=request_obj)
+        if not pending_step:
+            # Legacy request created before route-matrix rollout.
+            return True, None, None
+        if not cls._user_has_role_for_correction_step(user=user, request_obj=request_obj, step=pending_step):
+            return (
+                False,
+                pending_step,
+                f"Only users with role {pending_step.approver_role.code} can review this step.",
+            )
+        if pending_step.requires_same_department:
+            user_dept_id = getattr(user, "default_department_id", None)
+            if not user_dept_id or user_dept_id != request_obj.faculty_department_id:
+                return (
+                    False,
+                    pending_step,
+                    "This step requires the approver to belong to the same faculty department as the requester.",
+                )
+        return True, pending_step, None
+
+    @classmethod
+    def is_final_correction_step(cls, *, request_obj: GradeCorrectionRequest, step: GradeCorrectionApprovalStep | None):
+        if step is None:
+            return True
+        return not request_obj.approval_steps.filter(
+            status=GradeCorrectionApprovalStep.Status.PENDING,
+            step_order__gt=step.step_order,
+        ).exists()
+
+    @classmethod
     def resolve_submission_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
         lock = cls.resolve_lock(offering=offering, template_period=template_period)
         return lock.deadline_at if lock else None
 
     @classmethod
     def can_faculty_self_reopen_before_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
+        if not cls.is_system_correction_enabled(tenant_id=offering.tenant_id):
+            return False
         submission = cls.get_submission(offering=offering, template_period=template_period)
         if not submission or submission.status != GradeSubmission.Status.SUBMITTED:
             return False
@@ -626,6 +817,75 @@ class GradingGovernanceService:
         ).order_by("-updated_at").first()
 
     @classmethod
+    @transaction.atomic
+    def auto_lapse_expired_correction_windows(cls, *, at=None, dry_run: bool = False):
+        now = at or timezone.now()
+        due_windows = list(
+            GradeCorrectionUnlockWindow.objects.select_related("correction_request", "offering", "template_period")
+            .filter(
+                is_active=True,
+                is_consumed=False,
+                end_at__lt=now,
+                correction_request__status=GradeCorrectionRequest.Status.APPROVED,
+            )
+            .order_by("end_at", "id")
+        )
+
+        rows = []
+        for window in due_windows:
+            request_obj = window.correction_request
+            rows.append(
+                {
+                    "window_id": window.id,
+                    "request_id": request_obj.id,
+                    "offering_id": window.offering_id,
+                    "template_period_id": window.template_period_id,
+                    "window_end_at": window.end_at,
+                }
+            )
+            if dry_run:
+                continue
+
+            window.is_active = False
+            window.is_consumed = True
+            window.closed_at = now
+            window.save(update_fields=["is_active", "is_consumed", "closed_at", "updated_at"])
+
+            request_obj.status = GradeCorrectionRequest.Status.LAPSED
+            request_obj.save(update_fields=["status", "updated_at"])
+
+            AuditService.log_event(
+                action="LAPSE",
+                portal="SYSTEM",
+                entity_type="GradeCorrectionRequest",
+                entity_id=request_obj.id,
+                actor=None,
+                tenant=request_obj.tenant,
+                campus=request_obj.campus,
+                before_data={
+                    "status": GradeCorrectionRequest.Status.APPROVED,
+                    "window_end_at": window.end_at.isoformat() if window.end_at else None,
+                },
+                after_data={
+                    "status": GradeCorrectionRequest.Status.LAPSED,
+                    "window_consumed": True,
+                    "lapsed_at": now.isoformat(),
+                },
+                metadata={
+                    "mode": "AUTO_LAPSE_CORRECTION_WINDOW",
+                    "window_id": window.id,
+                    "correction_window_hours": cls.CORRECTION_WINDOW_HOURS,
+                },
+            )
+
+        return {
+            "checked_at": now,
+            "count": len(rows),
+            "dry_run": dry_run,
+            "rows": rows,
+        }
+
+    @classmethod
     def is_locked(cls, *, offering, template_period: GradingTemplatePeriod):
         lock = cls.resolve_lock(offering=offering, template_period=template_period)
         return bool(lock and lock.is_locked)
@@ -638,6 +898,7 @@ class GradingGovernanceService:
     @classmethod
     def get_active_unlock_window(cls, *, offering, template_period: GradingTemplatePeriod, at=None):
         now = at or timezone.now()
+        cls.auto_lapse_expired_correction_windows(at=now)
         return (
             GradeCorrectionUnlockWindow.objects.select_related("correction_request")
             .filter(
@@ -901,6 +1162,11 @@ class GradingGovernanceService:
         justification: str,
         items: list[dict],
     ):
+        if not cls.is_system_correction_enabled(tenant_id=offering.tenant_id):
+            raise ValidationError(
+                "Correction requests are disabled by tenant policy (MANUAL_ONLY). "
+                "Please follow the manual approval process and ask authorized admin to reopen."
+            )
         if not cls.is_submitted(offering=offering, template_period=template_period):
             raise ValidationError("Correction requests are allowed only after period submission.")
         if not items:
@@ -915,6 +1181,7 @@ class GradingGovernanceService:
             status=GradeCorrectionRequest.Status.PENDING,
             justification=justification.strip(),
         )
+        cls.initialize_correction_route(request_obj=request_obj)
         item_rows = []
         for item in items:
             item_rows.append(
@@ -947,15 +1214,49 @@ class GradingGovernanceService:
             raise ValidationError("Only pending correction requests can be reviewed.")
 
         now = timezone.now()
+        can_review, pending_step, reason = cls.can_user_review_correction_request(
+            request_obj=request_obj,
+            user=reviewer,
+        )
+        if not can_review:
+            raise ValidationError(reason or "You are not allowed to review this correction request.")
+
+        remarks_value = (review_remarks or "").strip() or None
+        is_final_step = cls.is_final_correction_step(request_obj=request_obj, step=pending_step)
+
+        if pending_step:
+            pending_step.reviewed_by_user = reviewer
+            pending_step.reviewed_at = now
+            pending_step.review_remarks = remarks_value
+            pending_step.status = (
+                GradeCorrectionApprovalStep.Status.APPROVED
+                if approved
+                else GradeCorrectionApprovalStep.Status.REJECTED
+            )
+            pending_step.save(
+                update_fields=[
+                    "status",
+                    "reviewed_by_user",
+                    "reviewed_at",
+                    "review_remarks",
+                    "updated_at",
+                ]
+            )
+
+        if approved and not is_final_step:
+            request_obj.reviewed_by_user = reviewer
+            request_obj.reviewed_at = now
+            request_obj.review_remarks = remarks_value
+            request_obj.save(update_fields=["reviewed_by_user", "reviewed_at", "review_remarks", "updated_at"])
+            return request_obj
+
         request_obj.reviewed_by_user = reviewer
         request_obj.reviewed_at = now
-        request_obj.review_remarks = (review_remarks or "").strip() or None
+        request_obj.review_remarks = remarks_value
 
         if approved:
-            if not window_start or not window_end:
-                raise ValidationError("Window start and end are required for approval.")
-            if window_end <= window_start:
-                raise ValidationError("Correction window end must be later than start.")
+            window_start = now
+            window_end = now + timedelta(hours=cls.CORRECTION_WINDOW_HOURS)
             request_obj.status = GradeCorrectionRequest.Status.APPROVED
 
             GradeCorrectionUnlockWindow.objects.filter(
@@ -979,6 +1280,11 @@ class GradingGovernanceService:
             )
         else:
             request_obj.status = GradeCorrectionRequest.Status.REJECTED
+            if pending_step:
+                request_obj.approval_steps.filter(
+                    status=GradeCorrectionApprovalStep.Status.PENDING,
+                    step_order__gt=pending_step.step_order,
+                ).update(status=GradeCorrectionApprovalStep.Status.SKIPPED)
 
         request_obj.save(
             update_fields=[
@@ -1163,6 +1469,24 @@ class FacultyGradingService:
         if template.default_base_value is not None:
             return Decimal(template.default_base_value)
         return Decimal("50")
+
+    @classmethod
+    def resolve_passing_threshold(cls, offering) -> Decimal:
+        profile = cls.resolve_grading_profile_for_offering(offering)
+        if profile and profile.passing_grade_threshold is not None:
+            try:
+                return cls._round(Decimal(profile.passing_grade_threshold))
+            except Exception:
+                pass
+        tenant_value = SystemSettingService.get(
+            "PASSING_GRADE_THRESHOLD",
+            tenant_id=offering.tenant_id,
+            default="75",
+        )
+        try:
+            return cls._round(Decimal(str(tenant_value)))
+        except Exception:
+            return Decimal("75.00")
 
     @staticmethod
     def get_active_enrollments(offering):

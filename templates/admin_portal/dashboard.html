@@ -1,275 +1,472 @@
 {% extends "admin_portal/base.html" %}
 
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .admin-dashboard {
+    max-width: 1360px;
+    margin: 0 auto;
+  }
+  .dash-header {
+    border: 1px solid #d7e1d5;
+    border-radius: 14px;
+    background: linear-gradient(120deg, #f5f8f3 0%, #eef4ed 62%, #faf3d8 100%);
+    padding: 1rem 1.15rem;
+    margin-bottom: 1rem;
+  }
+  .dash-header h2 {
+    color: #1f4b33;
+    font-weight: 800;
+    margin-bottom: 0.2rem;
+  }
+  .dash-header p {
+    color: #4a6658;
+    margin: 0;
+    font-size: 0.92rem;
+  }
+  .dash-stage {
+    border: 1px solid #9ebca6;
+    color: #1f4b33;
+    background: #eef7ec;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 0.3rem 0.72rem;
+    font-size: 0.82rem;
+  }
+  .dashboard-section {
+    margin-top: 1.05rem;
+  }
+  .section-card {
+    border: 1px solid #d7e1d5;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 8px 20px rgba(26, 58, 35, 0.06);
+  }
+  .section-header {
+    padding: 0.78rem 0.95rem;
+    border-bottom: 1px solid #dfe8dc;
+    background: linear-gradient(120deg, #f7faf6 0%, #eff5ee 100%);
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+  }
+  .section-title {
+    margin: 0;
+    color: #214d35;
+    font-size: 1rem;
+    font-weight: 800;
+  }
+  .section-subtitle {
+    margin: 0.25rem 0 0;
+    color: #5a7566;
+    font-size: 0.82rem;
+  }
+  .metric-card {
+    border: 1px solid #d8e3d7;
+    border-radius: 12px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbf7 100%);
+    box-shadow: 0 6px 16px rgba(30, 62, 38, 0.05);
+    height: 100%;
+  }
+  .metric-card .card-body {
+    padding: 0.9rem 0.95rem;
+  }
+  .metric-label {
+    color: #5b7466;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+  }
+  .metric-value {
+    color: #1f4c34;
+    font-size: 1.35rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin: 0;
+  }
+  .scope-card-body {
+    padding: 0.95rem;
+  }
+  .scope-note {
+    color: #607a6c;
+    font-size: 0.82rem;
+  }
+  .mini-metric {
+    border: 1px solid #dce6d9;
+    border-radius: 10px;
+    background: #f7fbf6;
+    padding: 0.8rem 0.85rem;
+    height: 100%;
+  }
+  .mini-metric .label {
+    color: #5a7565;
+    font-size: 0.8rem;
+    margin-bottom: 0.2rem;
+  }
+  .mini-metric .value {
+    color: #214d35;
+    font-weight: 800;
+    font-size: 1.25rem;
+    margin-bottom: 0.2rem;
+  }
+  .mini-metric .hint {
+    color: #6c8579;
+    font-size: 0.79rem;
+    margin: 0;
+  }
+  .table-shell {
+    border: 1px solid #dde7db;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #ffffff;
+    height: 100%;
+  }
+  .table-shell-title {
+    padding: 0.62rem 0.82rem;
+    border-bottom: 1px solid #dfe8dd;
+    background: #f4f8f3;
+    color: #4f6b5c;
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .table-shell .table {
+    margin-bottom: 0;
+  }
+  .table-shell .table thead th {
+    background: #f9fcf8;
+    color: #4f6b5c;
+    font-size: 0.79rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-bottom: 1px solid #dfe8dd;
+  }
+  .quick-actions .btn {
+    font-weight: 700;
+    border-radius: 10px;
+    padding-top: 0.62rem;
+    padding-bottom: 0.62rem;
+  }
+  .import-callout {
+    border: 1px solid #bcd8c4;
+    background: #eff8f2;
+    color: #2e5e44;
+    border-radius: 10px;
+    padding: 0.82rem 0.95rem;
+    margin-top: 1rem;
+    margin-bottom: 0;
+  }
+  @media (max-width: 767.98px) {
+    .dash-header {
+      padding: 0.85rem 0.9rem;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block admin_content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h2 class="h4 mb-0">Dashboard</h2>
-  <span class="badge text-bg-success">Stage 0.75</span>
-</div>
-
-<div class="row g-3">
-  <div class="col-md-3">
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <div class="text-muted small">Tenants</div>
-        <div class="h5 mb-0">{{ stats.tenants }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <div class="text-muted small">Campuses</div>
-        <div class="h5 mb-0">{{ stats.campuses }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <div class="text-muted small">Users</div>
-        <div class="h5 mb-0">{{ stats.users }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <div class="text-muted small">Audit Logs</div>
-        <div class="h5 mb-0">{{ stats.audit_logs }}</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="card border-0 shadow-sm mt-3">
-  <div class="card-header bg-white d-flex justify-content-between align-items-center">
-    <div class="fw-semibold">Active Academic Scope</div>
-    {% if current_tenant_id %}
-    <span class="badge text-bg-light border">Tenant Scope Active</span>
-    {% endif %}
-  </div>
-  <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+<div class="admin-dashboard">
+  <div class="dash-header d-flex justify-content-between align-items-start gap-3">
     <div>
-      {% if active_academic_year and active_term %}
-      <div class="small text-muted mb-1">Faculty portal auto-archive basis</div>
-      <div class="h6 mb-1">{{ active_academic_year.code }} / {{ active_term.code }}</div>
-      <div class="text-muted small">{{ active_academic_year.name }} | {{ active_term.name }}</div>
-      {% elif current_tenant_id %}
-      <div class="small text-muted mb-1">Faculty portal auto-archive basis</div>
-      <div class="h6 mb-1">Not configured</div>
-      <div class="text-muted small">Set an active AY/Term so faculty active and archived classes stay aligned.</div>
-      {% else %}
-      <div class="h6 mb-1">No tenant selected</div>
-      <div class="text-muted small">Choose a tenant from the top scope selectors to manage academic scope.</div>
-      {% endif %}
+      <h2 class="h4">Dashboard</h2>
+      <p>Operational overview of scope, imports, governance locks, and user activity.</p>
     </div>
-    {% if has_system_settings_update %}
-    <div>
-      <a class="btn btn-outline-success" href="{% url 'admin_portal:active_academic_term_settings' %}">
-        Configure Active AY / Term
-      </a>
-    </div>
-    {% endif %}
+    <span class="dash-stage">Stage 0.75</span>
   </div>
-</div>
 
-{% if has_grading_period_lock and lock_monitor %}
-<div class="card border-0 shadow-sm mt-3">
-  <div class="card-header bg-white d-flex justify-content-between align-items-center">
-    <div class="fw-semibold">Automatic Period Lock Monitor</div>
-    <div class="d-flex align-items-center gap-2">
-      {% if lock_monitor.overdue_open_count %}
-      <span class="badge text-bg-danger">{{ lock_monitor.overdue_open_count }} overdue</span>
-      {% endif %}
-      <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:grading_period_lock_list' %}">Open Lock Rules</a>
-    </div>
-  </div>
-  <div class="card-body">
-    <div class="row g-3 mb-3">
-      <div class="col-md-4">
-        <div class="rounded-3 bg-light border p-3 h-100">
-          <div class="small text-muted">Next Due Auto-Locks</div>
-          <div class="h5 mb-1">{{ lock_monitor.upcoming_count }}</div>
-          <div class="small text-muted">Upcoming open rules with deadlines waiting for cron.</div>
-        </div>
-      </div>
-      <div class="col-md-4">
-        <div class="rounded-3 bg-light border p-3 h-100">
-          <div class="small text-muted">Recently Auto-Locked</div>
-          <div class="h5 mb-1">{{ lock_monitor.recent_auto_locked_count }}</div>
-          <div class="small text-muted">Most recent rules locked by the deadline job.</div>
-        </div>
-      </div>
-      <div class="col-md-4">
-        <div class="rounded-3 bg-light border p-3 h-100">
-          <div class="small text-muted">Dashboard Checked</div>
-          <div class="h6 mb-1">{{ lock_monitor.checked_at|date:"Y-m-d H:i:s" }}</div>
-          <div class="small text-muted">Refreshes every 30 seconds to mirror cron outcomes.</div>
-        </div>
-      </div>
-    </div>
-
+  <div class="dashboard-section">
     <div class="row g-3">
-      <div class="col-lg-6">
-        <div class="border rounded-3 h-100">
-          <div class="px-3 py-2 border-bottom bg-light fw-semibold small text-uppercase text-muted">Upcoming Deadline Locks</div>
-          <div class="table-responsive">
-            <table class="table table-sm align-middle mb-0">
-              <thead>
-              <tr>
-                <th>Campus</th>
-                <th>AY / Term</th>
-                <th>Period</th>
-                <th>Scope</th>
-                <th>Deadline</th>
-              </tr>
-              </thead>
-              <tbody>
-              {% for row in lock_monitor.next_due_locks %}
-              <tr>
-                <td>{{ row.campus.code }}</td>
-                <td>{{ row.academic_year.code }} / {{ row.term.code }}</td>
-                <td>{{ row.period_code }}</td>
-                <td>{% if row.course_offering %}Offering{% else %}Campus{% endif %}</td>
-                <td>{{ row.deadline_at|date:"Y-m-d H:i" }}</td>
-              </tr>
-              {% empty %}
-              <tr><td colspan="5" class="text-center text-muted py-4">No upcoming deadline-based locks in current scope.</td></tr>
-              {% endfor %}
-              </tbody>
-            </table>
+      <div class="col-sm-6 col-xl-3">
+        <div class="metric-card">
+          <div class="card-body">
+            <div class="metric-label">Tenants</div>
+            <p class="metric-value">{{ stats.tenants }}</p>
           </div>
         </div>
       </div>
-      <div class="col-lg-6">
-        <div class="border rounded-3 h-100">
-          <div class="px-3 py-2 border-bottom bg-light fw-semibold small text-uppercase text-muted">Recently Auto-Locked</div>
-          <div class="table-responsive">
-            <table class="table table-sm align-middle mb-0">
-              <thead>
-              <tr>
-                <th>Campus</th>
-                <th>AY / Term</th>
-                <th>Period</th>
-                <th>Locked At</th>
-                <th>Note</th>
-              </tr>
-              </thead>
-              <tbody>
-              {% for row in lock_monitor.recently_auto_locked %}
-              <tr>
-                <td>{{ row.campus.code }}</td>
-                <td>{{ row.academic_year.code }} / {{ row.term.code }}</td>
-                <td>{{ row.period_code }}</td>
-                <td>{{ row.locked_at|date:"Y-m-d H:i" }}</td>
-                <td><small class="text-muted">{{ row.remarks|default:"Auto-locked by deadline." }}</small></td>
-              </tr>
-              {% empty %}
-              <tr><td colspan="5" class="text-center text-muted py-4">No auto-locked periods recorded yet in current scope.</td></tr>
-              {% endfor %}
-              </tbody>
-            </table>
+      <div class="col-sm-6 col-xl-3">
+        <div class="metric-card">
+          <div class="card-body">
+            <div class="metric-label">Campuses</div>
+            <p class="metric-value">{{ stats.campuses }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="metric-card">
+          <div class="card-body">
+            <div class="metric-label">Users</div>
+            <p class="metric-value">{{ stats.users }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="metric-card">
+          <div class="card-body">
+            <div class="metric-label">Audit Logs</div>
+            <p class="metric-value">{{ stats.audit_logs }}</p>
           </div>
         </div>
       </div>
     </div>
   </div>
-</div>
-{% endif %}
 
-{% if has_import_read and import_stats %}
-<div class="row g-3 mt-2">
-  <div class="col-md-3">
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <div class="text-muted small">Import Batches</div>
-        <div class="h5 mb-0">{{ import_stats.total_batches }}</div>
+  <div class="dashboard-section">
+    <div class="section-card">
+      <div class="section-header d-flex justify-content-between align-items-center gap-2 flex-wrap">
+        <div>
+          <h3 class="section-title">Active Academic Scope</h3>
+          <p class="section-subtitle">Reference for faculty active/archive class classification.</p>
+        </div>
+        {% if current_tenant_id %}
+        <span class="badge text-bg-light border">Tenant Scope Active</span>
+        {% endif %}
       </div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <div class="text-muted small">Pending Confirmations</div>
-        <div class="h5 mb-0">{{ import_stats.pending_confirmations }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <div class="text-muted small">Failed Batches</div>
-        <div class="h5 mb-0">{{ import_stats.failed_batches }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-3">
-    <div class="card border-0 shadow-sm">
-      <div class="card-body">
-        <div class="text-muted small">Imported Rows</div>
-        <div class="h5 mb-0">{{ import_stats.imported_rows_total }}</div>
-      </div>
-    </div>
-  </div>
-</div>
-{% endif %}
-
-<div class="row g-3 mt-2">
-  <div class="col-md-4"><a class="btn btn-outline-primary w-100" href="{% url 'admin_portal:user_list' %}">Manage Users</a></div>
-  <div class="col-md-4"><a class="btn btn-outline-primary w-100" href="{% url 'admin_portal:role_list' %}">Manage Roles</a></div>
-  <div class="col-md-4"><a class="btn btn-outline-primary w-100" href="{% url 'admin_portal:audit_log_list' %}">View Audit Logs</a></div>
-</div>
-
-{% if has_users_read %}
-<div class="card border-0 shadow-sm mt-3">
-  <div class="card-header bg-white d-flex justify-content-between align-items-center">
-    <div class="fw-semibold">Currently Logged-in Users</div>
-    <span class="badge text-bg-success">{{ active_user_count }}</span>
-  </div>
-  <div class="table-responsive">
-    <table class="table table-sm table-hover mb-0">
-      <thead>
-      <tr>
-        <th>User</th>
-        <th>Email</th>
-        <th>Tenant / Campus</th>
-        <th>Current Activity (latest captured)</th>
-        <th>Last Activity At</th>
-        <th>Session Expires</th>
-      </tr>
-      </thead>
-      <tbody>
-      {% for row in active_user_sessions %}
-      <tr>
-        <td>{{ row.user.username }}</td>
-        <td>{{ row.user.email|default:"-" }}</td>
-        <td>{{ row.user.default_tenant.code|default:"-" }} / {{ row.user.default_campus.code|default:"-" }}</td>
-        <td>
-          <div>{{ row.last_activity_label }}</div>
-          {% if row.last_activity_action %}
-          <small class="text-muted">{{ row.last_activity_action }}{% if row.last_activity_entity %} | {{ row.last_activity_entity }}{% endif %}</small>
+      <div class="scope-card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div>
+          {% if active_academic_year and active_term %}
+          <div class="scope-note mb-1">Faculty portal auto-archive basis</div>
+          <div class="h6 mb-1">{{ active_academic_year.code }} / {{ active_term.code }}</div>
+          <div class="text-muted small">{{ active_academic_year.name }} | {{ active_term.name }}</div>
+          {% elif current_tenant_id %}
+          <div class="scope-note mb-1">Faculty portal auto-archive basis</div>
+          <div class="h6 mb-1">Not configured</div>
+          <div class="text-muted small">Set an active AY/Term so faculty active and archived classes stay aligned.</div>
+          {% else %}
+          <div class="h6 mb-1">No tenant selected</div>
+          <div class="text-muted small">Choose a tenant from the top scope selectors to manage academic scope.</div>
           {% endif %}
-        </td>
-        <td>{% if row.last_activity_at %}{{ row.last_activity_at|date:"Y-m-d H:i:s" }}{% else %}-{% endif %}</td>
-        <td>{% if row.session_expires_at %}{{ row.session_expires_at|date:"Y-m-d H:i:s" }}{% else %}-{% endif %}</td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="6" class="text-center text-muted py-4">No active logged-in users found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
+        </div>
+        {% if has_system_settings_update %}
+        <div>
+          <a class="btn btn-outline-success" href="{% url 'admin_portal:active_academic_term_settings' %}">
+            Configure Active AY / Term
+          </a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
   </div>
-  <div class="card-footer small text-muted">
-    Dashboard auto-refreshes every 30 seconds. Activity reflects latest auditable route or event captured.
-  </div>
-</div>
-{% endif %}
 
-{% if has_import_read %}
-<div class="alert alert-info mt-3 mb-0">
-  Bulk import tools are now available in the left navigation under <strong>Tools</strong>.
+  {% if has_grading_period_lock and lock_monitor %}
+  <div class="dashboard-section">
+    <div class="section-card">
+      <div class="section-header d-flex justify-content-between align-items-center gap-2 flex-wrap">
+        <div>
+          <h3 class="section-title">Automatic Period Lock Monitor</h3>
+          <p class="section-subtitle">Deadline-driven lock status tracked per scope.</p>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          {% if lock_monitor.overdue_open_count %}
+          <span class="badge text-bg-danger">{{ lock_monitor.overdue_open_count }} overdue</span>
+          {% endif %}
+          <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:grading_period_lock_list' %}">Open Lock Rules</a>
+        </div>
+      </div>
+      <div class="p-3">
+        <div class="row g-3 mb-3">
+          <div class="col-md-4">
+            <div class="mini-metric">
+              <div class="label">Next Due Auto-Locks</div>
+              <div class="value">{{ lock_monitor.upcoming_count }}</div>
+              <p class="hint">Upcoming open rules with deadlines waiting for cron.</p>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="mini-metric">
+              <div class="label">Recently Auto-Locked</div>
+              <div class="value">{{ lock_monitor.recent_auto_locked_count }}</div>
+              <p class="hint">Most recent rules locked by the deadline job.</p>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="mini-metric">
+              <div class="label">Dashboard Checked</div>
+              <div class="h6 mb-1">{{ lock_monitor.checked_at|date:"Y-m-d H:i:s" }}</div>
+              <p class="hint">Refreshes every 30 seconds to mirror cron outcomes.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-lg-6">
+            <div class="table-shell">
+              <div class="table-shell-title">Upcoming Deadline Locks</div>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                  <thead>
+                  <tr>
+                    <th>Campus</th>
+                    <th>AY / Term</th>
+                    <th>Period</th>
+                    <th>Scope</th>
+                    <th>Deadline</th>
+                  </tr>
+                  </thead>
+                  <tbody>
+                  {% for row in lock_monitor.next_due_locks %}
+                  <tr>
+                    <td>{{ row.campus.code }}</td>
+                    <td>{{ row.academic_year.code }} / {{ row.term.code }}</td>
+                    <td>{{ row.period_code }}</td>
+                    <td>{% if row.course_offering %}Offering{% else %}Campus{% endif %}</td>
+                    <td>{{ row.deadline_at|date:"Y-m-d H:i" }}</td>
+                  </tr>
+                  {% empty %}
+                  <tr><td colspan="5" class="text-center text-muted py-4">No upcoming deadline-based locks in current scope.</td></tr>
+                  {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="table-shell">
+              <div class="table-shell-title">Recently Auto-Locked</div>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                  <thead>
+                  <tr>
+                    <th>Campus</th>
+                    <th>AY / Term</th>
+                    <th>Period</th>
+                    <th>Locked At</th>
+                    <th>Note</th>
+                  </tr>
+                  </thead>
+                  <tbody>
+                  {% for row in lock_monitor.recently_auto_locked %}
+                  <tr>
+                    <td>{{ row.campus.code }}</td>
+                    <td>{{ row.academic_year.code }} / {{ row.term.code }}</td>
+                    <td>{{ row.period_code }}</td>
+                    <td>{{ row.locked_at|date:"Y-m-d H:i" }}</td>
+                    <td><small class="text-muted">{{ row.remarks|default:"Auto-locked by deadline." }}</small></td>
+                  </tr>
+                  {% empty %}
+                  <tr><td colspan="5" class="text-center text-muted py-4">No auto-locked periods recorded yet in current scope.</td></tr>
+                  {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if has_import_read and import_stats %}
+  <div class="dashboard-section">
+    <div class="row g-3">
+      <div class="col-sm-6 col-xl-3">
+        <div class="metric-card">
+          <div class="card-body">
+            <div class="metric-label">Import Batches</div>
+            <p class="metric-value">{{ import_stats.total_batches }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="metric-card">
+          <div class="card-body">
+            <div class="metric-label">Pending Confirmations</div>
+            <p class="metric-value">{{ import_stats.pending_confirmations }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="metric-card">
+          <div class="card-body">
+            <div class="metric-label">Failed Batches</div>
+            <p class="metric-value">{{ import_stats.failed_batches }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="metric-card">
+          <div class="card-body">
+            <div class="metric-label">Imported Rows</div>
+            <p class="metric-value">{{ import_stats.imported_rows_total }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="dashboard-section quick-actions">
+    <div class="section-card">
+      <div class="section-header">
+        <h3 class="section-title">Quick Actions</h3>
+      </div>
+      <div class="p-3">
+        <div class="row g-3">
+          <div class="col-md-3"><a class="btn btn-outline-primary w-100" href="{% url 'admin_portal:user_list' %}">Manage Users</a></div>
+          <div class="col-md-3"><a class="btn btn-outline-primary w-100" href="{% url 'admin_portal:role_list' %}">Manage Roles</a></div>
+          <div class="col-md-3"><a class="btn btn-outline-primary w-100" href="{% url 'admin_portal:audit_log_list' %}">View Audit Logs</a></div>
+          {% if "grading_analytics.read" in effective_permissions %}
+          <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:grading_analytics' %}">Grading Analytics</a></div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if has_users_read %}
+  <div class="dashboard-section">
+    <div class="section-card">
+      <div class="section-header d-flex justify-content-between align-items-center">
+        <div>
+          <h3 class="section-title">Currently Logged-in Users</h3>
+          <p class="section-subtitle">Latest auditable activity and session visibility.</p>
+        </div>
+        <span class="badge text-bg-success">{{ active_user_count }}</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+          <tr>
+            <th>User</th>
+            <th>Email</th>
+            <th>Tenant / Campus</th>
+            <th>Current Activity (latest captured)</th>
+            <th>Last Activity At</th>
+            <th>Session Expires</th>
+          </tr>
+          </thead>
+          <tbody>
+          {% for row in active_user_sessions %}
+          <tr>
+            <td>{{ row.user.username }}</td>
+            <td>{{ row.user.email|default:"-" }}</td>
+            <td>{{ row.user.default_tenant.code|default:"-" }} / {{ row.user.default_campus.code|default:"-" }}</td>
+            <td>
+              <div>{{ row.last_activity_label }}</div>
+              {% if row.last_activity_action %}
+              <small class="text-muted">{{ row.last_activity_action }}{% if row.last_activity_entity %} | {{ row.last_activity_entity }}{% endif %}</small>
+              {% endif %}
+            </td>
+            <td>{% if row.last_activity_at %}{{ row.last_activity_at|date:"Y-m-d H:i:s" }}{% else %}-{% endif %}</td>
+            <td>{% if row.session_expires_at %}{{ row.session_expires_at|date:"Y-m-d H:i:s" }}{% else %}-{% endif %}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="text-center text-muted py-4">No active logged-in users found.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="px-3 py-2 small text-muted border-top">
+        Dashboard auto-refreshes every 30 seconds. Activity reflects latest auditable route or event captured.
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
 </div>
-{% endif %}
 {% endblock %}
 
 {% block extra_js %}

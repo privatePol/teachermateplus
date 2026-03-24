@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.core.services.settings import SystemSettingService
 from apps.grading.models import (
+    CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
     GradeSubmission,
@@ -147,16 +148,19 @@ class UserCreateForm(forms.ModelForm):
             "last_name",
             "default_tenant",
             "default_campus",
+            "default_department",
             "is_active",
             "is_staff",
         ]
 
-    def __init__(self, *args, tenant_queryset=None, campus_queryset=None, **kwargs):
+    def __init__(self, *args, tenant_queryset=None, campus_queryset=None, department_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if tenant_queryset is not None:
             self.fields["default_tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["default_campus"].queryset = campus_queryset
+        if department_queryset is not None:
+            self.fields["default_department"].queryset = department_queryset
         allowed_domains = self._allowed_domains_for_tenant(self._resolve_selected_tenant_id())
         self.fields["email"].help_text = (
             "Allowed email domain(s): " + ", ".join(allowed_domains)
@@ -218,8 +222,13 @@ class UserCreateForm(forms.ModelForm):
         cleaned = super().clean()
         campus = cleaned.get("default_campus")
         tenant = cleaned.get("default_tenant")
+        department = cleaned.get("default_department")
         if campus and tenant and campus.tenant_id != tenant.id:
             raise DjangoValidationError("Default campus must belong to the selected default tenant.")
+        if department and tenant and department.tenant_id != tenant.id:
+            raise DjangoValidationError("Default department must belong to the selected default tenant.")
+        if department and campus and department.campus_id != campus.id:
+            raise DjangoValidationError("Default department must belong to the selected default campus.")
         return cleaned
 
     def save(self, commit=True):
@@ -241,24 +250,32 @@ class UserUpdateForm(forms.ModelForm):
             "last_name",
             "default_tenant",
             "default_campus",
+            "default_department",
             "is_active",
             "is_staff",
         ]
 
-    def __init__(self, *args, tenant_queryset=None, campus_queryset=None, **kwargs):
+    def __init__(self, *args, tenant_queryset=None, campus_queryset=None, department_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if tenant_queryset is not None:
             self.fields["default_tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["default_campus"].queryset = campus_queryset
+        if department_queryset is not None:
+            self.fields["default_department"].queryset = department_queryset
         _enforce_active_reference_choices(self)
 
     def clean(self):
         cleaned = super().clean()
         campus = cleaned.get("default_campus")
         tenant = cleaned.get("default_tenant")
+        department = cleaned.get("default_department")
         if campus and tenant and campus.tenant_id != tenant.id:
             raise DjangoValidationError("Default campus must belong to the selected default tenant.")
+        if department and tenant and department.tenant_id != tenant.id:
+            raise DjangoValidationError("Default department must belong to the selected default tenant.")
+        if department and campus and department.campus_id != campus.id:
+            raise DjangoValidationError("Default department must belong to the selected default campus.")
 
         if self.instance and self.instance.pk and not self.instance.is_superuser:
             default_tenant_id = tenant.id if tenant else None
@@ -984,12 +1001,19 @@ class GradeCorrectionReviewForm(forms.Form):
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
     )
 
+    def __init__(self, *args, require_window: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.require_window = require_window
+        if not self.require_window:
+            self.fields.pop("window_start", None)
+            self.fields.pop("window_end", None)
+
     def clean(self):
         cleaned = super().clean()
         decision = cleaned.get("decision")
         window_start = cleaned.get("window_start")
         window_end = cleaned.get("window_end")
-        if decision == self.Decision.APPROVE:
+        if decision == self.Decision.APPROVE and self.require_window:
             if not window_start:
                 self.add_error("window_start", "Window start is required for approval.")
             if not window_end:
@@ -1013,6 +1037,7 @@ class TenantGradingProfileForm(forms.ModelForm):
             "profile_name",
             "grading_template",
             "default_base_value",
+            "passing_grade_threshold",
             "priority",
             "effective_from_term",
             "is_default",
@@ -1052,6 +1077,10 @@ class TenantGradingProfileForm(forms.ModelForm):
         self.fields["program"].help_text = "Optional narrower scope."
         self.fields["course"].help_text = "Optional course-specific override."
         self.fields["course_type"].help_text = "Optional fallback by course type."
+        self.fields["passing_grade_threshold"].help_text = (
+            "Optional passing threshold for analytics and governance at this profile scope "
+            "(example: 75.00). Leave blank to use tenant default."
+        )
         _enforce_active_reference_choices(self)
 
     def clean(self):
@@ -1086,6 +1115,13 @@ class TenantGradingProfileForm(forms.ModelForm):
         if course and course_type:
             raise forms.ValidationError("Choose either course-specific or course_type fallback, not both.")
         cleaned["course_type"] = course_type or None
+
+        passing_threshold = cleaned.get("passing_grade_threshold")
+        if passing_threshold is not None and (passing_threshold <= 0 or passing_threshold > 100):
+            self.add_error(
+                "passing_grade_threshold",
+                "Passing threshold must be greater than 0 and not greater than 100.",
+            )
         return cleaned
 
 
@@ -1123,10 +1159,23 @@ class ActiveAcademicTermSettingForm(forms.Form):
 
 
 class CorrectionGovernanceSettingForm(forms.Form):
+    CORRECTION_MODE_CHOICES = [
+        ("MANUAL_ONLY", "Manual Only (paper form + admin reopen)"),
+        ("SYSTEM_REQUEST", "System Request Workflow"),
+    ]
     PREDEADLINE_CORRECTION_MODE_CHOICES = [
         ("REQUEST_REVIEW", "Request Review"),
         ("FACULTY_SELF_REOPEN", "Faculty Self-Reopen Before Deadline"),
     ]
+
+    correction_mode = forms.ChoiceField(
+        choices=CORRECTION_MODE_CHOICES,
+        label="Correction process mode",
+        help_text=(
+            "Manual Only disables faculty in-portal correction request filing. "
+            "System Request enables the in-portal correction workflow."
+        ),
+    )
 
     predeadline_correction_mode = forms.ChoiceField(
         choices=PREDEADLINE_CORRECTION_MODE_CHOICES,
@@ -1137,6 +1186,62 @@ class CorrectionGovernanceSettingForm(forms.Form):
         ),
     )
 
+
+class CorrectionApprovalRouteRuleForm(forms.ModelForm):
+    class Meta:
+        model = CorrectionApprovalRouteRule
+        fields = [
+            "faculty_department",
+            "route_mode",
+            "step1_role",
+            "step1_requires_same_department",
+            "final_role",
+            "final_requires_same_department",
+            "notes",
+            "is_active",
+        ]
+
+    def __init__(
+        self,
+        *args,
+        tenant=None,
+        department_queryset=None,
+        role_queryset=None,
+        **kwargs,
+    ):
+        self.tenant = tenant
+        super().__init__(*args, **kwargs)
+        if department_queryset is not None:
+            self.fields["faculty_department"].queryset = department_queryset
+        if role_queryset is not None:
+            self.fields["step1_role"].queryset = role_queryset
+            self.fields["final_role"].queryset = role_queryset
+        self.fields["faculty_department"].required = False
+        self.fields["faculty_department"].help_text = "Leave blank to configure tenant default route."
+        self.fields["final_role"].required = False
+        _enforce_active_reference_choices(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        route_mode = cleaned.get("route_mode")
+        step1_role = cleaned.get("step1_role")
+        final_role = cleaned.get("final_role")
+        faculty_department = cleaned.get("faculty_department")
+
+        if not step1_role:
+            self.add_error("step1_role", "First approver role is required.")
+
+        if route_mode == CorrectionApprovalRouteRule.RouteMode.TWO_STEP and not final_role:
+            self.add_error("final_role", "Final approver role is required for two-step route.")
+        if route_mode == CorrectionApprovalRouteRule.RouteMode.DIRECT_TO_FINAL:
+            cleaned["final_role"] = None
+            cleaned["final_requires_same_department"] = False
+
+        tenant = self.tenant or getattr(self.instance, "tenant", None)
+        if tenant and faculty_department and faculty_department.tenant_id != tenant.id:
+            self.add_error("faculty_department", "Faculty department must belong to the selected tenant scope.")
+
+        return cleaned
 
 class DocumentPrintSettingForm(forms.Form):
     school_name = forms.CharField(

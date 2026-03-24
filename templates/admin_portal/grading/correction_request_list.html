@@ -41,6 +41,7 @@
           <th>Period</th>
           <th>Faculty</th>
           <th>Status</th>
+          <th>Current Approver</th>
           <th>Requested</th>
           <th></th>
         </tr>
@@ -59,10 +60,27 @@
               <span class="badge text-bg-warning">{{ row.status }}</span>
             {% elif row.status == "REJECTED" %}
               <span class="badge text-bg-danger">{{ row.status }}</span>
+            {% elif row.status == "LAPSED" %}
+              <span class="badge text-bg-dark">{{ row.status }}</span>
             {% elif row.status == "CLOSED" %}
               <span class="badge text-bg-secondary">{{ row.status }}</span>
             {% else %}
               <span class="badge text-bg-info">{{ row.status }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.current_approver_label %}
+              {{ row.current_approver_label }}
+            {% elif row.status == "PENDING" %}
+              Legacy reviewer
+            {% elif row.status == "APPROVED" %}
+              Approved
+            {% elif row.status == "REJECTED" %}
+              Rejected
+            {% elif row.status == "LAPSED" %}
+              Lapsed
+            {% else %}
+              -
             {% endif %}
           </td>
           <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
@@ -73,7 +91,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="9" class="text-center text-muted py-4">No correction requests found.</td></tr>
+        <tr><td colspan="10" class="text-center text-muted py-4">No correction requests found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

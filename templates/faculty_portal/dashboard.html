@@ -139,6 +139,9 @@
     <h2 class="h4 mb-1">Faculty Dashboard</h2>
     <div class="text-muted">Quick visibility into class submission progress, student outcomes, and missing records.</div>
   </div>
+  {% if "faculty_analytics.read" in effective_permissions %}
+  <a class="btn btn-outline-success" href="{% url 'faculty_portal:analytics' %}">Open Grading Analytics</a>
+  {% endif %}
 </div>
 
 <div class="card faculty-deadline-card reminder-{{ stats.deadline_reminder.variant }}">

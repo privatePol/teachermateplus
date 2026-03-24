@@ -31,7 +31,7 @@
 {% if is_correction_active %}
 <div class="alert alert-warning">
   Approved correction window is active. Only scoped students/activities can be edited.
-  {% if "corrections.create" in effective_permissions %}
+  {% if "corrections.create" in effective_permissions and system_correction_enabled %}
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">View request</a>
   {% endif %}
 </div>

@@ -105,6 +105,29 @@
     border-color: #9ac6a5;
     box-shadow: 0 0 0 0.2rem rgba(55, 138, 87, 0.12);
   }
+  .admin-help-fab {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid #78927f;
+    color: #214a31;
+    background: #f8fbf8;
+    font-size: 1.4rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    box-shadow: 0 6px 16px rgba(24, 59, 37, 0.16);
+    z-index: 1060;
+  }
+  .admin-help-fab:hover {
+    background: #e6f0e8;
+    color: #103d25;
+  }
 </style>
 {% endblock %}
 
@@ -187,6 +210,7 @@
       </section>
     </main>
   </div>
+  <a class="admin-help-fab" href="{% url 'admin_portal:guide' %}" aria-label="Open Admin User Guide" title="Open Admin User Guide">?</a>
 </div>
 {% endblock %}
 {% block extra_js %}

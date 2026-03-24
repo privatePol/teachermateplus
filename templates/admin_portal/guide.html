@@ -1,0 +1,563 @@
+{% extends "admin_portal/base.html" %}
+{% load static %}
+
+{% block title %}Admin Portal User Guide | EduGradesPro{% endblock %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .admin-guide-wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .admin-guide-hero {
+    border-radius: 14px;
+    padding: 1.15rem 1.25rem;
+    background: linear-gradient(120deg, #f4f8f1 0%, #eef6ea 60%, #fbf5da 100%);
+    border: 1px solid #d8e2d4;
+    margin-bottom: 1rem;
+  }
+  .admin-guide-hero h1 {
+    margin: 0 0 0.4rem 0;
+    font-size: 1.7rem;
+    font-weight: 800;
+    color: #1f4b33;
+  }
+  .admin-guide-hero p {
+    margin: 0;
+    color: #355847;
+  }
+  .admin-guide-toc {
+    border-radius: 12px;
+    border: 1px solid #d7e0d3;
+    background: #ffffff;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+  }
+  .admin-guide-toc h2 {
+    font-size: 1.05rem;
+    margin: 0 0 0.55rem 0;
+    color: #1e4630;
+    font-weight: 700;
+  }
+  .admin-guide-toc ul {
+    margin: 0;
+    padding-left: 1.15rem;
+    columns: 2;
+  }
+  .admin-guide-toc li {
+    margin-bottom: 0.3rem;
+  }
+  .admin-guide-toc a {
+    color: #2b6242;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .admin-guide-toc a:hover {
+    text-decoration: underline;
+  }
+  .guide-section {
+    border: 1px solid #d7e0d3;
+    border-radius: 12px;
+    background: #ffffff;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  .guide-section-head {
+    padding: 0.85rem 1rem;
+    background: linear-gradient(120deg, #eff6ec 0%, #f6faef 72%, #faf4d8 100%);
+    border-bottom: 1px solid #d7e0d3;
+  }
+  .guide-section-head h3 {
+    margin: 0;
+    color: #1f4b33;
+    font-size: 1.15rem;
+    font-weight: 800;
+  }
+  .guide-section-body {
+    padding: 0.95rem 1rem 1rem;
+  }
+  .guide-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 1rem;
+    align-items: start;
+  }
+  .guide-grid.single {
+    grid-template-columns: 1fr;
+  }
+  .guide-list {
+    margin: 0;
+    padding-left: 1.1rem;
+  }
+  .guide-list li {
+    margin-bottom: 0.45rem;
+    color: #2f5341;
+  }
+  .guide-subhead {
+    margin-top: 0.75rem;
+    margin-bottom: 0.35rem;
+    font-weight: 700;
+    color: #1f4736;
+    font-size: 0.95rem;
+  }
+  .guide-steps {
+    margin: 0;
+    padding-left: 1.1rem;
+  }
+  .guide-steps li {
+    margin-bottom: 0.4rem;
+    color: #2d4f3f;
+  }
+  .guide-note {
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid #d8e6cf;
+    background: #f8fcf5;
+    color: #2a4f3d;
+    font-size: 0.93rem;
+    margin-top: 0.75rem;
+  }
+  .guide-image {
+    border: 0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: transparent;
+  }
+  .guide-image img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .quick-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+  }
+  .quick-links a {
+    border: 1px solid #91b59c;
+    color: #1f4b33;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    padding: 0.32rem 0.7rem;
+    text-decoration: none;
+    background: #f7fbf6;
+    font-weight: 600;
+  }
+  .quick-links a:hover {
+    background: #e9f4e7;
+  }
+  .policy-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.35rem;
+  }
+  .policy-table th,
+  .policy-table td {
+    border: 1px solid #d8e2d4;
+    padding: 0.55rem 0.6rem;
+    vertical-align: top;
+  }
+  .policy-table th {
+    background: #f1f7ee;
+    color: #1e4630;
+    font-weight: 700;
+  }
+  .policy-table td {
+    color: #2f5341;
+  }
+  @media (max-width: 991.98px) {
+    .admin-guide-toc ul {
+      columns: 1;
+    }
+    .guide-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block admin_content %}
+<div class="admin-guide-wrap">
+  <div class="admin-guide-hero">
+    <h1>Admin Portal User Guide</h1>
+    <p>
+      Practical operations guide for EduGradesPro admin users. This page is arranged by actual admin workflow:
+      setup, governance settings, imports, submission/reopen control, correction handling, and audit monitoring.
+    </p>
+    <div class="quick-links">
+      <a href="{% url 'admin_portal:dashboard' %}">Dashboard</a>
+      <a href="{% url 'admin_portal:user_list' %}">Users</a>
+      <a href="{% url 'admin_portal:import_batch_list' %}">Tools / Imports</a>
+      <a href="{% url 'admin_portal:active_academic_term_settings' %}">Active AY/Term</a>
+      <a href="{% url 'admin_portal:grading_period_lock_list' %}">Period Locks</a>
+      <a href="{% url 'admin_portal:grade_submission_list' %}">Grade Submissions</a>
+      <a href="{% url 'admin_portal:grade_correction_request_list' %}">Correction Requests</a>
+      <a href="{% url 'admin_portal:audit_log_list' %}">Audit Logs</a>
+    </div>
+  </div>
+
+  <div class="admin-guide-toc">
+    <h2>Guide Contents (by Workstream)</h2>
+    <ul>
+      <li><a href="#quick-start">1. Quick Start Sequence</a></li>
+      <li><a href="#scope">2. Scope Selectors (Tenant/Campus)</a></li>
+      <li><a href="#cfg">3. Configuration Setup</a></li>
+      <li><a href="#records">4. Records Management</a></li>
+      <li><a href="#settings">5. Governance Settings</a></li>
+      <li><a href="#imports">6. Tools and CSV Importing</a></li>
+      <li><a href="#submission">7. Submission and Reopen Control</a></li>
+      <li><a href="#corrections">8. Correction Workflow (System vs Manual)</a></li>
+      <li><a href="#security">9. Security and User Administration</a></li>
+      <li><a href="#audit">10. Audit and Monitoring</a></li>
+      <li><a href="#ops">11. End-of-Term Checklist</a></li>
+      <li><a href="#policies">12. Policy and Governance Reference</a></li>
+    </ul>
+  </div>
+
+  <section class="guide-section" id="quick-start">
+    <div class="guide-section-head"><h3>1. Quick Start Sequence</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid single">
+        <div>
+          <div class="guide-subhead">Phase A - Foundation Setup</div>
+          <ol class="guide-steps">
+            <li>Set top scope first: Tenant then Campus.</li>
+            <li>Verify academic setup: AY/Term, Course, Section, Offering, Faculty Assignment.</li>
+            <li>Set active AY/Term for faculty active/archive behavior.</li>
+          </ol>
+
+          <div class="guide-subhead">Phase B - Governance Controls</div>
+          <ol class="guide-steps">
+            <li>Configure grading deadlines and lock rules.</li>
+            <li>Set correction governance mode and route matrix.</li>
+          </ol>
+
+          <div class="guide-subhead">Phase C - Operations Monitoring</div>
+          <ol class="guide-steps">
+            <li>Monitor submissions, reopen actions, and correction queue.</li>
+            <li>Run audit checks before official release/export.</li>
+          </ol>
+          <div class="guide-note">
+            Recommended sequence each term: Scope -> Setup -> Governance -> Monitoring. Avoid doing reopen/correction
+            actions until deadline rules and correction mode are already configured.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="scope">
+    <div class="guide-section-head"><h3>2. Scope Selectors (Tenant/Campus)</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <ul class="guide-list">
+            <li>Tenant/Campus selectors define operational scope for most list/create/edit actions.</li>
+            <li>Wrong scope selection causes missing/incorrect records in view.</li>
+            <li>Always verify scope before import, reopening, and policy updates.</li>
+          </ul>
+          <div class="guide-subhead">How To</div>
+          <ol class="guide-steps">
+            <li>Select tenant first, then select campus.</li>
+            <li>Open target module and verify listed records align with selected scope.</li>
+            <li>If data looks wrong, check selectors first before deeper troubleshooting.</li>
+          </ol>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/1.png" alt="Scope selector guidance">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="cfg">
+    <div class="guide-section-head"><h3>3. Configuration Setup</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <ul class="guide-list">
+            <li>Create Tenant and Campuses.</li>
+            <li>Create Departments and Programs.</li>
+            <li>Create Academic Years and Terms.</li>
+            <li>Create Courses and Sections.</li>
+            <li>Create Course Offerings and Faculty Assignments.</li>
+            <li>Proceed to Enrollment and grading setup.</li>
+          </ul>
+          <div class="guide-subhead">How To</div>
+          <ol class="guide-steps">
+            <li>Follow strict order: Tenant -> Campus -> Department/Program -> AY/Term.</li>
+            <li>Create course/section masters, then offerings and faculty assignments.</li>
+            <li>Verify all references are active before import/operations.</li>
+          </ol>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/1.png" alt="Configuration workflow screenshot">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="records">
+    <div class="guide-section-head"><h3>4. Records Management</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <ul class="guide-list">
+            <li>Use filters before editing records.</li>
+            <li>Prefer inactivation for historical traceability.</li>
+            <li>Keep codes consistent across imports and operations.</li>
+            <li>Review related dependencies before major edits.</li>
+          </ul>
+          <div class="guide-subhead">How To</div>
+          <ol class="guide-steps">
+            <li>Filter -> Edit exact record -> Save -> Re-verify in list.</li>
+            <li>Inactivate records instead of deleting when operations already depend on them.</li>
+          </ol>
+          <div class="guide-note">
+            Data quality is the top source of grading stability.
+          </div>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/4.png" alt="Records management screenshot">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="settings">
+    <div class="guide-section-head"><h3>5. Governance Settings</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <ul class="guide-list">
+            <li>Set Active AY/Term for academic scope governance.</li>
+            <li>Set Correction Governance Mode:
+              <strong>SYSTEM_REQUEST</strong> or <strong>MANUAL_ONLY</strong>.
+            </li>
+            <li>Set pre-deadline behavior (when SYSTEM_REQUEST is used).</li>
+            <li>Set route matrix by requesting faculty department.</li>
+            <li>Set document print header values.</li>
+          </ul>
+          <div class="guide-subhead">How To</div>
+          <ol class="guide-steps">
+            <li>Go to Tools and open each settings screen by scope.</li>
+            <li>Save mode/settings then verify behavior in Faculty summary and corrections screens.</li>
+            <li>Limit update permissions to authorized governance roles only.</li>
+          </ol>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/settings_guide.png" alt="Admin settings screenshot">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="imports">
+    <div class="guide-section-head"><h3>6. Tools and CSV Importing</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <ul class="guide-list">
+            <li>Use only system-generated templates.</li>
+            <li>Upload and validate first; no insert should occur yet.</li>
+            <li>Review row-level errors and duplicates.</li>
+            <li>Confirm import only after all validation issues are resolved.</li>
+          </ul>
+          <div class="guide-subhead">How To</div>
+          <ol class="guide-steps">
+            <li>Download template for specific import type.</li>
+            <li>Populate required fields with valid business keys.</li>
+            <li>Upload CSV -> review validation result.</li>
+            <li>Fix source data and re-upload until valid.</li>
+            <li>Confirm import and verify list pages.</li>
+          </ol>
+          <div class="guide-note">
+            Strict headers are required by design; custom formats are rejected.
+          </div>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/3.png" alt="Import workflow screenshot">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="submission">
+    <div class="guide-section-head"><h3>7. Submission and Reopen Control</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <ul class="guide-list">
+            <li>Configure deadlines and locks in Grading Period Locks.</li>
+            <li>Monitor submission status in Grade Submissions.</li>
+            <li>Use reopen controls only with approved governance and role permissions.</li>
+            <li>Deadline-driven locks should be backed by scheduled auto-lock job.</li>
+          </ul>
+          <div class="guide-subhead">How To</div>
+          <ol class="guide-steps">
+            <li>Create period lock rule and deadline by scope.</li>
+            <li>Track pending submissions near deadlines.</li>
+            <li>For approved reopen, process from Grade Submissions (authorized user only).</li>
+            <li>Ensure faculty re-submits after correction.</li>
+          </ol>
+          <div class="guide-subhead">Reopening a Submitted Class (Admin Procedure)</div>
+          <ol class="guide-steps">
+            <li>Open <strong>Grade Submissions</strong> and filter by campus/term/course/section/period.</li>
+            <li>Confirm approved basis (system request approval or manual signed form).</li>
+            <li>Click <strong>Reopen</strong> for the exact class-period row.</li>
+            <li>Confirm the row status changes from <strong>SUBMITTED</strong> to open/reopened state.</li>
+            <li>Inform faculty to apply corrections and re-submit before deadline.</li>
+          </ol>
+          <div class="guide-note">
+            Reopen always applies to the class-period submission record, so admins must verify the exact course-section-period before clicking.
+          </div>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/6.png" alt="Submission and lock monitoring screenshot">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="corrections">
+    <div class="guide-section-head"><h3>8. Correction Workflow (System vs Manual)</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <div class="guide-subhead">SYSTEM_REQUEST Mode</div>
+          <ol class="guide-steps">
+            <li>Faculty files correction request in portal.</li>
+            <li>Approvers review based on route matrix and permissions.</li>
+            <li>Final approval opens 24-hour correction window.</li>
+            <li>Faculty updates records and finalizes correction.</li>
+            <li>If not finalized in time, request becomes <strong>LAPSED</strong>.</li>
+          </ol>
+
+          <div class="guide-subhead">MANUAL_ONLY Mode</div>
+          <ol class="guide-steps">
+            <li>Faculty files paper correction form.</li>
+            <li>Manual approvals are completed outside system.</li>
+            <li>After final paper approval, authorized admin reopens class-period in EduGradesPro.</li>
+            <li>Faculty applies approved correction and re-submits grades.</li>
+          </ol>
+
+          <div class="guide-subhead">Important Guardrails</div>
+          <ul class="guide-list">
+            <li>Route matrix is based on requesting faculty department.</li>
+            <li>CAO/dean/coordinator users must have correct scoped roles.</li>
+            <li>Use remarks/reference number for traceability, especially in manual mode.</li>
+            <li>All correction/reopen decisions are auditable.</li>
+            <li>When final approval grants a 24-hour window, unexecuted requests automatically lapse and require a new request.</li>
+          </ul>
+          <div class="guide-note">
+            If registrar policy requires paper source-of-truth, set mode to MANUAL_ONLY. Faculty does not file online request; admin executes reopen only after approved form.
+          </div>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/7.png" alt="Correction and reopen governance screenshot">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="security">
+    <div class="guide-section-head"><h3>9. Security and User Administration</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid single">
+        <div>
+          <ul class="guide-list">
+            <li>Enforce domain policy, password complexity, first-login password change, and privacy consent.</li>
+            <li>Assign default tenant/campus/department correctly per user.</li>
+            <li>Grant least privilege and role scopes carefully.</li>
+            <li>For dual-role users (admin + faculty), ensure both portal permissions are assigned.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="audit">
+    <div class="guide-section-head"><h3>10. Audit and Monitoring</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid single">
+        <div>
+          <ul class="guide-list">
+            <li>Use dashboard and analytics to monitor submissions, failures, and exceptions.</li>
+            <li>Use audit logs for policy-critical actions and decision traceability.</li>
+            <li>Review correction/reopen actions before official release.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="ops">
+    <div class="guide-section-head"><h3>11. End-of-Term Checklist</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <ul class="guide-list">
+            <li>Confirm active AY/Term and role scopes.</li>
+            <li>Confirm all lock/deadline configurations are correct.</li>
+            <li>Track and resolve non-submitted classes.</li>
+            <li>Process correction/reopen according to chosen policy mode.</li>
+            <li>Review audit logs and analytics before final release/export.</li>
+          </ul>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/admin_operations_checklist.png" alt="Admin operations checklist screenshot">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="policies">
+    <div class="guide-section-head"><h3>12. Policy and Governance Reference</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <table class="policy-table">
+            <thead>
+              <tr>
+                <th>Policy Area</th>
+                <th>Operational Rule</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Scope and Access</td>
+                <td>All operations must respect tenant/campus scope and assigned permissions.</td>
+              </tr>
+              <tr>
+                <td>Submission Governance</td>
+                <td>Submission and reopen decisions must follow configured deadlines and authorized roles.</td>
+              </tr>
+              <tr>
+                <td>Correction Governance</td>
+                <td>Use SYSTEM_REQUEST or MANUAL_ONLY according to institutional policy.</td>
+              </tr>
+              <tr>
+                <td>Import Controls</td>
+                <td>Only official templates with strict headers are accepted.</td>
+              </tr>
+              <tr>
+                <td>Auditability</td>
+                <td>Critical actions must remain reviewable via audit logs.</td>
+              </tr>
+              <tr>
+                <td>Privacy</td>
+                <td>Data handling must comply with institutional privacy policy and role boundaries.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/policies_governance_reference.png" alt="Policies and governance reference screenshot">
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

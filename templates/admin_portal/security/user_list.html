@@ -34,7 +34,7 @@
 <div class="card border-0 shadow-sm">
   <div class="table-responsive">
     <table class="table table-hover mb-0">
-      <thead><tr><th>Username</th><th>Email</th><th>Default Tenant</th><th>Default Campus</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Username</th><th>Email</th><th>Default Tenant</th><th>Default Campus</th><th>Default Department</th><th>Status</th><th></th></tr></thead>
       <tbody>
       {% for row in page_obj %}
         <tr>
@@ -42,6 +42,7 @@
           <td>{{ row.email }}</td>
           <td>{{ row.default_tenant.code|default:"-" }}</td>
           <td>{{ row.default_campus.code|default:"-" }}</td>
+          <td>{{ row.default_department.code|default:"-" }}</td>
           <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
           <td class="text-end">
             {% if "users.update" in effective_permissions %}
@@ -54,7 +55,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="6" class="text-center text-muted py-4">No users found.</td></tr>
+        <tr><td colspan="7" class="text-center text-muted py-4">No users found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

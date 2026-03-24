@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .api_views import sis_periodic_grades_api_view
 from .import_views import (
     email_diagnostics_view,
     import_batch_confirm_view,
@@ -29,6 +30,8 @@ from .views import (
     course_template_assignment_list_view,
     course_template_assignment_update_view,
     dashboard_view,
+    admin_guide_view,
+    grading_analytics_view,
     department_create_view,
     department_list_view,
     department_update_view,
@@ -69,6 +72,7 @@ from .views import (
     offering_create_view,
     offering_list_view,
     offering_update_view,
+    overdue_unsubmitted_report_view,
     program_create_view,
     program_list_view,
     program_update_view,
@@ -115,7 +119,11 @@ from .views import (
 app_name = "admin_portal"
 
 urlpatterns = [
+    path("api/v1/sis/periodic-grades/", sis_periodic_grades_api_view, name="sis_periodic_grades_api"),
+    path("api/sis/periodic-grades/", sis_periodic_grades_api_view, name="sis_periodic_grades_api_alias"),
     path("admin-portal/dashboard/", dashboard_view, name="dashboard"),
+    path("admin-portal/grading/analytics/", grading_analytics_view, name="grading_analytics"),
+    path("admin-portal/guide/", admin_guide_view, name="guide"),
     path("admin-portal/organization/tenants/", tenant_list_view, name="tenant_list"),
     path("admin-portal/organization/tenants/create/", tenant_create_view, name="tenant_create"),
     path("admin-portal/organization/tenants/<int:tenant_id>/edit/", tenant_update_view, name="tenant_update"),
@@ -379,6 +387,11 @@ urlpatterns = [
         "admin-portal/grading/submissions/",
         grade_submission_list_view,
         name="grade_submission_list",
+    ),
+    path(
+        "admin-portal/grading/submissions/overdue-unsubmitted/",
+        overdue_unsubmitted_report_view,
+        name="overdue_unsubmitted_report",
     ),
     path(
         "admin-portal/grading/submissions/<int:submission_id>/reopen/",

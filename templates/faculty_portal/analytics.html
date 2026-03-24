@@ -1,0 +1,169 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .analytics-kpi {
+    border: 0;
+    border-radius: 1rem;
+    box-shadow: 0 12px 24px rgba(22, 57, 37, 0.08);
+    height: 100%;
+  }
+  .analytics-kpi .card-body {
+    padding: 1rem 1.05rem;
+  }
+  .analytics-kpi .kpi-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #607868;
+    margin-bottom: 0.28rem;
+  }
+  .analytics-kpi .kpi-value {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #174029;
+    line-height: 1.1;
+    margin: 0;
+  }
+  .analytics-kpi .kpi-note {
+    color: #597162;
+    font-size: 0.83rem;
+    margin-top: 0.3rem;
+  }
+  .analytics-kpi.kpi-green { background: linear-gradient(180deg, #ffffff 0%, #f2faf3 100%); }
+  .analytics-kpi.kpi-gold { background: linear-gradient(180deg, #fffef8 0%, #fbf4d7 100%); }
+  .analytics-kpi.kpi-blue { background: linear-gradient(180deg, #ffffff 0%, #eef7fb 100%); }
+  .analytics-kpi.kpi-red { background: linear-gradient(180deg, #fffefe 0%, #fae9e6 100%); }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="h4 mb-1">Grading Analytics</h2>
+    <div class="text-muted">Performance, submission, and completion visibility across your classes.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <form method="get">
+      <input type="hidden" name="include_archived" value="{% if include_archived %}0{% else %}1{% endif %}">
+      <button class="btn btn-sm btn-outline-secondary" type="submit">
+        {% if include_archived %}Hide Archived{% else %}Include Archived{% endif %}
+      </button>
+    </form>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:dashboard' %}">Back to Dashboard</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-2 col-6">
+    <div class="card analytics-kpi kpi-green">
+      <div class="card-body">
+        <div class="kpi-label">Included Classes</div>
+        <p class="kpi-value">{{ summary.included_classes }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card analytics-kpi kpi-blue">
+      <div class="card-body">
+        <div class="kpi-label">Active Students</div>
+        <p class="kpi-value">{{ summary.active_students }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card analytics-kpi kpi-gold">
+      <div class="card-body">
+        <div class="kpi-label">Submitted Periods</div>
+        <p class="kpi-value">{{ summary.submitted_periods }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card analytics-kpi kpi-red">
+      <div class="card-body">
+        <div class="kpi-label">Failed Rows</div>
+        <p class="kpi-value">{{ summary.failed_rows }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card analytics-kpi kpi-green">
+      <div class="card-body">
+        <div class="kpi-label">Pass Rate</div>
+        <p class="kpi-value">{{ summary.pass_rate }}%</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card analytics-kpi kpi-blue">
+      <div class="card-body">
+        <div class="kpi-label">Avg Grade</div>
+        <p class="kpi-value">{% if summary.avg_grade is not None %}{{ summary.avg_grade|floatformat:2 }}{% else %}-{% endif %}</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white fw-semibold">Period Grade Distribution</div>
+  <div class="card-body">
+    {% for row in distribution_rows %}
+    <div class="mb-3">
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <span>{{ row.label }}</span>
+        <span class="fw-semibold">{{ row.count }} <small class="text-muted">({{ row.share_pct }}%)</small></span>
+      </div>
+      <div class="progress">
+        <div class="progress-bar bg-success" style="width: {{ row.width_pct }}%"></div>
+      </div>
+    </div>
+    {% empty %}
+    <div class="text-muted">No period grade data available yet.</div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white fw-semibold">Class Analytics Breakdown</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Course</th>
+        <th>Section</th>
+        <th>AY / Term</th>
+        <th>Active Students</th>
+        <th>Submitted</th>
+        <th>Pending</th>
+        <th>Avg Grade</th>
+        <th>Failed</th>
+        <th>Pass Rate</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in class_rows %}
+      <tr>
+        <td>
+          <div class="fw-semibold">{{ row.offering.course.code }}</div>
+          <small class="text-muted">{{ row.offering.course.title }}</small>
+        </td>
+        <td>{{ row.offering.section.code }}</td>
+        <td>{{ row.offering.academic_year.code }} / {{ row.offering.term.code }}</td>
+        <td>{{ row.active_students }}</td>
+        <td>{{ row.submitted_periods }}</td>
+        <td>{{ row.pending_periods }}</td>
+        <td>{% if row.avg_grade is not None %}{{ row.avg_grade|floatformat:2 }}{% else %}-{% endif %}</td>
+        <td>{{ row.failed_rows }}</td>
+        <td>{{ row.pass_rate }}%</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="9" class="text-center text-muted py-3">No class analytics rows found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+

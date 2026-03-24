@@ -8,6 +8,65 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'faculty_portal/css/public_index.css' %}">
+<style>
+  .fp-compare-table-clean {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    border: 1px solid rgba(74, 113, 82, 0.22);
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.85);
+  }
+  .fp-compare-table-clean,
+  .fp-compare-table-clean thead,
+  .fp-compare-table-clean tbody,
+  .fp-compare-table-clean tr,
+  .fp-compare-table-clean th,
+  .fp-compare-table-clean td {
+    display: revert !important;
+  }
+  .fp-compare-table-clean th {
+    background: linear-gradient(120deg, rgba(33, 88, 43, 0.95), rgba(120, 164, 58, 0.92));
+    color: #f8fff8;
+    font-size: 0.84rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.78rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    white-space: normal;
+    vertical-align: middle;
+  }
+  .fp-compare-table-clean td {
+    padding: 0.82rem 0.85rem;
+    border: 1px solid rgba(87, 119, 91, 0.16);
+    color: #355747;
+    line-height: 1.46;
+    vertical-align: top;
+    word-break: normal;
+    overflow-wrap: anywhere;
+    background: rgba(255, 255, 255, 0.75);
+  }
+  .fp-compare-table-clean td.fp-area {
+    font-weight: 700;
+    color: #1d4a31;
+  }
+  .fp-compare-table-clean td.fp-egp {
+    font-weight: 600;
+    color: #1c5c37;
+  }
+  .fp-compare-scroll {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  @media (max-width: 767.98px) {
+    .fp-compare-table-clean {
+      min-width: 720px;
+    }
+  }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -30,6 +89,7 @@
             <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
             <li class="nav-item"><a class="nav-link" href="#workflow">Workflow</a></li>
             <li class="nav-item"><a class="nav-link" href="#features">Features</a></li>
+            <li class="nav-item"><a class="nav-link" href="#integration">Integration</a></li>
             <li class="nav-item"><a class="nav-link" href="#support">Support</a></li>
           </ul>
 
@@ -223,6 +283,71 @@
         <span>Student Performance</span>
         <span>Academic Term Monitoring</span>
         <span>Secure Access</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- SIS Integration + Grade File Comparison -->
+  <section id="integration" class="fp-section">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <div class="fp-eyebrow">SIS INTEGRATION AND OPERATIONAL CONTINUITY</div>
+      <h2 class="fp-section-title">API-Ready Integration with Existing School Information Systems</h2>
+      <p class="fp-section-text mw-xxl">
+        EduGradesPro can expose submitted periodic grades through a secured API endpoint so your existing SIS can pull validated records
+        without manual re-encoding. This keeps grading operations connected while preserving governance controls.
+      </p>
+      <div class="fp-integration-grid">
+        <div class="fp-integration-card">
+          <h3>How SIS API Integration Helps</h3>
+          <ul class="fp-feature-list mb-0">
+            <li>Pull submitted periodic grades directly into SIS through token-protected API access</li>
+            <li>Reduce duplicate encoding work and lower reconciliation errors</li>
+            <li>Apply tenant/campus/AY/term/period filters for precise data exchange</li>
+            <li>Consume only submitted records to avoid draft-grade leakage</li>
+            <li>Maintain traceability with governance-aware grading workflows</li>
+          </ul>
+        </div>
+        <div class="fp-integration-card">
+          <h3>EduGradesPro vs Standalone Grade Files</h3>
+          <div class="fp-compare-scroll" role="region" aria-label="EduGradesPro comparison table">
+            <table class="fp-compare-table-clean">
+              <colgroup>
+                <col style="width: 32%;">
+                <col style="width: 34%;">
+                <col style="width: 34%;">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Operational Area</th>
+                  <th>Standalone Spreadsheets</th>
+                  <th>EduGradesPro</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="fp-area">Data ownership and continuity</td>
+                  <td>No institutional ownership of data. If a faculty member goes AWOL, grade files may be lost or hard to recover.</td>
+                  <td class="fp-egp">Centralized and school-controlled records stay available to authorized personnel even when faculty turnover happens.</td>
+                </tr>
+                <tr>
+                  <td class="fp-area">Submission governance and deadlines</td>
+                  <td>Manual follow-up and weaker control points.</td>
+                  <td class="fp-egp">System-enforced submission flow, lock rules, and deadline control.</td>
+                </tr>
+                <tr>
+                  <td class="fp-area">Correction and reopen traceability</td>
+                  <td>Limited or no formal audit trail.</td>
+                  <td class="fp-egp">Governed correction/reopen process with visibility and audit history.</td>
+                </tr>
+                <tr>
+                  <td class="fp-area">Institutional reporting readiness</td>
+                  <td>Fragmented files and manual consolidation.</td>
+                  <td class="fp-egp">Structured source for summary views and SIS API integration.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   </section>

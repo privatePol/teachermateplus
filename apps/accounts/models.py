@@ -52,6 +52,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         blank=True,
         null=True,
     )
+    default_department = models.ForeignKey(
+        "tenants.Department",
+        on_delete=models.SET_NULL,
+        related_name="default_users",
+        blank=True,
+        null=True,
+    )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     must_change_password = models.BooleanField(default=False)

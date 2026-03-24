@@ -475,6 +475,90 @@ body {
   box-shadow: 0 6px 16px rgba(26, 56, 33, 0.08);
 }
 
+/* SIS Integration + Comparison */
+.fp-integration-grid {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fp-integration-card {
+  border-radius: 1.1rem;
+  padding: 1.15rem 1.15rem 1.1rem;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.9), rgba(245, 250, 244, 0.82));
+  box-shadow: 0 14px 30px rgba(19, 57, 34, 0.08);
+}
+
+.fp-integration-card h3 {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #1a402a;
+  margin-bottom: 0.8rem;
+}
+
+.fp-compare-matrix {
+  border: 1px solid rgba(74, 113, 82, 0.2);
+  border-radius: 0.9rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.fp-compare-header,
+.fp-compare-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr;
+}
+
+.fp-compare-header {
+  background: linear-gradient(120deg, rgba(33, 88, 43, 0.95), rgba(120, 164, 58, 0.92));
+  color: #f8fff8;
+}
+
+.fp-compare-header > div {
+  padding: 0.75rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-right: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.fp-compare-header > div:last-child {
+  border-right: 0;
+}
+
+.fp-compare-body {
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.fp-compare-row + .fp-compare-row {
+  border-top: 1px solid rgba(87, 119, 91, 0.15);
+}
+
+.fp-compare-cell {
+  padding: 0.78rem 0.85rem;
+  color: #365849;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  border-right: 1px solid rgba(87, 119, 91, 0.15);
+}
+
+.fp-compare-cell:last-child {
+  border-right: 0;
+}
+
+.fp-compare-cell.fp-area {
+  font-weight: 700;
+  color: #1f4a31;
+}
+
+.fp-compare-cell.fp-advantage {
+  color: #1d5735;
+  font-weight: 600;
+}
+
 /* Final CTA */
 .fp-final-cta {
   padding: 4.2rem 0 5rem;
@@ -531,6 +615,10 @@ input:focus-visible {
     grid-template-columns: 1fr;
   }
 
+  .fp-integration-grid {
+    grid-template-columns: 1fr;
+  }
+
   .fp-hero-section {
     padding-top: 4.2rem;
     padding-bottom: 3.8rem;
@@ -561,5 +649,21 @@ input:focus-visible {
 
   .fp-image-holder {
     min-height: 180px;
+  }
+
+  .fp-compare-header,
+  .fp-compare-row {
+    grid-template-columns: 1fr;
+  }
+
+  .fp-compare-header > div,
+  .fp-compare-cell {
+    border-right: 0;
+    border-bottom: 1px solid rgba(87, 119, 91, 0.15);
+  }
+
+  .fp-compare-header > div:last-child,
+  .fp-compare-cell:last-child {
+    border-bottom: 0;
   }
 }

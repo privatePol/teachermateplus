@@ -345,8 +345,10 @@ class AdminScopeService:
                 "template_period",
                 "requested_by_user",
                 "reviewed_by_user",
+                "faculty_department",
+                "approval_route",
             )
-            .prefetch_related("items", "attachments")
+            .prefetch_related("items", "attachments", "approval_steps", "approval_steps__approver_role")
             .order_by("-created_at")
         )
         return AdminScopeService._visible_queryset(request, queryset)

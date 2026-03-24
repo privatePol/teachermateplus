@@ -5,7 +5,7 @@ import re
 from django.contrib import messages
 from django import forms as django_forms
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Count, Q
+from django.db.models import Avg, Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -135,6 +135,8 @@ def _period_edit_state(offering, period):
     )
     is_correction_active = bool(active_correction_request)
     is_editable = (not is_locked and not is_submitted) or is_correction_active
+    correction_mode = GradingGovernanceService.get_correction_mode(tenant_id=offering.tenant_id)
+    system_correction_enabled = correction_mode == GradingGovernanceService.CORRECTION_MODE_SYSTEM_REQUEST
     return {
         "is_locked": is_locked,
         "is_submitted": is_submitted,
@@ -150,6 +152,8 @@ def _period_edit_state(offering, period):
         "predeadline_correction_mode": GradingGovernanceService.get_predeadline_correction_mode(
             tenant_id=offering.tenant_id
         ),
+        "correction_mode": correction_mode,
+        "system_correction_enabled": system_correction_enabled,
         "can_self_reopen_before_deadline": GradingGovernanceService.can_faculty_self_reopen_before_deadline(
             offering=offering,
             template_period=period,
@@ -616,6 +620,155 @@ def dashboard_view(request):
 
 
 @portal_required("FACULTY")
+@permission_required("faculty_analytics.read")
+def analytics_view(request):
+    include_archived = request.GET.get("include_archived") == "1"
+    offerings_qs = _faculty_offering_queryset(request.user).distinct()
+    active_term_cache = {}
+
+    def _is_in_active_scope(offering):
+        tenant_id = offering.tenant_id
+        if tenant_id not in active_term_cache:
+            _, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
+            active_term_cache[tenant_id] = active_term.id if active_term else None
+        active_term_id = active_term_cache[tenant_id]
+        if not active_term_id:
+            return True
+        return offering.term_id == active_term_id
+
+    active_offerings = []
+    archived_offerings = []
+    for offering in offerings_qs:
+        forced_archive = offering.status == CourseOffering.Status.ARCHIVED
+        outside_active_scope = not _is_in_active_scope(offering)
+        if forced_archive or outside_active_scope:
+            archived_offerings.append(offering)
+        else:
+            active_offerings.append(offering)
+
+    selected_offerings = active_offerings + archived_offerings if include_archived else active_offerings
+    selected_offering_ids = [offering.id for offering in selected_offerings]
+
+    submission_qs = GradeSubmission.objects.filter(offering_id__in=selected_offering_ids)
+    grade_qs = StudentPeriodGrade.objects.filter(
+        offering_id__in=selected_offering_ids,
+        period_grade__isnull=False,
+    )
+    active_enrollment_qs = Enrollment.objects.filter(
+        course_offering_id__in=selected_offering_ids,
+        is_active=True,
+        enrollment_status=Enrollment.Status.ACTIVE,
+    )
+
+    graded_count = grade_qs.count()
+    failed_count = grade_qs.filter(period_grade__lt=Decimal("75")).count()
+    passed_count = max(graded_count - failed_count, 0)
+
+    def _pct(value, total):
+        if not total:
+            return 0
+        return round((value / total) * 100, 1)
+
+    expected_periods_by_offering = {}
+    for offering in selected_offerings:
+        try:
+            template = FacultyGradingService.resolve_template_for_offering(offering)
+            expected_periods_by_offering[offering.id] = len(list(FacultyGradingService.get_template_periods(template)))
+        except ValidationError:
+            expected_periods_by_offering[offering.id] = 0
+
+    submission_map = {
+        row["offering_id"]: row
+        for row in submission_qs.values("offering_id").annotate(
+            submitted=Count("id", filter=Q(status=GradeSubmission.Status.SUBMITTED)),
+            reopened=Count("id", filter=Q(status=GradeSubmission.Status.REOPENED)),
+        )
+    }
+    enrollment_map = {
+        row["course_offering_id"]: row["active_students"]
+        for row in active_enrollment_qs.values("course_offering_id").annotate(active_students=Count("id"))
+    }
+    grade_map = {
+        row["offering_id"]: row
+        for row in grade_qs.values("offering_id").annotate(
+            avg_grade=Avg("period_grade"),
+            graded_rows=Count("id"),
+            failed_rows=Count("id", filter=Q(period_grade__lt=Decimal("75"))),
+        )
+    }
+
+    class_rows = []
+    for offering in selected_offerings:
+        submission_row = submission_map.get(offering.id, {})
+        grade_row = grade_map.get(offering.id, {})
+        graded_rows = grade_row.get("graded_rows", 0) or 0
+        failed_rows = grade_row.get("failed_rows", 0) or 0
+        submitted_periods = submission_row.get("submitted", 0) or 0
+        expected_periods = expected_periods_by_offering.get(offering.id, 0)
+        class_rows.append(
+            {
+                "offering": offering,
+                "active_students": enrollment_map.get(offering.id, 0),
+                "submitted_periods": submitted_periods,
+                "pending_periods": max(expected_periods - submitted_periods, 0),
+                "avg_grade": grade_row.get("avg_grade"),
+                "failed_rows": failed_rows,
+                "pass_rate": _pct(max(graded_rows - failed_rows, 0), graded_rows),
+            }
+        )
+    class_rows.sort(key=lambda item: (-item["pending_periods"], -item["failed_rows"], item["offering"].course.code))
+
+    distribution_ranges = [
+        ("90+", Decimal("90"), None),
+        ("85-89.99", Decimal("85"), Decimal("90")),
+        ("80-84.99", Decimal("80"), Decimal("85")),
+        ("75-79.99", Decimal("75"), Decimal("80")),
+        ("Below 75", None, Decimal("75")),
+    ]
+    distribution_rows = []
+    max_distribution_count = 0
+    for label, lower, upper in distribution_ranges:
+        qs = grade_qs
+        if lower is not None:
+            qs = qs.filter(period_grade__gte=lower)
+        if upper is not None:
+            qs = qs.filter(period_grade__lt=upper)
+        total = qs.count()
+        max_distribution_count = max(max_distribution_count, total)
+        distribution_rows.append(
+            {
+                "label": label,
+                "count": total,
+                "share_pct": _pct(total, graded_count),
+            }
+        )
+    for row in distribution_rows:
+        row["width_pct"] = _pct(row["count"], max_distribution_count) if max_distribution_count else 0
+
+    summary = {
+        "active_classes": len(active_offerings),
+        "archived_classes": len(archived_offerings),
+        "included_classes": len(selected_offerings),
+        "active_students": active_enrollment_qs.count(),
+        "submitted_periods": submission_qs.filter(status=GradeSubmission.Status.SUBMITTED).count(),
+        "reopened_periods": submission_qs.filter(status=GradeSubmission.Status.REOPENED).count(),
+        "graded_rows": graded_count,
+        "passed_rows": passed_count,
+        "failed_rows": failed_count,
+        "pass_rate": _pct(passed_count, graded_count),
+        "avg_grade": grade_qs.aggregate(avg=Avg("period_grade")).get("avg"),
+    }
+
+    context = {
+        "summary": summary,
+        "distribution_rows": distribution_rows,
+        "class_rows": class_rows,
+        "include_archived": include_archived,
+    }
+    return render(request, "faculty_portal/analytics.html", context)
+
+
+@portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def my_courses_view(request):
     show_archived = request.GET.get("archived") == "1"
@@ -713,6 +866,9 @@ def offering_periods_view(request, offering_id: int):
         "periods": periods,
         "period_cards": period_cards,
         "enrollment_count": FacultyGradingService.get_active_enrollments(offering).count(),
+        "system_correction_enabled": GradingGovernanceService.is_system_correction_enabled(
+            tenant_id=offering.tenant_id
+        ),
     }
     return render(request, "faculty_portal/offering_periods.html", context)
 
@@ -909,6 +1065,7 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
         "is_editable": state["is_editable"],
+        "system_correction_enabled": state["system_correction_enabled"],
         "can_create_activity": not state["is_locked"] and not state["is_submitted"],
         "editing_activity": editing_activity,
         "component_option_data": component_option_data,
@@ -1100,6 +1257,7 @@ def activity_scores_view(request, offering_id: int, period_id: int, activity_id:
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
         "is_editable": state["is_editable"],
+        "system_correction_enabled": state["system_correction_enabled"],
     }
     return render(request, "faculty_portal/activity_scores.html", context)
 
@@ -1228,6 +1386,7 @@ def period_attendance_view(request, offering_id: int, period_id: int):
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
         "is_editable": state["is_editable"],
+        "system_correction_enabled": state["system_correction_enabled"],
         "can_manage_sessions": not state["is_locked"] and not state["is_submitted"],
     }
     return render(request, "faculty_portal/period_attendance.html", context)
@@ -1373,6 +1532,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "active_correction_request": state["active_correction_request"],
         "submission_status": state["submission_status"],
         "predeadline_correction_mode": state["predeadline_correction_mode"],
+        "correction_mode": state["correction_mode"],
+        "system_correction_enabled": state["system_correction_enabled"],
         "can_self_reopen_before_deadline": state["can_self_reopen_before_deadline"],
         "print_header_name": print_header_name,
         "print_header_address": print_header_address,
@@ -1453,11 +1614,19 @@ def period_submit_view(request, offering_id: int, period_id: int):
 @portal_required("FACULTY")
 @permission_required("corrections.create")
 def period_corrections_view(request, offering_id: int, period_id: int):
+    GradingGovernanceService.auto_lapse_expired_correction_windows()
     offering, template, period = _resolve_offering_period(request, offering_id, period_id)
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering.id)
 
     state = _period_edit_state(offering, period)
+    if not state["system_correction_enabled"]:
+        messages.info(
+            request,
+            "Correction requests are disabled by tenant policy (MANUAL_ONLY). "
+            "Please follow the manual paper approval process and request authorized admin reopen.",
+        )
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
     enrollments = FacultyGradingService.get_active_enrollments(offering)
     student_qs = Student.objects.filter(id__in=enrollments.values_list("student_id", flat=True)).order_by(
         "last_name", "first_name", "student_no"
@@ -1563,6 +1732,13 @@ def period_self_reopen_view(request, offering_id: int, period_id: int):
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering_id)
 
+    if not GradingGovernanceService.is_system_correction_enabled(tenant_id=offering.tenant_id):
+        messages.error(
+            request,
+            "Self-reopen is disabled by tenant policy (MANUAL_ONLY).",
+        )
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+
     if not GradingGovernanceService.can_faculty_self_reopen_before_deadline(
         offering=offering,
         template_period=period,
@@ -1614,14 +1790,31 @@ def period_correction_finalize_view(request, offering_id: int, period_id: int, r
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering_id)
 
+    if not GradingGovernanceService.is_system_correction_enabled(tenant_id=offering.tenant_id):
+        messages.error(
+            request,
+            "Correction finalization is disabled by tenant policy (MANUAL_ONLY).",
+        )
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+
+    GradingGovernanceService.auto_lapse_expired_correction_windows()
     correction = get_object_or_404(
         GradeCorrectionRequest.objects.select_related("unlock_window", "offering", "template_period"),
         id=request_id,
         offering_id=offering.id,
         template_period_id=period.id,
         requested_by_user=request.user,
-        status=GradeCorrectionRequest.Status.APPROVED,
     )
+    if correction.status != GradeCorrectionRequest.Status.APPROVED:
+        if correction.status == GradeCorrectionRequest.Status.LAPSED:
+            messages.error(
+                request,
+                "This correction request already lapsed after the 24-hour validity window. Please file a new request.",
+            )
+        else:
+            messages.error(request, "This correction request is not in approved status.")
+        return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
+
     window = getattr(correction, "unlock_window", None)
     if not window or not window.is_active or window.is_consumed:
         messages.error(request, "No active correction window to finalize.")

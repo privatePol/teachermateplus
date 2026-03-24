@@ -124,6 +124,7 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "False").lower() == "true"
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() == "true"
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10"))
+SIS_API_TOKEN = os.getenv("SIS_API_TOKEN", "")
 PRIVACY_CONSENT_VERSION = os.getenv("PRIVACY_CONSENT_VERSION", "2026-03")
 ENFORCE_SINGLE_DEVICE_SESSION = os.getenv("ENFORCE_SINGLE_DEVICE_SESSION", "True").lower() == "true"
 

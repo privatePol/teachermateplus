@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -11,7 +11,7 @@ from django import forms as django_forms
 from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Count, Prefetch, Q, Sum
+from django.db.models import Avg, Count, Prefetch, Q, Sum
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -23,6 +23,7 @@ from apps.admin_portal.forms import (
     ActiveAcademicTermSettingForm,
     AcademicYearForm,
     CampusForm,
+    CorrectionApprovalRouteRuleForm,
     CorrectionGovernanceSettingForm,
     CourseForm,
     CourseOfferingForm,
@@ -70,8 +71,10 @@ from apps.enrollment.forms import EnrollmentForm
 from apps.enrollment.models import Enrollment
 from apps.enrollment.services import EnrollmentService
 from apps.grading.models import (
+    CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
+    GradeCorrectionApprovalStep,
     GradeCorrectionRequest,
     GradeSubmission,
     GradeSubmissionReopenRequest,
@@ -81,10 +84,17 @@ from apps.grading.models import (
     GradingTemplateDetail,
     GradingTemplatePeriod,
     GradingTemplateSubcomponent,
+    StudentActivityScore,
+    StudentPeriodGrade,
     TemplateHotfixRequest,
     TenantGradingProfile,
 )
-from apps.grading.services import GradingGovernanceService, GradingTemplateService, TemplateHotfixService
+from apps.grading.services import (
+    FacultyGradingService,
+    GradingGovernanceService,
+    GradingTemplateService,
+    TemplateHotfixService,
+)
 from apps.imports.models import ImportBatch
 from apps.navigation.models import MenuGroup, MenuItem, MenuItemPermission
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
@@ -314,6 +324,641 @@ def dashboard_view(request):
 
 
 @portal_required("ADMIN")
+@permission_required("grading_analytics.read")
+def grading_analytics_view(request):
+    offerings_qs = AdminScopeService.scoped_course_offerings(request)
+    campus_options = AdminScopeService.scoped_campuses(request).order_by("code")
+    academic_year_options = AdminScopeService.scoped_academic_years(request).order_by("-start_date")
+    term_options = AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
+
+    selected_campus_id = _safe_int(request.GET.get("campus_id"))
+    selected_ay_id = _safe_int(request.GET.get("academic_year_id"))
+    selected_term_id = _safe_int(request.GET.get("term_id"))
+
+    if selected_campus_id:
+        offerings_qs = offerings_qs.filter(campus_id=selected_campus_id)
+    if selected_ay_id:
+        offerings_qs = offerings_qs.filter(academic_year_id=selected_ay_id)
+    if selected_term_id:
+        offerings_qs = offerings_qs.filter(term_id=selected_term_id)
+
+    offerings = list(
+        offerings_qs.select_related(
+            "tenant",
+            "campus",
+            "department",
+            "program",
+            "course",
+            "section",
+            "academic_year",
+            "term",
+        ).distinct()
+    )
+    offering_ids = [offering.id for offering in offerings]
+    offerings_by_id = {offering.id: offering for offering in offerings}
+
+    submission_qs = AdminScopeService.scoped_grade_submissions(request).filter(offering_id__in=offering_ids)
+    correction_qs = AdminScopeService.scoped_grade_correction_requests(request).filter(offering_id__in=offering_ids)
+    reopen_qs = AdminScopeService.scoped_grade_submission_reopen_requests(request).filter(offering_id__in=offering_ids)
+    active_enrollment_qs = Enrollment.objects.filter(
+        course_offering_id__in=offering_ids,
+        is_active=True,
+        enrollment_status=Enrollment.Status.ACTIVE,
+    )
+    period_grade_qs = StudentPeriodGrade.objects.filter(offering_id__in=offering_ids, period_grade__isnull=False)
+    period_grade_rows = list(period_grade_qs.select_related("template_period"))
+
+    def _to_decimal(value, fallback=Decimal("75.00")):
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return fallback
+
+    def _threshold_label(min_value: Decimal | None, max_value: Decimal | None):
+        if min_value is None or max_value is None:
+            return "-"
+        if min_value == max_value:
+            return f"{min_value:.2f}"
+        return f"{min_value:.2f} - {max_value:.2f}"
+
+    offering_threshold_map = {}
+    offering_threshold_source_map = {}
+    tenant_threshold_cache = {}
+    profile_threshold_offerings = 0
+    tenant_threshold_offerings = 0
+    for offering in offerings:
+        profile = FacultyGradingService.resolve_grading_profile_for_offering(offering)
+        profile_threshold = None
+        if profile and profile.passing_grade_threshold is not None:
+            profile_threshold = GradingGovernanceService._round(Decimal(profile.passing_grade_threshold))
+        if profile_threshold is not None:
+            offering_threshold_map[offering.id] = profile_threshold
+            offering_threshold_source_map[offering.id] = f"Profile {profile.profile_code}"
+            profile_threshold_offerings += 1
+            continue
+        if offering.tenant_id not in tenant_threshold_cache:
+            tenant_raw = SystemSettingService.get(
+                "PASSING_GRADE_THRESHOLD",
+                tenant_id=offering.tenant_id,
+                default="75",
+            )
+            tenant_threshold_cache[offering.tenant_id] = GradingGovernanceService._round(
+                _to_decimal(tenant_raw, Decimal("75.00"))
+            )
+        offering_threshold_map[offering.id] = tenant_threshold_cache[offering.tenant_id]
+        offering_threshold_source_map[offering.id] = "Tenant Default"
+        tenant_threshold_offerings += 1
+
+    graded_count = len(period_grade_rows)
+    failed_count = 0
+    total_period_grade = Decimal("0")
+    for row in period_grade_rows:
+        value = Decimal(row.period_grade)
+        threshold = offering_threshold_map.get(row.offering_id, Decimal("75.00"))
+        total_period_grade += value
+        if value < threshold:
+            failed_count += 1
+    passed_count = max(graded_count - failed_count, 0)
+    avg_period_grade = GradingGovernanceService._round(total_period_grade / Decimal(graded_count)) if graded_count else None
+
+    def _pct(value, total):
+        if not total:
+            return 0
+        return round((value / total) * 100, 1)
+
+    summary = {
+        "offerings": len(offering_ids),
+        "active_students": active_enrollment_qs.count(),
+        "submitted_periods": submission_qs.filter(status=GradeSubmission.Status.SUBMITTED).count(),
+        "reopened_periods": submission_qs.filter(status=GradeSubmission.Status.REOPENED).count(),
+        "pending_reopen_requests": reopen_qs.filter(status=GradeSubmissionReopenRequest.Status.PENDING).count(),
+        "pending_corrections": correction_qs.filter(status=GradeCorrectionRequest.Status.PENDING).count(),
+        "graded_rows": graded_count,
+        "passed_rows": passed_count,
+        "failed_rows": failed_count,
+        "pass_rate": _pct(passed_count, graded_count),
+        "fail_rate": _pct(failed_count, graded_count),
+        "avg_period_grade": avg_period_grade,
+        "profile_threshold_offerings": profile_threshold_offerings,
+        "tenant_threshold_offerings": tenant_threshold_offerings,
+        "threshold_policy": "Profile threshold -> Tenant PASSING_GRADE_THRESHOLD -> 75.00",
+    }
+
+    submission_status_rows = list(
+        submission_qs.values("status").annotate(total=Count("id")).order_by("-total", "status")
+    )
+    max_submission_total = max([row["total"] for row in submission_status_rows], default=0)
+    submission_status_palette = {
+        GradeSubmission.Status.SUBMITTED: "bg-success-subtle text-success-emphasis",
+        GradeSubmission.Status.REOPENED: "bg-warning-subtle text-warning-emphasis",
+        GradeSubmission.Status.DRAFT: "bg-secondary-subtle text-secondary-emphasis",
+    }
+    for row in submission_status_rows:
+        row["width_pct"] = _pct(row["total"], max_submission_total) if max_submission_total else 0
+        row["badge_class"] = submission_status_palette.get(row["status"], "bg-light text-dark")
+
+    distribution_ranges = [
+        ("90+", Decimal("90"), None),
+        ("85-89.99", Decimal("85"), Decimal("90")),
+        ("80-84.99", Decimal("80"), Decimal("85")),
+        ("75-79.99", Decimal("75"), Decimal("80")),
+        ("Below 75", None, Decimal("75")),
+    ]
+    grade_distribution_rows = []
+    max_distribution_count = 0
+    for label, lower, upper in distribution_ranges:
+        total = 0
+        for row in period_grade_rows:
+            value = Decimal(row.period_grade)
+            if lower is not None and value < lower:
+                continue
+            if upper is not None and value >= upper:
+                continue
+            total += 1
+        max_distribution_count = max(max_distribution_count, total)
+        grade_distribution_rows.append(
+            {
+                "label": label,
+                "count": total,
+                "share_pct": _pct(total, graded_count),
+            }
+        )
+    for row in grade_distribution_rows:
+        row["width_pct"] = _pct(row["count"], max_distribution_count) if max_distribution_count else 0
+
+    campus_offering_rows = list(
+        offerings_qs.values("campus_id", "campus__code", "campus__name")
+        .annotate(total_offerings=Count("id"))
+        .order_by("campus__code")
+    )
+    campus_enrollment_map = {
+        row["course_offering__campus_id"]: row["active_students"]
+        for row in active_enrollment_qs.values("course_offering__campus_id").annotate(active_students=Count("id"))
+    }
+    campus_submission_map = {
+        row["offering__campus_id"]: row
+        for row in submission_qs.values("offering__campus_id").annotate(
+            submitted=Count("id", filter=Q(status=GradeSubmission.Status.SUBMITTED)),
+            reopened=Count("id", filter=Q(status=GradeSubmission.Status.REOPENED)),
+            total=Count("id"),
+        )
+    }
+    campus_grade_map = {}
+    for row in period_grade_rows:
+        offering = offerings_by_id.get(row.offering_id)
+        if not offering:
+            continue
+        campus_id = offering.campus_id
+        threshold = offering_threshold_map.get(row.offering_id, Decimal("75.00"))
+        bucket = campus_grade_map.setdefault(
+            campus_id,
+            {
+                "graded": 0,
+                "failed": 0,
+                "grade_sum": Decimal("0"),
+            },
+        )
+        bucket["graded"] += 1
+        bucket["grade_sum"] += Decimal(row.period_grade)
+        if Decimal(row.period_grade) < threshold:
+            bucket["failed"] += 1
+    campus_rows = []
+    for row in campus_offering_rows:
+        campus_id = row["campus_id"]
+        submission_row = campus_submission_map.get(campus_id, {})
+        grade_row = campus_grade_map.get(campus_id, {})
+        graded_rows = grade_row.get("graded", 0) or 0
+        failed_rows = grade_row.get("failed", 0) or 0
+        grade_sum = grade_row.get("grade_sum", Decimal("0"))
+        avg_grade = GradingGovernanceService._round(grade_sum / Decimal(graded_rows)) if graded_rows else None
+        campus_rows.append(
+            {
+                "campus_code": row["campus__code"],
+                "campus_name": row["campus__name"],
+                "offerings": row["total_offerings"],
+                "active_students": campus_enrollment_map.get(campus_id, 0),
+                "submitted": submission_row.get("submitted", 0),
+                "reopened": submission_row.get("reopened", 0),
+                "avg_grade": avg_grade,
+                "pass_rate": _pct(max(graded_rows - failed_rows, 0), graded_rows),
+            }
+        )
+
+    top_failing_map = {}
+    for row in period_grade_rows:
+        threshold = offering_threshold_map.get(row.offering_id, Decimal("75.00"))
+        grade = Decimal(row.period_grade)
+        if grade >= threshold:
+            continue
+        bucket = top_failing_map.setdefault(
+            row.offering_id,
+            {
+                "failed_students": 0,
+                "graded": 0,
+                "grade_sum": Decimal("0"),
+            },
+        )
+        bucket["failed_students"] += 1
+    for row in period_grade_rows:
+        bucket = top_failing_map.get(row.offering_id)
+        if not bucket:
+            continue
+        bucket["graded"] += 1
+        bucket["grade_sum"] += Decimal(row.period_grade)
+
+    top_failing_offerings = []
+    for offering_id, bucket in top_failing_map.items():
+        offering = offerings_by_id.get(offering_id)
+        if not offering:
+            continue
+        avg_grade = (
+            GradingGovernanceService._round(bucket["grade_sum"] / Decimal(bucket["graded"]))
+            if bucket["graded"]
+            else None
+        )
+        top_failing_offerings.append(
+            {
+                "offering_id": offering.id,
+                "offering__course__code": offering.course.code,
+                "offering__course__title": offering.course.title,
+                "offering__section__code": offering.section.code,
+                "offering__term__code": offering.term.code,
+                "offering__academic_year__code": offering.academic_year.code,
+                "failed_students": bucket["failed_students"],
+                "avg_grade": avg_grade,
+                "threshold": offering_threshold_map.get(offering.id, Decimal("75.00")),
+                "threshold_source": offering_threshold_source_map.get(offering.id, "Default"),
+            }
+        )
+    top_failing_offerings.sort(
+        key=lambda row: (-row["failed_students"], row["offering__course__code"], row["offering__section__code"])
+    )
+    top_failing_offerings = top_failing_offerings[:10]
+
+    period_fail_map = {}
+    for row in period_grade_rows:
+        threshold = offering_threshold_map.get(row.offering_id, Decimal("75.00"))
+        bucket = period_fail_map.setdefault(
+            row.template_period_id,
+            {
+                "period_code": row.template_period.code,
+                "period_name": row.template_period.name,
+                "period_sequence": row.template_period.sequence_no,
+                "graded": 0,
+                "failed": 0,
+                "threshold_min": None,
+                "threshold_max": None,
+            },
+        )
+        bucket["graded"] += 1
+        if Decimal(row.period_grade) < threshold:
+            bucket["failed"] += 1
+        if bucket["threshold_min"] is None or threshold < bucket["threshold_min"]:
+            bucket["threshold_min"] = threshold
+        if bucket["threshold_max"] is None or threshold > bucket["threshold_max"]:
+            bucket["threshold_max"] = threshold
+
+    period_fail_rows = []
+    for bucket in period_fail_map.values():
+        graded = bucket["graded"]
+        failed = bucket["failed"]
+        period_fail_rows.append(
+            {
+                **bucket,
+                "passed": max(graded - failed, 0),
+                "fail_rate": _pct(failed, graded),
+                "threshold_display": _threshold_label(bucket["threshold_min"], bucket["threshold_max"]),
+            }
+        )
+    period_fail_rows.sort(key=lambda row: (row["period_sequence"], row["period_code"]))
+
+    period_ids = {row.template_period_id for row in period_grade_rows}
+    period_objs = list(
+        GradingTemplatePeriod.objects.filter(id__in=period_ids).prefetch_related("components__subcomponents__details")
+    )
+    component_map = {}
+    subcomponent_map = {}
+    detail_map = {}
+    for period in period_objs:
+        active_components = [component for component in period.components.all() if component.is_active]
+        active_components.sort(key=lambda component: (component.sort_order, component.id))
+        component_map[period.id] = active_components
+        for component in active_components:
+            active_subcomponents = [sub for sub in component.subcomponents.all() if sub.is_active]
+            active_subcomponents.sort(key=lambda sub: (sub.sort_order, sub.id))
+            subcomponent_map[component.id] = active_subcomponents
+            for sub in active_subcomponents:
+                active_details = [detail for detail in sub.details.all() if detail.is_active]
+                active_details.sort(key=lambda detail: (detail.sort_order, detail.id))
+                detail_map[sub.id] = active_details
+
+    score_lookup = {}
+    if period_ids and offering_ids:
+        score_rows = StudentActivityScore.objects.filter(
+            activity__offering_id__in=offering_ids,
+            activity__template_period_id__in=period_ids,
+            activity__is_active=True,
+            is_active=True,
+        ).select_related("activity")
+        for score in score_rows:
+            activity = score.activity
+            key = (
+                activity.offering_id,
+                activity.template_period_id,
+                score.student_id,
+                activity.template_component_id,
+                activity.template_subcomponent_id,
+                activity.template_detail_id,
+            )
+            score_lookup.setdefault(key, []).append(Decimal(score.computed_score or 0))
+
+    def _score_avg(key):
+        values = score_lookup.get(key, [])
+        if not values:
+            return None
+        return GradingGovernanceService._round(sum(values) / Decimal(len(values)))
+
+    student_period_keys = {(row.offering_id, row.template_period_id, row.student_id) for row in period_grade_rows}
+    component_fail_map = {}
+    detail_fail_map = {}
+    period_meta = {period.id: period for period in period_objs}
+
+    for offering_id, period_id, student_id in student_period_keys:
+        threshold = offering_threshold_map.get(offering_id, Decimal("75.00"))
+        period_obj = period_meta.get(period_id)
+        components = component_map.get(period_id, [])
+        for component in components:
+            component_has_data = False
+            component_value = None
+            subcomponents = subcomponent_map.get(component.id, [])
+            if subcomponents:
+                sub_weight_total = sum(Decimal(sub.weight_percentage or 0) for sub in subcomponents)
+                sub_denominator = sub_weight_total if sub_weight_total > 0 else Decimal("100")
+                component_raw = Decimal("0")
+                for sub in subcomponents:
+                    details = detail_map.get(sub.id, [])
+                    if details:
+                        detail_weight_total = sum(Decimal(detail.weight_percentage or 0) for detail in details)
+                        detail_denominator = detail_weight_total if detail_weight_total > 0 else Decimal("100")
+                        sub_raw = Decimal("0")
+                        sub_has_data = False
+                        for detail in details:
+                            detail_value = _score_avg(
+                                (offering_id, period_id, student_id, component.id, sub.id, detail.id)
+                            )
+                            if detail_value is not None:
+                                sub_has_data = True
+                                detail_bucket = detail_fail_map.setdefault(
+                                    (period_id, component.id, sub.id, detail.id),
+                                    {
+                                        "period_code": period_obj.code if period_obj else "",
+                                        "period_sequence": period_obj.sequence_no if period_obj else 999,
+                                        "component_name": component.name,
+                                        "component_sort": component.sort_order,
+                                        "subcomponent_name": sub.name,
+                                        "subcomponent_sort": sub.sort_order,
+                                        "detail_name": detail.name,
+                                        "detail_sort": detail.sort_order,
+                                        "graded": 0,
+                                        "failed": 0,
+                                        "threshold_min": None,
+                                        "threshold_max": None,
+                                    },
+                                )
+                                detail_bucket["graded"] += 1
+                                if detail_value < threshold:
+                                    detail_bucket["failed"] += 1
+                                if (
+                                    detail_bucket["threshold_min"] is None
+                                    or threshold < detail_bucket["threshold_min"]
+                                ):
+                                    detail_bucket["threshold_min"] = threshold
+                                if (
+                                    detail_bucket["threshold_max"] is None
+                                    or threshold > detail_bucket["threshold_max"]
+                                ):
+                                    detail_bucket["threshold_max"] = threshold
+                            sub_raw += (Decimal(detail.weight_percentage or 0) / detail_denominator) * (
+                                detail_value or Decimal("0")
+                            )
+                        sub_value = GradingGovernanceService._round(sub_raw) if sub_has_data else None
+                    else:
+                        sub_value = _score_avg((offering_id, period_id, student_id, component.id, sub.id, None))
+
+                    if sub_value is not None:
+                        component_has_data = True
+                    component_raw += (Decimal(sub.weight_percentage or 0) / sub_denominator) * (
+                        sub_value or Decimal("0")
+                    )
+                component_value = GradingGovernanceService._round(component_raw) if component_has_data else None
+            else:
+                component_value = _score_avg((offering_id, period_id, student_id, component.id, None, None))
+                component_has_data = component_value is not None
+
+            if component_has_data and component_value is not None:
+                component_bucket = component_fail_map.setdefault(
+                    (period_id, component.id),
+                    {
+                        "period_code": period_obj.code if period_obj else "",
+                        "period_sequence": period_obj.sequence_no if period_obj else 999,
+                        "component_code": component.code,
+                        "component_name": component.name,
+                        "component_sort": component.sort_order,
+                        "graded": 0,
+                        "failed": 0,
+                        "threshold_min": None,
+                        "threshold_max": None,
+                    },
+                )
+                component_bucket["graded"] += 1
+                if component_value < threshold:
+                    component_bucket["failed"] += 1
+                if component_bucket["threshold_min"] is None or threshold < component_bucket["threshold_min"]:
+                    component_bucket["threshold_min"] = threshold
+                if component_bucket["threshold_max"] is None or threshold > component_bucket["threshold_max"]:
+                    component_bucket["threshold_max"] = threshold
+
+    component_fail_rows = []
+    for bucket in component_fail_map.values():
+        graded = bucket["graded"]
+        failed = bucket["failed"]
+        component_fail_rows.append(
+            {
+                **bucket,
+                "passed": max(graded - failed, 0),
+                "fail_rate": _pct(failed, graded),
+                "threshold_display": _threshold_label(bucket["threshold_min"], bucket["threshold_max"]),
+            }
+        )
+    component_fail_rows.sort(key=lambda row: (row["period_sequence"], row["component_sort"], row["component_code"]))
+
+    detail_fail_rows = []
+    for bucket in detail_fail_map.values():
+        graded = bucket["graded"]
+        failed = bucket["failed"]
+        detail_fail_rows.append(
+            {
+                **bucket,
+                "passed": max(graded - failed, 0),
+                "fail_rate": _pct(failed, graded),
+                "threshold_display": _threshold_label(bucket["threshold_min"], bucket["threshold_max"]),
+            }
+        )
+    detail_fail_rows.sort(
+        key=lambda row: (
+            row["period_sequence"],
+            row["component_sort"],
+            row["subcomponent_sort"],
+            row["detail_sort"],
+            row["detail_name"],
+        )
+    )
+
+    assignment_rows = (
+        FacultyAssignment.objects.filter(
+            offering_id__in=offering_ids,
+            is_active=True,
+            faculty_user__is_active=True,
+        )
+        .select_related("faculty_user")
+        .order_by("offering_id", "-is_primary", "id")
+    )
+    offering_faculty_map = {}
+    for assignment in assignment_rows:
+        if assignment.offering_id not in offering_faculty_map:
+            offering_faculty_map[assignment.offering_id] = assignment.faculty_user
+
+    class_fail_map = {}
+    for row in period_grade_rows:
+        offering = offerings_by_id.get(row.offering_id)
+        if not offering:
+            continue
+        threshold = offering_threshold_map.get(row.offering_id, Decimal("75.00"))
+        faculty_user = offering_faculty_map.get(row.offering_id)
+        faculty_id = faculty_user.id if faculty_user else 0
+        faculty_name = faculty_user.full_name if faculty_user else "Unassigned Faculty"
+        class_key = (offering.campus_id, offering.id, faculty_id)
+        bucket = class_fail_map.setdefault(
+            class_key,
+            {
+                "campus_code": offering.campus.code,
+                "campus_name": offering.campus.name,
+                "course_code": offering.course.code,
+                "course_title": offering.course.title,
+                "section_code": offering.section.code,
+                "academic_year_code": offering.academic_year.code,
+                "term_code": offering.term.code,
+                "faculty_name": faculty_name,
+                "graded": 0,
+                "failed": 0,
+                "threshold_min": None,
+                "threshold_max": None,
+            },
+        )
+        bucket["graded"] += 1
+        if Decimal(row.period_grade) < threshold:
+            bucket["failed"] += 1
+        if bucket["threshold_min"] is None or threshold < bucket["threshold_min"]:
+            bucket["threshold_min"] = threshold
+        if bucket["threshold_max"] is None or threshold > bucket["threshold_max"]:
+            bucket["threshold_max"] = threshold
+
+    faculty_class_fail_rows = []
+    for bucket in class_fail_map.values():
+        graded = bucket["graded"]
+        if graded <= 0:
+            continue
+        failed = bucket["failed"]
+        passed = max(graded - failed, 0)
+        fail_rate = _pct(failed, graded)
+        bucket["passed"] = passed
+        bucket["fail_rate"] = fail_rate
+        bucket["pass_fail_ratio"] = f"{passed}:{failed}"
+        bucket["threshold_display"] = _threshold_label(bucket["threshold_min"], bucket["threshold_max"])
+        faculty_class_fail_rows.append(bucket)
+    faculty_class_fail_rows.sort(
+        key=lambda row: (-row["fail_rate"], -row["failed"], -row["graded"], row["course_code"], row["section_code"])
+    )
+    faculty_class_fail_rows = faculty_class_fail_rows[:10]
+
+    course_faculty_map = {}
+    for bucket in class_fail_map.values():
+        course_key = (bucket["campus_code"], bucket["course_code"])
+        faculty_name = bucket["faculty_name"]
+        agg = course_faculty_map.setdefault(course_key, {})
+        teacher_bucket = agg.setdefault(
+            faculty_name,
+            {
+                "campus_code": bucket["campus_code"],
+                "campus_name": bucket["campus_name"],
+                "course_code": bucket["course_code"],
+                "course_title": bucket["course_title"],
+                "faculty_name": faculty_name,
+                "graded": 0,
+                "failed": 0,
+            },
+        )
+        teacher_bucket["graded"] += bucket["graded"]
+        teacher_bucket["failed"] += bucket["failed"]
+
+    faculty_course_compare_rows = []
+    for teacher_map in course_faculty_map.values():
+        compared_count = len(teacher_map)
+        if compared_count <= 1:
+            continue
+        for teacher_bucket in teacher_map.values():
+            graded = teacher_bucket["graded"]
+            failed = teacher_bucket["failed"]
+            passed = max(graded - failed, 0)
+            teacher_bucket["passed"] = passed
+            teacher_bucket["fail_rate"] = _pct(failed, graded)
+            teacher_bucket["pass_fail_ratio"] = f"{passed}:{failed}"
+            teacher_bucket["compared_faculty_count"] = compared_count
+            faculty_course_compare_rows.append(teacher_bucket)
+    faculty_course_compare_rows.sort(
+        key=lambda row: (
+            -row["fail_rate"],
+            -row["failed"],
+            -row["graded"],
+            row["campus_code"],
+            row["course_code"],
+            row["faculty_name"],
+        )
+    )
+    faculty_course_compare_rows = faculty_course_compare_rows[:10]
+
+    context = {
+        "summary": summary,
+        "submission_status_rows": submission_status_rows,
+        "grade_distribution_rows": grade_distribution_rows,
+        "period_fail_rows": period_fail_rows,
+        "component_fail_rows": component_fail_rows,
+        "detail_fail_rows": detail_fail_rows,
+        "faculty_class_fail_rows": faculty_class_fail_rows,
+        "faculty_course_compare_rows": faculty_course_compare_rows,
+        "campus_rows": campus_rows,
+        "top_failing_offerings": top_failing_offerings,
+        "campus_options": campus_options,
+        "academic_year_options": academic_year_options,
+        "term_options": term_options,
+        "selected_campus_id": selected_campus_id,
+        "selected_ay_id": selected_ay_id,
+        "selected_term_id": selected_term_id,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/analytics.html", context)
+
+
+@portal_required("ADMIN")
+def admin_guide_view(request):
+    context = {
+        "title": "Admin Portal User Guide",
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/guide.html", context)
+
+
+@portal_required("ADMIN")
 @permission_required("system_settings.update")
 def active_academic_term_settings_view(request):
     tenant_id = getattr(request, "scope", {}).get("tenant_id")
@@ -400,45 +1045,154 @@ def correction_governance_settings_view(request):
         return _redirect_back_or_default(request, "admin_portal:dashboard")
 
     current_mode = GradingGovernanceService.get_predeadline_correction_mode(tenant_id=tenant_id)
-    form = CorrectionGovernanceSettingForm(
-        request.POST or None,
-        initial={"predeadline_correction_mode": current_mode},
+    current_correction_mode = GradingGovernanceService.get_correction_mode(tenant_id=tenant_id)
+    tenant_obj = Tenant.objects.filter(id=tenant_id).first()
+    department_qs = AdminScopeService.scoped_departments(request).filter(tenant_id=tenant_id)
+    role_qs = Role.objects.filter(is_active=True).order_by("name")
+
+    mode_form = CorrectionGovernanceSettingForm(
+        initial={
+            "correction_mode": current_correction_mode,
+            "predeadline_correction_mode": current_mode,
+        },
+        prefix="mode",
     )
-    _style_form(form)
-    if request.method == "POST" and form.is_valid():
-        selected_mode = form.cleaned_data["predeadline_correction_mode"]
-        SystemSettingService.set(
-            GradingGovernanceService.PREDEADLINE_CORRECTION_MODE_KEY,
-            selected_mode,
-            tenant_id=tenant_id,
-            value_type="STRING",
-            is_active=True,
-            description="Controls how submitted period corrections are handled before the deadline.",
-        )
-        AuditService.log_event(
-            action="UPDATE_SYSTEM_SETTING",
-            portal="ADMIN",
-            entity_type="SystemSetting",
-            entity_id=f"tenant:{tenant_id}:predeadline-correction-mode",
-            actor=request.user,
-            tenant=tenant_id,
-            campus=getattr(request, "scope", {}).get("campus_id"),
-            before_data={"predeadline_correction_mode": current_mode},
-            after_data={"predeadline_correction_mode": selected_mode},
-            metadata={
-                "setting_keys": [GradingGovernanceService.PREDEADLINE_CORRECTION_MODE_KEY],
-            },
-            request=request,
-        )
-        messages.success(request, "Correction governance setting updated.")
-        return _redirect_back_or_default(request, "admin_portal:correction_governance_settings")
+    edit_route_id = request.GET.get("edit_route")
+    edit_route = None
+    if edit_route_id:
+        edit_route = CorrectionApprovalRouteRule.objects.filter(id=edit_route_id, tenant_id=tenant_id).first()
+
+    route_form = CorrectionApprovalRouteRuleForm(
+        instance=edit_route,
+        tenant=tenant_obj,
+        department_queryset=department_qs,
+        role_queryset=role_qs,
+        prefix="route",
+    )
+    _style_form(mode_form)
+    _style_form(route_form)
+
+    if request.method == "POST":
+        action = request.POST.get("form_action")
+        if action == "save_mode":
+            mode_form = CorrectionGovernanceSettingForm(
+                request.POST,
+                prefix="mode",
+            )
+            _style_form(mode_form)
+            if mode_form.is_valid():
+                selected_correction_mode = mode_form.cleaned_data["correction_mode"]
+                selected_mode = mode_form.cleaned_data["predeadline_correction_mode"]
+                SystemSettingService.set(
+                    GradingGovernanceService.CORRECTION_MODE_KEY,
+                    selected_correction_mode,
+                    tenant_id=tenant_id,
+                    value_type="STRING",
+                    is_active=True,
+                    description="Controls whether correction handling is manual-only or in-system request workflow.",
+                )
+                SystemSettingService.set(
+                    GradingGovernanceService.PREDEADLINE_CORRECTION_MODE_KEY,
+                    selected_mode,
+                    tenant_id=tenant_id,
+                    value_type="STRING",
+                    is_active=True,
+                    description="Controls how submitted period corrections are handled before the deadline.",
+                )
+                AuditService.log_event(
+                    action="UPDATE_SYSTEM_SETTING",
+                    portal="ADMIN",
+                    entity_type="SystemSetting",
+                    entity_id=f"tenant:{tenant_id}:predeadline-correction-mode",
+                    actor=request.user,
+                    tenant=tenant_id,
+                    campus=getattr(request, "scope", {}).get("campus_id"),
+                    before_data={
+                        "correction_mode": current_correction_mode,
+                        "predeadline_correction_mode": current_mode,
+                    },
+                    after_data={
+                        "correction_mode": selected_correction_mode,
+                        "predeadline_correction_mode": selected_mode,
+                    },
+                    metadata={
+                        "setting_keys": [
+                            GradingGovernanceService.CORRECTION_MODE_KEY,
+                            GradingGovernanceService.PREDEADLINE_CORRECTION_MODE_KEY,
+                        ],
+                    },
+                    request=request,
+                )
+                messages.success(request, "Correction governance setting updated.")
+                return _redirect_back_or_default(request, "admin_portal:correction_governance_settings")
+        elif action == "save_route":
+            route_id = request.POST.get("route_id")
+            route_instance = None
+            if route_id:
+                route_instance = get_object_or_404(CorrectionApprovalRouteRule, id=route_id, tenant_id=tenant_id)
+            route_form = CorrectionApprovalRouteRuleForm(
+                request.POST,
+                instance=route_instance,
+                tenant=tenant_obj,
+                department_queryset=department_qs,
+                role_queryset=role_qs,
+                prefix="route",
+            )
+            _style_form(route_form)
+            if route_form.is_valid():
+                before = model_before_after(route_instance) if route_instance else None
+                route_row = route_form.save(commit=False)
+                route_row.tenant_id = tenant_id
+                route_row.save()
+                action_name = "UPDATE" if route_instance else "CREATE"
+                AuditService.log_event(
+                    action=action_name,
+                    portal="ADMIN",
+                    entity_type="CorrectionApprovalRouteRule",
+                    entity_id=route_row.id,
+                    actor=request.user,
+                    tenant=tenant_id,
+                    campus=getattr(request, "scope", {}).get("campus_id"),
+                    before_data=before,
+                    after_data=model_before_after(route_row),
+                    request=request,
+                )
+                messages.success(request, "Correction approval route saved.")
+                return _redirect_back_or_default(request, "admin_portal:correction_governance_settings")
+        elif action == "delete_route":
+            route_id = request.POST.get("route_id")
+            route_row = get_object_or_404(CorrectionApprovalRouteRule, id=route_id, tenant_id=tenant_id)
+            before = model_before_after(route_row)
+            route_row.delete()
+            AuditService.log_event(
+                action="DELETE",
+                portal="ADMIN",
+                entity_type="CorrectionApprovalRouteRule",
+                entity_id=route_id,
+                actor=request.user,
+                tenant=tenant_id,
+                campus=getattr(request, "scope", {}).get("campus_id"),
+                before_data=before,
+                request=request,
+            )
+            messages.success(request, "Correction approval route removed.")
+            return _redirect_back_or_default(request, "admin_portal:correction_governance_settings")
+
+    routes = (
+        CorrectionApprovalRouteRule.objects.filter(tenant_id=tenant_id)
+        .select_related("faculty_department", "step1_role", "final_role")
+        .order_by("faculty_department__name", "id")
+    )
 
     context = {
-        "form": form,
+        "mode_form": mode_form,
+        "route_form": route_form,
+        "routes": routes,
+        "edit_route": edit_route,
         "title": "Correction Governance",
     }
     context.update(_scope_context(request))
-    return render(request, "admin_portal/shared/form_page.html", context)
+    return render(request, "admin_portal/tools/correction_governance.html", context)
 
 
 @portal_required("ADMIN")
@@ -931,7 +1685,7 @@ def program_update_view(request, program_id: int):
 @portal_required("ADMIN")
 @permission_required("users.read")
 def user_list_view(request):
-    queryset = _scoped_users_queryset(request).select_related("default_tenant", "default_campus")
+    queryset = _scoped_users_queryset(request).select_related("default_tenant", "default_campus", "default_department")
     tenant_filter = request.GET.get("tenant_id", "").strip()
     campus_filter = request.GET.get("campus_id", "").strip()
     if tenant_filter:
@@ -961,10 +1715,12 @@ def user_list_view(request):
 def user_create_view(request):
     tenant_qs = AdminScopeService.scoped_tenants(request)
     campus_qs = AdminScopeService.scoped_campuses(request)
+    department_qs = AdminScopeService.scoped_departments(request)
     form = UserCreateForm(
         request.POST or None,
         tenant_queryset=tenant_qs,
         campus_queryset=campus_qs,
+        department_queryset=department_qs,
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -1036,11 +1792,13 @@ def user_update_view(request, user_id: int):
     before = model_before_after(user)
     tenant_qs = AdminScopeService.scoped_tenants(request)
     campus_qs = AdminScopeService.scoped_campuses(request)
+    department_qs = AdminScopeService.scoped_departments(request)
     form = UserUpdateForm(
         request.POST or None,
         instance=user,
         tenant_queryset=tenant_qs,
         campus_queryset=campus_qs,
+        department_queryset=department_qs,
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -3966,6 +4724,205 @@ def grading_period_lock_reopen_view(request, lock_id: int):
 
 @portal_required("ADMIN")
 @permission_required("grade_submissions.read")
+def overdue_unsubmitted_report_view(request):
+    now = timezone.now()
+    current_tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    current_campus_id = getattr(request, "scope", {}).get("campus_id")
+
+    locks_qs = AdminScopeService.scoped_grading_period_locks(request).filter(
+        is_active=True,
+        deadline_at__isnull=False,
+        deadline_at__lt=now,
+    )
+    if request.GET.get("campus_id"):
+        locks_qs = locks_qs.filter(campus_id=request.GET.get("campus_id"))
+    if request.GET.get("academic_year_id"):
+        locks_qs = locks_qs.filter(academic_year_id=request.GET.get("academic_year_id"))
+    if request.GET.get("term_id"):
+        locks_qs = locks_qs.filter(term_id=request.GET.get("term_id"))
+    if request.GET.get("period_code"):
+        locks_qs = locks_qs.filter(period_code__iexact=request.GET.get("period_code"))
+
+    overdue_locks = list(locks_qs)
+    offerings_by_scope = {}
+    lock_targets = {}
+
+    def _pick_lock(previous, new_lock):
+        if previous is None:
+            return new_lock
+        if (
+            previous.scope_type == GradingPeriodLock.ScopeType.CAMPUS
+            and new_lock.scope_type == GradingPeriodLock.ScopeType.COURSE
+        ):
+            return new_lock
+        if previous.scope_type == new_lock.scope_type and new_lock.updated_at > previous.updated_at:
+            return new_lock
+        return previous
+
+    for lock in overdue_locks:
+        period_key = GradingGovernanceService._normalize_period_key(lock.period_code)
+        if lock.scope_type == GradingPeriodLock.ScopeType.COURSE and lock.course_offering_id:
+            target_key = (lock.course_offering_id, period_key)
+            lock_targets[target_key] = _pick_lock(lock_targets.get(target_key), lock)
+            continue
+
+        scope_key = (
+            lock.tenant_id,
+            lock.campus_id,
+            lock.academic_year_id,
+            lock.term_id,
+        )
+        if scope_key not in offerings_by_scope:
+            offerings_by_scope[scope_key] = list(
+                AdminScopeService.scoped_course_offerings(request).filter(
+                    tenant_id=lock.tenant_id,
+                    campus_id=lock.campus_id,
+                    academic_year_id=lock.academic_year_id,
+                    term_id=lock.term_id,
+                    is_active=True,
+                )
+            )
+        for offering in offerings_by_scope[scope_key]:
+            target_key = (offering.id, period_key)
+            lock_targets[target_key] = _pick_lock(lock_targets.get(target_key), lock)
+
+    if lock_targets:
+        offering_ids = {offering_id for offering_id, _ in lock_targets.keys()}
+        offerings = list(
+            AdminScopeService.scoped_course_offerings(request)
+            .filter(id__in=offering_ids)
+            .select_related("tenant", "campus", "academic_year", "term", "course", "section")
+        )
+        offerings_map = {row.id: row for row in offerings}
+    else:
+        offerings_map = {}
+
+    assignment_rows = (
+        FacultyAssignment.objects.filter(
+            offering_id__in=list(offerings_map.keys()),
+            is_active=True,
+            faculty_user__is_active=True,
+        )
+        .select_related("faculty_user")
+        .order_by("offering_id", "-is_primary", "id")
+    )
+    offering_faculty = {}
+    for assignment in assignment_rows:
+        if assignment.offering_id not in offering_faculty:
+            offering_faculty[assignment.offering_id] = assignment.faculty_user
+
+    q = (request.GET.get("q") or "").strip().lower()
+    report_rows = []
+    for (offering_id, period_key), lock in lock_targets.items():
+        offering = offerings_map.get(offering_id)
+        if not offering:
+            continue
+
+        template_period = None
+        submission = None
+        submission_status = "NO_RECORD"
+        skip_reason = None
+        try:
+            template = FacultyGradingService.resolve_template_for_offering(offering)
+            for period in template.periods.filter(is_active=True):
+                if GradingGovernanceService._normalize_period_key(period.code) == period_key:
+                    template_period = period
+                    break
+            if not template_period:
+                skip_reason = "Template period not found"
+                submission_status = "NO_PERIOD"
+            else:
+                submission = GradeSubmission.objects.filter(
+                    offering_id=offering.id,
+                    template_period_id=template_period.id,
+                ).first()
+                if submission:
+                    submission_status = submission.status
+        except ValidationError:
+            skip_reason = "No template assignment"
+            submission_status = "NO_TEMPLATE"
+
+        if submission_status == GradeSubmission.Status.SUBMITTED:
+            continue
+
+        faculty_user = offering_faculty.get(offering.id)
+        faculty_name = faculty_user.full_name if faculty_user else "-"
+        row_text = " ".join(
+            [
+                offering.campus.code or "",
+                offering.academic_year.code or "",
+                offering.term.code or "",
+                lock.period_code or "",
+                offering.course.code or "",
+                offering.course.title or "",
+                offering.section.code or "",
+                faculty_name or "",
+                submission_status,
+            ]
+        ).lower()
+        if q and q not in row_text:
+            continue
+
+        delta = now - lock.deadline_at if lock.deadline_at else None
+        overdue_hours = int(delta.total_seconds() // 3600) if delta else 0
+        report_rows.append(
+            {
+                "lock_id": lock.id,
+                "tenant_code": offering.tenant.code,
+                "campus_code": offering.campus.code,
+                "academic_year_code": offering.academic_year.code,
+                "term_code": offering.term.code,
+                "period_code": lock.period_code,
+                "course_code": offering.course.code,
+                "course_title": offering.course.title,
+                "section_code": offering.section.code,
+                "faculty_name": faculty_name,
+                "deadline_at": lock.deadline_at,
+                "lock_state": "LOCKED" if lock.is_locked else "OPEN_OVERDUE",
+                "submission_status": submission_status,
+                "submitted_at": submission.submitted_at if submission else None,
+                "skip_reason": skip_reason,
+                "overdue_hours": overdue_hours,
+                "offering_id": offering.id,
+            }
+        )
+
+    report_rows.sort(
+        key=lambda row: (
+            row["deadline_at"] or now,
+            row["campus_code"],
+            row["course_code"],
+            row["section_code"],
+            row["period_code"],
+        )
+    )
+
+    summary = {
+        "total_overdue_unsubmitted": len(report_rows),
+        "locked_unsubmitted": sum(1 for row in report_rows if row["lock_state"] == "LOCKED"),
+        "open_overdue_unsubmitted": sum(1 for row in report_rows if row["lock_state"] == "OPEN_OVERDUE"),
+    }
+    context = {
+        "page_obj": _get_page(request, report_rows, per_page=30),
+        "summary": summary,
+        "q": request.GET.get("q", ""),
+        "period_code": request.GET.get("period_code", ""),
+        "campus_options": AdminScopeService.scoped_campuses(request).order_by("code"),
+        "academic_year_options": AdminScopeService.scoped_academic_years(request).order_by("-start_date"),
+        "term_options": AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no"),
+        "can_force_reopen": PermissionService.has_permission(
+            request.user,
+            "grade_submissions.reopen",
+            tenant_id=current_tenant_id,
+            campus_id=current_campus_id,
+        ),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/overdue_unsubmitted_report.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grade_submissions.read")
 def grade_submission_list_view(request):
     queryset = AdminScopeService.scoped_grade_submissions(request)
     if request.GET.get("term_id"):
@@ -4196,6 +5153,7 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
 @portal_required("ADMIN")
 @permission_required("corrections.read")
 def grade_correction_request_list_view(request):
+    GradingGovernanceService.auto_lapse_expired_correction_windows()
     queryset = AdminScopeService.scoped_grade_correction_requests(request)
     if request.GET.get("term_id"):
         queryset = queryset.filter(offering__term_id=request.GET.get("term_id"))
@@ -4209,8 +5167,14 @@ def grade_correction_request_list_view(request):
             | Q(requested_by_user__username__icontains=q)
             | Q(justification__icontains=q)
         )
+    page_obj = _get_page(request, queryset)
+    for row in page_obj.object_list:
+        pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=row)
+        row.current_approval_step = pending_step
+        row.current_approver_label = pending_step.approver_label if pending_step else None
+
     context = {
-        "page_obj": _get_page(request, queryset),
+        "page_obj": page_obj,
         "q": q,
         "status": request.GET.get("status", ""),
         "terms": AdminScopeService.scoped_terms(request),
@@ -4223,13 +5187,39 @@ def grade_correction_request_list_view(request):
 @portal_required("ADMIN")
 @permission_required("corrections.review")
 def grade_correction_request_review_view(request, request_id: int):
+    GradingGovernanceService.auto_lapse_expired_correction_windows()
     correction_request = get_object_or_404(
         AdminScopeService.scoped_grade_correction_requests(request),
         id=request_id,
     )
-    form = GradeCorrectionReviewForm(request.POST or None)
+    pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction_request)
+    can_review, _, review_guard_message = GradingGovernanceService.can_user_review_correction_request(
+        request_obj=correction_request,
+        user=request.user,
+    )
+    is_final_step = GradingGovernanceService.is_final_correction_step(
+        request_obj=correction_request,
+        step=pending_step,
+    )
+    form = GradeCorrectionReviewForm(
+        request.POST or None,
+        require_window=False,
+    )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
+        if not can_review:
+            form.add_error(None, review_guard_message or "You are not allowed to review this correction request.")
+            context = {
+                "title": f"Review Correction Request #{correction_request.id}",
+                "form": form,
+                "correction_request": correction_request,
+                "pending_step": pending_step,
+                "is_final_step": is_final_step,
+                "correction_window_hours": GradingGovernanceService.CORRECTION_WINDOW_HOURS,
+            }
+            context.update(_scope_context(request))
+            return render(request, "admin_portal/grading/correction_request_review.html", context)
+
         before = model_before_after(correction_request)
         decision = form.cleaned_data["decision"]
         approved = decision == GradeCorrectionReviewForm.Decision.APPROVE
@@ -4269,7 +5259,11 @@ def grade_correction_request_review_view(request, request_id: int):
             )
             messages.success(
                 request,
-                "Correction request approved and unlock window opened."
+                (
+                    "Correction request approved and unlock window opened."
+                    if approved and is_final_step
+                    else "Correction request step approved. Waiting for final approver."
+                )
                 if approved
                 else "Correction request rejected.",
             )
@@ -4279,6 +5273,11 @@ def grade_correction_request_review_view(request, request_id: int):
         "title": f"Review Correction Request #{correction_request.id}",
         "form": form,
         "correction_request": correction_request,
+        "pending_step": pending_step,
+        "is_final_step": is_final_step,
+        "correction_window_hours": GradingGovernanceService.CORRECTION_WINDOW_HOURS,
+        "review_guard_message": review_guard_message,
+        "can_review": can_review,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/correction_request_review.html", context)

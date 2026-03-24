@@ -111,7 +111,7 @@
   }
   .guide-highlight-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.9rem;
     margin: 1.2rem 0 1.5rem;
   }
@@ -218,6 +218,19 @@
     color: #566d5e;
     margin-bottom: 0;
   }
+  .guide-workflow-visual {
+    margin-bottom: 1rem;
+    border-radius: 1rem;
+    overflow: hidden;
+    background: #ffffff;
+    box-shadow: 0 10px 20px rgba(18, 53, 32, 0.08);
+  }
+  .guide-workflow-visual img {
+    width: 100%;
+    height: auto;
+    display: block;
+    object-fit: cover;
+  }
   .guide-image-panel {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -307,10 +320,63 @@
     color: rgba(245, 255, 247, 0.84);
     font-size: 0.92rem;
   }
+  .guide-map-card {
+    border: 0;
+    border-radius: 1.1rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%);
+    box-shadow: 0 12px 22px rgba(16, 50, 30, 0.06);
+    margin-bottom: 1rem;
+  }
+  .guide-map-card .card-body {
+    padding: 1rem 1.1rem;
+  }
+  .guide-map-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-bottom: 0.6rem;
+  }
+  .guide-map-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.7rem;
+  }
+  .guide-map-item {
+    border: 1px solid #dfe9e1;
+    border-radius: 0.85rem;
+    background: #fff;
+    padding: 0.7rem 0.75rem;
+  }
+  .guide-map-item strong {
+    color: #193f29;
+    font-size: 0.9rem;
+  }
+  .guide-map-item p {
+    margin: 0.22rem 0 0;
+    color: #5b7162;
+    font-size: 0.85rem;
+  }
+  .guide-divider {
+    margin: 1rem 0 0.65rem;
+  }
+  .guide-divider h2 {
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: #173d27;
+    margin: 0;
+  }
+  .guide-divider p {
+    margin: 0.2rem 0 0;
+    color: #607667;
+    font-size: 0.9rem;
+  }
   @media (max-width: 991.98px) {
     .guide-hero-grid,
     .guide-management-grid,
     .guide-highlight-grid {
+      grid-template-columns: 1fr;
+    }
+    .guide-map-grid {
       grid-template-columns: 1fr;
     }
     .guide-image-panel {
@@ -342,16 +408,19 @@
           <div class="guide-anchor-nav">
             <a href="#guide-workflow">Daily Workflow</a>
             <a href="#guide-activities">Activities and Scores</a>
+            <a href="#guide-attendance-summary">Attendance and Summary</a>
             <a href="#guide-submission">Submission Rules</a>
             <a href="#guide-corrections">Corrections and Reopen</a>
-            <a href="#guide-classlist">Class List Status</a>
+            <a href="#guide-classlist">Class List and Archives</a>
+            <a href="#guide-archived">Archived Classes</a>
             <a href="#guide-password">Password Help</a>
+            <a href="#guide-first-login">First Login Consent</a>
             <a href="#guide-privacy">Privacy and Governance</a>
           </div>
         </div>
         <div>
           <div class="guide-visual-card">
-            <img src="{% get_media_prefix %}imahe/facultygrades.jpg" alt="Faculty grade book preview">
+            <img src="{% get_media_prefix %}portal-img/faculty_portal_guide.png" alt="Faculty grade book preview">
             <div class="guide-visual-caption">
               <div class="guide-float-pill">Daily Encoding</div>
               <div class="guide-float-pill">Submission Review</div>
@@ -393,69 +462,57 @@
     </div>
   </div>
 
-  <div class="row g-3 mb-4" id="guide-workflow">
-    <div class="col-xl-7">
-      <div class="card guide-section-card">
-        <div class="card-body">
-          <div class="guide-section-title">Recommended Daily Faculty Workflow</div>
-          <div class="guide-steps">
-            <div class="guide-step">
-              <div class="guide-step-number">1</div>
-              <div>
-                <div class="guide-step-title">Open My Classes</div>
-                <p class="guide-step-copy">Start in <strong>My Classes</strong> and choose the correct course, section, academic year, and term assignment.</p>
-              </div>
-            </div>
-            <div class="guide-step">
-              <div class="guide-step-number">2</div>
-              <div>
-                <div class="guide-step-title">Review the Period Card</div>
-                <p class="guide-step-copy">Open the period you are currently working on, such as Prelim, Midterm, Pre-final, or Final.</p>
-              </div>
-            </div>
-            <div class="guide-step">
-              <div class="guide-step-number">3</div>
-              <div>
-                <div class="guide-step-title">Create Activities Carefully</div>
-                <p class="guide-step-copy">Use short activity labels like <strong>Q1</strong>, <strong>R1</strong>, <strong>A1</strong>, or <strong>AC1</strong> so the grade summary remains readable.</p>
-              </div>
-            </div>
-            <div class="guide-step">
-              <div class="guide-step-number">4</div>
-              <div>
-                <div class="guide-step-title">Encode Scores and Attendance</div>
-                <p class="guide-step-copy">Save only the scores you are ready to encode. Blank fields stay unencoded and can be completed later.</p>
-              </div>
-            </div>
-            <div class="guide-step">
-              <div class="guide-step-number">5</div>
-              <div>
-                <div class="guide-step-title">Check the Summary Before Submission</div>
-                <p class="guide-step-copy">Use the Summary page to review computed grades, missing records, and printable submission sheets before finalizing.</p>
-              </div>
-            </div>
-            <div class="guide-step">
-              <div class="guide-step-number">6</div>
-              <div>
-                <div class="guide-step-title">Finalize Submission Only When Ready</div>
-                <p class="guide-step-copy">Submit the grading period only after verifying that the activity setup, encoded scores, class list status, and summary output are correct.</p>
-              </div>
-            </div>
-          </div>
+  <div class="card guide-map-card">
+    <div class="card-body">
+      <div class="guide-map-title">Quick Guide Flow</div>
+      <div class="guide-map-grid">
+        <div class="guide-map-item">
+          <strong>1. Start Daily Work</strong>
+          <p>Follow workflow and open the correct class/period.</p>
+        </div>
+        <div class="guide-map-item">
+          <strong>2. Encode and Review</strong>
+          <p>Create activities, encode scores, and verify summary.</p>
+        </div>
+        <div class="guide-map-item">
+          <strong>3. Submit with Policy</strong>
+          <p>Finalize only when ready and follow correction rules.</p>
+        </div>
+        <div class="guide-map-item">
+          <strong>4. Support and Privacy</strong>
+          <p>Use password/consent help and protect student data.</p>
         </div>
       </div>
     </div>
-    <div class="col-xl-5">
+  </div>
+
+  <div class="guide-divider">
+    <h2>Part 1: Daily Workflow</h2>
+    <p>Begin here before creating activities or encoding scores.</p>
+  </div>
+  <div class="row g-3 mb-4" id="guide-workflow">
+    <div class="col-xl-8">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Recommended Daily Faculty Workflow</div>
+          <div class="guide-workflow-visual">
+            <img src="{% get_media_prefix %}portal-img/recommended_daily_faculty_workflow.png" alt="Recommended daily faculty workflow">
+          </div>
+          
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-4">
       <div class="guide-image-panel">
         <div class="guide-image-card">
-          <img src="{% get_media_prefix %}imahe/dailywork.jpg" alt="Daily faculty workflow">
+          <img src="{% get_media_prefix %}portal-img/daily_work_rythm.png" alt="Daily faculty workflow rhythm">
           <div class="guide-image-copy">
             <div class="guide-image-title">Daily Work Rhythm</div>
             <p class="guide-image-note">A gentle reminder that the portal is meant to support routine class work, not create pressure.</p>
           </div>
         </div>
         <div class="guide-image-card">
-          <img src="{% get_media_prefix %}imahe/focused.jpg" alt="Focused faculty work">
+          <img src="{% get_media_prefix %}portal-img/focused_checking.png" alt="Focused faculty checking">
           <div class="guide-image-copy">
             <div class="guide-image-title">Focused Checking</div>
             <p class="guide-image-note">Reviewing structure, scores, and summary results before submission prevents avoidable corrections later.</p>
@@ -465,9 +522,13 @@
     </div>
   </div>
 
+  <div class="guide-divider">
+    <h2>Part 2: Encoding and Review</h2>
+    <p>Set up activities correctly, then check attendance and summary before submission.</p>
+  </div>
   <div class="row g-3 mb-4" id="guide-activities">
     <div class="col-lg-6">
-      <div class="card guide-section-card">
+        <div class="card guide-section-card">
         <div class="card-body">
           <div class="guide-section-title">Creating Activities and Encoding Scores</div>
           <ul class="guide-list">
@@ -481,18 +542,74 @@
           <div class="guide-mini-note">
             Tip: If you only want to encode one or two students first, enter values only for those students and leave the others blank.
           </div>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Create Grade Activity</h6>
+          <ol class="guide-list">
+            <li>Open <strong>My Courses</strong> -> choose class -> choose period -> click the <strong>Activities</strong> icon.</li>
+            <li>Select <strong>Component</strong> first.</li>
+            <li>Select <strong>Subcomponent</strong> only if the selected component requires it.</li>
+            <li>Select <strong>Detail</strong> only if the selected subcomponent requires it.</li>
+            <li>Enter a short <strong>Activity Title</strong> (ex: Q1, R1, A1, AC1).</li>
+            <li>Enter <strong>Total Score</strong> (for direct percentage items, system uses 100).</li>
+            <li>Set <strong>Date</strong> using the date picker.</li>
+            <li>Click <strong>Save Activity</strong>.</li>
+          </ol>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Encode Scores</h6>
+          <ol class="guide-list">
+            <li>From the Activities table, click <strong>Encode Scores</strong> on the target activity.</li>
+            <li>Enter score values only for students to encode now (leave blank if not yet ready).</li>
+            <li>Click <strong>Save Scores</strong>.</li>
+            <li>Verify the <strong>Encoded</strong> count on the Activities list.</li>
+          </ol>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Update Existing Activity</h6>
+          <ol class="guide-list">
+            <li>Click <strong>Edit</strong> on the activity row.</li>
+            <li>Update component mapping/title/total/date as needed.</li>
+            <li>Click <strong>Update Activity</strong>.</li>
+            <li>Re-check summary results after update.</li>
+          </ol>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Delete Activity</h6>
+          <ol class="guide-list">
+            <li>Click <strong>Delete</strong> on the target activity row.</li>
+            <li>Confirm deletion.</li>
+            <li>Review the summary to ensure expected values after deletion.</li>
+          </ol>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Guardrails (Activities and Scores)</h6>
+          <ul class="guide-list">
+            <li>You cannot save scores above the allowed max (total score for raw-score items, 100 for direct percentage).</li>
+            <li>If the period is <strong>Submitted</strong> or <strong>Locked</strong>, normal editing is blocked.</li>
+            <li>During correction window, editing is scope-limited to approved correction items only.</li>
+            <li>Activity deletion is blocked while approved correction window is active.</li>
+          </ul>
+          <div class="guide-image-card mt-3">
+            <img src="{% get_media_prefix %}portal-img/activities_encoding_scores_workflow.png" alt="Creating activities and encoding scores workflow">
+          </div>
         </div>
       </div>
     </div>
-    <div class="col-lg-6">
+    <div class="col-lg-6" id="guide-attendance-summary">
       <div class="card guide-section-card">
         <div class="card-body">
-          <div class="guide-section-title">How the Summary Helps You</div>
+          <div class="guide-section-title">Attendance and Summary (Step-by-Step)</div>
+          <h6 class="mb-2 fw-bold text-success">Step-by-Step: Attendance</h6>
+          <ol class="guide-list">
+            <li>Open period card -> click <strong>Attendance</strong> icon.</li>
+            <li>Create or select an attendance session (date/title).</li>
+            <li>Set attendance status per student.</li>
+            <li>Click <strong>Save Attendance</strong>.</li>
+          </ol>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Summary Review</h6>
+          <ol class="guide-list">
+            <li>Open period card -> click <strong>Summary</strong> icon.</li>
+            <li>Review component-level and overall period grades.</li>
+            <li>Check submission readiness indicators (coverage, missing records).</li>
+            <li>Use <strong>Print Grade Book</strong> for pre-submission verification.</li>
+            <li>Submit only when ready.</li>
+          </ol>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Guardrails (Attendance and Summary)</h6>
           <ul class="guide-list">
-            <li>The summary mirrors the configured grading template hierarchy for the selected period.</li>
-            <li>Activity averages and class standing values are shown separately so faculty can trace where a result came from.</li>
-            <li>The print button produces a compact grade-book style submission sheet for formal review and filing.</li>
-            <li>The summary also shows submission readiness, including active students with missing records.</li>
+            <li>Submitted or locked periods are view-only for normal attendance/summary edits.</li>
+            <li>Submission is blocked if no encoded grade/attendance exists for active students.</li>
+            <li>If some active students have no records, system shows warning before final submission.</li>
           </ul>
           <div class="guide-mini-note">
             If a value looks unexpected, review the activity setup, score entry method, total score, and class list status before submitting.
@@ -502,6 +619,10 @@
     </div>
   </div>
 
+  <div class="guide-divider">
+    <h2>Part 3: Submission and Corrections</h2>
+    <p>Use these controls only when your records are complete and policy conditions are met.</p>
+  </div>
   <div class="row g-3 mb-4" id="guide-submission">
     <div class="col-lg-6">
       <div class="card guide-section-card">
@@ -513,6 +634,9 @@
             <li>If some active students still have missing records, the system warns you before submission so you can review the class list carefully.</li>
             <li>Always review the printed sheet or on-screen summary before finalizing.</li>
           </ul>
+          <div class="guide-image-card mt-3">
+            <img src="{% get_media_prefix %}portal-img/submission_rules.png" alt="Submission rules workflow">
+          </div>
         </div>
       </div>
     </div>
@@ -520,14 +644,44 @@
       <div class="card guide-section-card">
         <div class="card-body">
           <div class="guide-section-title">Corrections and Reopen Governance</div>
+          <h6 class="mb-2 fw-bold text-success">System Request Mode (SYSTEM_REQUEST)</h6>
+          <ol class="guide-list">
+            <li>Submit period first.</li>
+            <li>Open <strong>Correction Requests</strong> from Summary/Period screen.</li>
+            <li>File request with justification and scope (student/activity/action).</li>
+            <li>Wait for governance approval route (for example: Coordinator -> CAO).</li>
+            <li>After final approval, apply corrections within the allowed validity window.</li>
+            <li>Finalize correction to re-lock scope.</li>
+          </ol>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Manual Mode (MANUAL_ONLY)</h6>
+          <ol class="guide-list">
+            <li>Faculty prepares and submits paper correction form.</li>
+            <li>Paper form is approved by authorized academic officers.</li>
+            <li>Final approver (or authorized admin) reopens the class period in Admin Portal.</li>
+            <li>Faculty performs approved correction updates.</li>
+            <li>Faculty re-submits period.</li>
+          </ol>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Guardrails (Corrections)</h6>
           <div class="guide-policy-grid">
             <div class="guide-policy-item">
               <strong>Before Deadline</strong>
               <p>If tenant policy allows faculty self-reopen, a submitted period may be reopened directly by the teacher before the deadline. Otherwise, the correction request workflow applies.</p>
             </div>
             <div class="guide-policy-item">
+              <strong>Manual-Only Schools</strong>
+              <p>If the tenant is set to <strong>MANUAL_ONLY</strong>, in-portal correction request filing is disabled. Faculty should follow paper approval flow and wait for authorized admin reopen action.</p>
+            </div>
+            <div class="guide-policy-item">
               <strong>After Deadline</strong>
               <p>Reopen and correction actions are governed. The faculty member should use the correction request process and wait for authorized review.</p>
+            </div>
+            <div class="guide-policy-item">
+              <strong>Approval Route</strong>
+              <p>Approval route is configured by admin based on the requesting faculty department. Your school may use one-step final approval (for example, CAO) or two-step review (for example, Coordinator then CAO).</p>
+            </div>
+            <div class="guide-policy-item">
+              <strong>24-Hour Validity</strong>
+              <p>Once final approval is granted, correction validity is automatically set to 24 hours. If the window lapses, request status becomes <strong>LAPSED</strong> and faculty must submit a new correction request.</p>
             </div>
             <div class="guide-policy-item">
               <strong>Audit Trail</strong>
@@ -539,6 +693,10 @@
     </div>
   </div>
 
+  <div class="guide-divider">
+    <h2>Part 4: Class List, Account Help, and Privacy</h2>
+    <p>Manage class status carefully and follow security/privacy guidance.</p>
+  </div>
   <div class="row g-3 mb-4" id="guide-classlist">
     <div class="col-lg-6">
       <div class="card guide-section-card">
@@ -550,6 +708,35 @@
             <li><strong>W</strong> means the student is withdrawn and is also excluded from normal active grading coverage.</li>
             <li>Use the class list carefully before submission because class list status affects readiness, summary interpretation, and final grade handling.</li>
           </ul>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Mark Student as DR or W</h6>
+          <ol class="guide-list">
+            <li>Open class -> go to <strong>Enrollment</strong>.</li>
+            <li>Find the student row.</li>
+            <li>Change status to <strong>DR</strong> or <strong>W</strong>.</li>
+            <li>Click <strong>Save</strong> on that student row.</li>
+            <li>Recheck Summary readiness after status update.</li>
+          </ol>
+          <div class="guide-mini-note">
+            Guardrail: DR/W students are excluded from normal active grading coverage and submission readiness counts.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6" id="guide-archived">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Archived Classes Explained</div>
+          <ul class="guide-list">
+            <li><strong>Active Classes</strong> = current workload under active AY/Term and non-archived offerings.</li>
+            <li><strong>Archived Classes</strong> = offerings outside current active AY/Term scope or explicitly archived offerings.</li>
+            <li>Archived classes are kept for historical reference and monitoring.</li>
+          </ul>
+          <h6 class="mt-3 mb-2 fw-bold text-success">How to View Archived Classes</h6>
+          <ol class="guide-list">
+            <li>Open <strong>My Courses</strong>.</li>
+            <li>Switch to <strong>Archived</strong> tab/filter.</li>
+            <li>Open class card if review access is allowed by policy.</li>
+          </ol>
         </div>
       </div>
     </div>
@@ -566,6 +753,22 @@
           </ul>
           <div class="guide-mini-note">
             For security, faculty members should not request passwords from co-teachers or share login credentials. Use the reset process or ask the authorized support team for assistance.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6" id="guide-first-login">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">First Login Privacy Consent</div>
+          <ol class="guide-list">
+            <li>On first login, review the privacy consent statement carefully.</li>
+            <li>Read what data is collected and how it is used for academic operations.</li>
+            <li>Confirm consent to proceed to the portal.</li>
+            <li>If consent is not accepted, portal access remains restricted.</li>
+          </ol>
+          <div class="guide-mini-note">
+            Consent is part of compliance and accountability. Use only your own account and keep credentials private.
           </div>
         </div>
       </div>

@@ -278,6 +278,7 @@ class TenantGradingProfile(TimeStampedModel, ActivatableModel):
         related_name="tenant_grading_profiles",
     )
     default_base_value = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+    passing_grade_threshold = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
     priority = models.PositiveIntegerField(default=100)
     effective_from_term = models.ForeignKey(
         "academics.Term",
@@ -678,11 +679,66 @@ class GradeSubmissionReopenRequest(TimeStampedModel):
         return f"{self.submission_id}:{self.status}"
 
 
+class CorrectionApprovalRouteRule(TimeStampedModel, ActivatableModel):
+    class RouteMode(models.TextChoices):
+        DIRECT_TO_FINAL = "DIRECT_TO_FINAL", "Direct to Final Approver"
+        TWO_STEP = "TWO_STEP", "Step 1 then Final Approver"
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="correction_approval_routes")
+    faculty_department = models.ForeignKey(
+        "tenants.Department",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="correction_approval_routes",
+        help_text="Leave blank to use this as tenant default route.",
+    )
+    route_mode = models.CharField(max_length=20, choices=RouteMode.choices, default=RouteMode.DIRECT_TO_FINAL)
+    step1_role = models.ForeignKey(
+        "rbac.Role",
+        on_delete=models.PROTECT,
+        related_name="correction_route_step1_rules",
+        help_text="First approver role. For DIRECT_TO_FINAL, this is also the final approver.",
+    )
+    step1_requires_same_department = models.BooleanField(
+        default=False,
+        help_text="When enabled, approver must share the same default department as requesting faculty.",
+    )
+    final_role = models.ForeignKey(
+        "rbac.Role",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="correction_route_final_rules",
+        help_text="Final approver role for TWO_STEP route mode.",
+    )
+    final_requires_same_department = models.BooleanField(
+        default=False,
+        help_text="When enabled, final approver must share the same default department as requesting faculty.",
+    )
+    notes = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        db_table = "correction_approval_routes"
+        ordering = ["tenant__name", "faculty_department__name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "faculty_department"],
+                name="uq_correction_routes_tenant_department",
+            ),
+        ]
+
+    def __str__(self):
+        scope = self.faculty_department.code if self.faculty_department_id else "DEFAULT"
+        return f"{self.tenant.code}:{scope}:{self.route_mode}"
+
+
 class GradeCorrectionRequest(TimeStampedModel):
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
         APPROVED = "APPROVED", "Approved"
         REJECTED = "REJECTED", "Rejected"
+        LAPSED = "LAPSED", "Lapsed"
         CLOSED = "CLOSED", "Closed"
 
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="grade_correction_requests")
@@ -700,6 +756,20 @@ class GradeCorrectionRequest(TimeStampedModel):
     requested_by_user = models.ForeignKey(
         "accounts.User",
         on_delete=models.PROTECT,
+        related_name="grade_correction_requests",
+    )
+    faculty_department = models.ForeignKey(
+        "tenants.Department",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="grade_correction_requests",
+    )
+    approval_route = models.ForeignKey(
+        "grading.CorrectionApprovalRouteRule",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
         related_name="grade_correction_requests",
     )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
@@ -720,6 +790,51 @@ class GradeCorrectionRequest(TimeStampedModel):
 
     def __str__(self):
         return f"{self.offering_id}:{self.template_period.code}:{self.status}"
+
+
+class GradeCorrectionApprovalStep(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+        SKIPPED = "SKIPPED", "Skipped"
+
+    correction_request = models.ForeignKey(
+        "grading.GradeCorrectionRequest",
+        on_delete=models.PROTECT,
+        related_name="approval_steps",
+    )
+    step_order = models.PositiveSmallIntegerField(default=1)
+    approver_role = models.ForeignKey(
+        "rbac.Role",
+        on_delete=models.PROTECT,
+        related_name="grade_correction_approval_steps",
+    )
+    approver_label = models.CharField(max_length=150)
+    requires_same_department = models.BooleanField(default=False)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    reviewed_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="reviewed_grade_correction_approval_steps",
+    )
+    reviewed_at = models.DateTimeField(blank=True, null=True)
+    review_remarks = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = "grade_correction_approval_steps"
+        ordering = ["correction_request_id", "step_order"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["correction_request", "step_order"],
+                name="uq_grade_correction_approval_steps_order",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.correction_request_id}:S{self.step_order}:{self.status}"
 
 
 class GradeCorrectionRequestItem(TimeStampedModel, ActivatableModel):

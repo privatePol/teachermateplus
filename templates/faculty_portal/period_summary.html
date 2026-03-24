@@ -346,7 +346,7 @@
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
     <button class="btn btn-sm btn-outline-primary print-trigger-btn" type="button" onclick="window.print();">Print Grade Book</button>
-    {% if "corrections.create" in effective_permissions %}
+    {% if "corrections.create" in effective_permissions and system_correction_enabled %}
       <a class="btn btn-sm btn-outline-warning" href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Correction Requests</a>
     {% endif %}
   </div>
@@ -355,7 +355,7 @@
 {% if is_correction_active %}
 <div class="alert alert-warning no-print">
   Approved correction window is active.
-  {% if "corrections.create" in effective_permissions %}
+  {% if "corrections.create" in effective_permissions and system_correction_enabled %}
     You can apply scoped edits then finalize in
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Corrections</a>.
   {% endif %}

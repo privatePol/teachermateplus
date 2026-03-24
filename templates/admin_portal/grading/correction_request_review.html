@@ -14,7 +14,40 @@
         <div class="mb-2"><strong>Offering:</strong> {{ correction_request.offering.course.code }} / {{ correction_request.offering.section.code }}</div>
         <div class="mb-2"><strong>Period:</strong> {{ correction_request.template_period.code }}</div>
         <div class="mb-2"><strong>Faculty:</strong> {{ correction_request.requested_by_user.username }}</div>
+        <div class="mb-2"><strong>Faculty Department:</strong> {{ correction_request.faculty_department.code|default:"-" }}</div>
         <div class="mb-2"><strong>Status:</strong> {{ correction_request.status }}</div>
+        <div class="mb-2">
+          <strong>Current Approval Step:</strong>
+          {% if pending_step %}
+            Step {{ pending_step.step_order }} - {{ pending_step.approver_label }}
+            {% if pending_step.requires_same_department %}
+              (same faculty department required)
+            {% endif %}
+          {% else %}
+            Finalized / Legacy request
+          {% endif %}
+        </div>
+        {% if correction_request.approval_steps.all %}
+        <div class="mb-2">
+          <strong>Route Steps:</strong>
+          <ul class="mb-0">
+            {% for step in correction_request.approval_steps.all %}
+              <li>
+                Step {{ step.step_order }} - {{ step.approver_label }}:
+                {% if step.status == "APPROVED" %}
+                  <span class="badge text-bg-success">Approved</span>
+                {% elif step.status == "REJECTED" %}
+                  <span class="badge text-bg-danger">Rejected</span>
+                {% elif step.status == "SKIPPED" %}
+                  <span class="badge text-bg-secondary">Skipped</span>
+                {% else %}
+                  <span class="badge text-bg-warning text-dark">Pending</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
         <div class="mb-2"><strong>Justification:</strong><br>{{ correction_request.justification }}</div>
         <div class="mb-2">
           <strong>Scope:</strong>
@@ -25,7 +58,7 @@
                 {% if item.student %}| {{ item.student.student_no }}{% endif %}
                 {% if item.grade_activity %}| {{ item.grade_activity.title }}{% endif %}
                 {% if item.old_value or item.new_value %}
-                  | {{ item.old_value|default:"-" }} → {{ item.new_value|default:"-" }}
+                  | {{ item.old_value|default:"-" }} -> {{ item.new_value|default:"-" }}
                 {% endif %}
               </li>
             {% empty %}
@@ -50,6 +83,16 @@
     <div class="card border-0 shadow-sm">
       <div class="card-header bg-white"><strong>Review Action</strong></div>
       <div class="card-body">
+        {% if not can_review %}
+          <div class="alert alert-warning mb-3">
+            {{ review_guard_message|default:"You are not allowed to review the current approval step." }}
+          </div>
+        {% endif %}
+        {% if is_final_step %}
+          <div class="alert alert-info py-2">Final approval step: correction window is auto-set to {{ correction_window_hours }} hours from approval time.</div>
+        {% else %}
+          <div class="alert alert-secondary py-2">Intermediate step: this will move to the next approver step.</div>
+        {% endif %}
         <form method="post" novalidate>
           {% csrf_token %}
           {% if form.non_field_errors %}
@@ -59,10 +102,11 @@
           <div class="mb-3">
             <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
             {{ field }}
+            {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
             {% for error in field.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
           </div>
           {% endfor %}
-          <button class="btn btn-primary" type="submit">Submit Review</button>
+          <button class="btn btn-primary" type="submit" {% if not can_review %}disabled{% endif %}>Submit Review</button>
         </form>
       </div>
     </div>

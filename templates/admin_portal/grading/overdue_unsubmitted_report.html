@@ -1,0 +1,150 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <h2 class="h5 mb-0">Overdue Unsubmitted Classes</h2>
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{% url 'admin_portal:grade_submission_list' %}" class="btn btn-sm btn-outline-secondary">Back to Grade Submissions</a>
+    <a href="{% url 'admin_portal:grading_period_lock_list' %}" class="btn btn-sm btn-outline-success">Open Lock Rules</a>
+  </div>
+</div>
+
+<div class="row g-2 mb-3">
+  <div class="col-md-4 col-xl-2">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body py-2">
+        <div class="small text-muted">Total Overdue</div>
+        <div class="h5 mb-0">{{ summary.total_overdue_unsubmitted }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 col-xl-2">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body py-2">
+        <div class="small text-muted">Locked</div>
+        <div class="h5 mb-0">{{ summary.locked_unsubmitted }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 col-xl-2">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body py-2">
+        <div class="small text-muted">Open + Overdue</div>
+        <div class="h5 mb-0">{{ summary.open_overdue_unsubmitted }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <select class="form-select" name="campus_id">
+      <option value="">All Campuses</option>
+      {% for campus in campus_options %}
+        <option value="{{ campus.id }}" {% if request.GET.campus_id == campus.id|stringformat:'s' %}selected{% endif %}>{{ campus.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="academic_year_id">
+      <option value="">All AY</option>
+      {% for ay in academic_year_options %}
+        <option value="{{ ay.id }}" {% if request.GET.academic_year_id == ay.id|stringformat:'s' %}selected{% endif %}>{{ ay.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="term_id">
+      <option value="">All Terms</option>
+      {% for term in term_options %}
+        <option value="{{ term.id }}" {% if request.GET.term_id == term.id|stringformat:'s' %}selected{% endif %}>{{ term.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <input class="form-control" name="period_code" value="{{ period_code }}" placeholder="Period code">
+  </div>
+  <div class="col-md-3">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Campus/course/section/faculty">
+  </div>
+  <div class="col-md-1">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Campus</th>
+          <th>AY / Term</th>
+          <th>Period</th>
+          <th>Course</th>
+          <th>Section</th>
+          <th>Faculty</th>
+          <th>Deadline</th>
+          <th>Overdue</th>
+          <th>Lock</th>
+          <th>Submission</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in page_obj %}
+        <tr>
+          <td>{{ row.campus_code }}</td>
+          <td>{{ row.academic_year_code }} / {{ row.term_code }}</td>
+          <td>{{ row.period_code }}</td>
+          <td>
+            <div><strong>{{ row.course_code }}</strong></div>
+            <div class="small text-muted">{{ row.course_title }}</div>
+          </td>
+          <td>{{ row.section_code }}</td>
+          <td>{{ row.faculty_name }}</td>
+          <td>{{ row.deadline_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ row.overdue_hours }}h</td>
+          <td>
+            {% if row.lock_state == "LOCKED" %}
+              <span class="badge text-bg-danger">Locked</span>
+            {% else %}
+              <span class="badge text-bg-warning">Open Overdue</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.submission_status == "DRAFT" %}
+              <span class="badge text-bg-secondary">Draft</span>
+            {% elif row.submission_status == "REOPENED" %}
+              <span class="badge text-bg-warning">Reopened</span>
+            {% elif row.submission_status == "NO_RECORD" %}
+              <span class="badge text-bg-dark">No Record</span>
+            {% elif row.submission_status == "NO_TEMPLATE" %}
+              <span class="badge text-bg-danger">No Template</span>
+            {% elif row.submission_status == "NO_PERIOD" %}
+              <span class="badge text-bg-danger">No Period</span>
+            {% else %}
+              <span class="badge text-bg-secondary">{{ row.submission_status }}</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            {% if row.lock_state == "OPEN_OVERDUE" %}
+              <span class="small text-warning">Pending lock job</span>
+            {% elif row.submission_status == "NO_TEMPLATE" %}
+              <span class="small text-danger">Assign template</span>
+            {% elif row.submission_status == "NO_PERIOD" %}
+              <span class="small text-danger">Fix period mapping</span>
+            {% else %}
+              <span class="small text-muted">Needs faculty completion</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="11" class="text-center text-muted py-4">No overdue unsubmitted classes found for current filters.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}
+

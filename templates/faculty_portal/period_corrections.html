@@ -12,6 +12,10 @@
 <div class="alert alert-warning">
   Correction window is active for request #{{ active_correction_request.id }}.
   Apply scoped edits in Activities/Attendance, then finalize below.
+  {% if active_correction_request.unlock_window %}
+    Valid until <strong>{{ active_correction_request.unlock_window.end_at|date:"Y-m-d H:i" }}</strong>.
+  {% endif %}
+  If not finalized within the validity window, the request is marked <strong>LAPSED</strong> and a new request is required.
 </div>
 {% elif can_self_reopen_before_deadline %}
 <div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-3">
@@ -62,6 +66,8 @@
               <span class="badge text-bg-warning">{{ req.status }}</span>
             {% elif req.status == "REJECTED" %}
               <span class="badge text-bg-danger">{{ req.status }}</span>
+            {% elif req.status == "LAPSED" %}
+              <span class="badge text-bg-dark">LAPSED</span>
             {% elif req.status == "CLOSED" %}
               <span class="badge text-bg-secondary">{{ req.status }}</span>
             {% else %}
