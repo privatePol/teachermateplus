@@ -21,12 +21,16 @@
       <div class="col-md-5">
         <label class="form-label">Select Faculty</label>
         <select class="form-select" id="faculty-select-input" name="faculty_user_id">
-          <option value="">-- Select Faculty --</option>
-          {% for user in faculty_candidates %}
+            <option value="">-- Select Faculty --</option>
+            {% for user in faculty_candidates %}
             <option value="{{ user.id }}" {% if selected_faculty and selected_faculty.id == user.id %}selected{% endif %}>
-              {{ user.username }}{% if user.get_full_name %} - {{ user.get_full_name }}{% endif %}
+              {% if user.full_name and user.full_name != user.username %}
+                {{ user.full_name }} ({{ user.username }})
+              {% else %}
+                {{ user.username }}
+              {% endif %}
             </option>
-          {% endfor %}
+            {% endfor %}
         </select>
       </div>
       <div class="col-md-3 d-flex gap-2">
@@ -37,25 +41,40 @@
 
     {% if selected_faculty %}
     <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top">
-      <div>
-        <div class="small text-muted">Selected Faculty</div>
-        <div class="fw-semibold">{{ selected_faculty.username }}{% if selected_faculty.get_full_name %} - {{ selected_faculty.get_full_name }}{% endif %}</div>
+        <div>
+          <div class="small text-muted">Selected Faculty</div>
+          <div class="fw-semibold">
+            {% if selected_faculty.full_name and selected_faculty.full_name != selected_faculty.username %}
+              {{ selected_faculty.full_name }} ({{ selected_faculty.username }})
+            {% else %}
+              {{ selected_faculty.username }}
+            {% endif %}
+          </div>
+        </div>
+      <div class="d-flex gap-2">
+        <a
+          class="btn btn-outline-success"
+          href="{% url 'admin_portal:faculty_gradebook_monitor' %}?faculty_user_id={{ selected_faculty.id }}&faculty_q={{ faculty_q|urlencode }}"
+        >
+          OPEN GRADE BOOK
+        </a>
+        {% if "faculty_assignments.create" in effective_permissions %}
+        <a
+          class="btn btn-primary"
+          href="{% url 'admin_portal:faculty_assignment_list' %}?faculty_user_id={{ selected_faculty.id }}&faculty_q={{ faculty_q|urlencode }}&assign=1{% if selected_section_id %}&section_id={{ selected_section_id }}{% endif %}"
+        >
+          ASSIGN COURSE OFFERINGS
+        </a>
+        {% endif %}
       </div>
-      {% if "faculty_assignments.create" in effective_permissions %}
-      <a
-        class="btn btn-primary"
-        href="{% url 'admin_portal:faculty_assignment_list' %}?faculty_user_id={{ selected_faculty.id }}&faculty_q={{ faculty_q|urlencode }}&assign=1{% if selected_section_id %}&section_id={{ selected_section_id }}{% endif %}"
-      >
-        ASSIGN COURSE OFFERINGS
-      </a>
-      {% endif %}
     </div>
     {% endif %}
   </div>
 </div>
 
-{% if show_assign_box and selected_faculty %}
+{% if selected_faculty %}
 <div class="d-flex flex-column gap-3">
+  {% if show_assign_box %}
   <div class="card border-0 shadow-sm">
     <div class="card-body">
       <div class="d-flex justify-content-between align-items-center mb-3">
@@ -114,8 +133,7 @@
             <thead>
               <tr>
                 <th style="width: 48px;"></th>
-                <th>Course Code</th>
-                <th>Course Title</th>
+                <th>Course</th>
                 <th>Section</th>
                 <th>Schedule / Time</th>
               </tr>
@@ -126,14 +144,13 @@
                 <td>
                   <input class="form-check-input offering-checkbox" type="checkbox" name="offering_ids" value="{{ o.id }}">
                 </td>
-                <td>{{ o.course.code }}</td>
-                <td>{{ o.course.title }}</td>
-                <td>{{ o.section.code }}</td>
+                <td>{{ o.course.title }} <span class="text-muted">({{ o.course.code }})</span></td>
+                <td>{{ o.section.name|default:o.section.code }}</td>
                 <td>{{ o.schedule_text|default:"-" }}</td>
               </tr>
               {% empty %}
               <tr>
-                <td colspan="5" class="text-center text-muted py-4">
+                <td colspan="4" class="text-center text-muted py-4">
                   No unassigned offerings found.
                 </td>
               </tr>
@@ -150,6 +167,7 @@
       </form>
     </div>
   </div>
+  {% endif %}
 
   <div class="card border-0 shadow-sm">
     <div class="card-body">
@@ -182,8 +200,7 @@
             <thead>
               <tr>
                 <th style="width: 48px;"></th>
-                <th>Course Code</th>
-                <th>Course Title</th>
+                <th>Course</th>
                 <th>Section</th>
                 <th>Schedule / Time</th>
                 <th>Primary</th>
@@ -195,9 +212,8 @@
                 <td>
                   <input class="form-check-input assigned-checkbox" type="checkbox" name="assignment_ids" value="{{ row.id }}">
                 </td>
-                <td>{{ row.offering.course.code }}</td>
-                <td>{{ row.offering.course.title }}</td>
-                <td>{{ row.offering.section.code }}</td>
+                <td>{{ row.offering.course.title }} <span class="text-muted">({{ row.offering.course.code }})</span></td>
+                <td>{{ row.offering.section.name|default:row.offering.section.code }}</td>
                 <td>{{ row.offering.schedule_text|default:"-" }}</td>
                 <td>
                   <div class="d-flex align-items-center gap-2">
@@ -220,7 +236,7 @@
               </tr>
               {% empty %}
               <tr>
-                <td colspan="6" class="text-center text-muted py-4">No assigned offerings yet.</td>
+                <td colspan="5" class="text-center text-muted py-4">No assigned offerings found in the current scope.</td>
               </tr>
               {% endfor %}
             </tbody>

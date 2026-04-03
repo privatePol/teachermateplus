@@ -1,0 +1,440 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .monitor-shell {
+    display: grid;
+    gap: 1rem;
+  }
+  .monitor-card {
+    border: 0;
+    box-shadow: 0 0.5rem 1rem rgba(23, 59, 37, 0.08);
+    border-radius: 1rem;
+  }
+  .monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.85rem;
+  }
+  .monitor-metric {
+    border-radius: 1rem;
+    padding: 1rem 1.1rem;
+    background:
+      radial-gradient(circle at top right, rgba(247, 211, 84, 0.45) 0%, rgba(247, 211, 84, 0) 42%),
+      linear-gradient(145deg, #0f6d3d 0%, #2f8e4f 52%, #d9b738 100%);
+    border: 1px solid rgba(18, 78, 45, 0.22);
+    box-shadow: 0 0.75rem 1.35rem rgba(20, 71, 42, 0.14);
+  }
+  .monitor-metric .metric-label {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(249, 248, 232, 0.9);
+    margin-bottom: 0.45rem;
+  }
+  .monitor-metric .metric-value {
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: #fffdf2;
+    line-height: 1.1;
+    text-shadow: 0 1px 1px rgba(12, 46, 26, 0.18);
+  }
+  .monitor-metric .metric-meta {
+    margin-top: 0.45rem;
+    font-size: 0.84rem;
+    color: rgba(245, 247, 232, 0.9);
+  }
+  .monitor-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .monitor-meta .badge {
+    font-size: 0.8rem;
+    padding: 0.45rem 0.7rem;
+  }
+  .class-record-table {
+    min-width: 1240px;
+  }
+  .class-record-table thead th {
+    font-size: 0.9rem;
+    vertical-align: middle;
+    white-space: nowrap;
+    border-color: #d8e4d8;
+    text-align: center;
+  }
+  .class-record-table tbody td {
+    white-space: nowrap;
+  }
+  .class-record-table .sticky-col {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background: #ffffff;
+  }
+  .class-record-table .sticky-col-2 {
+    position: sticky;
+    left: 64px;
+    z-index: 3;
+    background: #ffffff;
+  }
+  .class-record-table .sticky-col-3 {
+    position: sticky;
+    left: 220px;
+    z-index: 3;
+    background: #ffffff;
+  }
+  .class-record-table .sticky-col-4 {
+    position: sticky;
+    left: 520px;
+    z-index: 3;
+    background: #ffffff;
+  }
+  .class-record-table thead .sticky-col,
+  .class-record-table thead .sticky-col-2,
+  .class-record-table thead .sticky-col-3,
+  .class-record-table thead .sticky-col-4 {
+    z-index: 5;
+  }
+  .class-record-table .row-no-col {
+    min-width: 64px;
+    text-align: center;
+  }
+  .class-record-table .student-no-col {
+    min-width: 156px;
+  }
+  .class-record-table .student-name-col {
+    min-width: 300px;
+  }
+  .class-record-table .status-col {
+    min-width: 110px;
+  }
+  .class-record-table .band-class-standing {
+    background: linear-gradient(180deg, #eef6ee 0%, #e4f0e5 100%);
+    color: #20442d;
+  }
+  .class-record-table .band-section {
+    background: #f7faf6;
+    color: #31513f;
+  }
+  .class-record-table .band-subsection {
+    background: #fbfdf9;
+    color: #4c6556;
+  }
+  .class-record-table .band-exam {
+    background: linear-gradient(180deg, #fbf6de 0%, #f4e7ad 100%);
+    color: #5b4a14;
+  }
+  .class-record-table .metric-col {
+    background: #f1f6f1;
+    font-weight: 700;
+  }
+  .class-record-table .metric-col.metric-final {
+    background: #f7efd0;
+    color: #4f441a;
+  }
+  .class-record-table .perfect-score-row td {
+    background: #f9fbf8;
+    font-size: 0.82rem;
+    color: #647567;
+  }
+  .class-record-table .perfect-score-row .metric-col {
+    background: #edf3ed;
+  }
+  .class-record-table .row-number-cell {
+    text-align: center;
+    font-weight: 600;
+    color: #4c6556;
+  }
+  @media (max-width: 991.98px) {
+    .class-record-table .sticky-col,
+    .class-record-table .sticky-col-2,
+    .class-record-table .sticky-col-3,
+    .class-record-table .sticky-col-4 {
+      position: static;
+    }
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Faculty Grade Book Monitor</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:faculty_assignment_list' %}">Back to Faculty Assignments</a>
+</div>
+
+<div class="monitor-shell">
+  <div class="card monitor-card">
+    <div class="card-body">
+      <form class="row g-3 align-items-end">
+        <div class="col-lg-4">
+          <label class="form-label">Search Faculty</label>
+          <input class="form-control" name="faculty_q" value="{{ faculty_q }}" placeholder="Type faculty username, name, or email">
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label">Faculty</label>
+          <select class="form-select" name="faculty_user_id" onchange="this.form.submit()">
+            <option value="">-- Select Faculty --</option>
+            {% for user in faculty_candidates %}
+              <option value="{{ user.id }}" {% if selected_faculty and selected_faculty.id == user.id %}selected{% endif %}>
+                {% if user.full_name and user.full_name != user.username %}
+                  {{ user.full_name }} ({{ user.username }})
+                {% else %}
+                  {{ user.username }}
+                {% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-2">
+          <label class="form-label">Class</label>
+          <select class="form-select" name="offering_id" onchange="this.form.submit()" {% if not selected_faculty %}disabled{% endif %}>
+            <option value="">-- Select Class --</option>
+            {% for assignment in selected_faculty_assignments %}
+              <option value="{{ assignment.offering.id }}" {% if selected_offering and selected_offering.id == assignment.offering.id %}selected{% endif %}>
+                {{ assignment.offering.course.title }} ({{ assignment.offering.course.code }}) |
+                {{ assignment.offering.section.name|default:assignment.offering.section.code }} |
+                {{ assignment.offering.term.name|default:assignment.offering.term.code }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-2">
+          <label class="form-label">Period</label>
+          <select class="form-select" name="period_id" onchange="this.form.submit()" {% if not selected_offering %}disabled{% endif %}>
+            <option value="">-- Select Period --</option>
+            {% for item in periods %}
+              <option value="{{ item.id }}" {% if selected_period and selected_period.id == item.id %}selected{% endif %}>{{ item.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-8">
+          <label class="form-label">Search Student</label>
+          <input class="form-control" name="q" value="{{ q }}" placeholder="Search student number or name within the selected grade book">
+        </div>
+        <div class="col-lg-4 d-flex gap-2">
+          <button class="btn btn-primary flex-fill" type="submit">Refresh Monitor</button>
+          <a class="btn btn-outline-dark flex-fill" href="{% url 'admin_portal:faculty_gradebook_monitor' %}">Reset</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% if selected_faculty and selected_offering and selected_period %}
+    <div class="card monitor-card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+          <div>
+            <div class="small text-muted text-uppercase fw-semibold mb-1">Monitoring Faculty</div>
+            <div class="h5 mb-1">
+              {% if selected_faculty.full_name and selected_faculty.full_name != selected_faculty.username %}
+                {{ selected_faculty.full_name }} ({{ selected_faculty.username }})
+              {% else %}
+                {{ selected_faculty.username }}
+              {% endif %}
+            </div>
+            <div class="text-muted">
+              {{ selected_offering.course.title }} ({{ selected_offering.course.code }}) |
+              {{ selected_offering.section.name|default:selected_offering.section.code }} |
+              {{ selected_period.name }}
+            </div>
+          </div>
+          <div class="monitor-meta">
+            {% if period_state.submission_status %}
+              {% if period_state.submission_status == "SUBMITTED" %}
+                <span class="badge text-bg-success">Submitted</span>
+              {% elif period_state.submission_status == "REOPENED" %}
+                <span class="badge text-bg-warning text-dark">Reopened</span>
+              {% else %}
+                <span class="badge text-bg-secondary">{{ period_state.submission_status }}</span>
+              {% endif %}
+            {% else %}
+              <span class="badge text-bg-secondary">Draft</span>
+            {% endif %}
+            {% if period_state.is_locked %}
+              <span class="badge text-bg-danger">Locked</span>
+            {% else %}
+              <span class="badge text-bg-info">Unlocked</span>
+            {% endif %}
+            {% if is_masked %}
+              <span class="badge text-bg-dark">Masked Student Identity</span>
+            {% endif %}
+          </div>
+        </div>
+        {% if submit_readiness %}
+          <div class="mt-3 text-muted small">
+            ACTIVE students: <strong>{{ submit_readiness.eligible_student_count }}</strong> |
+            With at least 1 encoded record: <strong>{{ submit_readiness.students_with_any_grade }}</strong> |
+            Missing records: <strong>{{ submit_readiness.students_missing_any_grade }}</strong> |
+            Coverage: <strong>{{ submit_readiness.coverage_percent }}%</strong>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="monitor-grid">
+      {% for card in metric_cards %}
+        <div class="monitor-metric">
+          <div class="metric-label">{{ card.label }}</div>
+          <div class="metric-value">{{ card.value }}</div>
+          <div class="metric-meta">{{ card.meta }}</div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="card monitor-card">
+      <div class="card-body">
+        <div class="alert alert-light border mb-3">
+          Read-only academic monitoring view. Student identity is masked for AC/Dean/CAO roles to reduce bias during oversight.
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover mb-0 align-middle class-record-table">
+            <thead>
+              <tr>
+                <th rowspan="4" class="sticky-col row-no-col">No.</th>
+                <th rowspan="4" class="sticky-col-2 student-no-col">Student No</th>
+                <th rowspan="4" class="sticky-col-3 student-name-col">Student Name</th>
+                <th rowspan="4" class="sticky-col-4 status-col">Status</th>
+                {% for block in summary_layout.class_standing_blocks %}
+                  <th colspan="{{ block.colspan }}" class="band-class-standing">{{ block.label }}</th>
+                {% endfor %}
+                {% for exam in summary_layout.exam_components %}
+                  <th rowspan="4" class="band-exam metric-col metric-final">{{ exam.label }}</th>
+                {% endfor %}
+                <th rowspan="4" class="metric-col metric-final">{{ selected_period.name|upper }} Grade</th>
+              </tr>
+              <tr>
+                {% for block in summary_layout.class_standing_blocks %}
+                  {% for section in block.sections %}
+                    <th colspan="{{ section.colspan }}" class="band-section">{{ section.label }}</th>
+                  {% endfor %}
+                  <th class="metric-col"></th>
+                {% endfor %}
+              </tr>
+              <tr>
+                {% for block in summary_layout.class_standing_blocks %}
+                  {% for section in block.sections %}
+                    {% if section.uses_nested %}
+                      {% for group in section.groups %}
+                        <th colspan="{{ group.colspan }}" class="band-subsection">{{ group.label }}</th>
+                      {% endfor %}
+                    {% else %}
+                      <th colspan="{{ section.colspan }}" class="band-subsection"></th>
+                    {% endif %}
+                  {% endfor %}
+                  <th class="metric-col"></th>
+                {% endfor %}
+              </tr>
+              <tr>
+                {% for block in summary_layout.class_standing_blocks %}
+                  {% for section in block.sections %}
+                    {% if section.uses_nested %}
+                      {% for group in section.groups %}
+                        {% for column in group.activity_columns %}
+                          <th>{{ column.label }}</th>
+                        {% endfor %}
+                        <th class="metric-col">{{ group.avg_label }}</th>
+                      {% endfor %}
+                    {% else %}
+                      {% for column in section.activity_columns %}
+                        <th>{{ column.label }}</th>
+                      {% endfor %}
+                      <th class="metric-col">{{ section.avg_label }}</th>
+                    {% endif %}
+                  {% endfor %}
+                  <th class="metric-col">{{ block.total_label }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="perfect-score-row">
+                <td class="sticky-col row-no-col"></td>
+                <td class="sticky-col-2 student-no-col"></td>
+                <td class="sticky-col-3 student-name-col fw-semibold">Highest Possible Score</td>
+                <td class="sticky-col-4 status-col"></td>
+                {% for block in summary_layout.class_standing_blocks %}
+                  {% for section in block.sections %}
+                    {% if section.uses_nested %}
+                      {% for group in section.groups %}
+                        {% for column in group.activity_columns %}
+                          <td>{{ column.total_score|default:"" }}</td>
+                        {% endfor %}
+                        <td class="metric-col"></td>
+                      {% endfor %}
+                    {% else %}
+                      {% for column in section.activity_columns %}
+                        <td>{{ column.total_score|default:"" }}</td>
+                      {% endfor %}
+                      <td class="metric-col"></td>
+                    {% endif %}
+                  {% endfor %}
+                  <td class="metric-col"></td>
+                {% endfor %}
+                {% for exam in summary_layout.exam_components %}
+                  <td class="metric-col metric-final">
+                    {% if exam.sections and exam.sections.0.activity_columns %}
+                      {{ exam.sections.0.activity_columns.0.total_score|default:"" }}
+                    {% endif %}
+                  </td>
+                {% endfor %}
+                <td class="metric-col metric-final"></td>
+              </tr>
+              {% for row in rows %}
+                <tr>
+                  <td class="sticky-col row-no-col row-number-cell">{{ forloop.counter }}</td>
+                  <td class="sticky-col-2 student-no-col">{{ row.display_student_no }}</td>
+                  <td class="sticky-col-3 student-name-col">{{ row.display_student_name }}</td>
+                  <td class="sticky-col-4 status-col">
+                    {% if row.enrollment_status == "ACTIVE" %}
+                      <span class="badge text-bg-success">{{ row.enrollment_status }}</span>
+                    {% else %}
+                      <span class="badge text-bg-warning">{{ row.enrollment_status }}</span>
+                    {% endif %}
+                  </td>
+                  {% for block in row.class_standing_blocks %}
+                    {% for section in block.sections %}
+                      {% if section.uses_nested %}
+                        {% for group in section.groups %}
+                          {% for value in group.activity_values %}
+                            <td>{{ value|default:"" }}</td>
+                          {% endfor %}
+                          <td class="metric-col">{{ group.average|default:"" }}</td>
+                        {% endfor %}
+                      {% else %}
+                        {% for value in section.activity_values %}
+                          <td>{{ value|default:"" }}</td>
+                        {% endfor %}
+                        <td class="metric-col">{{ section.average|default:"" }}</td>
+                      {% endif %}
+                    {% endfor %}
+                    <td class="metric-col"><strong>{{ block.total|default:"" }}</strong></td>
+                  {% endfor %}
+                  {% for value in row.exam_values %}
+                    <td class="metric-col metric-final">{{ value|default:"" }}</td>
+                  {% endfor %}
+                  <td class="metric-col metric-final"><strong>{{ row.period_grade|default:"" }}</strong></td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="{{ table_colspan }}" class="text-center text-muted py-4">No grade book rows found in the current scope.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  {% elif selected_faculty %}
+    <div class="card monitor-card">
+      <div class="card-body text-muted">
+        No assigned class or grading period is available for the selected faculty in the current scope.
+      </div>
+    </div>
+  {% else %}
+    <div class="card monitor-card">
+      <div class="card-body text-muted">
+        Select a faculty member to open the read-only grade book monitor.
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

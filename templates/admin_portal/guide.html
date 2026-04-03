@@ -194,6 +194,7 @@
       <a href="{% url 'admin_portal:grading_period_lock_list' %}">Period Locks</a>
       <a href="{% url 'admin_portal:grade_submission_list' %}">Grade Submissions</a>
       <a href="{% url 'admin_portal:grade_correction_request_list' %}">Correction Requests</a>
+      <a href="{% url 'admin_portal:faculty_gradebook_monitor' %}">Faculty Grade Book Monitor</a>
       <a href="{% url 'admin_portal:audit_log_list' %}">Audit Logs</a>
     </div>
   </div>
@@ -490,7 +491,18 @@
             <li>Use dashboard and analytics to monitor submissions, failures, and exceptions.</li>
             <li>Use audit logs for policy-critical actions and decision traceability.</li>
             <li>Review correction/reopen actions before official release.</li>
+            <li>Use Faculty Grade Book Monitor for read-only academic oversight of a scoped faculty member's classes and period grades.</li>
           </ul>
+          <div class="guide-subhead">Faculty Grade Book Monitoring</div>
+          <ol class="guide-steps">
+            <li>Open Faculty Assignments and select the faculty member within your allowed tenant, campus, and department scope.</li>
+            <li>Click <strong>Open Grade Book</strong>, then choose the class and grading period to review.</li>
+            <li>Review the metric cards first for class coverage, averages, and pass rate before drilling into detailed rows.</li>
+            <li>Use the student search box when you need to isolate a specific record during review.</li>
+          </ol>
+          <div class="guide-note">
+            AC, Dean, and CAO monitoring opens the grade book in read-only mode. Student identity can be masked by role, and every monitor open is recorded in the audit trail.
+          </div>
         </div>
       </div>
     </div>

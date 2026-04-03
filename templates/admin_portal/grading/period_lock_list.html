@@ -63,11 +63,18 @@
       <tbody>
       {% for row in page_obj %}
         <tr>
-          <td>{{ row.campus.code }}</td>
-          <td>{{ row.term.code }}</td>
+          <td>{{ row.campus.name|default:row.campus.code }}</td>
+          <td>{{ row.term.name|default:row.term.code }}</td>
           <td>{{ row.period_code }}</td>
           <td>{{ row.scope_type }}</td>
-          <td>{% if row.course_offering %}{{ row.course_offering.course.code }} / {{ row.course_offering.section.code }}{% else %}-{% endif %}</td>
+          <td>
+            {% if row.course_offering %}
+              {{ row.course_offering.course.title }} <span class="text-muted">({{ row.course_offering.course.code }})</span>
+              / {{ row.course_offering.section.name|default:row.course_offering.section.code }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
           <td>
             {% if row.deadline_at %}
               {{ row.deadline_at|date:"Y-m-d H:i" }}

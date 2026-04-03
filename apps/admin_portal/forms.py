@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from django import forms
 from django.db import models
 from django.contrib.auth import get_user_model
@@ -52,6 +54,56 @@ def _enforce_active_reference_choices(form):
 def _set_choice_label(field, formatter):
     if field is not None:
         field.label_from_instance = formatter
+
+
+def _course_label(obj):
+    title = (getattr(obj, "title", "") or "").strip()
+    code = (getattr(obj, "code", "") or "").strip()
+    if title and code:
+        return f"{title} ({code})"
+    return title or code or str(obj)
+
+
+def _section_label(obj):
+    name = (getattr(obj, "name", "") or "").strip()
+    code = (getattr(obj, "code", "") or "").strip()
+    if name and code and name != code:
+        return f"{name} ({code})"
+    return name or code or str(obj)
+
+
+def _term_label(obj):
+    name = (getattr(obj, "name", "") or "").strip()
+    code = (getattr(obj, "code", "") or "").strip()
+    academic_year = getattr(obj, "academic_year", None)
+    ay_name = (getattr(academic_year, "name", "") or getattr(academic_year, "code", "") or "").strip()
+    primary = name or code or str(obj)
+    if ay_name:
+        return f"{primary} - {ay_name}"
+    return primary
+
+
+def _academic_year_label(obj):
+    name = (getattr(obj, "name", "") or "").strip()
+    code = (getattr(obj, "code", "") or "").strip()
+    if name and code and name != code:
+        return f"{name} ({code})"
+    return name or code or str(obj)
+
+
+def _offering_label(obj):
+    course_label = _course_label(getattr(obj, "course", None))
+    section_label = _section_label(getattr(obj, "section", None))
+    term_label = _term_label(getattr(obj, "term", None))
+    return f"{course_label} | {section_label} | {term_label}"
+
+
+def _faculty_label(obj):
+    full_name = (getattr(obj, "full_name", "") or "").strip()
+    username = (getattr(obj, "username", "") or "").strip()
+    if full_name and username and full_name != username:
+        return f"{full_name} ({username})"
+    return full_name or username or str(obj)
 
 
 def _resolve_user_default_scope_ids(user):
@@ -551,8 +603,40 @@ class CourseForm(forms.ModelForm):
             self.fields["campus"].queryset = campus_queryset
         if department_queryset is not None:
             self.fields["department"].queryset = department_queryset
+        department_field = self.fields["department"]
+        selected_campus_id = None
+        raw_campus_id = (
+            self.data.get(self.add_prefix("campus"))
+            or self.initial.get("campus")
+            or getattr(getattr(self, "instance", None), "campus_id", None)
+        )
+        try:
+            selected_campus_id = int(raw_campus_id) if raw_campus_id not in (None, "") else None
+        except (TypeError, ValueError):
+            selected_campus_id = None
+
+        department_queryset = department_field.queryset.select_related("campus").order_by("campus__name", "name", "code")
+        department_options = [
+            {
+                "id": department.id,
+                "campus_id": department.campus_id,
+                "label": f"{department.code} - {department.name}",
+            }
+            for department in department_queryset
+        ]
+        if selected_campus_id:
+            department_field.queryset = department_queryset.filter(campus_id=selected_campus_id)
+        else:
+            department_field.queryset = department_queryset.none()
+
         self.fields["campus"].help_text = "Leave blank to share this course across all campuses of the tenant."
-        self.fields["department"].help_text = "Optional. Leave blank for tenant-wide shared course definitions."
+        department_field.help_text = (
+            "Optional. Select the campus first to load only that campus' departments. "
+            "Leave both campus and department blank for tenant-wide shared course definitions."
+        )
+        department_field.widget.attrs["data-campus-dependent"] = "true"
+        department_field.widget.attrs["data-department-options"] = json.dumps(department_options)
+        department_field.widget.attrs["data-placeholder"] = "---------"
         _enforce_active_reference_choices(self)
 
     def clean(self):
@@ -658,6 +742,10 @@ class CourseOfferingForm(forms.ModelForm):
         self.fields["term"].help_text = "Must match Term code in CSV (example: 1ST, 2ND)."
         self.fields["section"].help_text = "Use exact Section code from Sections master."
         self.fields["room"].label = "Room/Office/Lab"
+        _set_choice_label(self.fields.get("academic_year"), _academic_year_label)
+        _set_choice_label(self.fields.get("term"), _term_label)
+        _set_choice_label(self.fields.get("course"), _course_label)
+        _set_choice_label(self.fields.get("section"), _section_label)
         self.fields["is_active"].label = "Record state"
         self.fields["is_active"].widget = forms.Select(
             choices=((True, "Active"), (False, "Inactive"))
@@ -706,6 +794,8 @@ class FacultyAssignmentForm(forms.ModelForm):
             self.fields["offering"].queryset = offering_queryset
         if faculty_queryset is not None:
             self.fields["faculty_user"].queryset = faculty_queryset
+        _set_choice_label(self.fields.get("offering"), _offering_label)
+        _set_choice_label(self.fields.get("faculty_user"), _faculty_label)
         _enforce_active_reference_choices(self)
 
 
@@ -799,6 +889,7 @@ class TemplateHotfixRequestForm(forms.Form):
         super().__init__(*args, **kwargs)
         if offering_queryset is not None:
             self.fields["selected_offerings"].queryset = offering_queryset
+        _set_choice_label(self.fields.get("selected_offerings"), _offering_label)
         _enforce_active_reference_choices(self)
 
     def clean(self):
@@ -938,6 +1029,12 @@ class CourseTemplateAssignmentForm(forms.ModelForm):
             self.fields["grading_template"].queryset = template_queryset
         if term_queryset is not None:
             self.fields["effective_from_term"].queryset = term_queryset
+        _set_choice_label(self.fields.get("course"), _course_label)
+        _set_choice_label(
+            self.fields.get("grading_template"),
+            lambda obj: getattr(obj, "name", None) or getattr(obj, "code", str(obj)),
+        )
+        _set_choice_label(self.fields.get("effective_from_term"), _term_label)
         _enforce_active_reference_choices(self)
 
     def clean(self):
@@ -964,6 +1061,8 @@ class CourseBaseValueOverrideForm(forms.ModelForm):
             self.fields["course"].queryset = course_queryset
         if term_queryset is not None:
             self.fields["effective_from_term"].queryset = term_queryset
+        _set_choice_label(self.fields.get("course"), _course_label)
+        _set_choice_label(self.fields.get("effective_from_term"), _term_label)
         _enforce_active_reference_choices(self)
 
     def clean(self):
@@ -1016,6 +1115,9 @@ class GradingPeriodLockForm(forms.ModelForm):
             self.fields["term"].queryset = term_queryset
         if offering_queryset is not None:
             self.fields["course_offering"].queryset = offering_queryset
+        _set_choice_label(self.fields.get("academic_year"), _academic_year_label)
+        _set_choice_label(self.fields.get("term"), _term_label)
+        _set_choice_label(self.fields.get("course_offering"), _offering_label)
         _enforce_active_reference_choices(self)
         self.fields["deadline_at"].input_formats = ["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"]
         self.fields["deadline_at"].help_text = (
@@ -1163,6 +1265,12 @@ class TenantGradingProfileForm(forms.ModelForm):
             "Optional passing threshold for analytics and governance at this profile scope "
             "(example: 75.00). Leave blank to use tenant default."
         )
+        _set_choice_label(self.fields.get("course"), _course_label)
+        _set_choice_label(
+            self.fields.get("grading_template"),
+            lambda obj: getattr(obj, "name", None) or getattr(obj, "code", str(obj)),
+        )
+        _set_choice_label(self.fields.get("effective_from_term"), _term_label)
         _enforce_active_reference_choices(self)
 
     def clean(self):
@@ -1227,6 +1335,8 @@ class ActiveAcademicTermSettingForm(forms.Form):
             self.fields["active_academic_year"].queryset = academic_year_queryset
         if term_queryset is not None:
             self.fields["active_term"].queryset = term_queryset
+        _set_choice_label(self.fields.get("active_academic_year"), _academic_year_label)
+        _set_choice_label(self.fields.get("active_term"), _term_label)
         _enforce_active_reference_choices(self)
 
     def clean(self):

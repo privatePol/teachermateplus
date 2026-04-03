@@ -444,7 +444,12 @@
           <tbody>
           {% for row in active_user_sessions %}
           <tr>
-            <td>{{ row.user.username }}</td>
+            <td>
+              {{ row.user.full_name|default:row.user.username }}
+              {% if row.user.full_name != row.user.username %}
+                <div class="small text-muted">{{ row.user.username }}</div>
+              {% endif %}
+            </td>
             <td>{{ row.user.email|default:"-" }}</td>
             <td>{{ row.user.default_tenant.code|default:"-" }} / {{ row.user.default_campus.code|default:"-" }}</td>
             <td>

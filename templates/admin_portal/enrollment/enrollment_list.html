@@ -60,7 +60,7 @@
       <option value="">All Offerings</option>
       {% for o in offerings %}
         <option value="{{ o.id }}" {% if o.id|stringformat:'s' == offering_id %}selected{% endif %}>
-          {{ o.academic_year.code }}-{{ o.term.code }} | {{ o.course.code }} | {{ o.section.code }}
+          {{ o.course.title }} ({{ o.course.code }}) | {{ o.section.name|default:o.section.code }} | {{ o.term.name|default:o.term.code }}
         </option>
       {% endfor %}
     </select>
@@ -85,7 +85,10 @@
       {% for row in page_obj %}
         <tr>
           <td>{{ row.student.student_no }} - {{ row.student.last_name }}, {{ row.student.first_name }}</td>
-          <td>{{ row.course_offering.course.code }} | {{ row.course_offering.section.code }}</td>
+          <td>
+            {{ row.course_offering.course.title }} <span class="text-muted">({{ row.course_offering.course.code }})</span>
+            | {{ row.course_offering.section.name|default:row.course_offering.section.code }}
+          </td>
           <td><span class="badge text-bg-info">{{ row.enrollment_status }}</span></td>
           <td>{{ row.encoded_via_portal }}</td>
           <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>

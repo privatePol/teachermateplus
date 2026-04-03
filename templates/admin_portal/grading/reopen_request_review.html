@@ -11,9 +11,19 @@
     <div class="card border-0 shadow-sm">
       <div class="card-header bg-white"><strong>Request Details</strong></div>
       <div class="card-body">
-        <div class="mb-2"><strong>Offering:</strong> {{ reopen_request.offering.course.code }} / {{ reopen_request.offering.section.code }}</div>
-        <div class="mb-2"><strong>Period:</strong> {{ reopen_request.template_period.code }}</div>
-        <div class="mb-2"><strong>Requestor:</strong> {{ reopen_request.requested_by_user.username }}</div>
+        <div class="mb-2">
+          <strong>Offering:</strong>
+          {{ reopen_request.offering.course.title }} ({{ reopen_request.offering.course.code }})
+          / {{ reopen_request.offering.section.name|default:reopen_request.offering.section.code }}
+        </div>
+        <div class="mb-2"><strong>Period:</strong> {{ reopen_request.template_period.name|default:reopen_request.template_period.code }}</div>
+        <div class="mb-2">
+          <strong>Requestor:</strong>
+          {{ reopen_request.requested_by_user.full_name|default:reopen_request.requested_by_user.username }}
+          {% if reopen_request.requested_by_user.full_name != reopen_request.requested_by_user.username %}
+            <span class="text-muted">({{ reopen_request.requested_by_user.username }})</span>
+          {% endif %}
+        </div>
         <div class="mb-2"><strong>Status:</strong> {{ reopen_request.status }}</div>
         <div class="mb-2"><strong>Justification:</strong><br>{{ reopen_request.justification }}</div>
         <div class="mb-0">

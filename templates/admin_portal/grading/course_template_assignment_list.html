@@ -20,7 +20,7 @@
     <select class="form-select" name="course_id">
       <option value="">All Courses</option>
       {% for course in courses %}
-      <option value="{{ course.id }}" {% if course.id|stringformat:'s' == request.GET.course_id %}selected{% endif %}>{{ course.code }}</option>
+      <option value="{{ course.id }}" {% if course.id|stringformat:'s' == request.GET.course_id %}selected{% endif %}>{{ course.title }} ({{ course.code }})</option>
       {% endfor %}
     </select>
   </div>
@@ -46,9 +46,9 @@
       <tbody>
       {% for row in page_obj %}
         <tr>
-          <td>{{ row.course.code }}</td>
-          <td>{{ row.grading_template.code }} - {{ row.grading_template.name }}</td>
-          <td>{{ row.effective_from_term.code|default:"-" }}</td>
+          <td>{{ row.course.title }} <span class="text-muted">({{ row.course.code }})</span></td>
+          <td>{{ row.grading_template.name }} <span class="text-muted">({{ row.grading_template.code }})</span></td>
+          <td>{{ row.effective_from_term.name|default:row.effective_from_term.code|default:"-" }}</td>
           <td>
             {% if row.is_active %}
               <span class="badge text-bg-success">Active</span>

@@ -75,10 +75,12 @@ from apps.core.services.settings import SystemSettingService
 from apps.enrollment.forms import EnrollmentForm
 from apps.enrollment.models import Enrollment
 from apps.enrollment.services import EnrollmentService
+from apps.faculty_portal.views import _build_summary_layout, _build_summary_row_values, _period_edit_state
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
+    GradeActivity,
     GradeCorrectionApprovalStep,
     GradeCorrectionRequest,
     GradeSubmission,
@@ -193,6 +195,123 @@ def _redirect_back_or_default(request, fallback_route_name: str, **kwargs):
     ):
         return redirect(next_url)
     return redirect(fallback_route_name, **kwargs)
+
+
+def _user_has_role_code(user, *role_codes):
+    role_code_set = {code.upper() for code in role_codes}
+    return UserRole.objects.filter(
+        user=user,
+        is_active=True,
+        role__is_active=True,
+        role__code__in=role_code_set,
+    ).exists()
+
+
+def _should_mask_gradebook_student_identity(user):
+    active_role_codes = {
+        code.upper()
+        for code in UserRole.objects.filter(
+            user=user,
+            is_active=True,
+            role__is_active=True,
+        ).values_list("role__code", flat=True)
+    }
+    return (
+        "DEAN" in active_role_codes
+        or "CAO" in active_role_codes
+        or "AC" in active_role_codes
+        or any(code.endswith("_AC") for code in active_role_codes)
+    )
+
+
+def _mask_student_number(student_no: str | None) -> str:
+    raw_value = str(student_no or "")
+    if len(raw_value) <= 4:
+        return "*" * len(raw_value)
+    masked = []
+    for index, char in enumerate(raw_value):
+        if char == "-":
+            masked.append("-")
+        elif index < 2 or index >= len(raw_value) - 2:
+            masked.append(char)
+        elif index % 3 == 0:
+            masked.append(char)
+        else:
+            masked.append("*")
+    return "".join(masked)
+
+
+def _mask_word(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= 2:
+        return text[0] + "*" * max(len(text) - 1, 0)
+    return text[0] + "*" * (len(text) - 2) + text[-1]
+
+
+def _mask_student_name(student) -> str:
+    parts = [student.first_name, student.middle_name, student.last_name]
+    masked_parts = [_mask_word(part) for part in parts if part]
+    return " ".join(masked_parts)
+
+
+def _format_metric_value(value):
+    if value is None:
+        return "-"
+    if isinstance(value, Decimal):
+        return format(GradingGovernanceService._round(value), ".2f")
+    return str(value)
+
+
+def _gradebook_metrics(rows, *, passing_threshold: Decimal):
+    active_count = len(rows)
+    graded_periods = [Decimal(row["period_grade"]) for row in rows if row.get("period_grade") is not None]
+    class_standing_values = [Decimal(row["class_standing"]) for row in rows if row.get("class_standing") is not None]
+    exam_values = [Decimal(row["exam_grade"]) for row in rows if row.get("exam_grade") is not None]
+    graded_count = len(graded_periods)
+    passed_count = len([value for value in graded_periods if value >= passing_threshold])
+    failed_count = max(graded_count - passed_count, 0)
+    coverage = round((graded_count / active_count) * 100, 1) if active_count else 0
+    pass_rate = round((passed_count / graded_count) * 100, 1) if graded_count else 0
+
+    def _average(values):
+        if not values:
+            return None
+        return GradingGovernanceService._round(sum(values) / Decimal(len(values)))
+
+    return [
+        {
+            "label": "Active Students",
+            "value": active_count,
+            "meta": "Students included in the selected class and period.",
+        },
+        {
+            "label": "With Period Grade",
+            "value": f"{graded_count}/{active_count}",
+            "meta": f"Coverage {coverage:.1f}%",
+        },
+        {
+            "label": "Class Standing Avg",
+            "value": _format_metric_value(_average(class_standing_values)),
+            "meta": "Average class standing for graded students.",
+        },
+        {
+            "label": "Exam Avg",
+            "value": _format_metric_value(_average(exam_values)),
+            "meta": "Average exam score for graded students.",
+        },
+        {
+            "label": "Period Avg",
+            "value": _format_metric_value(_average(graded_periods)),
+            "meta": f"Passing threshold {format(passing_threshold, '.2f')}",
+        },
+        {
+            "label": "Pass Rate",
+            "value": f"{pass_rate:.1f}%",
+            "meta": f"{passed_count} passed / {failed_count} failed",
+        },
+    ]
 
 
 def _send_new_user_credentials_email(request, user, temporary_password: str) -> int:
@@ -2898,6 +3017,209 @@ def faculty_assignment_list_view(request):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/academics/faculty_assignment_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("faculty_assignments.read")
+def faculty_gradebook_monitor_view(request):
+    faculty_ids = AdminScopeService.scoped_faculty_users(request)
+    all_faculty = User.objects.filter(id__in=faculty_ids, is_active=True).order_by("last_name", "first_name", "username")
+
+    faculty_q = request.GET.get("faculty_q", "").strip()
+    faculty_candidates = all_faculty
+    if faculty_q:
+        faculty_candidates = faculty_candidates.filter(
+            Q(username__icontains=faculty_q)
+            | Q(email__icontains=faculty_q)
+            | Q(first_name__icontains=faculty_q)
+            | Q(last_name__icontains=faculty_q)
+        )
+
+    selected_faculty_id = _safe_int(request.GET.get("faculty_user_id"))
+    selected_faculty = all_faculty.filter(id=selected_faculty_id).first() if selected_faculty_id else None
+
+    selected_offering = None
+    selected_period = None
+    periods = []
+    metric_cards = []
+    rows = []
+    summary_layout = {"class_standing_blocks": [], "exam_components": []}
+    q = request.GET.get("q", "").strip()
+    is_masked = _should_mask_gradebook_student_identity(request.user)
+    period_state = None
+    submit_readiness = None
+    selected_faculty_assignments = FacultyAssignment.objects.none()
+    table_colspan = 5
+
+    if selected_faculty:
+        selected_faculty_assignments = (
+            AdminScopeService.scoped_faculty_assignments(request)
+            .filter(faculty_user_id=selected_faculty.id, is_active=True)
+            .select_related(
+                "offering",
+                "offering__course",
+                "offering__section",
+                "offering__term",
+                "offering__academic_year",
+                "offering__campus",
+            )
+            .order_by("offering__academic_year__start_date", "offering__term__sequence_no", "offering__course__code")
+        )
+        offering_map = {assignment.offering_id: assignment.offering for assignment in selected_faculty_assignments}
+        selected_offering_id = _safe_int(request.GET.get("offering_id"))
+        if selected_offering_id in offering_map:
+            selected_offering = offering_map[selected_offering_id]
+        elif offering_map:
+            selected_offering = next(iter(offering_map.values()))
+
+        if selected_offering:
+            try:
+                template = FacultyGradingService.resolve_template_for_offering(selected_offering)
+            except ValidationError as exc:
+                messages.error(request, str(exc))
+                template = None
+            if template:
+                periods = list(template.periods.filter(is_active=True).order_by("sequence_no", "id"))
+                period_map = {period.id: period for period in periods}
+                selected_period_id = _safe_int(request.GET.get("period_id"))
+                if selected_period_id in period_map:
+                    selected_period = period_map[selected_period_id]
+                elif periods:
+                    selected_period = periods[0]
+
+            if selected_period:
+                period_state = _period_edit_state(selected_offering, selected_period)
+                period_rows = list(
+                    Enrollment.objects.filter(course_offering_id=selected_offering.id, is_active=True)
+                    .select_related("student")
+                    .order_by("student__last_name", "student__first_name", "student__student_no")
+                )
+                grade_map = {
+                    row.student_id: row
+                    for row in StudentPeriodGrade.objects.filter(
+                        offering_id=selected_offering.id,
+                        template_period_id=selected_period.id,
+                    )
+                }
+                base_rows = []
+                for enrollment in period_rows:
+                    grade_row = grade_map.get(enrollment.student_id)
+                    base_rows.append(
+                        {
+                            "student": enrollment.student,
+                            "enrollment_status": enrollment.enrollment_status,
+                            "component_scores": {},
+                            "class_standing": grade_row.class_standing_grade if grade_row else None,
+                            "exam_grade": grade_row.exam_grade if grade_row else None,
+                            "period_grade": grade_row.period_grade if grade_row else None,
+                        }
+                    )
+
+                activities = list(
+                    GradeActivity.objects.filter(
+                        offering_id=selected_offering.id,
+                        template_period_id=selected_period.id,
+                        is_active=True,
+                    )
+                    .select_related("template_component", "template_subcomponent", "template_detail")
+                    .order_by(
+                        "template_component__sort_order",
+                        "template_subcomponent__sort_order",
+                        "template_detail__sort_order",
+                        "activity_date",
+                        "id",
+                    )
+                )
+                summary_layout = _build_summary_layout(selected_period, activities)
+                score_by_activity = {
+                    (score.student_id, score.activity_id): Decimal(score.computed_score)
+                    for score in StudentActivityScore.objects.filter(
+                        activity_id__in=[activity.id for activity in activities],
+                        is_active=True,
+                        activity__is_active=True,
+                    )
+                }
+                filtered_rows = base_rows
+                if q:
+                    lowered_q = q.lower()
+                    filtered_rows = [
+                        row
+                        for row in base_rows
+                        if lowered_q in row["student"].student_no.lower()
+                        or lowered_q in row["student"].last_name.lower()
+                        or lowered_q in row["student"].first_name.lower()
+                    ]
+
+                for row in filtered_rows:
+                    summary_values = _build_summary_row_values(row, summary_layout, score_by_activity)
+                    rows.append(
+                        {
+                            "student": row["student"],
+                            "display_student_no": _mask_student_number(row["student"].student_no) if is_masked else row["student"].student_no,
+                            "display_student_name": _mask_student_name(row["student"]) if is_masked else f"{row['student'].last_name}, {row['student'].first_name}",
+                            "enrollment_status": row["enrollment_status"],
+                            "class_standing_blocks": summary_values["class_standing_blocks"],
+                            "exam_values": summary_values["exam_values"],
+                            "period_grade": row["period_grade"],
+                            "print_grade_status": (
+                                "PASSED"
+                                if row["period_grade"] is not None
+                                and Decimal(row["period_grade"]) >= FacultyGradingService.resolve_passing_threshold(selected_offering)
+                                else "FAILED"
+                                if row["period_grade"] is not None
+                                else ""
+                            ),
+                        }
+                    )
+
+                passing_threshold = FacultyGradingService.resolve_passing_threshold(selected_offering)
+                metric_cards = _gradebook_metrics(base_rows, passing_threshold=passing_threshold)
+                submit_readiness = GradingGovernanceService.evaluate_submission_readiness(
+                    offering=selected_offering,
+                    template_period=selected_period,
+                )
+                table_colspan = (
+                    4
+                    + sum(block["colspan"] for block in summary_layout["class_standing_blocks"])
+                    + len(summary_layout["exam_components"])
+                    + 1
+                )
+                AuditService.log_event(
+                    action="READ",
+                    portal="ADMIN",
+                    entity_type="FacultyGradebookMonitor",
+                    entity_id=f"{selected_faculty.id}:{selected_offering.id}:{selected_period.id}",
+                    actor=request.user,
+                    tenant=selected_offering.tenant,
+                    campus=selected_offering.campus,
+                    metadata={
+                        "faculty_user_id": selected_faculty.id,
+                        "offering_id": selected_offering.id,
+                        "period_id": selected_period.id,
+                        "masked_student_identity": is_masked,
+                    },
+                    request=request,
+                )
+
+    context = {
+        "faculty_q": faculty_q,
+        "faculty_candidates": faculty_candidates,
+        "selected_faculty": selected_faculty,
+        "selected_faculty_assignments": selected_faculty_assignments,
+        "selected_offering": selected_offering,
+        "periods": periods,
+        "selected_period": selected_period,
+        "period_state": period_state,
+        "metric_cards": metric_cards,
+        "rows": rows,
+        "summary_layout": summary_layout,
+        "submit_readiness": submit_readiness,
+        "q": q,
+        "is_masked": is_masked,
+        "table_colspan": table_colspan,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/academics/faculty_gradebook_monitor.html", context)
 
 
 @portal_required("ADMIN")

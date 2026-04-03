@@ -51,11 +51,16 @@
       {% for row in page_obj %}
         <tr>
           <td>#{{ row.id }}</td>
-          <td>{{ row.offering.term.code }}</td>
-          <td>{{ row.offering.course.code }}</td>
-          <td>{{ row.offering.section.code }}</td>
-          <td>{{ row.template_period.code }}</td>
-          <td>{{ row.requested_by_user.username }}</td>
+          <td>{{ row.offering.term.name|default:row.offering.term.code }}</td>
+          <td>{{ row.offering.course.title }} <span class="text-muted">({{ row.offering.course.code }})</span></td>
+          <td>{{ row.offering.section.name|default:row.offering.section.code }}</td>
+          <td>{{ row.template_period.name|default:row.template_period.code }}</td>
+          <td>
+            {{ row.requested_by_user.full_name|default:row.requested_by_user.username }}
+            {% if row.requested_by_user.full_name != row.requested_by_user.username %}
+              <div class="small text-muted">{{ row.requested_by_user.username }}</div>
+            {% endif %}
+          </td>
           <td>
             {% if row.status == "APPROVED" %}
               <span class="badge text-bg-success">{{ row.status }}</span>

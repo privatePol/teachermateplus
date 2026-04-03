@@ -34,7 +34,16 @@
           <td>{{ log.portal }}</td>
           <td>{{ log.action }}</td>
           <td>{{ log.entity_type }}{% if log.entity_id %}#{{ log.entity_id }}{% endif %}</td>
-          <td>{{ log.actor_user.username|default:"-" }}</td>
+          <td>
+            {% if log.actor_user %}
+              {{ log.actor_user.full_name|default:log.actor_user.username }}
+              {% if log.actor_user.full_name != log.actor_user.username %}
+                <div class="small text-muted">{{ log.actor_user.username }}</div>
+              {% endif %}
+            {% else %}
+              -
+            {% endif %}
+          </td>
           <td>{{ log.tenant.code|default:"GLOBAL" }} / {{ log.campus.code|default:"ALL" }}</td>
         </tr>
       {% empty %}

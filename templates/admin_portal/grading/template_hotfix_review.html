@@ -12,7 +12,12 @@
       <div class="col-md-3"><strong>Template:</strong> {{ hotfix.template.code }}</div>
       <div class="col-md-3"><strong>Mode:</strong> {{ hotfix.apply_mode }}</div>
       <div class="col-md-3"><strong>Status:</strong> {{ hotfix.status }}</div>
-      <div class="col-md-3"><strong>Requested By:</strong> {{ hotfix.requested_by_user.username }}</div>
+      <div class="col-md-3">
+        <strong>Requested By:</strong> {{ hotfix.requested_by_user.full_name|default:hotfix.requested_by_user.username }}
+        {% if hotfix.requested_by_user.full_name != hotfix.requested_by_user.username %}
+          <span class="text-muted">({{ hotfix.requested_by_user.username }})</span>
+        {% endif %}
+      </div>
     </div>
     <div class="small text-muted mb-2">Requested at {{ hotfix.created_at|date:"Y-m-d H:i" }}</div>
     <div><strong>Justification:</strong></div>

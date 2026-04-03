@@ -79,7 +79,12 @@
               <span class="badge text-bg-secondary">{{ row.status }}</span>
             {% endif %}
           </td>
-          <td>{{ row.requested_by_user.username }}</td>
+          <td>
+            {{ row.requested_by_user.full_name|default:row.requested_by_user.username }}
+            {% if row.requested_by_user.full_name != row.requested_by_user.username %}
+              <div class="small text-muted">{{ row.requested_by_user.username }}</div>
+            {% endif %}
+          </td>
           <td>{{ row.affected_offering_count }}</td>
           <td>{{ row.recomputed_offering_count }}</td>
           <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>

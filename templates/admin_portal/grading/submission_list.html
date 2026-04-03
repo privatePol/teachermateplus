@@ -56,10 +56,10 @@
       <tbody>
       {% for row in page_obj %}
         <tr>
-          <td>{{ row.offering.term.code }}</td>
-          <td>{{ row.offering.course.code }}</td>
-          <td>{{ row.offering.section.code }}</td>
-          <td>{{ row.template_period.code }}</td>
+          <td>{{ row.offering.term.name|default:row.offering.term.code }}</td>
+          <td>{{ row.offering.course.title }} <span class="text-muted">({{ row.offering.course.code }})</span></td>
+          <td>{{ row.offering.section.name|default:row.offering.section.code }}</td>
+          <td>{{ row.template_period.name|default:row.template_period.code }}</td>
           <td>
             {% if row.revert_deadline_at %}
               {{ row.revert_deadline_at|date:"Y-m-d H:i" }}

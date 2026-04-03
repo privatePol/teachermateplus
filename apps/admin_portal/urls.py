@@ -41,6 +41,7 @@ from .views import (
     enrollment_update_view,
     faculty_assignment_create_view,
     faculty_assignment_assign_view,
+    faculty_gradebook_monitor_view,
     faculty_assignment_list_view,
     faculty_assignment_toggle_primary_view,
     faculty_assignment_unassign_view,
@@ -195,6 +196,11 @@ urlpatterns = [
         "admin-portal/academics/faculty-assignments/",
         faculty_assignment_list_view,
         name="faculty_assignment_list",
+    ),
+    path(
+        "admin-portal/academics/faculty-gradebook/",
+        faculty_gradebook_monitor_view,
+        name="faculty_gradebook_monitor",
     ),
     path(
         "admin-portal/academics/faculty-assignments/create/",

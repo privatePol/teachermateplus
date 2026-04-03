@@ -72,6 +72,10 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - if `student_no` is provided, `campus_code` and `section_code` are now required
   - if `section_code` is provided, `campus_code` is now required
   - API docs now include the campus + section + student pull pattern for separate campus SIS/AIMS servers.
+- Admin faculty gradebook monitor:
+  - AC/Dean/CAO can open a read-only gradebook monitor for scoped faculty members
+  - monitor includes per-class metric cards and masked student identity for academic oversight roles
+  - opening the monitor is captured in the audit trail.
 
 ### Changed
 - Comparison section wording updated to neutral term: **Standalone Grade Files / Spreadsheets**.
@@ -101,6 +105,18 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - original -> corrected grade values are highlighted in blue for quicker visual scanning.
 - Admin scope filtering now supports department-aware governance for faculty-assignment visibility:
   - AC/Dean/CAO scoped role assignments can now constrain faculty-assignment views to their assigned departments/areas.
+- Faculty monitoring scope now follows the faculty member's own organization scope:
+  - AC visibility for faculty assignments is now based on matching faculty tenant + campus + department identity
+  - the monitor no longer depends on the `CourseOffering.department` value to decide whether an AC may see a faculty member's assignments.
+  - campus-wide reviewers such as CAO now correctly see faculty users with campus-level FACULTY role assignments even when those faculty accounts have a different default campus.
+- Admin people-picker and review screens now prefer real names over usernames:
+  - faculty dropdowns show `Full Name (username)` when available
+  - audit, import, correction, reopen, hotfix, and user-role review screens now show full names first with usernames as secondary context.
+- Admin course/section/offering selectors and monitoring tables now prefer readable academic labels:
+  - course selectors show `Course Title (course code)`
+  - section selectors prefer section name over raw code
+  - offering selectors and related monitor/review tables now show title/name-first labels with codes kept as secondary reference.
+- Faculty Grade Book Monitor metric cards now use a stronger NCBA-style green/yellow gradient for clearer visual emphasis.
 - Official correction PDF layout updated for registrar operations:
   - `Approval Summary` now appears directly above `Registrar Reference`
   - `Supporting Attachments` section removed from the printable registrar PDF (attachments remain in-system).
@@ -112,6 +128,9 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Student identity uniqueness is now campus-scoped:
   - students can now share the same `student_no` across different campuses of the same tenant
   - enrollment import student resolution and auto-create paths now resolve by `tenant + campus + student_no`.
+- Course form campus-to-department mapping is now safer:
+  - the department dropdown stays aligned to the selected campus instead of listing departments from every campus at once
+  - admins are guided to choose campus first before mapping a campus-specific department to a course.
 
 ### Fixed
 - Multiple grading summary/runtime errors reported during faculty usage:
@@ -121,6 +140,9 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Table layout/formatting issues in faculty frontpage comparison section.
 - Reopen and deadline-related visibility inconsistencies across admin/faculty screens.
 - Filtering and selection behavior improvements across enrollment and assignment workflows.
+- Faculty assignment monitor visibility for read-only academic roles:
+  - selected faculty now shows the assigned-offerings table even without entering assign mode
+  - empty state now clearly reflects current-scope results.
 - Correction queue/review refinements:
   - review scope now shows student number with student name for clearer approver validation
   - pending requests that were created with fallback routing can now be reconciled to the configured approval route safely before review

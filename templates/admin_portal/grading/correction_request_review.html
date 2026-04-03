@@ -27,7 +27,13 @@
       <div class="card-body">
         <div class="mb-2"><strong>Offering:</strong> {{ correction_request.offering.course.title }} / {{ correction_request.offering.section.name|default:correction_request.offering.section.code }}</div>
         <div class="mb-2"><strong>Period:</strong> {{ correction_request.template_period.name|default:correction_request.template_period.code }}</div>
-        <div class="mb-2"><strong>Faculty:</strong> {{ correction_request.requested_by_user.username }}</div>
+        <div class="mb-2">
+          <strong>Faculty:</strong>
+          {{ correction_request.requested_by_user.full_name|default:correction_request.requested_by_user.username }}
+          {% if correction_request.requested_by_user.full_name != correction_request.requested_by_user.username %}
+            <span class="text-muted">({{ correction_request.requested_by_user.username }})</span>
+          {% endif %}
+        </div>
         <div class="mb-2"><strong>Faculty Department:</strong> {{ correction_request.faculty_department.name|default:"-" }}</div>
         <div class="mb-2"><strong>Status:</strong> {{ correction_request.status }}</div>
         <div class="mb-2">

@@ -103,6 +103,7 @@ All business operations should respect these dimensions and permissions.
 - Official correction PDF access now supports inline browser preview (new tab) to support immediate print/download flow from the viewer.
 - Faculty correction request history UI now emphasizes student names and color-highlights original-to-corrected grade values for readability.
 - Policy controls must be permission-aware and auditable.
+- Admin-side academic monitoring now includes a read-only faculty gradebook monitor with metric cards, while masking student identity for AC/Dean/CAO-style oversight roles.
 
 ## 6. Import System Context
 - Import flow is two-step:
@@ -120,6 +121,7 @@ All business operations should respect these dimensions and permissions.
 - Correction submission approval notification email is now one of those configurable flows, with recipient roles managed per tenant.
 - Registrar auto-email after final approval is now available as a configurable flow and uses campus-specific recipient mapping with default fallback when configured.
 - Admin scope service now supports department-aware visibility filtering so academic staff roles can be bounded by area/department in faculty-assignment monitoring workflows.
+- Academic monitoring scope for AC/Dean-style faculty oversight now follows the faculty member's own tenant/campus/department identity rather than depending on the stored department of each course offering.
 - Registrar auto-email now follows the same branded card format as approver notifications and includes petitioner + period name (no code), with improved inline logo rendering for common mail clients.
 - Session/device and login tracking are operational concerns and should remain auditable.
 
@@ -151,6 +153,16 @@ All business operations should respect these dimensions and permissions.
 - Support broader facility terminology in academics/offering labels (`Room/Office/Lab`) instead of room-only wording.
 - Persistent filters where practical.
 - Reduced clicks for repetitive tasks (auto-filter, bulk assign, guided forms).
+- Course maintenance now applies campus-first department filtering in the form UI so campus-specific department mapping is less error-prone.
+- Admin monitoring/review screens now favor human-readable staff naming:
+  - faculty selectors use `Full Name (username)` when name data exists
+  - review-heavy screens keep the username visible only as supporting context.
+- Admin academic selectors now favor human-readable academic labels:
+  - course choices prefer `Course Title (code)`
+  - section choices prefer section name
+  - offering labels combine readable course/section/term names with codes only as secondary reference.
+- Faculty Grade Book Monitor now uses a greener/yellow metric-card treatment to align better with the NCBA visual direction and make oversight stats easier to scan.
+- Campus-wide academic reviewers such as CAO now resolve faculty visibility by campus-level FACULTY assignments correctly, even when a faculty user's default campus differs from the campus being reviewed.
 
 ## 10. Open Design/Governance Topics
 - Tenant-specific grading methodology options (engine profiles/switches).

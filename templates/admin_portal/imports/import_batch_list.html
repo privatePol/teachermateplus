@@ -79,7 +79,12 @@
         <td>{{ row.get_import_type_display }}</td>
         <td><span class="badge text-bg-secondary">{{ row.status }}</span></td>
         <td>{{ row.total_rows }} (valid: {{ row.valid_rows }}, invalid: {{ row.invalid_rows }}, imported: {{ row.imported_rows }})</td>
-        <td>{{ row.uploaded_by_user.username }}</td>
+        <td>
+          {{ row.uploaded_by_user.full_name|default:row.uploaded_by_user.username }}
+          {% if row.uploaded_by_user.full_name != row.uploaded_by_user.username %}
+            <div class="small text-muted">{{ row.uploaded_by_user.username }}</div>
+          {% endif %}
+        </td>
         <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
         <td class="text-end">
           <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:import_batch_detail' row.id %}">View</a>
