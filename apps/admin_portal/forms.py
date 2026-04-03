@@ -5,6 +5,7 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.core.services.settings import SystemSettingService
@@ -48,38 +49,60 @@ def _enforce_active_reference_choices(form):
                 field.queryset = _active_only_queryset(queryset)
 
 
+def _set_choice_label(field, formatter):
+    if field is not None:
+        field.label_from_instance = formatter
+
+
 def _resolve_user_default_scope_ids(user):
     default_tenant_id = getattr(user, "default_tenant_id", None)
     default_campus_id = getattr(user, "default_campus_id", None)
+    default_department_id = getattr(user, "default_department_id", None)
     if default_tenant_id is None and default_campus_id:
         default_tenant_id = (
             Campus.objects.filter(id=default_campus_id).values_list("tenant_id", flat=True).first()
         )
-    return default_tenant_id, default_campus_id
+    return default_tenant_id, default_campus_id, default_department_id
 
 
 def _assignment_covers_default_scope(
     *,
     assignment_tenant_id: int | None,
     assignment_campus_id: int | None,
+    assignment_department_id: int | None,
     default_tenant_id: int | None,
     default_campus_id: int | None,
+    default_department_id: int | None,
 ) -> bool:
     if default_tenant_id and assignment_tenant_id not in (None, default_tenant_id):
         return False
     if default_campus_id and assignment_campus_id not in (None, default_campus_id):
         return False
+    if default_department_id and assignment_department_id not in (None, default_department_id):
+        return False
     return True
 
 
-def _user_has_active_role_covering_default_scope(user, *, default_tenant_id: int | None, default_campus_id: int | None):
-    assignments = UserRole.objects.filter(user=user, is_active=True, role__is_active=True).only("tenant_id", "campus_id")
+def _user_has_active_role_covering_default_scope(
+    user,
+    *,
+    default_tenant_id: int | None,
+    default_campus_id: int | None,
+    default_department_id: int | None,
+):
+    assignments = UserRole.objects.filter(user=user, is_active=True, role__is_active=True).only(
+        "tenant_id",
+        "campus_id",
+        "department_id",
+    )
     for assignment in assignments:
         if _assignment_covers_default_scope(
             assignment_tenant_id=assignment.tenant_id,
             assignment_campus_id=assignment.campus_id,
+            assignment_department_id=assignment.department_id,
             default_tenant_id=default_tenant_id,
             default_campus_id=default_campus_id,
+            default_department_id=default_department_id,
         ):
             return True
     return False
@@ -280,6 +303,7 @@ class UserUpdateForm(forms.ModelForm):
         if self.instance and self.instance.pk and not self.instance.is_superuser:
             default_tenant_id = tenant.id if tenant else None
             default_campus_id = campus.id if campus else None
+            default_department_id = department.id if department else None
             has_any_active_role = UserRole.objects.filter(
                 user=self.instance,
                 is_active=True,
@@ -290,10 +314,11 @@ class UserUpdateForm(forms.ModelForm):
                     self.instance,
                     default_tenant_id=default_tenant_id,
                     default_campus_id=default_campus_id,
+                    default_department_id=default_department_id,
                 )
                 if not is_covered:
                     raise DjangoValidationError(
-                        "Default tenant/campus is outside the user's active role scope. "
+                        "Default tenant/campus/department is outside the user's active role scope. "
                         "Assign a matching role scope first, or update role assignments."
                     )
         return cleaned
@@ -332,44 +357,84 @@ class UserRoleAssignmentForm(forms.Form):
     role = forms.ModelChoiceField(queryset=Role.objects.filter(is_active=True).order_by("name"))
     tenant = forms.ModelChoiceField(queryset=Tenant.objects.none(), required=False)
     campus = forms.ModelChoiceField(queryset=Campus.objects.none(), required=False)
+    department = forms.ModelChoiceField(queryset=Department.objects.none(), required=False)
 
-    def __init__(self, *args, tenant_queryset=None, campus_queryset=None, target_user=None, **kwargs):
+    def __init__(self, *args, tenant_queryset=None, campus_queryset=None, department_queryset=None, target_user=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.target_user = target_user
         if tenant_queryset is not None:
             self.fields["tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["campus"].queryset = campus_queryset
+        if department_queryset is not None:
+            self.fields["department"].queryset = department_queryset
         _enforce_active_reference_choices(self)
 
     def clean(self):
         cleaned_data = super().clean()
         tenant = cleaned_data.get("tenant")
         campus = cleaned_data.get("campus")
+        department = cleaned_data.get("department")
         if campus and tenant and campus.tenant_id != tenant.id:
             raise forms.ValidationError("Selected campus does not belong to the selected tenant.")
+        if department and tenant and department.tenant_id != tenant.id:
+            raise forms.ValidationError("Selected department does not belong to the selected tenant.")
+        if department and campus and department.campus_id != campus.id:
+            raise forms.ValidationError("Selected department does not belong to the selected campus.")
+        if department and not campus:
+            raise forms.ValidationError("Select a campus when assigning a department-scoped role.")
 
         if self.target_user and not self.target_user.is_superuser:
-            default_tenant_id, default_campus_id = _resolve_user_default_scope_ids(self.target_user)
-            if default_tenant_id or default_campus_id:
+            default_tenant_id, default_campus_id, default_department_id = _resolve_user_default_scope_ids(self.target_user)
+            if default_tenant_id or default_campus_id or default_department_id:
                 new_assignment_covers_default = _assignment_covers_default_scope(
                     assignment_tenant_id=tenant.id if tenant else None,
                     assignment_campus_id=campus.id if campus else None,
+                    assignment_department_id=department.id if department else None,
                     default_tenant_id=default_tenant_id,
                     default_campus_id=default_campus_id,
+                    default_department_id=default_department_id,
                 )
                 if not new_assignment_covers_default:
                     has_existing_cover = _user_has_active_role_covering_default_scope(
                         self.target_user,
                         default_tenant_id=default_tenant_id,
                         default_campus_id=default_campus_id,
+                        default_department_id=default_department_id,
                     )
                     if not has_existing_cover:
                         raise forms.ValidationError(
-                            "Role scope mismatch: this assignment does not include the user's default tenant/campus. "
-                            "Assign a matching scope first, or update the user's default tenant/campus."
+                            "Role scope mismatch: this assignment does not include the user's default tenant/campus/department. "
+                            "Assign a matching scope first, or update the user's default scope."
                         )
         return cleaned_data
+
+
+class RoleForm(forms.ModelForm):
+    source_role = forms.ModelChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Copy permissions from",
+        help_text="Optional. Select an existing role to copy its current permissions into the new role.",
+    )
+
+    class Meta:
+        model = Role
+        fields = ["code", "name", "description", "is_active"]
+
+    def __init__(self, *args, role_queryset=None, include_copy_option: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        if include_copy_option:
+            self.fields["source_role"].queryset = (role_queryset or Role.objects.filter(is_active=True)).order_by("name")
+        else:
+            self.fields.pop("source_role", None)
+        _enforce_active_reference_choices(self)
+
+    def clean_code(self):
+        code = (self.cleaned_data.get("code") or "").strip().upper()
+        if not code:
+            raise forms.ValidationError("Role code is required.")
+        return code
 
 
 class RolePermissionsForm(forms.Form):
@@ -592,6 +657,7 @@ class CourseOfferingForm(forms.ModelForm):
         self.fields["academic_year"].help_text = "Must match Academic Year used in CSV import (use AY code values from master)."
         self.fields["term"].help_text = "Must match Term code in CSV (example: 1ST, 2ND)."
         self.fields["section"].help_text = "Use exact Section code from Sections master."
+        self.fields["room"].label = "Room/Office/Lab"
         self.fields["is_active"].label = "Record state"
         self.fields["is_active"].widget = forms.Select(
             choices=((True, "Active"), (False, "Inactive"))
@@ -763,6 +829,10 @@ class GradingTemplatePeriodForm(forms.ModelForm):
         if template_queryset is not None:
             self.fields["template"].queryset = template_queryset
         _enforce_active_reference_choices(self)
+        _set_choice_label(
+            self.fields.get("template"),
+            lambda obj: getattr(obj, "name", None) or getattr(obj, "code", str(obj)),
+        )
 
 
 class GradingTemplateComponentForm(forms.ModelForm):
@@ -782,6 +852,10 @@ class GradingTemplateComponentForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if period_queryset is not None:
             self.fields["template_period"].queryset = period_queryset
+        _set_choice_label(
+            self.fields.get("template_period"),
+            lambda obj: f"{obj.template.name} - {obj.name}" if getattr(obj, "template_id", None) else (obj.name or obj.code),
+        )
         self.fields["score_input_mode"].label = "Score Entry Method"
         self.fields["score_input_mode"].help_text = (
             "Set the default entry method for this major component. "
@@ -810,6 +884,10 @@ class GradingTemplateSubcomponentForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if component_queryset is not None:
             self.fields["template_component"].queryset = component_queryset
+        _set_choice_label(
+            self.fields.get("template_component"),
+            lambda obj: f"{obj.template_period.name} - {obj.name}" if getattr(obj, "template_period_id", None) else (obj.name or obj.code),
+        )
         self.fields["score_input_mode"].label = "Score Entry Method"
         self.fields["score_input_mode"].help_text = (
             "Choose how this subcomponent accepts scores when activities are encoded directly here. "
@@ -836,6 +914,10 @@ class GradingTemplateDetailForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if subcomponent_queryset is not None:
             self.fields["template_subcomponent"].queryset = subcomponent_queryset
+        _set_choice_label(
+            self.fields.get("template_subcomponent"),
+            lambda obj: f"{obj.template_component.name} - {obj.name}" if getattr(obj, "template_component_id", None) else (obj.name or obj.code),
+        )
         self.fields["score_input_mode"].label = "Score Entry Method"
         self.fields["score_input_mode"].help_text = (
             "Use Inherit Parent Rule to follow the subcomponent setting, or override it here for this detail item."
@@ -1255,3 +1337,107 @@ class DocumentPrintSettingForm(forms.Form):
         label="School Address",
         help_text="Printed below the school name. Leave blank if the tenant prefers not to show an address line.",
     )
+
+
+class ConfigurableFeatureSettingForm(forms.Form):
+    correction_official_report_enabled = forms.BooleanField(
+        required=False,
+        label="Enable official correction PDF/report generation",
+        help_text="When enabled, approved correction workflows may generate an official printable/exportable registrar reference document.",
+    )
+    correction_submission_approval_email_enabled = forms.BooleanField(
+        required=False,
+        label="Enable approval notification email on correction submission",
+        help_text="When enabled, EduGradesPro emails the selected approval-role recipients as soon as a faculty member submits a petition for correction of grades.",
+    )
+    correction_submission_approval_email_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Recipient roles for correction submission notification",
+        help_text="Select the approval roles that should receive the notification email. Recommended: CAO and College Dean.",
+    )
+    correction_registrar_auto_email_enabled = forms.BooleanField(
+        required=False,
+        label="Enable automatic registrar email after final approval",
+        help_text="When enabled, EduGradesPro may email the official correction PDF automatically after academic approval.",
+    )
+    correction_registrar_auto_email_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed to trigger automatic registrar email",
+        help_text="Leave blank to allow any final approver role to trigger the automatic email when the feature is enabled.",
+    )
+    correction_registrar_default_recipients = forms.CharField(
+        required=False,
+        label="Default registrar recipient email(s)",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Fallback recipient list used when a campus-specific branch email is not configured. Separate multiple emails with commas or new lines.",
+    )
+
+    def __init__(self, *args, role_queryset=None, campus_queryset=None, campus_initial_map=None, **kwargs):
+        self.campus_fields = []
+        self.campus_queryset = campus_queryset
+        campus_initial_map = campus_initial_map or {}
+        super().__init__(*args, **kwargs)
+        if role_queryset is not None:
+            self.fields["correction_submission_approval_email_roles"].queryset = role_queryset
+            self.fields["correction_registrar_auto_email_roles"].queryset = role_queryset
+        _enforce_active_reference_choices(self)
+
+        for campus in campus_queryset or []:
+            field_name = f"campus_recipient_{campus.id}"
+            self.fields[field_name] = forms.CharField(
+                required=False,
+                label=f"{campus.code} registrar recipient email(s)",
+                widget=forms.Textarea(attrs={"rows": 2}),
+                help_text="Used for approved correction PDFs for this campus/branch. Separate multiple emails with commas or new lines.",
+                initial=", ".join(campus_initial_map.get(str(campus.id), [])),
+            )
+            self.campus_fields.append((field_name, campus))
+
+    @staticmethod
+    def _parse_email_list(raw_value: str) -> list[str]:
+        chunks = []
+        for piece in (raw_value or "").replace("\r", "\n").replace(",", "\n").split("\n"):
+            cleaned = piece.strip()
+            if cleaned:
+                chunks.append(cleaned)
+        return chunks
+
+    def clean(self):
+        cleaned = super().clean()
+
+        if (
+            cleaned.get("correction_submission_approval_email_enabled")
+            and not cleaned.get("correction_submission_approval_email_roles")
+        ):
+            self.add_error(
+                "correction_submission_approval_email_roles",
+                "Select at least one recipient role before enabling approval notification email.",
+            )
+
+        parsed_default = self._parse_email_list(cleaned.get("correction_registrar_default_recipients", ""))
+        for email in parsed_default:
+            validate_email(email)
+        cleaned["correction_registrar_default_recipient_list"] = parsed_default
+
+        campus_recipient_map = {}
+        for field_name, campus in self.campus_fields:
+            parsed_emails = self._parse_email_list(cleaned.get(field_name, ""))
+            for email in parsed_emails:
+                try:
+                    validate_email(email)
+                except DjangoValidationError:
+                    self.add_error(field_name, f"{email} is not a valid email address.")
+            if parsed_emails:
+                campus_recipient_map[str(campus.id)] = parsed_emails
+
+        if cleaned.get("correction_registrar_auto_email_enabled"):
+            if not parsed_default and not campus_recipient_map:
+                self.add_error(
+                    "correction_registrar_default_recipients",
+                    "Provide a default registrar recipient or at least one campus-specific recipient before enabling automatic email.",
+                )
+
+        cleaned["correction_registrar_campus_recipient_map"] = campus_recipient_map
+        return cleaned

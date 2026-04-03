@@ -3,7 +3,21 @@
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">{{ title }}</h2>
-  <a href="{% url 'admin_portal:grade_correction_request_list' %}" class="btn btn-sm btn-outline-secondary">Back</a>
+  <div class="d-flex gap-2">
+    {% if official_report_enabled %}
+      {% if correction_request.status == "APPROVED" or correction_request.status == "CLOSED" %}
+      <a
+        href="{% url 'admin_portal:grade_correction_request_official_report' correction_request.id %}"
+        class="btn btn-sm btn-outline-primary"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Download Official PDF
+      </a>
+      {% endif %}
+    {% endif %}
+    <a href="{% url 'admin_portal:grade_correction_request_list' %}" class="btn btn-sm btn-outline-secondary">Back</a>
+  </div>
 </div>
 
 <div class="row g-3">
@@ -11,10 +25,10 @@
     <div class="card border-0 shadow-sm">
       <div class="card-header bg-white"><strong>Request Details</strong></div>
       <div class="card-body">
-        <div class="mb-2"><strong>Offering:</strong> {{ correction_request.offering.course.code }} / {{ correction_request.offering.section.code }}</div>
-        <div class="mb-2"><strong>Period:</strong> {{ correction_request.template_period.code }}</div>
+        <div class="mb-2"><strong>Offering:</strong> {{ correction_request.offering.course.title }} / {{ correction_request.offering.section.name|default:correction_request.offering.section.code }}</div>
+        <div class="mb-2"><strong>Period:</strong> {{ correction_request.template_period.name|default:correction_request.template_period.code }}</div>
         <div class="mb-2"><strong>Faculty:</strong> {{ correction_request.requested_by_user.username }}</div>
-        <div class="mb-2"><strong>Faculty Department:</strong> {{ correction_request.faculty_department.code|default:"-" }}</div>
+        <div class="mb-2"><strong>Faculty Department:</strong> {{ correction_request.faculty_department.name|default:"-" }}</div>
         <div class="mb-2"><strong>Status:</strong> {{ correction_request.status }}</div>
         <div class="mb-2">
           <strong>Current Approval Step:</strong>
@@ -51,20 +65,44 @@
         <div class="mb-2"><strong>Justification:</strong><br>{{ correction_request.justification }}</div>
         <div class="mb-2">
           <strong>Scope:</strong>
-          <ul class="mb-0">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Grading Item</th>
+                  <th>Original Value</th>
+                  <th>Corrected Value</th>
+                </tr>
+              </thead>
+              <tbody>
             {% for item in correction_request.items.all %}
-              <li>
-                {{ item.requested_action }}
-                {% if item.student %}| {{ item.student.student_no }}{% endif %}
-                {% if item.grade_activity %}| {{ item.grade_activity.title }}{% endif %}
-                {% if item.old_value or item.new_value %}
-                  | {{ item.old_value|default:"-" }} -> {{ item.new_value|default:"-" }}
-                {% endif %}
-              </li>
+                <tr>
+                  <td>
+                    {{ item.student.student_no|default:"-" }}
+                    {% if item.student %}
+                      <div class="small text-muted">{{ item.student.last_name }}, {{ item.student.first_name }}</div>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if item.grade_activity %}
+                      {{ item.grade_activity.template_component.name }}
+                      {% if item.grade_activity.template_subcomponent %}/ {{ item.grade_activity.template_subcomponent.name }}{% endif %}
+                      {% if item.grade_activity.template_detail %}/ {{ item.grade_activity.template_detail.name }}{% endif %}
+                      {% if item.grade_activity.title %}/ {{ item.grade_activity.title }}{% endif %}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td>{{ item.old_value|default:"-" }}</td>
+                  <td>{{ item.new_value|default:"-" }}</td>
+                </tr>
             {% empty %}
-              <li>No scope items.</li>
+                <tr><td colspan="4" class="text-muted">No scope items.</td></tr>
             {% endfor %}
-          </ul>
+              </tbody>
+            </table>
+          </div>
         </div>
         {% if correction_request.attachments.all %}
         <div>
@@ -88,7 +126,11 @@
             {{ review_guard_message|default:"You are not allowed to review the current approval step." }}
           </div>
         {% endif %}
-        {% if is_final_step %}
+        {% if is_final_step and auto_apply_on_final_approval %}
+          <div class="alert alert-info py-2">
+            Final approval step: EduGradesPro will copy each corrected value directly into the faculty gradebook and recompute the submitted period automatically.
+          </div>
+        {% elif is_final_step %}
           <div class="alert alert-info py-2">Final approval step: correction window is auto-set to {{ correction_window_hours }} hours from approval time.</div>
         {% else %}
           <div class="alert alert-secondary py-2">Intermediate step: this will move to the next approver step.</div>

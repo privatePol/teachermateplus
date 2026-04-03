@@ -40,13 +40,19 @@ class UserRole(models.Model):
     campus = models.ForeignKey(
         "tenants.Campus", on_delete=models.PROTECT, related_name="user_roles", blank=True, null=True
     )
+    department = models.ForeignKey(
+        "tenants.Department", on_delete=models.PROTECT, related_name="user_roles", blank=True, null=True
+    )
     is_active = models.BooleanField(default=True)
     assigned_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "user_roles"
         constraints = [
-            models.UniqueConstraint(fields=["user", "role", "tenant", "campus"], name="uq_user_roles_scoped"),
+            models.UniqueConstraint(
+                fields=["user", "role", "tenant", "campus", "department"],
+                name="uq_user_roles_scoped",
+            ),
         ]
 
     def __str__(self):

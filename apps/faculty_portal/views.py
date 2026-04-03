@@ -1,11 +1,13 @@
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
 import re
 
 from django.contrib import messages
 from django import forms as django_forms
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Avg, Count, Q
+from django.db.models import Avg, Count, Prefetch, Q
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -16,6 +18,7 @@ from apps.academics.services import AcademicGovernanceService
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
+from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 from apps.enrollment.services import EnrollmentService
@@ -36,6 +39,8 @@ from apps.grading.models import (
     StudentActivityScore,
     StudentPeriodGrade,
 )
+from apps.grading.notifications import CorrectionNotificationService
+from apps.grading.reporting import CorrectionOfficialReportService
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
 from apps.students.models import Student
 
@@ -106,6 +111,36 @@ def _parse_decimal(value, fallback=Decimal("0")):
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return fallback
+
+
+def _format_decimal_display(value):
+    if value in (None, ""):
+        return ""
+    decimal_value = Decimal(str(value))
+    formatted = format(decimal_value.quantize(Decimal("0.01")), "f")
+    if "." in formatted:
+        formatted = formatted.rstrip("0").rstrip(".")
+    return formatted
+
+
+def _official_correction_report_filename(correction_request: GradeCorrectionRequest) -> str:
+    period_code = correction_request.template_period.code or "PERIOD"
+    course_code = correction_request.offering.course.code or "COURSE"
+    section_code = correction_request.offering.section.code or "SECTION"
+    return f"official-correction-{correction_request.id}-{course_code}-{section_code}-{period_code}.pdf"
+
+
+def _correction_activity_label(activity: GradeActivity):
+    parts = []
+    if activity.title:
+        parts.append(activity.title)
+    if activity.template_detail and activity.template_detail.name and activity.template_detail.name != activity.title:
+        parts.append(activity.template_detail.name)
+    elif activity.template_subcomponent and activity.template_subcomponent.name and activity.template_subcomponent.name != activity.title:
+        parts.append(activity.template_subcomponent.name)
+    elif activity.template_component and activity.template_component.name and activity.template_component.name != activity.title:
+        parts.append(activity.template_component.name)
+    return " - ".join(parts) if parts else "Grading Item"
 
 
 def _require_faculty_offering_or_404(request, offering_id: int):
@@ -1627,20 +1662,35 @@ def period_corrections_view(request, offering_id: int, period_id: int):
             "Please follow the manual paper approval process and request authorized admin reopen.",
         )
         return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
-    enrollments = FacultyGradingService.get_active_enrollments(offering)
-    student_qs = Student.objects.filter(id__in=enrollments.values_list("student_id", flat=True)).order_by(
-        "last_name", "first_name", "student_no"
-    )
+    enrollments = list(FacultyGradingService.get_active_enrollments(offering))
+    student_ids = [row.student_id for row in enrollments]
+    student_qs = Student.objects.filter(id__in=student_ids).order_by("last_name", "first_name", "student_no")
     activity_qs = GradeActivity.objects.filter(
         offering_id=offering.id,
         template_period_id=period.id,
         is_active=True,
-    ).order_by("-activity_date", "-created_at")
+    ).select_related("template_component", "template_subcomponent", "template_detail").order_by(
+        "template_component__sort_order",
+        "template_subcomponent__sort_order",
+        "template_detail__sort_order",
+        "activity_date",
+        "id",
+    )
+    activity_ids = list(activity_qs.values_list("id", flat=True))
+    score_lookup = {
+        (row.student_id, row.activity_id): _format_decimal_display(row.raw_score)
+        for row in StudentActivityScore.objects.filter(
+            activity_id__in=activity_ids,
+            student_id__in=student_ids,
+            is_active=True,
+        )
+    }
     form = GradeCorrectionRequestForm(
         request.POST or None,
         request.FILES or None,
         student_queryset=student_qs,
         activity_queryset=activity_qs,
+        score_lookup=score_lookup,
     )
 
     if request.method == "POST":
@@ -1648,22 +1698,14 @@ def period_corrections_view(request, offering_id: int, period_id: int):
             messages.error(request, "You can request correction only after period submission.")
             return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
         if form.is_valid():
-            item = {
-                "requested_action": form.cleaned_data["requested_action"],
-                "student_id": form.cleaned_data["student"].id if form.cleaned_data.get("student") else None,
-                "grade_activity_id": (
-                    form.cleaned_data["grade_activity"].id if form.cleaned_data.get("grade_activity") else None
-                ),
-                "old_value": form.cleaned_data.get("old_value"),
-                "new_value": form.cleaned_data.get("new_value"),
-            }
+            items = form.cleaned_data["items"]
             try:
                 correction = GradingGovernanceService.create_correction_request(
                     user=request.user,
                     offering=offering,
                     template_period=period,
                     justification=form.cleaned_data["justification"],
-                    items=[item],
+                    items=items,
                 )
             except ValidationError as exc:
                 messages.error(request, str(exc))
@@ -1675,6 +1717,9 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                         file=attachment,
                         uploaded_by_user=request.user,
                     )
+                notification_result = CorrectionNotificationService.send_correction_submission_approval_notifications(
+                    request_obj=correction
+                )
                 AuditService.log_event(
                     action="CREATE",
                     portal="FACULTY",
@@ -1686,12 +1731,31 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                     after_data={
                         "offering_id": offering.id,
                         "period_id": period.id,
-                        "requested_action": item["requested_action"],
-                        "student_id": item["student_id"],
-                        "grade_activity_id": item["grade_activity_id"],
+                        "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                        "correction_item_count": len(items),
+                        "student_count": len({item["student_id"] for item in items}),
+                        "grading_item_count": len({item["grade_activity_id"] for item in items}),
+                        "approval_notification_email_attempted": notification_result["attempted"],
+                        "approval_notification_email_sent": notification_result["sent"],
+                        "approval_notification_email_recipients": notification_result["recipients"],
                     },
                     request=request,
                 )
+                if notification_result["errors"]:
+                    messages.warning(
+                        request,
+                        "Correction request submitted, but some approval notification emails could not be sent. "
+                        "Please verify SMTP and recipient role configuration.",
+                    )
+                elif (
+                    FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=offering.tenant_id)
+                    and notification_result["attempted"] == 0
+                ):
+                    messages.warning(
+                        request,
+                        "Correction request submitted, but no approver email recipients matched the current feature settings. "
+                        "Please review Configurable Features and the recipient role assignments.",
+                    )
                 messages.success(request, "Correction request submitted for review.")
                 return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
 
@@ -1701,8 +1765,23 @@ def period_corrections_view(request, offering_id: int, period_id: int):
             template_period_id=period.id,
             requested_by_user=request.user,
         )
-        .prefetch_related("items", "attachments")
+        .prefetch_related(
+            Prefetch(
+                "items",
+                queryset=GradeCorrectionRequestItem.objects.select_related(
+                    "student",
+                    "grade_activity",
+                    "grade_activity__template_component",
+                    "grade_activity__template_subcomponent",
+                    "grade_activity__template_detail",
+                ),
+            ),
+            "attachments",
+        )
         .order_by("-created_at")
+    )
+    official_report_enabled = FeatureSettingsService.is_correction_official_report_enabled(
+        tenant_id=offering.tenant_id
     )
     context = {
         "offering": offering,
@@ -1718,6 +1797,55 @@ def period_corrections_view(request, offering_id: int, period_id: int):
         "active_correction_request": state["active_correction_request"],
         "predeadline_correction_mode": state["predeadline_correction_mode"],
         "can_self_reopen_before_deadline": state["can_self_reopen_before_deadline"],
+        "official_report_enabled": official_report_enabled,
+        "correction_students": [
+            {
+                "id": enrollment.student_id,
+                "label": f"{enrollment.student.student_no} - {enrollment.student.last_name}, {enrollment.student.first_name}",
+                "student_no": enrollment.student.student_no,
+                "name": f"{enrollment.student.last_name}, {enrollment.student.first_name}",
+                "status": enrollment.enrollment_status,
+            }
+            for enrollment in enrollments
+        ],
+        "correction_activities": [
+            {
+                "id": activity.id,
+                "label": _correction_activity_label(activity),
+                "title": activity.title,
+                "component_name": activity.template_component.name,
+                "subcomponent_name": activity.template_subcomponent.name if activity.template_subcomponent else "-",
+                "detail_name": activity.template_detail.name if activity.template_detail else "-",
+                "entry_method_label": FacultyGradingService.score_input_mode_label(
+                    FacultyGradingService.resolve_score_input_mode(
+                        template_component=activity.template_component,
+                        template_subcomponent=activity.template_subcomponent,
+                        template_detail=activity.template_detail,
+                    )
+                ),
+                "score_input_mode": FacultyGradingService.resolve_score_input_mode(
+                    template_component=activity.template_component,
+                    template_subcomponent=activity.template_subcomponent,
+                    template_detail=activity.template_detail,
+                ),
+                "score_input_max": _format_decimal_display(
+                    Decimal("100")
+                    if FacultyGradingService.resolve_score_input_mode(
+                        template_component=activity.template_component,
+                        template_subcomponent=activity.template_subcomponent,
+                        template_detail=activity.template_detail,
+                    )
+                    == "DIRECT_PERCENTAGE"
+                    else activity.total_score
+                ),
+                "total_score": _format_decimal_display(activity.total_score),
+            }
+            for activity in activity_qs
+        ],
+        "correction_score_map": {
+            f"{student_id}:{activity_id}": value for (student_id, activity_id), value in score_lookup.items()
+        },
+        "selected_grade_activity_ids": set(form.data.getlist("grade_activities")) if form.is_bound else set(),
     }
     return render(request, "faculty_portal/period_corrections.html", context)
 
@@ -1843,6 +1971,39 @@ def period_correction_finalize_view(request, offering_id: int, period_id: int, r
         )
         messages.success(request, "Correction finalized and period scope re-locked.")
     return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
+
+
+@portal_required("FACULTY")
+@permission_required("corrections.create")
+def period_correction_official_report_view(request, offering_id: int, period_id: int, request_id: int):
+    offering, template, period = _resolve_offering_period(request, offering_id, period_id)
+    if period is None:
+        raise PermissionDenied("Invalid period.")
+
+    correction_request = get_object_or_404(
+        GradeCorrectionRequest.objects.filter(
+            offering_id=offering.id,
+            template_period_id=period.id,
+            requested_by_user=request.user,
+        ),
+        id=request_id,
+    )
+    if not FeatureSettingsService.is_correction_official_report_enabled(tenant_id=offering.tenant_id):
+        raise PermissionDenied("Official correction report generation is disabled.")
+    if correction_request.status not in {
+        GradeCorrectionRequest.Status.APPROVED,
+        GradeCorrectionRequest.Status.CLOSED,
+    }:
+        raise PermissionDenied("Official correction report is available only after final approval.")
+
+    pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=correction_request)
+    filename = _official_correction_report_filename(correction_request)
+    return FileResponse(
+        BytesIO(pdf_bytes),
+        as_attachment=False,
+        filename=filename,
+        content_type="application/pdf",
+    )
 
 
 @portal_required("FACULTY")

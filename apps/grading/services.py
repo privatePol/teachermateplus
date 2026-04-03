@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from collections import defaultdict
 from datetime import timedelta
 
@@ -462,7 +462,7 @@ class GradingGovernanceService:
             )
         if dept_rule:
             return dept_rule
-        return (
+        default_rule = (
             CorrectionApprovalRouteRule.objects.filter(
                 tenant_id=tenant_id,
                 faculty_department__isnull=True,
@@ -471,6 +471,23 @@ class GradingGovernanceService:
             .select_related("step1_role", "final_role", "faculty_department")
             .first()
         )
+        if default_rule:
+            return default_rule
+
+        # Backward-safe fallback:
+        # if exactly one active route exists for this tenant, use it even when
+        # faculty department context is missing/incomplete.
+        active_routes = list(
+            CorrectionApprovalRouteRule.objects.filter(
+                tenant_id=tenant_id,
+                is_active=True,
+            )
+            .select_related("step1_role", "final_role", "faculty_department")
+            .order_by("id")
+        )
+        if len(active_routes) == 1:
+            return active_routes[0]
+        return None
 
     @classmethod
     def _build_correction_route_steps(cls, *, route_rule: CorrectionApprovalRouteRule):
@@ -545,6 +562,62 @@ class GradingGovernanceService:
         ]
         GradeCorrectionApprovalStep.objects.bulk_create(step_rows)
 
+    @classmethod
+    @transaction.atomic
+    def reconcile_pending_correction_route(cls, *, request_obj: GradeCorrectionRequest):
+        if request_obj.status != GradeCorrectionRequest.Status.PENDING:
+            return False
+        if request_obj.approval_route_id:
+            return False
+        if request_obj.approval_steps.exclude(status=GradeCorrectionApprovalStep.Status.PENDING).exists():
+            return False
+
+        faculty_department = cls.resolve_requesting_faculty_department(
+            user=request_obj.requested_by_user,
+            tenant_id=request_obj.tenant_id,
+        )
+        faculty_department_id = faculty_department.id if faculty_department else None
+        route_rule = cls.resolve_correction_route_rule(
+            tenant_id=request_obj.tenant_id,
+            faculty_department_id=faculty_department_id,
+        )
+        if not route_rule:
+            return False
+
+        expected_steps = cls._build_correction_route_steps(route_rule=route_rule)
+        current_steps = list(
+            request_obj.approval_steps.order_by("step_order").values(
+                "step_order", "approver_role_id", "requires_same_department"
+            )
+        )
+        expected_signature = [
+            {
+                "step_order": step["step_order"],
+                "approver_role_id": step["role"].id,
+                "requires_same_department": step["requires_same_department"],
+            }
+            for step in expected_steps
+        ]
+        if current_steps != expected_signature:
+            request_obj.approval_steps.all().delete()
+            GradeCorrectionApprovalStep.objects.bulk_create(
+                [
+                    GradeCorrectionApprovalStep(
+                        correction_request=request_obj,
+                        step_order=step["step_order"],
+                        approver_role_id=step["role"].id,
+                        approver_label=step["label"],
+                        requires_same_department=step["requires_same_department"],
+                        status=GradeCorrectionApprovalStep.Status.PENDING,
+                    )
+                    for step in expected_steps
+                ]
+            )
+        request_obj.faculty_department_id = faculty_department_id
+        request_obj.approval_route_id = route_rule.id
+        request_obj.save(update_fields=["faculty_department", "approval_route", "updated_at"])
+        return True
+
     @staticmethod
     def get_pending_correction_step(*, request_obj: GradeCorrectionRequest):
         return (
@@ -557,6 +630,16 @@ class GradingGovernanceService:
     @staticmethod
     def _user_has_role_for_correction_step(*, user, request_obj: GradeCorrectionRequest, step: GradeCorrectionApprovalStep):
         if user.is_superuser:
+            return True
+        if UserRole.objects.filter(
+            user=user,
+            role__code="SUPER_ADMIN",
+            is_active=True,
+        ).filter(
+            Q(tenant_id=request_obj.tenant_id) | Q(tenant__isnull=True)
+        ).filter(
+            Q(campus_id=request_obj.campus_id) | Q(campus__isnull=True)
+        ).exists():
             return True
         return UserRole.objects.filter(
             user=user,
@@ -575,10 +658,15 @@ class GradingGovernanceService:
             # Legacy request created before route-matrix rollout.
             return True, None, None
         if not cls._user_has_role_for_correction_step(user=user, request_obj=request_obj, step=pending_step):
+            step_label = (
+                pending_step.approver_label
+                or (pending_step.approver_role.name if pending_step.approver_role_id else None)
+                or (pending_step.approver_role.code if pending_step.approver_role_id else "the configured approver")
+            )
             return (
                 False,
                 pending_step,
-                f"Only users with role {pending_step.approver_role.code} can review this step.",
+                f"Only users assigned to approver role {step_label} can review this step.",
             )
         if pending_step.requires_same_department:
             user_dept_id = getattr(user, "default_department_id", None)
@@ -1151,6 +1239,206 @@ class GradingGovernanceService:
         )
         return request_obj
 
+    @staticmethod
+    def _format_decimal_value(value):
+        if value in (None, ""):
+            return ""
+        decimal_value = Decimal(str(value))
+        formatted = format(decimal_value.quantize(Decimal("0.01")), "f")
+        if "." in formatted:
+            formatted = formatted.rstrip("0").rstrip(".")
+        return formatted
+
+    @classmethod
+    def _normalize_correction_items(
+        cls,
+        *,
+        offering,
+        template_period: GradingTemplatePeriod,
+        items: list[dict],
+    ):
+        if not items:
+            raise ValidationError("At least one correction scope item is required.")
+
+        enrolled_student_ids = set(FacultyGradingService.get_active_enrollments(offering).values_list("student_id", flat=True))
+        score_items = [
+            item
+            for item in items
+            if (item.get("requested_action") or GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE)
+            == GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE
+        ]
+        activity_ids = {
+            int(item["grade_activity_id"])
+            for item in score_items
+            if item.get("grade_activity_id") not in (None, "")
+        }
+        activity_map = {
+            row.id: row
+            for row in GradeActivity.objects.filter(
+                id__in=activity_ids,
+                offering_id=offering.id,
+                template_period_id=template_period.id,
+                is_active=True,
+            ).select_related("template_component", "template_subcomponent", "template_detail")
+        }
+        score_lookup = {
+            (row.student_id, row.activity_id): cls._format_decimal_value(row.raw_score)
+            for row in StudentActivityScore.objects.filter(
+                activity_id__in=activity_ids,
+                student_id__in=enrolled_student_ids,
+                is_active=True,
+            )
+        }
+
+        normalized_items = []
+        seen_score_pairs = set()
+        for item in items:
+            action = item.get("requested_action") or GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE
+            if action == GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE:
+                student_id = item.get("student_id")
+                grade_activity_id = item.get("grade_activity_id")
+                if student_id in (None, ""):
+                    raise ValidationError("Student is required for score correction.")
+                if grade_activity_id in (None, ""):
+                    raise ValidationError("Grading item is required for score correction.")
+
+                student_id = int(student_id)
+                grade_activity_id = int(grade_activity_id)
+                if student_id not in enrolled_student_ids:
+                    raise ValidationError("Selected student is outside the faculty gradebook scope.")
+
+                activity = activity_map.get(grade_activity_id)
+                if activity is None:
+                    raise ValidationError("Selected grading item is outside the submitted period scope.")
+
+                pair_key = (student_id, grade_activity_id)
+                if pair_key in seen_score_pairs:
+                    raise ValidationError("Duplicate score correction rows are not allowed.")
+                seen_score_pairs.add(pair_key)
+
+                new_value_raw = str(item.get("new_value") or "").strip()
+                if not new_value_raw:
+                    raise ValidationError("Corrected value is required for score correction.")
+                try:
+                    parsed_new_value = Decimal(new_value_raw)
+                except (InvalidOperation, ValueError, TypeError):
+                    raise ValidationError("Corrected value must be a valid number.") from None
+
+                score_input_mode = FacultyGradingService.resolve_score_input_mode(
+                    template_component=activity.template_component,
+                    template_subcomponent=activity.template_subcomponent,
+                    template_detail=activity.template_detail,
+                )
+                max_value = Decimal("100") if score_input_mode == "DIRECT_PERCENTAGE" else Decimal(activity.total_score)
+                if parsed_new_value < 0 or parsed_new_value > max_value:
+                    raise ValidationError(
+                        f"Corrected value for {activity.title} must be between 0 and {cls._format_decimal_value(max_value)}."
+                    )
+
+                normalized_items.append(
+                    {
+                        "requested_action": action,
+                        "student_id": student_id,
+                        "grade_activity_id": grade_activity_id,
+                        "old_value": score_lookup.get((student_id, grade_activity_id), ""),
+                        "new_value": cls._format_decimal_value(parsed_new_value),
+                    }
+                )
+                continue
+
+            student_id = item.get("student_id")
+            if student_id not in (None, ""):
+                student_id = int(student_id)
+                if student_id not in enrolled_student_ids:
+                    raise ValidationError("Selected student is outside the faculty gradebook scope.")
+
+            if action in {
+                GradeCorrectionRequestItem.RequestedAction.UPDATE_ATTENDANCE,
+                GradeCorrectionRequestItem.RequestedAction.UPDATE_STATUS,
+            } and student_id in (None, ""):
+                raise ValidationError("Student is required for this correction action.")
+
+            normalized_items.append(
+                {
+                    "requested_action": action,
+                    "student_id": student_id,
+                    "grade_activity_id": item.get("grade_activity_id"),
+                    "old_value": (item.get("old_value") or "")[:255],
+                    "new_value": (item.get("new_value") or "")[:255],
+                }
+            )
+
+        return normalized_items
+
+    @classmethod
+    def is_auto_apply_score_correction_request(cls, *, request_obj: GradeCorrectionRequest):
+        items = list(request_obj.items.filter(is_active=True))
+        return bool(items) and all(
+            item.requested_action == GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE for item in items
+        )
+
+    @classmethod
+    def _apply_auto_approved_score_correction_request(cls, *, request_obj: GradeCorrectionRequest, actor):
+        items = list(
+            request_obj.items.filter(
+                is_active=True,
+                requested_action=GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+            ).select_related(
+                "grade_activity",
+                "grade_activity__template_component",
+                "grade_activity__template_subcomponent",
+                "grade_activity__template_detail",
+            )
+        )
+        if not items:
+            raise ValidationError("No score correction rows were found for automatic application.")
+
+        activity_map = {
+            row.id: row
+            for row in GradeActivity.objects.filter(
+                id__in={item.grade_activity_id for item in items},
+                offering_id=request_obj.offering_id,
+                template_period_id=request_obj.template_period_id,
+                is_active=True,
+            ).select_related("template_component", "template_subcomponent", "template_detail")
+        }
+        payload_by_activity = defaultdict(list)
+        effective_user = request_obj.requested_by_user or actor
+
+        for item in items:
+            activity = activity_map.get(item.grade_activity_id)
+            if activity is None or item.student_id is None:
+                raise ValidationError("A score correction row is no longer valid for this submitted period.")
+            try:
+                parsed_new_value = Decimal(str(item.new_value or "").strip())
+            except (InvalidOperation, ValueError, TypeError):
+                raise ValidationError("A score correction row contains an invalid corrected value.") from None
+            payload_by_activity[activity.id].append(
+                {
+                    "student_id": item.student_id,
+                    "raw_score": parsed_new_value,
+                }
+            )
+
+        for activity_id, score_payload in payload_by_activity.items():
+            FacultyGradingService.upsert_activity_scores(
+                user=effective_user,
+                activity=activity_map[activity_id],
+                score_payload=score_payload,
+            )
+
+        FacultyGradingService.recompute_period_summary(
+            user=effective_user,
+            offering=request_obj.offering,
+            template_period=request_obj.template_period,
+        )
+        StudentPeriodGrade.objects.filter(
+            offering_id=request_obj.offering_id,
+            template_period_id=request_obj.template_period_id,
+        ).update(is_finalized=True)
+        StudentFinalGrade.objects.filter(offering_id=request_obj.offering_id).update(is_submitted=True)
+        return request_obj
+
     @classmethod
     @transaction.atomic
     def create_correction_request(
@@ -1169,8 +1457,11 @@ class GradingGovernanceService:
             )
         if not cls.is_submitted(offering=offering, template_period=template_period):
             raise ValidationError("Correction requests are allowed only after period submission.")
-        if not items:
-            raise ValidationError("At least one correction scope item is required.")
+        normalized_items = cls._normalize_correction_items(
+            offering=offering,
+            template_period=template_period,
+            items=items,
+        )
 
         request_obj = GradeCorrectionRequest.objects.create(
             tenant_id=offering.tenant_id,
@@ -1183,7 +1474,7 @@ class GradingGovernanceService:
         )
         cls.initialize_correction_route(request_obj=request_obj)
         item_rows = []
-        for item in items:
+        for item in normalized_items:
             item_rows.append(
                 GradeCorrectionRequestItem(
                     correction_request=request_obj,
@@ -1278,6 +1569,18 @@ class GradingGovernanceService:
                     "closed_at": None,
                 },
             )
+            request_obj.save(
+                update_fields=[
+                    "status",
+                    "reviewed_by_user",
+                    "reviewed_at",
+                    "review_remarks",
+                    "updated_at",
+                ]
+            )
+            if cls.is_auto_apply_score_correction_request(request_obj=request_obj):
+                cls._apply_auto_approved_score_correction_request(request_obj=request_obj, actor=reviewer)
+                return cls.close_correction_window(request_obj=request_obj, actor=reviewer)
         else:
             request_obj.status = GradeCorrectionRequest.Status.REJECTED
             if pending_step:

@@ -164,7 +164,7 @@
 
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="h5 mb-0">Template Builder: {{ template_obj.code }}</h2>
+  <h2 class="h5 mb-0">Template Builder: {{ template_obj.name }}</h2>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grading_template_list' %}">Back</a>
     <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_period_create' %}?template_id={{ template_obj.id }}">Add Period</a>
@@ -226,7 +226,6 @@
       <button class="accordion-button {% if not forloop.first %}collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#period-collapse-{{ period.row.id }}" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}" aria-controls="period-collapse-{{ period.row.id }}">
         <span class="builder-level-badge builder-level-period me-2">Period Container</span>
         <span class="fw-semibold">{{ period.row.name }}</span>
-        <span class="builder-muted ms-2 builder-code">{{ period.row.code }}</span>
       </button>
     </h2>
     <div id="period-collapse-{{ period.row.id }}" class="accordion-collapse collapse {% if forloop.first %}show{% endif %}" aria-labelledby="period-heading-{{ period.row.id }}" data-bs-parent="#builder-accordion">
@@ -255,7 +254,6 @@
                 <div class="builder-node-title">
                   <span class="builder-level-badge builder-level-1">Major Component</span>
                   <span class="builder-node-title-text">{{ component.row.name }}</span>
-                  <span class="builder-muted builder-code">({{ component.row.code }})</span>
                 </div>
                 <div class="builder-node-subtitle">
                   Primary grading bucket directly under <strong>{{ period.row.name }}</strong>.
@@ -308,7 +306,6 @@
                       <div class="builder-node-title">
                         <span class="builder-level-badge builder-level-2">Subcomponent</span>
                         <span class="builder-node-title-text">{{ sub.row.name }}</span>
-                        <span class="builder-muted builder-code">({{ sub.row.code }})</span>
                       </div>
                       <div class="builder-node-subtitle">
                         Breakdown item inside <strong>{{ component.row.name }}</strong>.
@@ -362,7 +359,6 @@
                           <div class="builder-node-title">
                             <span class="builder-level-badge builder-level-3">Detail Item</span>
                             <span class="builder-detail-name">{{ detail.name }}</span>
-                            <span class="builder-muted builder-code">({{ detail.code }})</span>
                           </div>
                           <div class="builder-node-subtitle">
                             Lowest scoring line under <strong>{{ sub.row.name }}</strong>. Activities encoded here roll up into the subcomponent total.

@@ -1,3 +1,6 @@
+import json
+from decimal import Decimal, InvalidOperation
+
 from django import forms
 
 from apps.enrollment.models import Enrollment
@@ -140,54 +143,159 @@ class AttendanceSessionForm(forms.Form):
 
 
 class GradeCorrectionRequestForm(forms.Form):
-    requested_action = forms.ChoiceField(
-        choices=GradeCorrectionRequestItem.RequestedAction.choices,
+    apply_to_all_students = forms.BooleanField(required=False)
+    students = forms.ModelMultipleChoiceField(queryset=None, required=False)
+    grade_activities = forms.ModelMultipleChoiceField(
+        queryset=None,
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
     )
-    student = forms.ModelChoiceField(queryset=None, required=False)
-    grade_activity = forms.ModelChoiceField(queryset=None, required=False)
-    old_value = forms.CharField(max_length=255, required=False)
-    new_value = forms.CharField(max_length=255, required=False)
+    correction_payload = forms.CharField(required=False, widget=forms.HiddenInput())
     justification = forms.CharField(widget=forms.Textarea(attrs={"rows": 4}))
     attachment = forms.FileField(required=False)
 
-    def __init__(self, *args, student_queryset=None, activity_queryset=None, **kwargs):
+    def __init__(self, *args, student_queryset=None, activity_queryset=None, score_lookup=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["student"].queryset = student_queryset if student_queryset is not None else self.fields["student"].queryset
-        self.fields["grade_activity"].queryset = activity_queryset if activity_queryset is not None else self.fields["grade_activity"].queryset
+        self.score_lookup = score_lookup or {}
+        self.fields["students"].queryset = (
+            student_queryset if student_queryset is not None else self.fields["students"].queryset
+        )
+        self.fields["grade_activities"].queryset = (
+            activity_queryset if activity_queryset is not None else self.fields["grade_activities"].queryset
+        )
         _enforce_active_reference_choices(self)
-        self.fields["student"].label_from_instance = (
+        self.fields["apply_to_all_students"].widget.attrs["class"] = "form-check-input"
+        self.fields["students"].label_from_instance = (
             lambda obj: f"{obj.student_no} - {obj.last_name}, {obj.first_name}"
         )
-        self.fields["grade_activity"].label_from_instance = (
+        self.fields["grade_activities"].label_from_instance = (
             lambda obj: (
-                f"{obj.title} ({obj.template_component.code}"
-                f"{'/' + obj.template_subcomponent.code if obj.template_subcomponent else ''}"
-                f"{'/' + obj.template_detail.code if obj.template_detail else ''})"
+                f"{obj.template_component.code}"
+                f"{' / ' + obj.template_subcomponent.code if obj.template_subcomponent else ''}"
+                f"{' / ' + obj.template_detail.code if obj.template_detail else ''}"
+                f" - {obj.title}"
             )
         )
-        for name, field in self.fields.items():
-            if name == "justification":
-                field.widget.attrs["class"] = "form-control"
-            elif name == "requested_action":
-                field.widget.attrs["class"] = "form-select"
-            else:
-                field.widget.attrs["class"] = "form-control"
+        self.fields["students"].widget.attrs.update({"class": "form-select", "size": 12})
+        self.fields["justification"].widget.attrs["class"] = "form-control"
+        self.fields["attachment"].widget.attrs["class"] = "form-control"
+
+    @staticmethod
+    def _format_decimal(value):
+        if value in (None, ""):
+            return ""
+        decimal_value = Decimal(str(value))
+        formatted = format(decimal_value.quantize(Decimal("0.01")), "f")
+        if "." in formatted:
+            formatted = formatted.rstrip("0").rstrip(".")
+        return formatted
+
+    @staticmethod
+    def _parse_decimal(value):
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _score_input_mode(activity):
+        if activity.template_detail and getattr(activity.template_detail, "score_input_mode", "INHERIT") != "INHERIT":
+            return activity.template_detail.score_input_mode
+        if (
+            activity.template_subcomponent
+            and getattr(activity.template_subcomponent, "score_input_mode", "INHERIT") != "INHERIT"
+        ):
+            return activity.template_subcomponent.score_input_mode
+        return getattr(activity.template_component, "score_input_mode", "RAW_BASE50") or "RAW_BASE50"
 
     def clean(self):
         cleaned = super().clean()
-        action = cleaned.get("requested_action")
-        student = cleaned.get("student")
-        grade_activity = cleaned.get("grade_activity")
+        apply_to_all_students = cleaned.get("apply_to_all_students")
+        selected_students = cleaned.get("students")
+        selected_activities = cleaned.get("grade_activities")
+        payload_raw = cleaned.get("correction_payload") or "[]"
 
-        if action == GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE:
-            if not student:
-                self.add_error("student", "Student is required for score correction.")
-            if not grade_activity:
-                self.add_error("grade_activity", "Activity is required for score correction.")
-        elif action in {
-            GradeCorrectionRequestItem.RequestedAction.UPDATE_ATTENDANCE,
-            GradeCorrectionRequestItem.RequestedAction.UPDATE_STATUS,
-        }:
-            if not student:
-                self.add_error("student", "Student is required for this correction action.")
+        if not apply_to_all_students and not selected_students:
+            self.add_error("students", "Select at least one student or choose Entire Class.")
+        if not selected_activities:
+            self.add_error("grade_activities", "Select at least one grading item for correction.")
+
+        try:
+            payload_rows = json.loads(payload_raw)
+        except json.JSONDecodeError:
+            self.add_error(None, "Unable to read the correction grid. Please review the selected rows and try again.")
+            return cleaned
+
+        if not isinstance(payload_rows, list):
+            self.add_error(None, "Invalid correction grid payload.")
+            return cleaned
+
+        selected_student_ids = set(self.fields["students"].queryset.values_list("id", flat=True)) if apply_to_all_students else {
+            student.id for student in (selected_students or [])
+        }
+        activity_map = {activity.id: activity for activity in (selected_activities or [])}
+
+        items = []
+        seen_pairs = set()
+        for row in payload_rows:
+            if not isinstance(row, dict):
+                continue
+            student_id = row.get("student_id")
+            activity_id = row.get("grade_activity_id")
+            if student_id in (None, "") or activity_id in (None, ""):
+                continue
+
+            try:
+                student_id = int(student_id)
+                activity_id = int(activity_id)
+            except (TypeError, ValueError):
+                self.add_error(None, "Correction grid contains an invalid student or grading item reference.")
+                continue
+
+            if student_id not in selected_student_ids or activity_id not in activity_map:
+                self.add_error(None, "Correction grid no longer matches the selected students or grading items.")
+                continue
+
+            pair_key = (student_id, activity_id)
+            if pair_key in seen_pairs:
+                self.add_error(None, "Duplicate correction rows were detected.")
+                continue
+            seen_pairs.add(pair_key)
+
+            new_value = str(row.get("new_value") or "").strip()
+            if not new_value:
+                continue
+
+            parsed_new_value = self._parse_decimal(new_value)
+            if parsed_new_value is None:
+                activity = activity_map[activity_id]
+                self.add_error(
+                    None,
+                    f"Invalid corrected value for {activity.title}. Enter a valid number.",
+                )
+                continue
+
+            activity = activity_map[activity_id]
+            score_input_mode = self._score_input_mode(activity)
+            max_value = Decimal("100") if score_input_mode == "DIRECT_PERCENTAGE" else Decimal(activity.total_score)
+            if parsed_new_value < 0 or parsed_new_value > max_value:
+                self.add_error(
+                    None,
+                    f"Corrected value for {activity.title} must be between 0 and {self._format_decimal(max_value)}.",
+                )
+                continue
+
+            items.append(
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": student_id,
+                    "grade_activity_id": activity_id,
+                    "old_value": self.score_lookup.get((student_id, activity_id), ""),
+                    "new_value": self._format_decimal(parsed_new_value),
+                }
+            )
+
+        if not items:
+            self.add_error(None, "Enter at least one corrected value before submitting the request.")
+        cleaned["items"] = items
         return cleaned

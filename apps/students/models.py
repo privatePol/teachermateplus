@@ -33,7 +33,10 @@ class Student(TimeStampedModel, ActivatableModel):
         db_table = "students"
         ordering = ["last_name", "first_name", "student_no"]
         constraints = [
-            models.UniqueConstraint(fields=["tenant", "student_no"], name="uq_students_tenant_student_no"),
+            models.UniqueConstraint(
+                fields=["tenant", "campus", "student_no"],
+                name="uq_students_tenant_campus_student_no",
+            ),
         ]
 
     def __str__(self):

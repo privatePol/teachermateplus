@@ -16,6 +16,9 @@ This file is the working contract for humans and coding agents contributing to *
 3. Keep grading governance and auditability intact (submission, corrections, reopen).
 4. Prefer additive, low-risk changes over broad rewrites.
 5. Do not break existing URLs and workflows already used by operations.
+6. New features should be configurable whenever practical, with enable/disable control designed for flexibility.
+7. Feature availability should support global control and, when appropriate, per-role control.
+8. User-manageable feature toggles/settings should be exposed through a dedicated configurable-features page instead of being scattered across unrelated screens.
 
 ## Working Conventions
 - Backend: Django (apps-based architecture)
@@ -24,6 +27,7 @@ This file is the working contract for humans and coding agents contributing to *
 - Keep changes isolated per module and easy to review.
 - Add migration files for model changes.
 - Run `python manage.py check` after edits.
+- When adding optional workflows (for example, automatic email sending), implement them behind explicit feature configuration rather than hard-enabling behavior.
 
 ## Minimum Validation Before Handoff
 1. `python manage.py check`
@@ -53,4 +57,3 @@ When changing behavior, also update:
 
 Example:
 - `fix(grading): correct summary table ordering and period readiness checks`
-

@@ -1,0 +1,15 @@
+NATIONAL COLLEGE OF BUSINESS AND ARTS
+
+Registrar Notification
+
+An approved petition for correction of grades is ready for registrar reference.
+The official PDF report is attached to this email.
+
+Petitioner: {{ petitioner_name }}
+Reference No.: {{ reference_no }}
+Campus: {{ campus_name }}
+Course / Section: {{ course_title }} / {{ section_name }}
+Period: {{ period_name }}
+Approved At: {{ approved_at|date:"Y-m-d H:i" }}
+
+Please use the attached official report as registrar reference for posting to AIMS.

@@ -63,11 +63,14 @@ class AdminScopeService:
     def scoped_departments(request):
         campuses = AdminScopeService.scoped_campuses(request).values_list("id", flat=True)
         tenants = AdminScopeService.scoped_tenants(request).values_list("id", flat=True)
+        department_ids = getattr(request, "scope", {}).get("department_ids", [])
         queryset = (
             Department.objects.filter(tenant_id__in=tenants, campus_id__in=campuses)
             .select_related("tenant", "campus")
             .order_by("tenant__name", "campus__name", "name")
         )
+        if not request.user.is_superuser and department_ids:
+            queryset = queryset.filter(id__in=department_ids)
         return AdminScopeService._visible_queryset(request, queryset)
 
     @staticmethod
@@ -100,12 +103,15 @@ class AdminScopeService:
     def scoped_courses(request):
         tenants = AdminScopeService.scoped_tenants(request).values_list("id", flat=True)
         campuses = AdminScopeService.scoped_campuses(request).values_list("id", flat=True)
+        department_ids = getattr(request, "scope", {}).get("department_ids", [])
         queryset = (
             Course.objects.filter(tenant_id__in=tenants)
             .filter(models.Q(campus__isnull=True) | models.Q(campus_id__in=campuses))
             .select_related("tenant", "campus", "department")
             .order_by("code")
         )
+        if not request.user.is_superuser and department_ids:
+            queryset = queryset.filter(models.Q(department_id__in=department_ids) | models.Q(department__isnull=True))
         return AdminScopeService._visible_queryset(request, queryset)
 
     @staticmethod
@@ -181,6 +187,7 @@ class AdminScopeService:
     def scoped_faculty_users(request):
         tenants = AdminScopeService.scoped_tenants(request).values_list("id", flat=True)
         campuses = AdminScopeService.scoped_campuses(request).values_list("id", flat=True)
+        departments = AdminScopeService.scoped_departments(request).values_list("id", flat=True)
         faculty_role_assignments = UserRole.objects.filter(
             role__code="FACULTY",
             is_active=True,
@@ -189,12 +196,21 @@ class AdminScopeService:
             faculty_role_assignments = faculty_role_assignments.filter(
                 models.Q(tenant_id__in=tenants) | models.Q(tenant__isnull=True)
             ).filter(models.Q(campus_id__in=campuses) | models.Q(campus__isnull=True))
+            faculty_role_assignments = faculty_role_assignments.filter(
+                models.Q(department_id__in=departments) | models.Q(department__isnull=True)
+            )
         user_ids = (
             faculty_role_assignments.select_related("user")
             .values_list("user_id", flat=True)
             .distinct()
         )
-        queryset = UserRole.objects.filter(user_id__in=user_ids).values_list("user_id", flat=True)
+        scoped_offering_ids = AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True)
+        assignment_user_ids = FacultyAssignment.objects.filter(
+            offering_id__in=scoped_offering_ids,
+            is_active=True,
+        ).values_list("faculty_user_id", flat=True)
+        combined_user_ids = sorted(set(user_ids) | set(assignment_user_ids))
+        queryset = UserRole.objects.filter(user_id__in=combined_user_ids).values_list("user_id", flat=True)
         # Return user ids; non-super should only get active users.
         if request.user.is_superuser:
             return queryset.distinct()

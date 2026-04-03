@@ -3,7 +3,7 @@
 {% block faculty_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">
-    Corrections | {{ offering.course.code }} | {{ period.name }}
+    Corrections | {{ offering.course.title }} | {{ period.name }}
   </h2>
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
 </div>
@@ -43,6 +43,13 @@
 </div>
 {% endif %}
 
+{% if not is_correction_active %}
+<div class="alert alert-info">
+  Approved score corrections are automatically posted to the gradebook and recomputed by EduGradesPro.
+  No manual re-encoding is needed after approval.
+</div>
+{% endif %}
+
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-header bg-white"><strong>My Correction Requests</strong></div>
   <div class="table-responsive">
@@ -77,9 +84,18 @@
           <td>
             {% for item in req.items.all %}
               <div class="small">
-                {{ item.requested_action }}
-                {% if item.student %}| {{ item.student.student_no }}{% endif %}
-                {% if item.grade_activity %}| {{ item.grade_activity.title }}{% endif %}
+                {% if item.student %}
+                  {{ item.student.student_no }} - <strong>{{ item.student.last_name }}, {{ item.student.first_name }}</strong>
+                {% else %}
+                  Entire Class
+                {% endif %}
+                {% if item.grade_activity %}
+                  | {{ item.grade_activity.template_component.name }}
+                  {% if item.grade_activity.template_subcomponent %} / {{ item.grade_activity.template_subcomponent.name }}{% endif %}
+                  {% if item.grade_activity.template_detail %} / {{ item.grade_activity.template_detail.name }}{% endif %}
+                  {% if item.grade_activity.title %} / {{ item.grade_activity.title }}{% endif %}
+                {% endif %}
+                | <span class="text-primary">{{ item.old_value|default:"-" }} -> {{ item.new_value|default:"-" }}</span>
               </div>
             {% empty %}
               <span class="text-muted">-</span>
@@ -95,12 +111,26 @@
             {% endif %}
           </td>
           <td class="text-end">
-            {% if req.status == "APPROVED" and req.unlock_window and req.unlock_window.is_active and not req.unlock_window.is_consumed %}
-            <form method="post" action="{% url 'faculty_portal:period_correction_finalize' offering.id period.id req.id %}">
-              {% csrf_token %}
-              <button class="btn btn-sm btn-success" type="submit">Finalize & Re-lock</button>
-            </form>
-            {% endif %}
+            <div class="d-flex flex-column gap-1 align-items-end">
+              {% if official_report_enabled %}
+                {% if req.status == "APPROVED" or req.status == "CLOSED" %}
+              <a
+                class="btn btn-sm btn-outline-primary"
+                href="{% url 'faculty_portal:period_correction_official_report' offering.id period.id req.id %}"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Official PDF
+              </a>
+                {% endif %}
+              {% endif %}
+              {% if req.status == "APPROVED" and req.unlock_window and req.unlock_window.is_active and not req.unlock_window.is_consumed %}
+              <form method="post" action="{% url 'faculty_portal:period_correction_finalize' offering.id period.id req.id %}">
+                {% csrf_token %}
+                <button class="btn btn-sm btn-success" type="submit">Finalize & Re-lock</button>
+              </form>
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% if req.justification %}
@@ -146,31 +176,103 @@
       {% if form.non_field_errors %}
       <div class="alert alert-danger">{{ form.non_field_errors }}</div>
       {% endif %}
-      <div class="row g-2">
-        <div class="col-md-4">
-          <label class="form-label">Action</label>
-          {{ form.requested_action }}
-          {% for e in form.requested_action.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      <div class="alert alert-warning border mb-3">
+        <strong>Important:</strong> To avoid confusion and missing entries, follow this order when preparing a correction request.
+        <div class="mt-2 small">
+          <strong>Step 1:</strong> Select <strong>all affected students</strong> first.<br>
+          <strong>Step 2:</strong> Select <strong>all affected grading items</strong> next.<br>
+          <strong>Step 3:</strong> Encode the corrected values below.<br>
+          <strong>Step 4:</strong> Add your justification and submit the request for approval.
         </div>
-        <div class="col-md-4">
-          <label class="form-label">Student</label>
-          {{ form.student }}
-          {% for e in form.student.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+      </div>
+      {{ form.correction_payload }}
+      <div class="row g-3">
+        <div class="col-lg-4">
+          <div class="border rounded p-3 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="form-label mb-0">Students</label>
+              <div class="form-check mb-0">
+                {{ form.apply_to_all_students }}
+                <label class="form-check-label" for="{{ form.apply_to_all_students.id_for_label }}">Entire Class</label>
+              </div>
+            </div>
+            <div class="small text-muted mb-2">
+              Select specific students or use Entire Class to prepare correction rows for everyone in this offering.
+            </div>
+            {{ form.students }}
+            {% for e in form.students.errors %}<div class="small text-danger mt-2">{{ e }}</div>{% endfor %}
+          </div>
         </div>
-        <div class="col-md-4">
-          <label class="form-label">Activity (for score correction)</label>
-          {{ form.grade_activity }}
-          {% for e in form.grade_activity.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+        <div class="col-lg-8">
+          <div class="border rounded p-3 h-100">
+            <label class="form-label">Grading Items</label>
+            {% if correction_activities %}
+            <div class="small text-muted mb-2">
+              Select one or more activities below, similar to the Activities page, then encode corrected values in the sections that appear underneath.
+            </div>
+            <div class="table-responsive correction-activity-table">
+              <table class="table table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th style="width: 72px;">Select</th>
+                    <th>Title</th>
+                    <th>Component</th>
+                    <th>Subcomponent</th>
+                    <th>Detail</th>
+                    <th>Entry Method</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in correction_activities %}
+                  <tr>
+                    <td>
+                      <div class="form-check">
+                        <input
+                          class="form-check-input"
+                          type="checkbox"
+                          name="{{ form.grade_activities.html_name }}"
+                          value="{{ row.id }}"
+                          id="correction-activity-{{ row.id }}"
+                          {% if row.id|stringformat:"s" in selected_grade_activity_ids %}checked{% endif %}
+                        >
+                      </div>
+                    </td>
+                    <td>{{ row.title }}</td>
+                    <td>{{ row.component_name }}</td>
+                    <td>{{ row.subcomponent_name }}</td>
+                    <td>{{ row.detail_name }}</td>
+                    <td><span class="badge text-bg-light border">{{ row.entry_method_label }}</span></td>
+                    <td>{{ row.total_score }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <div class="alert alert-warning mb-0">
+              No grading items are available yet for this period.
+              Create the needed activities first in
+              <a href="{% url 'faculty_portal:period_activities' offering.id period.id %}">Activities</a>,
+              then return here to file the correction request.
+            </div>
+            {% endif %}
+            {% for e in form.grade_activities.errors %}<div class="small text-danger mt-2">{{ e }}</div>{% endfor %}
+          </div>
         </div>
-        <div class="col-md-6">
-          <label class="form-label">Old Value (optional)</label>
-          {{ form.old_value }}
-          {% for e in form.old_value.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">New Value (optional)</label>
-          {{ form.new_value }}
-          {% for e in form.new_value.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+        <div class="col-12">
+          <div class="border rounded p-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="form-label mb-0">Correction Encoding</label>
+              <span class="small text-muted">Original values are loaded automatically from the gradebook.</span>
+            </div>
+            <div class="alert alert-light border small mb-3">
+              Recommended workflow: <strong>1)</strong> select all affected students first, <strong>2)</strong> select all affected grading items next, <strong>3)</strong> encode the corrected values below. You may go back and adjust selections without losing already entered corrected values.
+            </div>
+            <div id="correction-grid-sections">
+              <div class="text-muted py-3">Select students and grading items to build the correction encoding sections.</div>
+            </div>
+          </div>
         </div>
         <div class="col-12">
           <label class="form-label">Justification</label>
@@ -190,4 +292,276 @@
     {% endif %}
   </div>
 </div>
+
+{{ correction_students|json_script:"correction-students-data" }}
+{{ correction_activities|json_script:"correction-activities-data" }}
+{{ correction_score_map|json_script:"correction-score-map" }}
+
+<style>
+  .correction-activity-table {
+    max-height: 21rem;
+    overflow-y: auto;
+  }
+
+  .correction-encode-section + .correction-encode-section {
+    margin-top: 1rem;
+  }
+</style>
+
+<script>
+  (() => {
+    const payloadField = document.getElementById("{{ form.correction_payload.id_for_label }}");
+    const studentSelect = document.getElementById("{{ form.students.id_for_label }}");
+    const applyAllCheckbox = document.getElementById("{{ form.apply_to_all_students.id_for_label }}");
+    const activityInputs = Array.from(document.querySelectorAll('input[name="{{ form.grade_activities.html_name }}"]'));
+    const gridSections = document.getElementById("correction-grid-sections");
+    const correctionForm = payloadField ? payloadField.closest("form") : null;
+
+    if (!payloadField || !studentSelect || !applyAllCheckbox || !gridSections || !correctionForm) {
+      return;
+    }
+
+    const students = JSON.parse(document.getElementById("correction-students-data").textContent);
+    const activities = JSON.parse(document.getElementById("correction-activities-data").textContent);
+    const scoreMap = JSON.parse(document.getElementById("correction-score-map").textContent);
+    const studentMap = new Map(students.map((row) => [String(row.id), row]));
+    const activityMap = new Map(activities.map((row) => [String(row.id), row]));
+
+    function parsePayload() {
+      if (!payloadField.value) {
+        return [];
+      }
+      try {
+        const parsed = JSON.parse(payloadField.value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function selectedStudentIds() {
+      if (applyAllCheckbox.checked) {
+        return students.map((row) => String(row.id));
+      }
+      return Array.from(studentSelect.selectedOptions).map((option) => option.value);
+    }
+
+    function selectedActivityIds() {
+      return activityInputs.filter((input) => input.checked).map((input) => input.value);
+    }
+
+    function syncPayloadFromGrid() {
+      const preservedRows = new Map(
+        parsePayload().map((row) => [`${row.student_id}:${row.grade_activity_id}`, row])
+      );
+      const visibleRows = Array.from(gridSections.querySelectorAll("[data-correction-row]")).map((row) => {
+        const input = row.querySelector("input");
+        return {
+          student_id: row.dataset.studentId,
+          grade_activity_id: row.dataset.activityId,
+          new_value: input ? input.value.trim() : "",
+        };
+      });
+      visibleRows.forEach((row) => {
+        const key = `${row.student_id}:${row.grade_activity_id}`;
+        if (row.new_value) {
+          preservedRows.set(key, row);
+        } else {
+          preservedRows.delete(key);
+        }
+      });
+      payloadField.value = JSON.stringify(Array.from(preservedRows.values()));
+    }
+
+    function getCorrectionInputs() {
+      return Array.from(gridSections.querySelectorAll("input[data-correction-input='1']:not([disabled])"));
+    }
+
+    function clearValidationState() {
+      const alertBox = correctionForm.querySelector("#correction-validation-message");
+      getCorrectionInputs().forEach((input) => input.classList.remove("is-invalid"));
+      if (alertBox) {
+        alertBox.classList.add("d-none");
+        alertBox.textContent = "";
+      }
+    }
+
+    function showValidationError(message, input) {
+      const alertBox = correctionForm.querySelector("#correction-validation-message");
+      if (alertBox) {
+        alertBox.textContent = message;
+        alertBox.classList.remove("d-none");
+      }
+      if (input) {
+        input.classList.add("is-invalid");
+        input.focus();
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+
+    function validateCorrectionInputs() {
+      clearValidationState();
+      for (const input of getCorrectionInputs()) {
+        const rawValue = (input.value || "").trim();
+        if (!rawValue) {
+          continue;
+        }
+        const numericValue = Number(rawValue);
+        const maxValue = Number(input.dataset.maxValue || input.getAttribute("max"));
+        if (Number.isNaN(numericValue)) {
+          showValidationError("Please enter a valid corrected value or leave the field blank.", input);
+          return false;
+        }
+        if (numericValue < 0 || numericValue > maxValue) {
+          showValidationError(
+            `Corrected value cannot be lower than 0 or higher than ${maxValue}. Please review the highlighted entry.`,
+            input
+          );
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function buildStatusBadge(status) {
+      const badgeClass = status === "ACTIVE" ? "text-bg-success" : "text-bg-warning";
+      return `<span class="badge ${badgeClass}">${status}</span>`;
+    }
+
+    function renderGrid() {
+      const rememberedValues = new Map(
+        parsePayload().map((row) => [`${row.student_id}:${row.grade_activity_id}`, row.new_value || ""])
+      );
+      const studentIds = selectedStudentIds();
+      const activityIds = selectedActivityIds();
+
+      gridSections.innerHTML = "";
+
+      if (!studentIds.length || !activityIds.length) {
+        gridSections.innerHTML = `
+          <div class="text-muted py-3">
+            Select students and grading items to build the correction encoding sections.
+          </div>
+        `;
+        return;
+      }
+
+      activityIds.forEach((activityId) => {
+        const activity = activityMap.get(String(activityId));
+        if (!activity) {
+          return;
+        }
+
+        const section = document.createElement("div");
+        section.className = "card border-0 shadow-sm correction-encode-section";
+
+        const sectionHeader = document.createElement("div");
+        sectionHeader.className = "card-body pb-0";
+        sectionHeader.innerHTML = `
+          <div class="alert alert-light border">
+            Entry Method: <strong>${activity.entry_method_label}</strong>
+            ${activity.score_input_mode === "RAW_BASE50"
+              ? `| Total Score: <strong>${activity.total_score}</strong>`
+              : "| Encode percentage directly from <strong>0 to 100</strong>"}
+            | ${activity.component_name} / ${activity.subcomponent_name}${activity.detail_name !== "-" ? ` / ${activity.detail_name}` : ""}
+            | <strong>${activity.title}</strong>
+          </div>
+        `;
+        if (!gridSections.querySelector("#correction-validation-message")) {
+          const validationBox = document.createElement("div");
+          validationBox.id = "correction-validation-message";
+          validationBox.className = "alert alert-danger d-none";
+          gridSections.appendChild(validationBox);
+        }
+        section.appendChild(sectionHeader);
+
+        const tableWrapper = document.createElement("div");
+        tableWrapper.className = "table-responsive";
+        const table = document.createElement("table");
+        table.className = "table table-hover mb-0 align-middle";
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th style="width: 72px;">No.</th>
+              <th>Name</th>
+              <th>Status</th>
+              <th style="width: 160px;">Original Value</th>
+              <th style="width: 200px;">Corrected Value</th>
+            </tr>
+          </thead>
+        `;
+        const tbody = document.createElement("tbody");
+
+        studentIds.forEach((studentId, index) => {
+          const student = studentMap.get(String(studentId));
+          if (!student) {
+            return;
+          }
+
+          const pairKey = `${studentId}:${activityId}`;
+          const row = document.createElement("tr");
+          row.dataset.correctionRow = "1";
+          row.dataset.studentId = String(studentId);
+          row.dataset.activityId = String(activityId);
+
+          const isActiveStudent = student.status === "ACTIVE";
+          row.innerHTML = `
+            <td>${index + 1}</td>
+            <td>${student.name}</td>
+            <td>${buildStatusBadge(student.status)}</td>
+            <td>${isActiveStudent ? (scoreMap[pairKey] || "-") : "N/A"}</td>
+            <td></td>
+          `;
+
+          const correctedCell = row.lastElementChild;
+          const input = document.createElement("input");
+          input.className = "form-control form-control-sm";
+          if (isActiveStudent) {
+            input.type = "number";
+            input.step = "0.01";
+            input.min = "0";
+            input.max = activity.score_input_max;
+            input.dataset.maxValue = activity.score_input_max;
+            input.dataset.correctionInput = "1";
+            input.placeholder = `0 to ${activity.score_input_max}`;
+            input.value = rememberedValues.get(pairKey) || "";
+            input.addEventListener("input", () => {
+              input.classList.remove("is-invalid");
+              syncPayloadFromGrid();
+            });
+          } else {
+            input.type = "text";
+            input.value = "N/A";
+            input.disabled = true;
+          }
+          correctedCell.appendChild(input);
+          tbody.appendChild(row);
+        });
+
+        table.appendChild(tbody);
+        tableWrapper.appendChild(table);
+        section.appendChild(tableWrapper);
+        gridSections.appendChild(section);
+      });
+
+      syncPayloadFromGrid();
+    }
+
+    applyAllCheckbox.addEventListener("change", () => {
+      studentSelect.disabled = applyAllCheckbox.checked;
+      renderGrid();
+    });
+    studentSelect.addEventListener("change", renderGrid);
+    activityInputs.forEach((input) => input.addEventListener("change", renderGrid));
+    correctionForm.addEventListener("submit", (event) => {
+      syncPayloadFromGrid();
+      if (!validateCorrectionInputs()) {
+        event.preventDefault();
+      }
+    });
+
+    studentSelect.disabled = applyAllCheckbox.checked;
+    renderGrid();
+  })();
+</script>
 {% endblock %}

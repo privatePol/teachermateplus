@@ -32,13 +32,14 @@
       <div class="card-header bg-white"><strong>Current Assignments</strong></div>
       <div class="table-responsive">
         <table class="table table-sm mb-0">
-          <thead><tr><th>Role</th><th>Tenant</th><th>Campus</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Role</th><th>Tenant</th><th>Campus</th><th>Department</th><th>Status</th><th></th></tr></thead>
           <tbody>
           {% for a in assignments %}
             <tr>
               <td>{{ a.role.code }}</td>
               <td>{{ a.tenant.code|default:"GLOBAL" }}</td>
               <td>{{ a.campus.code|default:"ALL" }}</td>
+              <td>{{ a.department.name|default:"ALL" }}</td>
               <td>{% if a.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
               <td class="text-end">
                 {% if a.is_active %}
@@ -52,7 +53,7 @@
               </td>
             </tr>
           {% empty %}
-            <tr><td colspan="5" class="text-center text-muted py-3">No role assignments yet.</td></tr>
+            <tr><td colspan="6" class="text-center text-muted py-3">No role assignments yet.</td></tr>
           {% endfor %}
           </tbody>
         </table>

@@ -3,25 +3,36 @@
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Roles</h2>
+  {% if "roles.create" in effective_permissions %}
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:role_create' %}">Add Role</a>
+  {% endif %}
 </div>
 <div class="card border-0 shadow-sm">
   <div class="table-responsive">
     <table class="table table-hover mb-0">
-      <thead><tr><th>Code</th><th>Name</th><th>Permissions</th><th></th></tr></thead>
+      <thead><tr><th>Code</th><th>Name</th><th>Status</th><th>Permissions</th><th></th></tr></thead>
       <tbody>
       {% for role in roles %}
         <tr>
           <td>{{ role.code }}</td>
           <td>{{ role.name }}</td>
+          <td>
+            {% if role.is_active %}
+              <span class="badge text-bg-success">Active</span>
+            {% else %}
+              <span class="badge text-bg-secondary">Inactive</span>
+            {% endif %}
+          </td>
           <td>{{ role.permission_count }}</td>
           <td class="text-end">
             {% if "roles.update" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:role_update' role.id %}">Edit</a>
             <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:role_permissions' role.id %}">Manage Permissions</a>
             {% endif %}
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="4" class="text-center text-muted py-4">No roles found.</td></tr>
+        <tr><td colspan="5" class="text-center text-muted py-4">No roles found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

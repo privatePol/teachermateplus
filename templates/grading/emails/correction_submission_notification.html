@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ subject_message }}</title>
+</head>
+<body style="margin:0; padding:24px; background:#eef6f0; font-family:Arial, Helvetica, sans-serif; color:#163424;">
+  <div style="max-width:640px; margin:0 auto;">
+    <div style="background:#ffffff; border:1px solid #cde3d3; border-radius:18px; padding:32px 28px; box-shadow:0 10px 24px rgba(15, 65, 40, 0.12);">
+      <div style="text-align:center; margin-bottom:20px;">
+        {% if logo_src %}
+        <img src="{{ logo_src }}" alt="NCBA Logo" style="width:88px; height:auto; display:inline-block; margin:0 auto 14px;">
+        {% endif %}
+        <div style="font-size:20px; line-height:1.4; font-weight:700; color:#1b5e3c; letter-spacing:0.04em;">
+          {{ school_name }}
+        </div>
+      </div>
+
+      <div style="background:linear-gradient(135deg, #edf9f1 0%, #f7fff9 100%); border:1px solid #cde7d6; border-radius:14px; padding:18px 20px; margin-bottom:18px;">
+        <div style="font-size:18px; font-weight:700; color:#1f6f46; margin-bottom:8px;">
+          Approval Notification
+        </div>
+        <div style="font-size:14px; line-height:1.7; color:#2f5a43;">
+          There is a petition for correction of grades awaiting your approval in EduGradesPro.
+        </div>
+      </div>
+
+      <div style="font-size:14px; line-height:1.8; color:#284c39; margin-bottom:18px;">
+        <strong>Petitioner:</strong> {{ petitioner_name }}
+      </div>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; margin-bottom:18px;">
+        <tr>
+          <td style="padding:10px 12px; border:1px solid #dcecdf; background:#f6fbf7; width:38%; font-weight:700;">Reference No.</td>
+          <td style="padding:10px 12px; border:1px solid #dcecdf;">{{ reference_no }}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px; border:1px solid #dcecdf; background:#f6fbf7; font-weight:700;">Campus</td>
+          <td style="padding:10px 12px; border:1px solid #dcecdf;">{{ campus_name }}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px; border:1px solid #dcecdf; background:#f6fbf7; font-weight:700;">Course / Section</td>
+          <td style="padding:10px 12px; border:1px solid #dcecdf;">{{ course_title }} / {{ section_name }}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px; border:1px solid #dcecdf; background:#f6fbf7; font-weight:700;">Period</td>
+          <td style="padding:10px 12px; border:1px solid #dcecdf;">{{ period_name }}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px; border:1px solid #dcecdf; background:#f6fbf7; font-weight:700;">Submitted At</td>
+          <td style="padding:10px 12px; border:1px solid #dcecdf;">{{ submitted_at|date:"Y-m-d H:i" }}</td>
+        </tr>
+      </table>
+
+      <div style="font-size:13px; line-height:1.7; color:#3a5f49;">
+        Please sign in to EduGradesPro to review the petition in the correction approval queue.
+      </div>
+    </div>
+  </div>
+</body>
+</html>

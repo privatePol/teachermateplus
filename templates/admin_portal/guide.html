@@ -339,6 +339,7 @@
             <li>Set pre-deadline behavior (when SYSTEM_REQUEST is used).</li>
             <li>Set route matrix by requesting faculty department.</li>
             <li>Set document print header values.</li>
+            <li>Use Configurable Features for optional workflow toggles such as correction official report generation and registrar auto-email settings.</li>
           </ul>
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
@@ -430,9 +431,11 @@
           <ol class="guide-steps">
             <li>Faculty files correction request in portal.</li>
             <li>Approvers review based on route matrix and permissions.</li>
-            <li>Final approval opens 24-hour correction window.</li>
-            <li>Faculty updates records and finalizes correction.</li>
-            <li>If not finalized in time, request becomes <strong>LAPSED</strong>.</li>
+            <li>Faculty may include multiple students or the entire class plus multiple grading items in one request.</li>
+            <li>Original values are shown in the request, and faculty enters only corrected values.</li>
+            <li>Final approval applies the corrected values directly into the gradebook and recomputes the submitted period automatically.</li>
+            <li>If the configurable feature is enabled, approved requests can also be opened as an official PDF artifact in a new browser tab for registrar/AIMS reference and immediate print/download, including campus applicability, before/after official grade values, and approval summary directly above registrar reference.</li>
+            <li>If the configurable feature is enabled, submission of a correction request can immediately email the selected approver roles such as CAO and college dean, using the NCBA-branded notification card with petitioner and period name details.</li>
           </ol>
 
           <div class="guide-subhead">MANUAL_ONLY Mode</div>
@@ -449,7 +452,7 @@
             <li>CAO/dean/coordinator users must have correct scoped roles.</li>
             <li>Use remarks/reference number for traceability, especially in manual mode.</li>
             <li>All correction/reopen decisions are auditable.</li>
-            <li>When final approval grants a 24-hour window, unexecuted requests automatically lapse and require a new request.</li>
+            <li>Approved score correction values should be reviewed carefully because the final approval posts them directly into the gradebook.</li>
           </ul>
           <div class="guide-note">
             If registrar policy requires paper source-of-truth, set mode to MANUAL_ONLY. Faculty does not file online request; admin executes reopen only after approved form.
@@ -470,7 +473,7 @@
           <ul class="guide-list">
             <li>Enforce domain policy, password complexity, first-login password change, and privacy consent.</li>
             <li>Assign default tenant/campus/department correctly per user.</li>
-            <li>Grant least privilege and role scopes carefully.</li>
+            <li>Grant least privilege and role scopes carefully. Role assignments can now be scoped by tenant, campus, and department for AC/Dean governance boundaries.</li>
             <li>For dual-role users (admin + faculty), ensure both portal permissions are assigned.</li>
           </ul>
         </div>

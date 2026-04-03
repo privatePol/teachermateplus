@@ -19,9 +19,9 @@ class PermissionAdmin(admin.ModelAdmin):
 
 @admin.register(UserRole)
 class UserRoleAdmin(admin.ModelAdmin):
-    list_display = ("user", "role", "tenant", "campus", "is_active", "assigned_at")
+    list_display = ("user", "role", "tenant", "campus", "department", "is_active", "assigned_at")
     search_fields = ("user__username", "role__code")
-    list_filter = ("role", "tenant", "campus", "is_active")
+    list_filter = ("role", "tenant", "campus", "department", "is_active")
 
 
 @admin.register(RolePermission)

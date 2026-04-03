@@ -12,7 +12,9 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Avg, Count, Prefetch, Q, Sum
-from django.http import HttpResponseForbidden
+from io import BytesIO
+
+from django.http import FileResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -23,6 +25,7 @@ from apps.admin_portal.forms import (
     ActiveAcademicTermSettingForm,
     AcademicYearForm,
     CampusForm,
+    ConfigurableFeatureSettingForm,
     CorrectionApprovalRouteRuleForm,
     CorrectionGovernanceSettingForm,
     CourseForm,
@@ -46,6 +49,7 @@ from apps.admin_portal.forms import (
     MenuGroupForm,
     MenuItemForm,
     ProgramForm,
+    RoleForm,
     RolePermissionsForm,
     SectionForm,
     StudentForm,
@@ -65,6 +69,7 @@ from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyA
 from apps.auditlog.models import AuditLog
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
+from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.forms import EnrollmentForm
@@ -89,6 +94,8 @@ from apps.grading.models import (
     TemplateHotfixRequest,
     TenantGradingProfile,
 )
+from apps.grading.notifications import CorrectionNotificationService
+from apps.grading.reporting import CorrectionOfficialReportService
 from apps.grading.services import (
     FacultyGradingService,
     GradingGovernanceService,
@@ -102,6 +109,13 @@ from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
 
 User = get_user_model()
+
+
+def _official_correction_report_filename(correction_request: GradeCorrectionRequest) -> str:
+    period_code = correction_request.template_period.code or "PERIOD"
+    course_code = correction_request.offering.course.code or "COURSE"
+    section_code = correction_request.offering.section.code or "SECTION"
+    return f"official-correction-{correction_request.id}-{course_code}-{section_code}-{period_code}.pdf"
 
 
 def _scope_context(request):
@@ -1274,6 +1288,166 @@ def document_print_settings_view(request):
     return render(request, "admin_portal/shared/form_page.html", context)
 
 
+@portal_required("ADMIN")
+@permission_required("system_settings.update")
+def configurable_features_settings_view(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    if not tenant_id:
+        messages.error(request, "Select a tenant scope first.")
+        return _redirect_back_or_default(request, "admin_portal:dashboard")
+
+    campus_queryset = AdminScopeService.scoped_campuses(request).filter(tenant_id=tenant_id).order_by("code", "name")
+    role_queryset = Role.objects.filter(is_active=True).order_by("name")
+
+    current_report_enabled = FeatureSettingsService.is_correction_official_report_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_submission_email_enabled = FeatureSettingsService.is_correction_submission_approval_email_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_submission_email_role_codes = FeatureSettingsService.get_correction_submission_approval_email_role_codes(
+        tenant_id=tenant_id
+    )
+    current_auto_email_enabled = FeatureSettingsService.is_correction_registrar_auto_email_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_role_codes = FeatureSettingsService.get_correction_registrar_auto_email_role_codes(tenant_id=tenant_id)
+    current_default_recipients = FeatureSettingsService.get_correction_registrar_default_recipients(tenant_id=tenant_id)
+    current_campus_recipients = FeatureSettingsService.get_correction_registrar_campus_recipients(tenant_id=tenant_id)
+
+    form = ConfigurableFeatureSettingForm(
+        request.POST or None,
+        initial={
+            "correction_official_report_enabled": current_report_enabled,
+            "correction_submission_approval_email_enabled": current_submission_email_enabled,
+            "correction_submission_approval_email_roles": role_queryset.filter(code__in=current_submission_email_role_codes),
+            "correction_registrar_auto_email_enabled": current_auto_email_enabled,
+            "correction_registrar_auto_email_roles": role_queryset.filter(code__in=current_role_codes),
+            "correction_registrar_default_recipients": ", ".join(current_default_recipients),
+        },
+        role_queryset=role_queryset,
+        campus_queryset=campus_queryset,
+        campus_initial_map=current_campus_recipients,
+    )
+    _style_form(form)
+
+    if request.method == "POST" and form.is_valid():
+        selected_submission_email_role_codes = list(
+            form.cleaned_data["correction_submission_approval_email_roles"].values_list("code", flat=True)
+        )
+        selected_role_codes = list(
+            form.cleaned_data["correction_registrar_auto_email_roles"].values_list("code", flat=True)
+        )
+        selected_default_recipients = form.cleaned_data["correction_registrar_default_recipient_list"]
+        selected_campus_recipients = form.cleaned_data["correction_registrar_campus_recipient_map"]
+
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_OFFICIAL_REPORT_ENABLED_KEY,
+            bool(form.cleaned_data["correction_official_report_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
+            bool(form.cleaned_data["correction_submission_approval_email_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ROLE_CODES_KEY,
+            selected_submission_email_role_codes,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_REGISTRAR_AUTO_EMAIL_ENABLED_KEY,
+            bool(form.cleaned_data["correction_registrar_auto_email_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_REGISTRAR_AUTO_EMAIL_ROLE_CODES_KEY,
+            selected_role_codes,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_REGISTRAR_DEFAULT_RECIPIENTS_KEY,
+            selected_default_recipients,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_REGISTRAR_CAMPUS_RECIPIENTS_KEY,
+            selected_campus_recipients,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+
+        AuditService.log_event(
+            action="UPDATE_SYSTEM_SETTING",
+            portal="ADMIN",
+            entity_type="SystemSetting",
+            entity_id=f"tenant:{tenant_id}:configurable-features",
+            actor=request.user,
+            tenant=tenant_id,
+            campus=getattr(request, "scope", {}).get("campus_id"),
+            before_data={
+                "correction_official_report_enabled": current_report_enabled,
+                "correction_submission_approval_email_enabled": current_submission_email_enabled,
+                "correction_submission_approval_email_role_codes": current_submission_email_role_codes,
+                "correction_registrar_auto_email_enabled": current_auto_email_enabled,
+                "correction_registrar_auto_email_role_codes": current_role_codes,
+                "correction_registrar_default_recipients": current_default_recipients,
+                "correction_registrar_campus_recipients": current_campus_recipients,
+            },
+            after_data={
+                "correction_official_report_enabled": bool(form.cleaned_data["correction_official_report_enabled"]),
+                "correction_submission_approval_email_enabled": bool(
+                    form.cleaned_data["correction_submission_approval_email_enabled"]
+                ),
+                "correction_submission_approval_email_role_codes": selected_submission_email_role_codes,
+                "correction_registrar_auto_email_enabled": bool(form.cleaned_data["correction_registrar_auto_email_enabled"]),
+                "correction_registrar_auto_email_role_codes": selected_role_codes,
+                "correction_registrar_default_recipients": selected_default_recipients,
+                "correction_registrar_campus_recipients": selected_campus_recipients,
+            },
+            metadata={
+                "setting_keys": [
+                    FeatureSettingsService.CORRECTION_OFFICIAL_REPORT_ENABLED_KEY,
+                    FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
+                    FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ROLE_CODES_KEY,
+                    FeatureSettingsService.CORRECTION_REGISTRAR_AUTO_EMAIL_ENABLED_KEY,
+                    FeatureSettingsService.CORRECTION_REGISTRAR_AUTO_EMAIL_ROLE_CODES_KEY,
+                    FeatureSettingsService.CORRECTION_REGISTRAR_DEFAULT_RECIPIENTS_KEY,
+                    FeatureSettingsService.CORRECTION_REGISTRAR_CAMPUS_RECIPIENTS_KEY,
+                ],
+            },
+            request=request,
+        )
+        messages.success(request, "Configurable features updated.")
+        return _redirect_back_or_default(request, "admin_portal:configurable_features_settings")
+
+    context = {
+        "title": "Configurable Features",
+        "form": form,
+        "campus_count": campus_queryset.count(),
+        "campus_field_rows": [{"campus": campus, "field": form[field_name]} for field_name, campus in form.campus_fields],
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/tools/configurable_features.html", context)
+
+
 def _scoped_users_queryset(request):
     qs = User.objects.all().order_by("username")
     if request.user.is_superuser:
@@ -1372,10 +1546,18 @@ def _active_user_activity_rows(request, limit=25):
     return rows[:limit]
 
 
-def _assignment_covers_default_scope(assignment, *, default_tenant_id: int | None, default_campus_id: int | None):
+def _assignment_covers_default_scope(
+    assignment,
+    *,
+    default_tenant_id: int | None,
+    default_campus_id: int | None,
+    default_department_id: int | None,
+):
     if default_tenant_id and assignment.tenant_id not in (None, default_tenant_id):
         return False
     if default_campus_id and assignment.campus_id not in (None, default_campus_id):
+        return False
+    if default_department_id and assignment.department_id not in (None, default_department_id):
         return False
     return True
 
@@ -1383,6 +1565,7 @@ def _assignment_covers_default_scope(assignment, *, default_tenant_id: int | Non
 def _has_active_role_covering_default_scope(user, *, exclude_assignment_id: int | None = None):
     default_tenant_id = getattr(user, "default_tenant_id", None)
     default_campus_id = getattr(user, "default_campus_id", None)
+    default_department_id = getattr(user, "default_department_id", None)
     if default_tenant_id is None and default_campus_id:
         default_tenant_id = (
             Campus.objects.filter(id=default_campus_id).values_list("tenant_id", flat=True).first()
@@ -1393,12 +1576,13 @@ def _has_active_role_covering_default_scope(user, *, exclude_assignment_id: int 
         assignments = assignments.exclude(id=exclude_assignment_id)
 
     has_any = False
-    for assignment in assignments.only("tenant_id", "campus_id"):
+    for assignment in assignments.only("tenant_id", "campus_id", "department_id"):
         has_any = True
         if _assignment_covers_default_scope(
             assignment,
             default_tenant_id=default_tenant_id,
             default_campus_id=default_campus_id,
+            default_department_id=default_department_id,
         ):
             return True
     return not has_any
@@ -1854,6 +2038,7 @@ def user_roles_view(request, user_id: int):
     user = get_object_or_404(_scoped_users_queryset(request), id=user_id)
     tenant_qs = AdminScopeService.scoped_tenants(request)
     campus_qs = AdminScopeService.scoped_campuses(request)
+    department_qs = AdminScopeService.scoped_departments(request)
 
     if request.method == "POST" and request.POST.get("action") == "deactivate":
         assignment = get_object_or_404(UserRole, id=request.POST.get("assignment_id"), user=user)
@@ -1861,6 +2046,10 @@ def user_roles_view(request, user_id: int):
             if assignment.tenant_id and assignment.tenant_id not in getattr(request, "scope", {}).get("tenant_ids", []):
                 return HttpResponseForbidden("Forbidden scope.")
             if assignment.campus_id and assignment.campus_id not in getattr(request, "scope", {}).get("campus_ids", []):
+                return HttpResponseForbidden("Forbidden scope.")
+            if assignment.department_id and assignment.department_id not in getattr(request, "scope", {}).get(
+                "department_ids", []
+            ):
                 return HttpResponseForbidden("Forbidden scope.")
         if not user.is_superuser and assignment.is_active:
             still_aligned = _has_active_role_covering_default_scope(
@@ -1870,7 +2059,7 @@ def user_roles_view(request, user_id: int):
             if not still_aligned:
                 messages.error(
                     request,
-                    "Cannot deactivate this assignment because it would leave active roles outside the user's default tenant/campus scope. "
+                    "Cannot deactivate this assignment because it would leave active roles outside the user's default tenant/campus/department scope. "
                     "Assign a matching scoped role first, or update user defaults.",
                 )
                 return _redirect_back_or_default(request, "admin_portal:user_roles", user_id=user.id)
@@ -1894,6 +2083,7 @@ def user_roles_view(request, user_id: int):
         request.POST or None,
         tenant_queryset=tenant_qs,
         campus_queryset=campus_qs,
+        department_queryset=department_qs,
         target_user=user,
     )
     _style_form(form)
@@ -1903,6 +2093,7 @@ def user_roles_view(request, user_id: int):
             role=form.cleaned_data["role"],
             tenant=form.cleaned_data["tenant"],
             campus=form.cleaned_data["campus"],
+            department=form.cleaned_data["department"],
             defaults={"is_active": True},
         )
         if not created and not assignment.is_active:
@@ -1927,12 +2118,18 @@ def user_roles_view(request, user_id: int):
         messages.success(request, "Role assignment saved.")
         return _redirect_back_or_default(request, "admin_portal:user_roles", user_id=user.id)
 
-    assignments = user.user_roles.select_related("role", "tenant", "campus").order_by("-assigned_at")
+    assignments = user.user_roles.select_related("role", "tenant", "campus", "department").order_by("-assigned_at")
     if not request.user.is_superuser:
         tenant_ids = getattr(request, "scope", {}).get("tenant_ids", [])
         campus_ids = getattr(request, "scope", {}).get("campus_ids", [])
+        department_ids = getattr(request, "scope", {}).get("department_ids", [])
         assignments = assignments.filter(
-            Q(tenant_id__in=tenant_ids) | Q(tenant__isnull=True) | Q(campus_id__in=campus_ids) | Q(campus__isnull=True)
+            Q(tenant_id__in=tenant_ids)
+            | Q(tenant__isnull=True)
+            | Q(campus_id__in=campus_ids)
+            | Q(campus__isnull=True)
+        ).filter(
+            Q(department_id__in=department_ids) | Q(department__isnull=True)
         )
     context = {"target_user": user, "form": form, "assignments": assignments}
     context.update(_scope_context(request))
@@ -1942,10 +2139,81 @@ def user_roles_view(request, user_id: int):
 @portal_required("ADMIN")
 @permission_required("roles.read")
 def role_list_view(request):
-    roles = Role.objects.filter(is_active=True).annotate(permission_count=Count("role_permissions")).order_by("name")
+    roles = Role.objects.annotate(permission_count=Count("role_permissions")).order_by("name")
     context = {"roles": roles}
     context.update(_scope_context(request))
     return render(request, "admin_portal/security/role_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("roles.create")
+def role_create_view(request):
+    role_queryset = Role.objects.filter(is_active=True).order_by("name")
+    form = RoleForm(request.POST or None, role_queryset=role_queryset)
+    _style_form(form)
+    if request.method == "POST" and form.is_valid():
+        source_role = form.cleaned_data.get("source_role")
+        role = form.save()
+        copied_permission_ids = []
+        if source_role:
+            copied_permission_ids = list(source_role.role_permissions.values_list("permission_id", flat=True))
+            for permission_id in copied_permission_ids:
+                RolePermission.objects.get_or_create(role=role, permission_id=permission_id)
+        AuditService.log_event(
+            action="CREATE",
+            portal="ADMIN",
+            entity_type="Role",
+            entity_id=role.id,
+            actor=request.user,
+            after_data=model_before_after(role),
+            metadata={
+                "copied_from_role_id": source_role.id if source_role else None,
+                "copied_permission_count": len(copied_permission_ids),
+            },
+            request=request,
+        )
+        if source_role:
+            messages.success(
+                request,
+                f"Role created. Copied {len(copied_permission_ids)} permission(s) from {source_role.name}.",
+            )
+        else:
+            messages.success(request, "Role created.")
+        return _redirect_back_or_default(request, "admin_portal:role_list")
+
+    context = {"form": form, "title": "Create Role"}
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/shared/form_page.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("roles.update")
+def role_update_view(request, role_id: int):
+    role = get_object_or_404(Role, id=role_id)
+    before = model_before_after(role)
+    form = RoleForm(request.POST or None, instance=role, include_copy_option=False)
+    _style_form(form)
+    if request.method == "POST" and form.is_valid():
+        role = form.save()
+        AuditService.log_event(
+            action="UPDATE",
+            portal="ADMIN",
+            entity_type="Role",
+            entity_id=role.id,
+            actor=request.user,
+            before_data=before,
+            after_data=model_before_after(role),
+            request=request,
+        )
+        messages.success(
+            request,
+            "Role updated." if role.is_active else "Role updated and deactivated.",
+        )
+        return _redirect_back_or_default(request, "admin_portal:role_list")
+
+    context = {"form": form, "title": f"Edit Role: {role.name}"}
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/shared/form_page.html", context)
 
 
 @portal_required("ADMIN")
@@ -3820,7 +4088,7 @@ def template_period_create_view(request):
         return redirect(f"{reverse('admin_portal:template_period_list')}?template_id={row.template_id}")
     context = {
         "form": form,
-        "title": f"Create Template Period{' - ' + selected_template.code if selected_template else ''}",
+        "title": f"Create Template Period{' - ' + (selected_template.name or selected_template.code) if selected_template else ''}",
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
@@ -3859,7 +4127,7 @@ def template_period_update_view(request, period_id: int):
         )
         messages.success(request, "Template period updated.")
         return _redirect_back_or_default(request, "admin_portal:template_period_list")
-    context = {"form": form, "title": f"Edit Template Period: {row.code}"}
+    context = {"form": form, "title": f"Edit Template Period: {row.name or row.code}"}
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
 
@@ -3942,7 +4210,7 @@ def template_component_create_view(request):
         )
     title_suffix = ""
     if selected_period:
-        title_suffix = f" - {selected_period.template.code}/{selected_period.code}"
+        title_suffix = f" - {(selected_period.template.name or selected_period.template.code)} / {(selected_period.name or selected_period.code)}"
     context = {"form": form, "title": f"Create Template Component{title_suffix}"}
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
@@ -3981,7 +4249,7 @@ def template_component_update_view(request, component_id: int):
         )
         messages.success(request, "Template component updated.")
         return _redirect_back_or_default(request, "admin_portal:template_component_list")
-    context = {"form": form, "title": f"Edit Template Component: {row.code}"}
+    context = {"form": form, "title": f"Edit Template Component: {row.name or row.code}"}
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
 
@@ -3998,7 +4266,7 @@ def template_component_delete_view(request, component_id: int):
 
     before = model_before_after(row)
     if not row.is_active:
-        messages.info(request, f"Component {row.code} is already inactive.")
+        messages.info(request, f"Component {row.name or row.code} is already inactive.")
         return _redirect_back_or_default(request, "admin_portal:template_component_list")
 
     row.is_active = False
@@ -4024,7 +4292,7 @@ def template_component_delete_view(request, component_id: int):
         },
         request=request,
     )
-    messages.success(request, f"Component {row.code} deleted (soft delete).")
+    messages.success(request, f"Component {row.name or row.code} deleted (soft delete).")
     return _redirect_back_or_default(request, "admin_portal:template_component_list")
 
 
@@ -4108,7 +4376,11 @@ def template_subcomponent_create_view(request):
         )
     title_suffix = ""
     if selected_component:
-        title_suffix = f" - {selected_component.template_period.template.code}/{selected_component.template_period.code}/{selected_component.code}"
+        title_suffix = (
+            f" - {(selected_component.template_period.template.name or selected_component.template_period.template.code)}"
+            f" / {(selected_component.template_period.name or selected_component.template_period.code)}"
+            f" / {(selected_component.name or selected_component.code)}"
+        )
     context = {"form": form, "title": f"Create Template Subcomponent{title_suffix}"}
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
@@ -4147,7 +4419,7 @@ def template_subcomponent_update_view(request, subcomponent_id: int):
         )
         messages.success(request, "Template subcomponent updated.")
         return _redirect_back_or_default(request, "admin_portal:template_subcomponent_list")
-    context = {"form": form, "title": f"Edit Template Subcomponent: {row.code}"}
+    context = {"form": form, "title": f"Edit Template Subcomponent: {row.name or row.code}"}
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
 
@@ -4244,7 +4516,12 @@ def template_detail_create_view(request):
     if selected_subcomponent:
         comp = selected_subcomponent.template_component
         period = comp.template_period
-        title_suffix = f" - {period.template.code}/{period.code}/{comp.code}/{selected_subcomponent.code}"
+        title_suffix = (
+            f" - {(period.template.name or period.template.code)}"
+            f" / {(period.name or period.code)}"
+            f" / {(comp.name or comp.code)}"
+            f" / {(selected_subcomponent.name or selected_subcomponent.code)}"
+        )
     context = {"form": form, "title": f"Create Template Detail{title_suffix}"}
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
@@ -4286,7 +4563,7 @@ def template_detail_update_view(request, detail_id: int):
         )
         messages.success(request, "Template detail updated.")
         return _redirect_back_or_default(request, "admin_portal:template_detail_list")
-    context = {"form": form, "title": f"Edit Template Detail: {row.code}"}
+    context = {"form": form, "title": f"Edit Template Detail: {row.name or row.code}"}
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
 
@@ -5192,6 +5469,8 @@ def grade_correction_request_review_view(request, request_id: int):
         AdminScopeService.scoped_grade_correction_requests(request),
         id=request_id,
     )
+    GradingGovernanceService.reconcile_pending_correction_route(request_obj=correction_request)
+    correction_request.refresh_from_db()
     pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction_request)
     can_review, _, review_guard_message = GradingGovernanceService.can_user_review_correction_request(
         request_obj=correction_request,
@@ -5200,6 +5479,12 @@ def grade_correction_request_review_view(request, request_id: int):
     is_final_step = GradingGovernanceService.is_final_correction_step(
         request_obj=correction_request,
         step=pending_step,
+    )
+    auto_apply_on_final_approval = GradingGovernanceService.is_auto_apply_score_correction_request(
+        request_obj=correction_request
+    )
+    official_report_enabled = FeatureSettingsService.is_correction_official_report_enabled(
+        tenant_id=correction_request.tenant_id
     )
     form = GradeCorrectionReviewForm(
         request.POST or None,
@@ -5215,6 +5500,8 @@ def grade_correction_request_review_view(request, request_id: int):
                 "correction_request": correction_request,
                 "pending_step": pending_step,
                 "is_final_step": is_final_step,
+                "auto_apply_on_final_approval": auto_apply_on_final_approval,
+                "official_report_enabled": official_report_enabled,
                 "correction_window_hours": GradingGovernanceService.CORRECTION_WINDOW_HOURS,
             }
             context.update(_scope_context(request))
@@ -5257,16 +5544,43 @@ def grade_correction_request_review_view(request, request_id: int):
                 after_data=after,
                 request=request,
             )
+            registrar_email_result = None
+            if approved and is_final_step and updated.status in {
+                GradeCorrectionRequest.Status.APPROVED,
+                GradeCorrectionRequest.Status.CLOSED,
+            }:
+                registrar_email_result = CorrectionNotificationService.send_registrar_official_report_email(
+                    request_obj=updated,
+                    trigger_role_code=pending_step.approver_role.code if pending_step and pending_step.approver_role_id else None,
+                )
             messages.success(
                 request,
                 (
-                    "Correction request approved and unlock window opened."
+                    "Correction request approved, applied to the gradebook, and recomputed."
+                    if approved and is_final_step and updated.status == GradeCorrectionRequest.Status.CLOSED
+                    else "Correction request approved and unlock window opened."
                     if approved and is_final_step
                     else "Correction request step approved. Waiting for final approver."
                 )
                 if approved
                 else "Correction request rejected.",
             )
+            if registrar_email_result:
+                if registrar_email_result["errors"]:
+                    messages.warning(
+                        request,
+                        "Correction request was approved, but the registrar email could not be sent. "
+                        "Please verify SMTP and registrar recipient configuration.",
+                    )
+                elif (
+                    FeatureSettingsService.is_correction_registrar_auto_email_enabled(tenant_id=updated.tenant_id)
+                    and registrar_email_result["attempted"] == 0
+                ):
+                    messages.warning(
+                        request,
+                        "Correction request was approved, but no registrar email recipient matched the current configuration "
+                        "for this campus or trigger role.",
+                    )
             return _redirect_back_or_default(request, "admin_portal:grade_correction_request_list")
 
     context = {
@@ -5275,10 +5589,37 @@ def grade_correction_request_review_view(request, request_id: int):
         "correction_request": correction_request,
         "pending_step": pending_step,
         "is_final_step": is_final_step,
+        "auto_apply_on_final_approval": auto_apply_on_final_approval,
+        "official_report_enabled": official_report_enabled,
         "correction_window_hours": GradingGovernanceService.CORRECTION_WINDOW_HOURS,
         "review_guard_message": review_guard_message,
         "can_review": can_review,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/correction_request_review.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("corrections.review")
+def grade_correction_request_official_report_view(request, request_id: int):
+    correction_request = get_object_or_404(
+        AdminScopeService.scoped_grade_correction_requests(request),
+        id=request_id,
+    )
+    if not FeatureSettingsService.is_correction_official_report_enabled(tenant_id=correction_request.tenant_id):
+        raise PermissionDenied("Official correction report generation is disabled.")
+    if correction_request.status not in {
+        GradeCorrectionRequest.Status.APPROVED,
+        GradeCorrectionRequest.Status.CLOSED,
+    }:
+        raise PermissionDenied("Official correction report is available only after final approval.")
+
+    pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=correction_request)
+    filename = _official_correction_report_filename(correction_request)
+    return FileResponse(
+        BytesIO(pdf_bytes),
+        as_attachment=False,
+        filename=filename,
+        content_type="application/pdf",
+    )
 

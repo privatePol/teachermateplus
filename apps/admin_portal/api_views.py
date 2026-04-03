@@ -92,6 +92,33 @@ def sis_periodic_grades_api_view(request):
         return JsonResponse({"ok": False, "error": "Invalid 'page_size'. Must be an integer."}, status=400)
     page_size = min(max(page_size, 1), 2000)
 
+    # Guardrails for campus-separated SIS integrations:
+    # student_no lookups must be scoped by campus + section to avoid ambiguous identity matches.
+    if section_code and not campus_code:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Query parameter 'campus_code' is required when 'section_code' is provided.",
+            },
+            status=400,
+        )
+    if student_no and not campus_code:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Query parameter 'campus_code' is required when 'student_no' is provided.",
+            },
+            status=400,
+        )
+    if student_no and not section_code:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Query parameter 'section_code' is required when 'student_no' is provided.",
+            },
+            status=400,
+        )
+
     updated_since = None
     if updated_since_raw:
         updated_since, err = _parse_iso_datetime("updated_since", updated_since_raw)
@@ -140,7 +167,7 @@ def sis_periodic_grades_api_view(request):
             "campus__code",
             "offering__academic_year__code",
             "offering__term__sequence_no",
-            "template_period__sort_order",
+            "template_period__sequence_no",
             "offering__course__code",
             "offering__section__code",
             "student__student_no",

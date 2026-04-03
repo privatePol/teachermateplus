@@ -36,10 +36,30 @@ Set the token in environment:
 - `page` (default `1`)
 - `page_size` (default `500`, max `2000`)
 
+## Identity scoping rules
+
+For campus-separated SIS/AIMS integrations, use the identity triple:
+
+- `campus_code`
+- `section_code`
+- `student_no`
+
+Validation guardrails:
+
+- If `section_code` is provided, `campus_code` is required.
+- If `student_no` is provided, both `campus_code` and `section_code` are required.
+
 ## Example request
 
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/sis/periodic-grades/?tenant_code=NCBA&campus_code=NCBA-02&academic_year_code=2025-2026&term_code=2ND&period_code=GENED_PRELIM&page=1&page_size=500" \
+  -H "X-API-Token: replace-with-sis-token"
+```
+
+### Example request (campus + section + student)
+
+```bash
+curl -X GET "http://127.0.0.1:8000/api/v1/sis/periodic-grades/?tenant_code=NCBA&campus_code=NCBA-FAIRV&section_code=BSA%201-BSA_1A&student_no=2025-10606&academic_year_code=2025-2026&term_code=2ND" \
   -H "X-API-Token: replace-with-sis-token"
 ```
 

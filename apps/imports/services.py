@@ -701,6 +701,7 @@ class BulkImportService:
     def _resolve_student(
         student_no: str,
         tenant,
+        campus,
         runtime: dict,
         errors: list[str],
         *,
@@ -710,11 +711,12 @@ class BulkImportService:
         if not student_no:
             errors.append("student_no is required.")
             return None
-        key = (tenant.id, student_no.upper())
+        key = (tenant.id, campus.id if campus else None, student_no.upper())
         if key not in runtime["student_cache"]:
-            runtime["student_cache"][key] = Student.objects.filter(
-                tenant=tenant, student_no__iexact=student_no, is_active=True
-            ).first()
+            query = Student.objects.filter(tenant=tenant, student_no__iexact=student_no, is_active=True)
+            if campus:
+                query = query.filter(campus=campus)
+            runtime["student_cache"][key] = query.first()
         student = runtime["student_cache"][key]
         if not student:
             mode_note = (
@@ -722,22 +724,28 @@ class BulkImportService:
                 if student_mode
                 else ""
             )
-            errors.append(f"student_no '{student_no}' not found for tenant '{tenant.code}'.{mode_note}")
+            campus_note = f" and campus '{campus.code}'" if campus else ""
+            errors.append(
+                f"student_no '{student_no}' not found for tenant '{tenant.code}'{campus_note}.{mode_note}"
+            )
             return None
         return student
 
     @staticmethod
-    def _find_student(student_no: str, tenant, runtime: dict):
+    def _find_student(student_no: str, tenant, campus, runtime: dict):
         student_no = student_no.strip()
         if not student_no:
             return None
-        key = (tenant.id, student_no.upper())
+        key = (tenant.id, campus.id if campus else None, student_no.upper())
         if key not in runtime["student_cache"]:
-            runtime["student_cache"][key] = Student.objects.filter(
+            query = Student.objects.filter(
                 tenant=tenant,
                 student_no__iexact=student_no,
                 is_active=True,
-            ).first()
+            )
+            if campus:
+                query = query.filter(campus=campus)
+            runtime["student_cache"][key] = query.first()
         return runtime["student_cache"][key]
 
     @staticmethod
@@ -1090,17 +1098,21 @@ class BulkImportService:
                 student = cls._resolve_student(
                     student_no,
                     tenant,
+                    campus,
                     runtime,
                     errors,
                     student_mode=student_mode,
                 )
             else:
-                student = cls._find_student(student_no, tenant, runtime)
+                student = cls._find_student(student_no, tenant, campus, runtime)
                 if not student:
-                    existing_any_status = Student.objects.filter(
+                    existing_any_status_query = Student.objects.filter(
                         tenant=tenant,
                         student_no__iexact=student_no,
-                    ).first()
+                    )
+                    if campus:
+                        existing_any_status_query = existing_any_status_query.filter(campus=campus)
+                    existing_any_status = existing_any_status_query.first()
                     if existing_any_status and not existing_any_status.is_active:
                         errors.append("student_no exists but is inactive. Reactivate student first.")
                     if not student_no:
@@ -1126,6 +1138,7 @@ class BulkImportService:
             if Enrollment.objects.filter(
                 course_offering=offering,
                 student__tenant=tenant,
+                student__campus=campus,
                 student__student_no__iexact=student_no,
                 student__is_active=True,
             ).exists():
@@ -1477,6 +1490,7 @@ class BulkImportService:
 
         student = Student.objects.filter(
             tenant_id=tenant_id,
+            campus_id=campus_id,
             student_no__iexact=student_no,
             is_active=True,
         ).first()
@@ -1487,6 +1501,7 @@ class BulkImportService:
 
         existing_inactive = Student.objects.filter(
             tenant_id=tenant_id,
+            campus_id=campus_id,
             student_no__iexact=student_no,
             is_active=False,
         ).first()

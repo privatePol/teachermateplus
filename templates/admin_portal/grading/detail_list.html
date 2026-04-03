@@ -13,7 +13,7 @@
       <option value="">All Subcomponents</option>
       {% for sub in subcomponents %}
       <option value="{{ sub.id }}" {% if sub.id|stringformat:'s' == selected_subcomponent_id %}selected{% endif %}>
-        {{ sub.template_component.template_period.template.code }} - {{ sub.template_component.code }} - {{ sub.code }}
+        {{ sub.template_component.name }} - {{ sub.name }}
       </option>
       {% endfor %}
     </select>
@@ -45,9 +45,9 @@
       <tbody>
       {% for row in page_obj %}
         <tr>
-          <td>{{ row.template_subcomponent.template_component.template_period.template.code }}</td>
-          <td>{{ row.template_subcomponent.template_component.code }}</td>
-          <td>{{ row.template_subcomponent.code }}</td>
+          <td>{{ row.template_subcomponent.template_component.template_period.template.name }}</td>
+          <td>{{ row.template_subcomponent.template_component.name }}</td>
+          <td>{{ row.template_subcomponent.name }}</td>
           <td>{{ row.code }}</td>
           <td>{{ row.name }}</td>
           <td>{{ row.weight_percentage }}</td>

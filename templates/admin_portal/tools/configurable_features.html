@@ -1,0 +1,127 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
+</div>
+
+<div class="alert alert-info">
+  Configure optional workflows here instead of hard-enabling them in code. Use this page for global feature toggles and, where needed, role-based control.
+</div>
+
+<form method="post" novalidate>
+  {% csrf_token %}
+  {% if form.non_field_errors %}
+  <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+  {% endif %}
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Correction Official Report</strong></div>
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.correction_official_report_enabled }}
+        <label class="form-check-label" for="{{ form.correction_official_report_enabled.id_for_label }}">
+          {{ form.correction_official_report_enabled.label }}
+        </label>
+        {% if form.correction_official_report_enabled.help_text %}
+        <div class="form-text">{{ form.correction_official_report_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.correction_official_report_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="small text-muted">
+        This governs the planned printable/exportable correction artifact that will serve as registrar reference for AIMS.
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Correction Approval Notification Email</strong></div>
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.correction_submission_approval_email_enabled }}
+        <label class="form-check-label" for="{{ form.correction_submission_approval_email_enabled.id_for_label }}">
+          {{ form.correction_submission_approval_email_enabled.label }}
+        </label>
+        {% if form.correction_submission_approval_email_enabled.help_text %}
+        <div class="form-text">{{ form.correction_submission_approval_email_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.correction_submission_approval_email_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="mb-0">
+        <label class="form-label" for="{{ form.correction_submission_approval_email_roles.id_for_label }}">
+          {{ form.correction_submission_approval_email_roles.label }}
+        </label>
+        {{ form.correction_submission_approval_email_roles }}
+        {% if form.correction_submission_approval_email_roles.help_text %}
+        <div class="form-text">{{ form.correction_submission_approval_email_roles.help_text }}</div>
+        {% endif %}
+        {% for error in form.correction_submission_approval_email_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Registrar Auto Email</strong></div>
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.correction_registrar_auto_email_enabled }}
+        <label class="form-check-label" for="{{ form.correction_registrar_auto_email_enabled.id_for_label }}">
+          {{ form.correction_registrar_auto_email_enabled.label }}
+        </label>
+        {% if form.correction_registrar_auto_email_enabled.help_text %}
+        <div class="form-text">{{ form.correction_registrar_auto_email_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.correction_registrar_auto_email_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.correction_registrar_auto_email_roles.id_for_label }}">
+          {{ form.correction_registrar_auto_email_roles.label }}
+        </label>
+        {{ form.correction_registrar_auto_email_roles }}
+        {% if form.correction_registrar_auto_email_roles.help_text %}
+        <div class="form-text">{{ form.correction_registrar_auto_email_roles.help_text }}</div>
+        {% endif %}
+        {% for error in form.correction_registrar_auto_email_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="mb-0">
+        <label class="form-label" for="{{ form.correction_registrar_default_recipients.id_for_label }}">
+          {{ form.correction_registrar_default_recipients.label }}
+        </label>
+        {{ form.correction_registrar_default_recipients }}
+        {% if form.correction_registrar_default_recipients.help_text %}
+        <div class="form-text">{{ form.correction_registrar_default_recipients.help_text }}</div>
+        {% endif %}
+        {% for error in form.correction_registrar_default_recipients.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Campus / Branch Recipient Emails</strong>
+      <span class="text-muted small">{{ campus_count }} campus{% if campus_count != 1 %}es{% endif %}</span>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-light border small">
+        Use campus-specific recipient emails when each branch has a different registrar destination. Leave a campus blank to fall back to the default recipient list above.
+      </div>
+      <div class="row g-3">
+        {% for row in campus_field_rows %}
+        <div class="col-lg-6">
+          <label class="form-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+          {{ row.field }}
+          {% if row.field.help_text %}<div class="form-text">{{ row.field.help_text }}</div>{% endif %}
+          {% for error in row.field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" type="submit">Save Feature Settings</button>
+</form>
+{% endblock %}

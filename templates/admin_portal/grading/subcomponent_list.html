@@ -13,7 +13,7 @@
       <option value="">All Components</option>
       {% for component in components %}
       <option value="{{ component.id }}" {% if component.id|stringformat:'s' == selected_component_id %}selected{% endif %}>
-        {{ component.template_period.template.code }} - {{ component.code }}
+        {{ component.template_period.name }} - {{ component.name }}
       </option>
       {% endfor %}
     </select>
@@ -45,8 +45,8 @@
       <tbody>
       {% for row in page_obj %}
         <tr>
-          <td>{{ row.template_component.template_period.template.code }}</td>
-          <td>{{ row.template_component.code }}</td>
+          <td>{{ row.template_component.template_period.template.name }}</td>
+          <td>{{ row.template_component.name }}</td>
           <td>{{ row.code }}</td>
           <td>{{ row.name }}</td>
           <td>{{ row.weight_percentage }}</td>
