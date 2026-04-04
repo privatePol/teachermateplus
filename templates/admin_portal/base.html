@@ -11,27 +11,132 @@
     --admin-nav-border: #d2dbd0;
     --admin-nav-text: #2e4e3b;
     --admin-nav-accent: #3a7a53;
+    --admin-sidebar-expanded-width: 280px;
+    --admin-sidebar-collapsed-width: 152px;
   }
   .admin-shell {
     background: var(--admin-nav-bg);
   }
   .admin-sidebar {
     background:
-      radial-gradient(circle at 86% 8%, rgba(214, 196, 35, 0.22) 0%, rgba(214, 196, 35, 0.08) 28%, rgba(214, 196, 35, 0) 60%),
-      linear-gradient(180deg, #d2bf2b 0%, #83ad34 36%, #3f7f2e 68%, #1f5427 100%);
+      radial-gradient(circle at 88% 5%, rgba(243, 209, 85, 0.08) 0%, rgba(243, 209, 85, 0.03) 24%, rgba(243, 209, 85, 0) 56%),
+      linear-gradient(180deg, #5b9a37 0%, #4d8c33 32%, #39742d 68%, #214f25 100%);
     box-shadow: inset -1px 0 0 #35603a;
     position: relative;
     overflow: hidden;
+    font-family: "Trebuchet MS", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 600;
+  }
+  .admin-main {
+    min-width: 0;
+  }
+  @media (min-width: 768px) {
+    .admin-shell > .row > .admin-sidebar {
+      flex: 0 0 var(--admin-sidebar-expanded-width);
+      max-width: var(--admin-sidebar-expanded-width);
+      width: var(--admin-sidebar-expanded-width);
+      transition: flex-basis 0.22s ease, max-width 0.22s ease, width 0.22s ease, padding 0.22s ease;
+    }
+    .admin-shell > .row > .admin-main {
+      flex: 1 1 0;
+      max-width: calc(100% - var(--admin-sidebar-expanded-width));
+      transition: max-width 0.22s ease, flex-basis 0.22s ease;
+    }
+    .admin-shell.sidebar-collapsed > .row > .admin-sidebar {
+      flex-basis: var(--admin-sidebar-collapsed-width);
+      max-width: var(--admin-sidebar-collapsed-width);
+      width: var(--admin-sidebar-collapsed-width);
+      padding-left: 0.45rem !important;
+      padding-right: 0.45rem !important;
+    }
+    .admin-shell.sidebar-collapsed > .row > .admin-main {
+      flex-basis: calc(100% - var(--admin-sidebar-collapsed-width));
+      max-width: calc(100% - var(--admin-sidebar-collapsed-width));
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .sidebar-copy,
+    .admin-shell.sidebar-collapsed .admin-sidebar .group-label-text,
+    .admin-shell.sidebar-collapsed .admin-sidebar .sidebar-link-text {
+      display: none !important;
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .group-chevron {
+      display: none !important;
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .sidebar-group-collapse {
+      display: none !important;
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .admin-logo-wrap {
+      padding-top: 3.9rem;
+      padding-left: 0.15rem;
+      padding-right: 0.15rem;
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .admin-logo-wrap img {
+      max-width: 122px !important;
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .admin-sidebar-toggle {
+      justify-content: center;
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .group-toggle {
+      justify-content: center;
+      padding-left: 0.35rem;
+      padding-right: 0.35rem;
+      margin-bottom: 1.05rem;
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .sidebar-link {
+      justify-content: center;
+      padding-left: 0.35rem !important;
+      padding-right: 0.35rem !important;
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .group-icon {
+      display: inline-flex;
+    }
+    .admin-shell.sidebar-collapsed .admin-sidebar .sidebar-link-chip {
+      display: none !important;
+    }
   }
   .admin-logo-wrap {
     position: relative;
     z-index: 1;
-    padding: 0.5rem 0.4rem;
+    padding: 4rem 0.4rem 0.55rem;
     text-align: center;
     background: transparent;
     border: none;
     border-radius: 0;
     box-shadow: none;
+  }
+  .admin-logo-wrap img {
+    width: 100%;
+    max-width: 180px;
+    height: auto;
+    object-fit: contain;
+  }
+  .admin-sidebar-toggle {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.65rem;
+    z-index: 3;
+    width: 2.7rem;
+    height: 2.7rem;
+    border: 1px solid rgba(240, 247, 232, 0.28);
+    background: rgba(16, 46, 24, 0.28);
+    color: #f8f9ef;
+    border-radius: 999px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    box-shadow: 0 6px 14px rgba(19, 52, 31, 0.16);
+  }
+  .admin-sidebar-toggle:hover {
+    background: rgba(19, 52, 31, 0.45);
+    color: #ffffff;
+  }
+  .admin-sidebar-toggle .toggle-icon {
+    font-size: 1.1rem;
+    line-height: 1;
   }
   .admin-sidebar .group-label {
     color: #f6f4df;
@@ -44,7 +149,7 @@
     width: 100%;
     background: transparent;
     border: 0;
-    padding: 0;
+    padding: 0.12rem 0;
     text-align: left;
     color: #f6f4df;
     letter-spacing: 0.08em;
@@ -54,6 +159,12 @@
     justify-content: space-between;
     cursor: pointer;
   }
+  .admin-sidebar .group-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.7rem;
+    min-width: 0;
+  }
   .admin-sidebar .group-toggle:hover {
     color: #fffbe8;
   }
@@ -62,20 +173,89 @@
     color: #dfebd9;
     transition: transform 0.2s ease;
   }
+  .admin-sidebar .group-icon {
+    width: 1.7rem;
+    height: 1.7rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    font-size: 1.2rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .admin-sidebar .group-icon svg {
+    width: 0.95rem;
+    height: 0.95rem;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   .admin-sidebar .group-toggle[aria-expanded="true"] .group-chevron {
     transform: rotate(180deg);
   }
+  .admin-sidebar .sidebar-group-collapse > .nav {
+    padding-left: 1.15rem;
+  }
   .admin-sidebar .sidebar-link {
     color: #f0f6ea;
-    border-radius: 0.45rem;
+    border-radius: 0.75rem;
     transition: all 0.2s ease;
     position: relative;
     z-index: 1;
+    font-size: 0.95rem;
+    line-height: 1.2;
+    font-weight: 400;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding-left: 0.85rem !important;
   }
   .admin-sidebar .sidebar-link:hover {
     color: #ffffff;
     background: rgba(17, 45, 24, 0.36);
-    padding-left: 0.5rem;
+    padding-left: 1rem !important;
+  }
+  .admin-sidebar .sidebar-link.active,
+  .admin-sidebar .sidebar-link[aria-current="page"] {
+    color: #17361f;
+    background: linear-gradient(135deg, rgba(255, 230, 124, 0.98) 0%, rgba(246, 195, 49, 0.96) 42%, rgba(77, 148, 74, 0.92) 100%);
+    box-shadow: 0 10px 20px rgba(15, 53, 28, 0.24);
+    font-weight: 700;
+  }
+  .admin-sidebar .sidebar-link-chip {
+    display: inline-flex;
+    width: 1.45rem;
+    height: 1.45rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    color: inherit;
+    font-size: 0.72rem;
+    font-weight: 800;
+    flex: 0 0 auto;
+  }
+  .admin-sidebar .sidebar-link-chip svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .admin-sidebar .sidebar-link.active .sidebar-link-chip,
+  .admin-sidebar .sidebar-link[aria-current="page"] .sidebar-link-chip {
+    background: rgba(255, 255, 255, 0.34);
+  }
+  .admin-sidebar .menu-icon-legacy {
+    display: none;
   }
   .admin-topbar {
     background: #f4f6f1 !important;
@@ -149,8 +329,11 @@
             aria-controls="sidebar-group-{{ forloop.counter }}"
             data-group-key="{{ group.group.code|default:group.group.label }}"
           >
-            <span>{{ group.group.label }}</span>
-            <span class="group-chevron">▼</span>
+            <span class="group-left">
+              <span class="group-icon" aria-hidden="true"></span>
+              <span class="group-label-text">{{ group.group.label }}</span>
+            </span>
+            <span class="group-chevron" aria-hidden="true"></span>
           </button>
         </div>
         <div class="collapse show sidebar-group-collapse" id="sidebar-group-{{ forloop.counter }}">
@@ -217,6 +400,127 @@
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const storageKey = "edugradespro_admin_sidebar_groups";
+    const sidebarCollapsedKey = "edugradespro_admin_sidebar_collapsed";
+    const groupIconMarkup = {
+      DASHBOARD:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5"></path><path d="M6.5 10.5V19h11v-8.5"></path><path d="M10 19v-5h4v5"></path></svg>',
+      SECURITY:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6l-7-3z"></path><path d="M9.5 12h5"></path><path d="M12 9.5V14.5"></path></svg>',
+      ORGANIZATION:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16"></path><path d="M6 20V8l6-3 6 3v12"></path><path d="M9 20v-4h6v4"></path></svg>',
+      ACADEMICS:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3.5 8.5 12 13l8.5-4.5L12 4z"></path><path d="M7 10.5V15c0 1.7 2.2 3 5 3s5-1.3 5-3v-4.5"></path><path d="M19 9v5"></path></svg>',
+      STUDENTS:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path><path d="M15 13a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"></path><path d="M4.5 20c.4-3.3 2.7-5 4.5-5s4.1 1.7 4.5 5"></path><path d="M13.5 20c.2-2 1.5-3.4 3-3.4 1.4 0 2.7 1 3 3.4"></path></svg>',
+      ENROLLMENT:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"></path><path d="M9 8h6"></path><path d="M9 12h6"></path><path d="M9 16h4"></path></svg>',
+      TOOLS:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5a4.5 4.5 0 0 0-5.6 5.6L4 16l4 4 4.9-4.9a4.5 4.5 0 0 0 5.6-5.6l-2.7 2.7-2.3-.1-.1-2.3 2.7-2.7z"></path></svg>',
+      DEFAULT:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4z"></path><path d="M14 4h6v6h-6z"></path><path d="M4 14h6v6H4z"></path><path d="M14 14h6v6h-6z"></path></svg>',
+    };
+    const linkIconMarkup = {
+      dashboard:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5"></path><path d="M6.5 10.5V19h11v-8.5"></path></svg>',
+      security:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6l-7-3z"></path><path d="M9.5 12h5"></path></svg>',
+      users:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path><path d="M15 13a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"></path><path d="M4.5 20c.4-3.3 2.7-5 4.5-5s4.1 1.7 4.5 5"></path></svg>',
+      roles:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6l-7-3z"></path><path d="M9.5 12h5"></path></svg>',
+      academic_years:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v4"></path><path d="M17 3v4"></path><path d="M4 8h16"></path><path d="M6 6h12v14H6z"></path></svg>',
+      terms:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v4"></path><path d="M12 12v1"></path><path d="M7 7h10"></path><path d="M5 20h14"></path></svg>',
+      course:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h10"></path></svg>',
+      section:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h6v6H4z"></path><path d="M14 6h6v6h-6z"></path><path d="M4 16h6v6H4z"></path><path d="M14 16h6v6h-6z"></path></svg>',
+      course_offerings:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5z"></path><path d="M8 9h8"></path><path d="M8 13h5"></path></svg>',
+      faculty_assignments:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16"></path><path d="M4 16h16"></path><path d="M7 4v16"></path><path d="M17 4v16"></path></svg>',
+      student:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3.5 8.5 12 13l8.5-4.5L12 4z"></path><path d="M7 10.5V15c0 1.7 2.2 3 5 3s5-1.3 5-3v-4.5"></path></svg>',
+      enrollment:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"></path><path d="M9 8h6"></path><path d="M9 12h6"></path><path d="M9 16h4"></path></svg>',
+      tools:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5a4.5 4.5 0 0 0-5.6 5.6L4 16l4 4 4.9-4.9a4.5 4.5 0 0 0 5.6-5.6l-2.7 2.7-2.3-.1-.1-2.3 2.7-2.7z"></path></svg>',
+      default:
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12"></path><path d="M6 12h12"></path><path d="M6 17h8"></path></svg>',
+    };
+    const normalizeKey = (value) =>
+      (value || "")
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    const resolveLinkIcon = (label, href) => {
+      const key = normalizeKey(label);
+      if (linkIconMarkup[key]) return linkIconMarkup[key];
+      if (key.includes("academic_year")) return linkIconMarkup.academic_years;
+      if (key.includes("term")) return linkIconMarkup.terms;
+      if (key.includes("offering")) return linkIconMarkup.course_offerings;
+      if (key.includes("faculty_assignment")) return linkIconMarkup.faculty_assignments;
+      if (key.includes("import") || key.includes("tool")) return linkIconMarkup.tools;
+      if (key.includes("enroll")) return linkIconMarkup.enrollment;
+      if (key.includes("student")) return linkIconMarkup.student;
+      if (key.includes("section")) return linkIconMarkup.section;
+      if (key.includes("course")) return linkIconMarkup.course;
+      if (key.includes("role")) return linkIconMarkup.roles;
+      if (key.includes("security")) return linkIconMarkup.security;
+      if (key.includes("user")) return linkIconMarkup.users;
+      if (href && href.includes("/admin-portal/")) return linkIconMarkup.default;
+      return linkIconMarkup.default;
+    };
+    const renderGroupIcon = (groupKey, collapsed) => {
+      if (collapsed) {
+        return groupIconMarkup[groupKey] || groupIconMarkup.DEFAULT;
+      }
+      return "+";
+    };
+    const tooltipInstances = [];
+    const clearTooltips = () => {
+      while (tooltipInstances.length) {
+        const tooltip = tooltipInstances.pop();
+        try {
+          tooltip.dispose();
+        } catch (e) {
+          // Ignore tooltip disposal issues.
+        }
+      }
+    };
+    const syncCollapsedTooltips = (collapsed) => {
+      clearTooltips();
+      const targets = document.querySelectorAll(".admin-sidebar .group-toggle, .admin-sidebar .sidebar-link");
+      targets.forEach((target) => {
+        target.removeAttribute("title");
+        target.removeAttribute("data-bs-title");
+      });
+      if (!collapsed || typeof bootstrap === "undefined" || !bootstrap.Tooltip) {
+        return;
+      }
+      document.querySelectorAll(".admin-sidebar .group-toggle").forEach((toggle) => {
+        const label = (toggle.querySelector(".group-label-text")?.textContent || "").trim();
+        if (!label) return;
+        toggle.setAttribute("title", label);
+        toggle.setAttribute("data-bs-title", label);
+        tooltipInstances.push(new bootstrap.Tooltip(toggle, {
+          trigger: "hover focus",
+          placement: "right",
+          boundary: "window",
+        }));
+      });
+    };
+    const findCollapsedTargetUrl = (toggle) => {
+      const targetSelector = toggle.getAttribute("data-bs-target");
+      if (!targetSelector) return "";
+      const panel = document.querySelector(targetSelector);
+      if (!panel) return "";
+      const firstLink = panel.querySelector(".sidebar-link[href]:not([href='#'])");
+      return firstLink ? firstLink.getAttribute("href") || "" : "";
+    };
     let savedState = {};
     try {
       savedState = JSON.parse(localStorage.getItem(storageKey) || "{}");
@@ -224,7 +528,136 @@
       savedState = {};
     }
 
+    const shell = document.querySelector(".admin-shell");
+    const sidebar = document.querySelector(".admin-sidebar");
+    const main = document.querySelector("main");
+    if (main) {
+      main.classList.add("admin-main");
+    }
+
+    let sidebarCollapsed = false;
+    try {
+      sidebarCollapsed = localStorage.getItem(sidebarCollapsedKey) === "1";
+    } catch (e) {
+      sidebarCollapsed = false;
+    }
+    if (shell && sidebarCollapsed) {
+      shell.classList.add("sidebar-collapsed");
+    }
+
+    const logoWrap = document.querySelector(".admin-logo-wrap");
+    if (logoWrap && !document.querySelector("[data-sidebar-toggle]")) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "admin-sidebar-toggle mt-3";
+      toggle.setAttribute("data-sidebar-toggle", "");
+      toggle.setAttribute("aria-pressed", sidebarCollapsed ? "true" : "false");
+      toggle.setAttribute("aria-label", sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+      toggle.setAttribute("title", sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+      toggle.innerHTML = '<span class="toggle-icon" aria-hidden="true">' + (sidebarCollapsed ? "&#8594;" : "&#8592;") + '</span>';
+      logoWrap.appendChild(toggle);
+    }
+
     const toggles = document.querySelectorAll(".group-toggle");
+    toggles.forEach((toggle) => {
+      const labelText = (toggle.querySelector(".group-label-text")?.textContent || "").trim();
+      const groupKey = (toggle.getAttribute("data-group-key") || "").toUpperCase();
+      let icon = toggle.querySelector(".group-icon");
+      if (!icon) {
+        icon = document.createElement("span");
+        icon.className = "group-icon";
+        icon.setAttribute("aria-hidden", "true");
+        const labelSpan = toggle.querySelector(".group-label-text");
+        if (labelSpan && labelSpan.parentNode) {
+          labelSpan.parentNode.insertBefore(icon, labelSpan);
+        } else {
+          toggle.insertBefore(icon, toggle.firstChild);
+        }
+      }
+      icon.innerHTML = renderGroupIcon(groupKey, sidebarCollapsed);
+      const chevron = toggle.querySelector(".group-chevron");
+      if (chevron) {
+        chevron.innerHTML = "&#9660;";
+      }
+      if (!labelText) {
+        const currentLabel = toggle.textContent.trim();
+        if (currentLabel) {
+          const textSpan = document.createElement("span");
+          textSpan.className = "group-label-text";
+          textSpan.textContent = currentLabel;
+          toggle.insertBefore(textSpan, toggle.querySelector(".group-chevron"));
+        }
+      }
+    });
+    syncCollapsedTooltips(sidebarCollapsed);
+
+    const sidebarLinks = document.querySelectorAll(".admin-sidebar .sidebar-link");
+    sidebarLinks.forEach((link) => {
+      const rawText = (link.querySelector(".sidebar-link-text")?.textContent || link.textContent || "").trim();
+      if (!rawText) return;
+      if (!link.querySelector(".sidebar-link-chip")) {
+        const chip = document.createElement("span");
+        chip.className = "sidebar-link-chip";
+        chip.setAttribute("aria-hidden", "true");
+        chip.innerHTML = resolveLinkIcon(rawText, link.getAttribute("href") || "");
+        const textSpan = document.createElement("span");
+        textSpan.className = "sidebar-link-text";
+        textSpan.textContent = rawText;
+        link.textContent = "";
+        link.appendChild(chip);
+        link.appendChild(textSpan);
+      } else {
+        const chip = link.querySelector(".sidebar-link-chip");
+        if (chip && !chip.innerHTML.trim()) {
+          chip.innerHTML = resolveLinkIcon(rawText, link.getAttribute("href") || "");
+        }
+      }
+    });
+
+    if (shell) {
+      const collapseToggle = document.querySelector("[data-sidebar-toggle]");
+      if (collapseToggle) {
+        collapseToggle.addEventListener("click", function () {
+        sidebarCollapsed = !shell.classList.contains("sidebar-collapsed");
+        shell.classList.toggle("sidebar-collapsed", sidebarCollapsed);
+        collapseToggle.setAttribute("aria-pressed", sidebarCollapsed ? "true" : "false");
+        collapseToggle.setAttribute("aria-label", sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+        collapseToggle.setAttribute("title", sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+        const icon = collapseToggle.querySelector(".toggle-icon");
+        if (icon) {
+          icon.innerHTML = sidebarCollapsed ? "&#8594;" : "&#8592;";
+        }
+        toggles.forEach((toggle) => {
+          const groupKey = (toggle.getAttribute("data-group-key") || "").toUpperCase();
+          const groupIcon = toggle.querySelector(".group-icon");
+          if (groupIcon) {
+            groupIcon.innerHTML = renderGroupIcon(groupKey, sidebarCollapsed);
+          }
+        });
+        syncCollapsedTooltips(sidebarCollapsed);
+        try {
+          localStorage.setItem(sidebarCollapsedKey, sidebarCollapsed ? "1" : "0");
+        } catch (e) {
+          // Ignore storage failures.
+        }
+        });
+      }
+    }
+
+    toggles.forEach((toggle) => {
+      toggle.addEventListener("click", function (event) {
+        if (!shell || !shell.classList.contains("sidebar-collapsed")) {
+          return;
+        }
+        const targetUrl = findCollapsedTargetUrl(toggle);
+        if (!targetUrl) {
+          return;
+        }
+        event.preventDefault();
+        window.location.href = targetUrl;
+      });
+    });
+
     toggles.forEach((toggle) => {
       const targetSelector = toggle.getAttribute("data-bs-target");
       const target = targetSelector ? document.querySelector(targetSelector) : null;
@@ -245,6 +678,31 @@
         savedState[groupKey] = false;
         localStorage.setItem(storageKey, JSON.stringify(savedState));
       });
+    });
+
+    const currentPath = window.location.pathname.replace(/\/+$/, "/");
+    sidebarLinks.forEach((link) => {
+      let linkPath = "";
+      try {
+        linkPath = new URL(link.getAttribute("href"), window.location.origin).pathname.replace(/\/+$/, "/");
+      } catch (e) {
+        return;
+      }
+      const isActive =
+        linkPath === currentPath ||
+        (linkPath !== "/" && currentPath.startsWith(linkPath));
+      if (isActive) {
+        link.classList.add("active");
+        link.setAttribute("aria-current", "page");
+        const collapsePanel = link.closest(".sidebar-group-collapse");
+        if (collapsePanel) {
+          collapsePanel.classList.add("show");
+          const groupToggle = document.querySelector(`[data-bs-target="#${collapsePanel.id}"]`);
+          if (groupToggle) {
+            groupToggle.setAttribute("aria-expanded", "true");
+          }
+        }
+      }
     });
 
     // Persist filter state for list -> create/edit/update flows.
@@ -269,3 +727,4 @@
   });
 </script>
 {% endblock %}
+

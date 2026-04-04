@@ -158,6 +158,33 @@
     margin-top: 1rem;
     margin-bottom: 0;
   }
+  .help-card {
+    border: 1px solid #d3e1d3;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #fbfdf7 0%, #f3f8ef 62%, #eef5e6 100%);
+    box-shadow: 0 8px 18px rgba(24, 57, 35, 0.05);
+    height: 100%;
+    padding: 1rem;
+  }
+  .help-card .eyebrow {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #748676;
+    margin-bottom: 0.35rem;
+    font-weight: 700;
+  }
+  .help-card h3 {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #1d482f;
+    margin-bottom: 0.35rem;
+  }
+  .help-card p {
+    color: #5a6f62;
+    font-size: 0.88rem;
+    margin-bottom: 0.85rem;
+  }
   @media (max-width: 767.98px) {
     .dash-header {
       padding: 0.85rem 0.9rem;
@@ -174,6 +201,37 @@
       <p>Operational overview of scope, imports, governance locks, and user activity.</p>
     </div>
     <span class="dash-stage">Stage 0.75</span>
+  </div>
+
+  <div class="dashboard-section">
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="help-card">
+          <div class="eyebrow">Important Workflow</div>
+          <h3>Faculty Must Accept Assigned Loads First</h3>
+          <p>New teaching loads remain pending until the faculty member accepts, requests clarification, or declines them. Pending and expired loads should be monitored before grading starts.</p>
+          <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:guide' %}#assignment-acceptance">Open Guide</a>
+            {% if has_faculty_assignments_read %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:faculty_assignment_dashboard' %}">Open Assignment Dashboard</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="help-card">
+          <div class="eyebrow">Operations Reminder</div>
+          <h3>Reminder and Expiry Rules Are Configurable</h3>
+          <p>Use Configurable Features to define response-window days, reminder timing, and whether overdue assignments expire automatically for the selected tenant.</p>
+          <div class="d-flex gap-2 flex-wrap">
+            {% if has_system_settings_update %}
+            <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:configurable_features_settings' %}">Open Configurable Features</a>
+            {% endif %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:guide' %}#assignment-acceptance">Review Rules</a>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="dashboard-section">
@@ -413,6 +471,9 @@
           <div class="col-md-3"><a class="btn btn-outline-primary w-100" href="{% url 'admin_portal:audit_log_list' %}">View Audit Logs</a></div>
           {% if "grading_analytics.read" in effective_permissions %}
           <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:grading_analytics' %}">Grading Analytics</a></div>
+          {% endif %}
+          {% if has_faculty_assignments_read %}
+          <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_assignment_dashboard' %}">Assignment Dashboard</a></div>
           {% endif %}
         </div>
       </div>

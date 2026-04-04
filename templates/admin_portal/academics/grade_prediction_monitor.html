@@ -1,0 +1,184 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .prediction-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.85rem;
+  }
+  .prediction-card {
+    border-radius: 1rem;
+    padding: 1rem 1.05rem;
+    background:
+      radial-gradient(circle at top right, rgba(244, 204, 61, 0.42) 0%, rgba(244, 204, 61, 0) 42%),
+      linear-gradient(145deg, #0f6c3c 0%, #2e8f4f 58%, #cfb33d 100%);
+    color: #fffdf5;
+    box-shadow: 0 0.8rem 1.4rem rgba(18, 73, 43, 0.13);
+  }
+  .prediction-label {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255, 250, 234, 0.9);
+  }
+  .prediction-value {
+    font-size: 1.45rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-top: 0.3rem;
+  }
+  .prediction-meta {
+    margin-top: 0.45rem;
+    font-size: 0.83rem;
+    color: rgba(252, 249, 240, 0.92);
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Grade Prediction Monitor</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:faculty_assignment_list' %}">Back to Faculty Assignments</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <form class="row g-3 align-items-end">
+      <div class="col-lg-4">
+        <label class="form-label">Search Faculty</label>
+        <input class="form-control" name="faculty_q" value="{{ faculty_q }}" placeholder="Type faculty username, name, or email">
+      </div>
+      <div class="col-lg-4">
+        <label class="form-label">Faculty</label>
+        <select class="form-select" name="faculty_user_id" onchange="this.form.submit()">
+          <option value="">-- Select Faculty --</option>
+          {% for user in faculty_candidates %}
+            <option value="{{ user.id }}" {% if selected_faculty and selected_faculty.id == user.id %}selected{% endif %}>
+              {% if user.full_name and user.full_name != user.username %}{{ user.full_name }} ({{ user.username }}){% else %}{{ user.username }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label">Class</label>
+        <select class="form-select" name="offering_id" onchange="this.form.submit()" {% if not selected_faculty %}disabled{% endif %}>
+          <option value="">-- Select Class --</option>
+          {% for assignment in selected_faculty_assignments %}
+            <option value="{{ assignment.offering.id }}" {% if selected_offering and selected_offering.id == assignment.offering.id %}selected{% endif %}>
+              {{ assignment.offering.course.title }} ({{ assignment.offering.course.code }}) | {{ assignment.offering.section.name|default:assignment.offering.section.code }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label">Period</label>
+        <select class="form-select" name="period_id" onchange="this.form.submit()" {% if not selected_offering %}disabled{% endif %}>
+          <option value="">-- Select Period --</option>
+          {% for item in periods %}
+            <option value="{{ item.id }}" {% if selected_period and selected_period.id == item.id %}selected{% endif %}>{{ item.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-8">
+        <label class="form-label">Search Student</label>
+        <input class="form-control" name="q" value="{{ q }}" placeholder="Search student number or name within the selected prediction view">
+      </div>
+      <div class="col-lg-4 d-flex gap-2">
+        <button class="btn btn-primary flex-fill" type="submit">Filter</button>
+        {% if selected_faculty and selected_offering and selected_period %}
+        <a class="btn btn-outline-success flex-fill" href="{% url 'admin_portal:grade_prediction_monitor' %}?faculty_user_id={{ selected_faculty.id }}&offering_id={{ selected_offering.id }}&period_id={{ selected_period.id }}&refresh=1">Refresh</a>
+        {% endif %}
+        <a class="btn btn-outline-dark flex-fill" href="{% url 'admin_portal:grade_prediction_monitor' %}">Reset</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if selected_faculty and selected_offering and selected_period and summary %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="small text-muted text-uppercase fw-semibold mb-1">Monitoring Faculty</div>
+    <div class="h5 mb-1">
+      {% if selected_faculty.full_name and selected_faculty.full_name != selected_faculty.username %}
+        {{ selected_faculty.full_name }} ({{ selected_faculty.username }})
+      {% else %}
+        {{ selected_faculty.username }}
+      {% endif %}
+    </div>
+    <div class="text-muted">{{ selected_offering.course.title }} ({{ selected_offering.course.code }}) | {{ selected_offering.section.name|default:selected_offering.section.code }} | {{ selected_period.name }}</div>
+    {% if is_masked %}<div class="mt-2"><span class="badge text-bg-dark">Masked Student Identity</span></div>{% endif %}
+  </div>
+</div>
+
+<div class="prediction-grid mb-3">
+  {% for card in metric_cards %}
+  <div class="prediction-card">
+    <div class="prediction-label">{{ card.label }}</div>
+    <div class="prediction-value">{{ card.value|default:"-" }}</div>
+    <div class="prediction-meta">{{ card.meta }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <div class="alert alert-light border">Read-only monitor. Prediction remains unofficial and never writes to the official gradebook.</div>
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Student No.</th>
+            <th>Student Name</th>
+            <th>Current Projection</th>
+            {% if show_best_case %}<th>Best Case</th>{% endif %}
+            {% if show_worst_case %}<th>Worst Case</th>{% endif %}
+            <th>Projected Final</th>
+            {% if show_target_needed %}<th>Target Needed</th>{% endif %}
+            <th>Coverage</th>
+            <th>Remaining</th>
+            {% if at_risk_enabled %}<th>Risk</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{% if is_masked %}{{ row.student.student_no|slice:":2" }}**-***{% else %}{{ row.student.student_no }}{% endif %}</td>
+            <td>
+              {% if is_masked %}
+                {{ row.student.first_name|slice:":1" }}** {{ row.student.last_name|slice:":1" }}**
+              {% else %}
+                {{ row.student.last_name }}, {{ row.student.first_name }}
+              {% endif %}
+            </td>
+            <td><strong>{{ row.current_projected_period_grade|default:"-" }}</strong></td>
+            {% if show_best_case %}<td>{{ row.best_case_period_grade|default:"-" }}</td>{% endif %}
+            {% if show_worst_case %}<td>{{ row.worst_case_period_grade|default:"-" }}</td>{% endif %}
+            <td>{{ row.current_projected_final_grade|default:"-" }}</td>
+            {% if show_target_needed %}
+            <td>
+              {% if row.target_needed_percent is None %}
+                <span class="text-muted">Not reachable</span>
+              {% elif row.target_needed_percent == 0 %}
+                <span class="text-success">Already met</span>
+              {% else %}
+                {{ row.target_needed_percent }}%
+              {% endif %}
+            </td>
+            {% endif %}
+            <td>{{ row.coverage_percent }}%</td>
+            <td>{{ row.remaining_item_count }}</td>
+            {% if at_risk_enabled %}
+            <td>
+              {% if row.at_risk_flag %}<span class="badge text-bg-danger">At Risk</span>{% else %}<span class="badge text-bg-success">On Track</span>{% endif %}
+            </td>
+            {% endif %}
+          </tr>
+          {% empty %}
+          <tr><td colspan="9" class="text-center text-muted py-4">No prediction rows found for this selection.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

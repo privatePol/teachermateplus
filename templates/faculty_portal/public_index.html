@@ -66,6 +66,37 @@
       min-width: 720px;
     }
   }
+  .fp-help-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin-top: 1.25rem;
+  }
+  .fp-help-card {
+    border: 1px solid rgba(63, 104, 67, 0.16);
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(246,251,242,0.96) 58%, rgba(239,247,228,0.96) 100%);
+    box-shadow: 0 14px 28px rgba(24, 56, 33, 0.08);
+    padding: 1rem 1.05rem;
+  }
+  .fp-help-card .eyebrow {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6f866f;
+    margin-bottom: 0.35rem;
+    font-weight: 700;
+  }
+  .fp-help-card h3 {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #1c4c30;
+    margin-bottom: 0.35rem;
+  }
+  .fp-help-card p {
+    color: #456150;
+    margin-bottom: 0;
+  }
 </style>
 {% endblock %}
 
@@ -212,6 +243,23 @@
         <div class="fp-step"><span>8</span>Review Summary of Grades</div>
         <div class="fp-step"><span>9</span>Submit Final Grades</div>
         <div class="fp-step"><span>10</span>Monitor Locking and Submission Status</div>
+      </div>
+      <div class="fp-help-card-grid">
+        <div class="fp-help-card">
+          <div class="eyebrow">Important Rule</div>
+          <h3>Accept Your Assigned Load First</h3>
+          <p>Newly assigned classes must be accepted before the grading pages and class-list tools can be opened.</p>
+        </div>
+        <div class="fp-help-card">
+          <div class="eyebrow">If There Is an Issue</div>
+          <h3>Request Clarification or Decline With a Note</h3>
+          <p>If the load is unclear or incorrect, respond from the pending-assignment card instead of proceeding directly into grading.</p>
+        </div>
+        <div class="fp-help-card">
+          <div class="eyebrow">Do Not Delay</div>
+          <h3>Pending Assignments Can Expire</h3>
+          <p>Assignment response windows are time-bound. Review and acknowledge your load early so admin does not need to renew it.</p>
+        </div>
       </div>
     </div>
   </section>

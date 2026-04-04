@@ -101,6 +101,140 @@
   </div>
 
   <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Faculty Assignment Acceptance Workflow</strong></div>
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.faculty_assignment_reminders_enabled }}
+        <label class="form-check-label" for="{{ form.faculty_assignment_reminders_enabled.id_for_label }}">
+          {{ form.faculty_assignment_reminders_enabled.label }}
+        </label>
+        {% if form.faculty_assignment_reminders_enabled.help_text %}
+        <div class="form-text">{{ form.faculty_assignment_reminders_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.faculty_assignment_reminders_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="form-check form-switch mb-3">
+        {{ form.faculty_assignment_auto_expire_enabled }}
+        <label class="form-check-label" for="{{ form.faculty_assignment_auto_expire_enabled.id_for_label }}">
+          {{ form.faculty_assignment_auto_expire_enabled.label }}
+        </label>
+        {% if form.faculty_assignment_auto_expire_enabled.help_text %}
+        <div class="form-text">{{ form.faculty_assignment_auto_expire_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.faculty_assignment_auto_expire_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.faculty_assignment_response_window_days.id_for_label }}">{{ form.faculty_assignment_response_window_days.label }}</label>
+          {{ form.faculty_assignment_response_window_days }}
+          {% if form.faculty_assignment_response_window_days.help_text %}<div class="form-text">{{ form.faculty_assignment_response_window_days.help_text }}</div>{% endif %}
+          {% for error in form.faculty_assignment_response_window_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.faculty_assignment_first_reminder_days.id_for_label }}">{{ form.faculty_assignment_first_reminder_days.label }}</label>
+          {{ form.faculty_assignment_first_reminder_days }}
+          {% if form.faculty_assignment_first_reminder_days.help_text %}<div class="form-text">{{ form.faculty_assignment_first_reminder_days.help_text }}</div>{% endif %}
+          {% for error in form.faculty_assignment_first_reminder_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.faculty_assignment_repeat_reminder_days.id_for_label }}">{{ form.faculty_assignment_repeat_reminder_days.label }}</label>
+          {{ form.faculty_assignment_repeat_reminder_days }}
+          {% if form.faculty_assignment_repeat_reminder_days.help_text %}<div class="form-text">{{ form.faculty_assignment_repeat_reminder_days.help_text }}</div>{% endif %}
+          {% for error in form.faculty_assignment_repeat_reminder_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+
+      <div class="alert alert-light border small mt-3 mb-0">
+        These settings control how long faculty have to acknowledge a load, when reminders start, and how often repeat reminders are queued while the load is still pending.
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Grade Prediction</strong></div>
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.grade_prediction_enabled }}
+        <label class="form-check-label" for="{{ form.grade_prediction_enabled.id_for_label }}">
+          {{ form.grade_prediction_enabled.label }}
+        </label>
+        {% if form.grade_prediction_enabled.help_text %}
+        <div class="form-text">{{ form.grade_prediction_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.grade_prediction_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.grade_prediction_roles.id_for_label }}">{{ form.grade_prediction_roles.label }}</label>
+        {{ form.grade_prediction_roles }}
+        {% if form.grade_prediction_roles.help_text %}<div class="form-text">{{ form.grade_prediction_roles.help_text }}</div>{% endif %}
+        {% for error in form.grade_prediction_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="form-check form-switch mb-3">
+        {{ form.grade_prediction_what_if_enabled }}
+        <label class="form-check-label" for="{{ form.grade_prediction_what_if_enabled.id_for_label }}">
+          {{ form.grade_prediction_what_if_enabled.label }}
+        </label>
+        {% if form.grade_prediction_what_if_enabled.help_text %}
+        <div class="form-text">{{ form.grade_prediction_what_if_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.grade_prediction_what_if_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.grade_prediction_what_if_roles.id_for_label }}">{{ form.grade_prediction_what_if_roles.label }}</label>
+        {{ form.grade_prediction_what_if_roles }}
+        {% if form.grade_prediction_what_if_roles.help_text %}<div class="form-text">{{ form.grade_prediction_what_if_roles.help_text }}</div>{% endif %}
+        {% for error in form.grade_prediction_what_if_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="form-check form-switch">
+            {{ form.grade_prediction_at_risk_enabled }}
+            <label class="form-check-label" for="{{ form.grade_prediction_at_risk_enabled.id_for_label }}">{{ form.grade_prediction_at_risk_enabled.label }}</label>
+          </div>
+          {% for error in form.grade_prediction_at_risk_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.grade_prediction_default_assumption.id_for_label }}">{{ form.grade_prediction_default_assumption.label }}</label>
+          {{ form.grade_prediction_default_assumption }}
+          {% if form.grade_prediction_default_assumption.help_text %}<div class="form-text">{{ form.grade_prediction_default_assumption.help_text }}</div>{% endif %}
+          {% for error in form.grade_prediction_default_assumption.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <div class="form-check form-switch">
+            {{ form.grade_prediction_show_best_case }}
+            <label class="form-check-label" for="{{ form.grade_prediction_show_best_case.id_for_label }}">{{ form.grade_prediction_show_best_case.label }}</label>
+          </div>
+          {% for error in form.grade_prediction_show_best_case.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <div class="form-check form-switch">
+            {{ form.grade_prediction_show_worst_case }}
+            <label class="form-check-label" for="{{ form.grade_prediction_show_worst_case.id_for_label }}">{{ form.grade_prediction_show_worst_case.label }}</label>
+          </div>
+          {% for error in form.grade_prediction_show_worst_case.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <div class="form-check form-switch">
+            {{ form.grade_prediction_show_target_needed }}
+            <label class="form-check-label" for="{{ form.grade_prediction_show_target_needed.id_for_label }}">{{ form.grade_prediction_show_target_needed.label }}</label>
+          </div>
+          {% for error in form.grade_prediction_show_target_needed.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+
+      <div class="alert alert-light border small mt-3 mb-0">
+        Prediction is unofficial and read-only. It uses the same grading template structure and formula path as the official grade engine, but never writes to the gradebook.
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
       <strong>Campus / Branch Recipient Emails</strong>
       <span class="text-muted small">{{ campus_count }} campus{% if campus_count != 1 %}es{% endif %}</span>

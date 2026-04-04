@@ -29,6 +29,77 @@
     color: #163f28;
     border-color: #b6cba6;
   }
+  .pending-board {
+    border: 1px solid #e1d4a2;
+    border-radius: 1rem;
+    background: linear-gradient(135deg, #fffef8 0%, #fff7db 55%, #f5f2d3 100%);
+    box-shadow: 0 8px 20px rgba(70, 63, 24, 0.08);
+    padding: 1rem;
+    margin-bottom: 1.2rem;
+  }
+  .pending-title {
+    color: #5d4d12;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+  }
+  .pending-copy {
+    color: #786a32;
+    font-size: 0.9rem;
+    margin-bottom: 0.9rem;
+  }
+  .pending-card {
+    border: 1px solid #eadcae;
+    border-radius: 0.9rem;
+    background: rgba(255, 255, 255, 0.72);
+    padding: 0.9rem;
+    height: 100%;
+  }
+  .pending-card .code {
+    font-weight: 700;
+    color: #4f4518;
+    margin-bottom: 0.1rem;
+  }
+  .pending-card .title {
+    color: #544a20;
+    font-size: 0.92rem;
+    margin-bottom: 0.35rem;
+  }
+  .pending-card .meta {
+    color: #7b7044;
+    font-size: 0.84rem;
+    margin-bottom: 0.15rem;
+  }
+  .pending-card textarea {
+    min-height: 82px;
+    resize: vertical;
+    border-radius: 0.8rem;
+  }
+  .pending-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.2rem 0.55rem;
+    margin-bottom: 0.5rem;
+  }
+  .pending-badge.pending {
+    background: #f2e4a6;
+    color: #624d06;
+  }
+  .pending-badge.clarification {
+    background: #dceefb;
+    color: #164d74;
+  }
+  .pending-badge.declined {
+    background: #f7d6d6;
+    color: #8b2222;
+  }
+  .pending-badge.expired {
+    background: #ece1f8;
+    color: #5f2f88;
+  }
   .course-card {
     border: 1px solid #d7e2d6;
     border-radius: 0.95rem;
@@ -132,8 +203,74 @@
     <a class="courses-chip {% if show_archived %}active{% endif %}" href="{% url 'faculty_portal:my_courses' %}?archived=1">
       Archived ({{ archived_count }})
     </a>
+    {% if pending_count %}
+    <span class="courses-chip">{{ pending_count }} Pending Acceptance</span>
+    {% endif %}
   </div>
 </div>
+
+{% if pending_assignments %}
+<section class="pending-board">
+  <div class="pending-title">Pending Faculty Assignments</div>
+  <div class="pending-copy">Please accept your assigned classes first. Only accepted assignments can be opened for grading and class-list work.</div>
+  <div class="row g-3">
+    {% for assignment in pending_assignments %}
+    <div class="col-md-6 col-xl-4">
+      <article class="pending-card">
+        {% if assignment.response_status == "CLARIFICATION_REQUESTED" %}
+        <div class="pending-badge clarification">Clarification Requested</div>
+        {% elif assignment.response_status == "DECLINED" %}
+        <div class="pending-badge declined">Declined</div>
+        {% elif assignment.response_status == "EXPIRED" %}
+        <div class="pending-badge expired">Response Window Expired</div>
+        {% else %}
+        <div class="pending-badge pending">Pending Acceptance</div>
+        {% endif %}
+        <div class="code">{{ assignment.offering.course.code }}</div>
+        <div class="title">{{ assignment.offering.course.title }}</div>
+        <div class="meta">{{ assignment.offering.section.code }} | {{ assignment.offering.academic_year.name|default:assignment.offering.academic_year.code }} / {{ assignment.offering.term.code }}</div>
+        <div class="meta">Campus: {{ assignment.offering.campus.code }}</div>
+        <div class="meta">Schedule: {{ assignment.offering.schedule_text|default:"-" }}</div>
+        <div class="meta">Assigned: {{ assignment.assigned_at|date:"M d, Y h:i A" }}</div>
+        {% if assignment.response_due_at %}
+        <div class="meta">Respond by: {{ assignment.response_due_at|date:"M d, Y h:i A" }}</div>
+        {% elif assignment.response_status == "EXPIRED" and assignment.responded_at %}
+        <div class="meta">Expired: {{ assignment.responded_at|date:"M d, Y h:i A" }}</div>
+        {% endif %}
+        {% if assignment.reminder_count %}
+        <div class="meta">Reminders queued: {{ assignment.reminder_count }}</div>
+        {% endif %}
+        {% if assignment.last_reminded_at %}
+        <div class="meta">Last reminder: {{ assignment.last_reminded_at|date:"M d, Y h:i A" }}</div>
+        {% endif %}
+        {% if assignment.assignment_note %}
+        <div class="meta mt-2"><strong>Admin Instructions:</strong> {{ assignment.assignment_note }}</div>
+        {% endif %}
+        {% if assignment.faculty_response_note %}
+        <div class="meta mt-2"><strong>Your Last Response:</strong> {{ assignment.faculty_response_note }}</div>
+        {% endif %}
+        {% if assignment.response_status == "EXPIRED" %}
+        <div class="meta mt-2"><strong>Next Step:</strong> Please ask admin to refresh this assignment window before you can respond again.</div>
+        {% else %}
+        <form method="post" action="{% url 'faculty_portal:faculty_assignment_accept' assignment.id %}" class="mt-3 d-inline-block">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-success btn-sm rounded-pill px-3">Accept Assignment</button>
+        </form>
+        <form method="post" action="{% url 'faculty_portal:faculty_assignment_response' assignment.id %}" class="mt-3">
+          {% csrf_token %}
+          <textarea class="form-control form-control-sm" name="faculty_response_note" placeholder="Add your note for admin if you need clarification or need to decline this load.">{{ assignment.faculty_response_note|default:"" }}</textarea>
+          <div class="d-flex gap-2 mt-2">
+            <button type="submit" name="response_action" value="clarification" class="btn btn-outline-primary btn-sm rounded-pill px-3">Request Clarification</button>
+            <button type="submit" name="response_action" value="decline" class="btn btn-outline-danger btn-sm rounded-pill px-3">Decline</button>
+          </div>
+        </form>
+        {% endif %}
+      </article>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 {% for group in grouped_offerings %}
   <div class="campus-group-title">

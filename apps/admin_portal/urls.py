@@ -33,6 +33,7 @@ from .views import (
     dashboard_view,
     admin_guide_view,
     grading_analytics_view,
+    grade_prediction_monitor_view,
     department_create_view,
     department_list_view,
     department_update_view,
@@ -41,8 +42,10 @@ from .views import (
     enrollment_update_view,
     faculty_assignment_create_view,
     faculty_assignment_assign_view,
+    faculty_assignment_dashboard_view,
     faculty_gradebook_monitor_view,
     faculty_assignment_list_view,
+    faculty_assignment_renew_window_view,
     faculty_assignment_toggle_primary_view,
     faculty_assignment_unassign_view,
     faculty_assignment_update_view,
@@ -114,6 +117,7 @@ from .views import (
     term_create_view,
     term_list_view,
     term_update_view,
+    admin_portal_root_view,
     user_create_view,
     user_change_password_view,
     user_list_view,
@@ -124,6 +128,8 @@ from .views import (
 app_name = "admin_portal"
 
 urlpatterns = [
+    path("admin-portal", admin_portal_root_view, name="root"),
+    path("admin-portal/", admin_portal_root_view, name="root_slash"),
     path("api/v1/sis/periodic-grades/", sis_periodic_grades_api_view, name="sis_periodic_grades_api"),
     path("api/sis/periodic-grades/", sis_periodic_grades_api_view, name="sis_periodic_grades_api_alias"),
     path("admin-portal/dashboard/", dashboard_view, name="dashboard"),
@@ -198,9 +204,19 @@ urlpatterns = [
         name="faculty_assignment_list",
     ),
     path(
+        "admin-portal/academics/faculty-assignments/dashboard/",
+        faculty_assignment_dashboard_view,
+        name="faculty_assignment_dashboard",
+    ),
+    path(
         "admin-portal/academics/faculty-gradebook/",
         faculty_gradebook_monitor_view,
         name="faculty_gradebook_monitor",
+    ),
+    path(
+        "admin-portal/academics/grade-predictions/",
+        grade_prediction_monitor_view,
+        name="grade_prediction_monitor",
     ),
     path(
         "admin-portal/academics/faculty-assignments/create/",
@@ -221,6 +237,11 @@ urlpatterns = [
         "admin-portal/academics/faculty-assignments/toggle-primary/",
         faculty_assignment_toggle_primary_view,
         name="faculty_assignment_toggle_primary",
+    ),
+    path(
+        "admin-portal/academics/faculty-assignments/<int:assignment_id>/renew-window/",
+        faculty_assignment_renew_window_view,
+        name="faculty_assignment_renew_window",
     ),
     path(
         "admin-portal/academics/faculty-assignments/<int:assignment_id>/edit/",

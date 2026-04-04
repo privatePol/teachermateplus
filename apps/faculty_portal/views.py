@@ -13,8 +13,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from apps.academics.models import CourseOffering
-from apps.academics.services import AcademicGovernanceService
+from apps.academics.models import CourseOffering, FacultyAssignment
+from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
@@ -42,6 +42,12 @@ from apps.grading.models import (
 from apps.grading.notifications import CorrectionNotificationService
 from apps.grading.reporting import CorrectionOfficialReportService
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
+from apps.predictions.services import (
+    PredictionAuditService,
+    PredictionComputationService,
+    PredictionSnapshotService,
+    PredictionWhatIfService,
+)
 from apps.students.models import Student
 
 
@@ -77,10 +83,30 @@ def guide_manual_view(request):
     return render(request, "faculty_portal/guide_manual.html")
 
 
+def _faculty_assignment_queryset(user):
+    return FacultyAssignment.objects.filter(
+        faculty_user_id=user.id,
+        is_active=True,
+        offering__is_active=True,
+    ).select_related(
+        "tenant",
+        "campus",
+        "offering",
+        "offering__tenant",
+        "offering__campus",
+        "offering__department",
+        "offering__term",
+        "offering__course",
+        "offering__section",
+        "accepted_by",
+    )
+
+
 def _faculty_offering_queryset(user):
     return CourseOffering.objects.filter(
         faculty_assignments__faculty_user_id=user.id,
         faculty_assignments__is_active=True,
+        faculty_assignments__accepted_at__isnull=False,
         is_active=True,
     ).select_related("tenant", "campus", "department", "term", "course", "section")
 
@@ -111,6 +137,13 @@ def _parse_decimal(value, fallback=Decimal("0")):
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return fallback
+
+
+def _safe_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _format_decimal_display(value):
@@ -147,7 +180,84 @@ def _require_faculty_offering_or_404(request, offering_id: int):
     return get_object_or_404(_faculty_offering_queryset(request.user), id=offering_id)
 
 
+def _require_pending_faculty_assignment_or_404(request, assignment_id: int):
+    return get_object_or_404(
+        _faculty_assignment_queryset(request.user).filter(accepted_at__isnull=True),
+        id=assignment_id,
+    )
+
+
+def _find_faculty_assignment(user, offering_id: int):
+    return _faculty_assignment_queryset(user).filter(offering_id=offering_id).first()
+
+
+def _apply_assignment_response(*, request, assignment, response_status: str, success_message: str, faculty_note: str = ""):
+    before_data = {
+        "response_status": assignment.response_status,
+        "faculty_response_note": assignment.faculty_response_note,
+        "responded_at": assignment.responded_at.isoformat() if assignment.responded_at else None,
+        "accepted_at": assignment.accepted_at.isoformat() if assignment.accepted_at else None,
+        "accepted_by_id": assignment.accepted_by_id,
+        "response_due_at": assignment.response_due_at.isoformat() if assignment.response_due_at else None,
+        "last_reminded_at": assignment.last_reminded_at.isoformat() if assignment.last_reminded_at else None,
+        "reminder_count": assignment.reminder_count,
+    }
+    assignment.response_status = response_status
+    assignment.faculty_response_note = faculty_note or None
+    assignment.responded_at = timezone.now()
+    if response_status == FacultyAssignment.ResponseStatus.ACCEPTED:
+        assignment.accepted_at = assignment.responded_at
+        assignment.accepted_by = request.user
+    else:
+        assignment.accepted_at = None
+        assignment.accepted_by = None
+    FacultyAssignmentWorkflowService.clear_response_window(assignment)
+    assignment.save(
+        update_fields=[
+            "response_status",
+            "faculty_response_note",
+            "responded_at",
+            "accepted_at",
+            "accepted_by",
+            "response_due_at",
+            "last_reminded_at",
+            "reminder_count",
+            "updated_at",
+        ]
+    )
+    AuditService.log_event(
+        action="UPDATE",
+        portal="FACULTY",
+        entity_type="FacultyAssignment",
+        entity_id=assignment.id,
+        actor=request.user,
+        tenant=assignment.tenant,
+        campus=assignment.campus,
+        before_data=before_data,
+        after_data={
+            "response_status": assignment.response_status,
+            "faculty_response_note": assignment.faculty_response_note,
+            "responded_at": assignment.responded_at.isoformat() if assignment.responded_at else None,
+            "accepted_at": assignment.accepted_at.isoformat() if assignment.accepted_at else None,
+            "accepted_by_id": assignment.accepted_by_id,
+            "response_due_at": assignment.response_due_at.isoformat() if assignment.response_due_at else None,
+            "last_reminded_at": assignment.last_reminded_at.isoformat() if assignment.last_reminded_at else None,
+            "reminder_count": assignment.reminder_count,
+        },
+        metadata={
+            "event": "faculty_assignment_response",
+            "offering_id": assignment.offering_id,
+        },
+        request=request,
+    )
+    messages.success(request, success_message)
+
+
 def _resolve_offering_period(request, offering_id: int, period_id: int):
+    assignment = _find_faculty_assignment(request.user, offering_id)
+    if assignment and not assignment.is_accepted:
+        messages.error(request, "Please accept this faculty assignment first before opening the class.")
+        return assignment.offering, None, None
     offering = _require_faculty_offering_or_404(request, offering_id)
     try:
         template = FacultyGradingService.resolve_template_for_offering(offering)
@@ -806,12 +916,19 @@ def analytics_view(request):
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def my_courses_view(request):
+    FacultyAssignmentWorkflowService.expire_overdue_assignments()
     show_archived = request.GET.get("archived") == "1"
-    base_qs = (
-        _faculty_offering_queryset(request.user)
-        .annotate(enrollment_count=Count("enrollments"))
+    assignment_qs = (
+        _faculty_assignment_queryset(request.user)
+        .annotate(enrollment_count=Count("offering__enrollments"))
         .distinct()
-        .order_by("tenant__code", "campus__code", "term__sequence_no", "course__code", "section__code")
+        .order_by(
+            "offering__tenant__code",
+            "offering__campus__code",
+            "offering__term__sequence_no",
+            "offering__course__code",
+            "offering__section__code",
+        )
     )
 
     active_term_cache = {}
@@ -826,12 +943,18 @@ def my_courses_view(request):
             return True
         return offering.term_id == active_term_id
 
+    pending_assignments = []
     active_offerings = []
     archived_offerings = []
-    for offering in base_qs:
+    for assignment in assignment_qs:
+        offering = assignment.offering
+        offering.assignment = assignment
+        offering.enrollment_count = assignment.enrollment_count
         forced_archive = offering.status == CourseOffering.Status.ARCHIVED
         outside_active_scope = not _is_in_active_scope(offering)
-        if forced_archive or outside_active_scope:
+        if not assignment.is_accepted and not forced_archive and not outside_active_scope:
+            pending_assignments.append(assignment)
+        elif forced_archive or outside_active_scope:
             archived_offerings.append(offering)
         else:
             active_offerings.append(offering)
@@ -858,16 +981,92 @@ def my_courses_view(request):
 
     context = {
         "grouped_offerings": grouped_offerings,
+        "pending_assignments": pending_assignments if not show_archived else [],
         "show_archived": show_archived,
         "active_count": len(active_offerings),
         "archived_count": len(archived_offerings),
+        "pending_count": len(pending_assignments),
+        "now": timezone.now(),
     }
     return render(request, "faculty_portal/my_courses.html", context)
 
 
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
+def faculty_assignment_accept_view(request, assignment_id: int):
+    if request.method != "POST":
+        return redirect("faculty_portal:my_courses")
+
+    FacultyAssignmentWorkflowService.expire_overdue_assignments()
+    assignment = _require_pending_faculty_assignment_or_404(request, assignment_id)
+    if assignment.response_status == FacultyAssignment.ResponseStatus.EXPIRED:
+        messages.error(
+            request,
+            "This assignment response window already expired. Please ask admin to refresh the assignment window.",
+        )
+        return redirect("faculty_portal:my_courses")
+    _apply_assignment_response(
+        request=request,
+        assignment=assignment,
+        response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+        success_message=f"Assignment accepted for {assignment.offering.course.code} / {assignment.offering.section.code}.",
+    )
+    return redirect("faculty_portal:my_courses")
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def faculty_assignment_response_view(request, assignment_id: int):
+    if request.method != "POST":
+        return redirect("faculty_portal:my_courses")
+
+    FacultyAssignmentWorkflowService.expire_overdue_assignments()
+    assignment = _require_pending_faculty_assignment_or_404(request, assignment_id)
+    if assignment.response_status == FacultyAssignment.ResponseStatus.EXPIRED:
+        messages.error(
+            request,
+            "This assignment response window already expired. Please ask admin to refresh the assignment window.",
+        )
+        return redirect("faculty_portal:my_courses")
+    response_action = (request.POST.get("response_action") or "").strip().lower()
+    faculty_note = (request.POST.get("faculty_response_note") or "").strip()
+
+    if response_action == "clarification":
+        if not faculty_note:
+            messages.error(request, "Please enter your clarification request before sending it.")
+            return redirect("faculty_portal:my_courses")
+        _apply_assignment_response(
+            request=request,
+            assignment=assignment,
+            response_status=FacultyAssignment.ResponseStatus.CLARIFICATION_REQUESTED,
+            faculty_note=faculty_note,
+            success_message="Clarification request sent to admin.",
+        )
+    elif response_action == "decline":
+        if not faculty_note:
+            messages.error(request, "Please explain why you are declining this assignment.")
+            return redirect("faculty_portal:my_courses")
+        _apply_assignment_response(
+            request=request,
+            assignment=assignment,
+            response_status=FacultyAssignment.ResponseStatus.DECLINED,
+            faculty_note=faculty_note,
+            success_message="Assignment marked as declined and sent back to admin.",
+        )
+    else:
+        messages.error(request, "Invalid assignment response.")
+        return redirect("faculty_portal:my_courses")
+
+    return redirect("faculty_portal:my_courses")
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
 def offering_periods_view(request, offering_id: int):
+    assignment = _find_faculty_assignment(request.user, offering_id)
+    if assignment and not assignment.is_accepted:
+        messages.error(request, "Please accept this faculty assignment first before opening the class.")
+        return redirect("faculty_portal:my_courses")
     offering = _require_faculty_offering_or_404(request, offering_id)
     try:
         template = FacultyGradingService.resolve_template_for_offering(offering)
@@ -903,6 +1102,10 @@ def offering_periods_view(request, offering_id: int):
         "enrollment_count": FacultyGradingService.get_active_enrollments(offering).count(),
         "system_correction_enabled": GradingGovernanceService.is_system_correction_enabled(
             tenant_id=offering.tenant_id
+        ),
+        "grade_prediction_enabled": FeatureSettingsService.can_user_access_grade_prediction(
+            user=request.user,
+            tenant_id=offering.tenant_id,
         ),
     }
     return render(request, "faculty_portal/offering_periods.html", context)
@@ -1580,6 +1783,302 @@ def period_summary_view(request, offering_id: int, period_id: int):
 
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
+def period_prediction_view(request, offering_id: int, period_id: int):
+    offering, template, period = _resolve_offering_period(request, offering_id, period_id)
+    if period is None:
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+    if not FeatureSettingsService.can_user_access_grade_prediction(user=request.user, tenant_id=offering.tenant_id):
+        messages.error(request, "Grade prediction is currently disabled for your role.")
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+
+    state = _period_edit_state(offering, period)
+    action = (request.POST.get("action") or "").strip().lower()
+    force_refresh = action == "refresh"
+    prediction_data = PredictionSnapshotService.get_period_predictions(
+        offering=offering,
+        template_period=period,
+        user=request.user,
+        force_refresh=force_refresh,
+    )
+    PredictionAuditService.log_view(
+        user=request.user,
+        offering=offering,
+        template_period=period,
+        view_mode="CLASS_SUMMARY",
+    )
+
+    q = (request.GET.get("q") or request.POST.get("q") or "").strip()
+    rows = prediction_data["rows"]
+    if q:
+        rows = [
+            row
+            for row in rows
+            if q.lower() in row.student.student_no.lower()
+            or q.lower() in row.student.last_name.lower()
+            or q.lower() in row.student.first_name.lower()
+        ]
+    for row in rows:
+        final_requirement = PredictionComputationService.final_requirement_for_remaining_periods(
+            offering=offering,
+            template_period=period,
+            student_id=row.student_id,
+            current_period_grade=row.current_projected_period_grade,
+        )
+        row.final_requirement_status = final_requirement["status"]
+        row.final_requirement_label = final_requirement["label"]
+        row.final_requirement_value = final_requirement["required_average"]
+        row.final_requirement_period_names = final_requirement["remaining_period_names"]
+
+    summary = prediction_data["summary"]
+    metric_cards = [
+        {"label": "Students", "value": summary.student_count, "meta": "Active students in this class."},
+        {
+            "label": "With Projection",
+            "value": summary.students_with_projection,
+            "meta": f"{summary.avg_coverage_percent}% average coverage",
+        },
+        {"label": "At Risk", "value": summary.at_risk_count, "meta": "Projected below passing threshold."},
+        {
+            "label": "Average Projection",
+            "value": _format_decimal_display(summary.avg_projected_grade),
+            "meta": "Unofficial projected period grade.",
+        },
+        {
+            "label": "Best Case",
+            "value": _format_decimal_display(summary.avg_best_case_grade),
+            "meta": "If remaining items are completed at full score.",
+        },
+        {
+            "label": "Worst Case",
+            "value": _format_decimal_display(summary.avg_worst_case_grade),
+            "meta": "If remaining items get zero raw score.",
+        },
+    ]
+
+    what_if_result = None
+    what_if_student = None
+    can_use_what_if = FeatureSettingsService.can_user_access_grade_prediction_what_if(
+        user=request.user,
+        tenant_id=offering.tenant_id,
+    )
+    if request.method == "POST" and action in {"simulate", "save_draft"} and can_use_what_if:
+        selected_student_id = _safe_int(request.POST.get("student_id"))
+        assumed_remaining_percent = _parse_decimal(request.POST.get("assumed_remaining_percent"), Decimal("0"))
+        target_grade = _parse_decimal(request.POST.get("target_grade"), Decimal("0"))
+        selected_snapshot = next((row for row in prediction_data["rows"] if row.student_id == selected_student_id), None)
+        if selected_snapshot:
+            what_if_student = selected_snapshot.student
+            what_if_result = PredictionWhatIfService.simulate(
+                snapshot=selected_snapshot,
+                assumed_remaining_percent=assumed_remaining_percent,
+            )
+            what_if_result["final_requirement"] = PredictionComputationService.final_requirement_for_remaining_periods(
+                offering=offering,
+                template_period=period,
+                student_id=selected_snapshot.student_id,
+                current_period_grade=what_if_result["projected_period_grade"],
+            )
+            if selected_snapshot.remaining_item_count == 0:
+                messages.info(
+                    request,
+                    "This student has no remaining items in the selected period. "
+                    "What-if results will stay the same because the grade is already based on completed records.",
+                )
+            PredictionAuditService.log_view(
+                user=request.user,
+                offering=offering,
+                template_period=period,
+                student=selected_snapshot.student,
+                view_mode="WHAT_IF",
+            )
+            if action == "save_draft":
+                scenario_name = (request.POST.get("scenario_name") or "").strip() or f"{selected_snapshot.student.student_no} Scenario"
+                PredictionWhatIfService.save_draft(
+                    user=request.user,
+                    snapshot=selected_snapshot,
+                    scenario_name=scenario_name,
+                    assumed_remaining_percent=assumed_remaining_percent,
+                    target_grade=target_grade if target_grade > 0 else None,
+                )
+                messages.success(request, "What-if scenario draft saved.")
+
+    context = {
+        "offering": offering,
+        "template": template,
+        "period": period,
+        "state": state,
+        "rows": rows,
+        "metric_cards": metric_cards,
+        "q": q,
+        "summary": summary,
+        "settings_snapshot": prediction_data["setting_snapshot"],
+        "show_best_case": prediction_data["setting_snapshot"].show_best_case,
+        "show_worst_case": prediction_data["setting_snapshot"].show_worst_case,
+        "show_target_needed": prediction_data["setting_snapshot"].show_target_needed,
+        "at_risk_enabled": FeatureSettingsService.is_grade_prediction_at_risk_enabled(tenant_id=offering.tenant_id),
+        "can_use_what_if": can_use_what_if,
+        "what_if_result": what_if_result,
+        "what_if_student": what_if_student,
+    }
+    return render(request, "faculty_portal/period_prediction.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def period_prediction_guide_view(request, offering_id: int, period_id: int):
+    offering, template, period = _resolve_offering_period(request, offering_id, period_id)
+    if period is None:
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+    if not FeatureSettingsService.can_user_access_grade_prediction(user=request.user, tenant_id=offering.tenant_id):
+        messages.error(request, "Grade prediction is currently disabled for your role.")
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+
+    default_assumption = FeatureSettingsService.get_grade_prediction_default_assumption(
+        tenant_id=offering.tenant_id,
+        default="IGNORE_MISSING",
+    )
+    assumption_explanations = {
+        "IGNORE_MISSING": {
+            "label": "Ignore Missing",
+            "meaning": "Only the encoded items are used in the current projection. Missing future items do not yet pull the estimate down.",
+        },
+        "RAW_ZERO": {
+            "label": "Assume Zero Raw Score",
+            "meaning": "Missing remaining items are treated as zero, so the projection becomes more conservative.",
+        },
+        "FULL_SCORE": {
+            "label": "Assume Full Score",
+            "meaning": "Missing remaining items are treated as full score, so the projection shows an optimistic result.",
+        },
+    }
+    default_assumption_info = assumption_explanations.get(
+        default_assumption,
+        assumption_explanations["IGNORE_MISSING"],
+    )
+
+    column_guides = [
+        {
+            "column": "Student No.",
+            "meaning": "The official student number of the learner in this class.",
+            "note": "This is only an identifier. It does not affect the prediction formula.",
+        },
+        {
+            "column": "Student Name",
+            "meaning": "The enrolled student whose current records are being projected.",
+            "note": "Use this together with the student number to avoid checking the wrong learner.",
+        },
+        {
+            "column": "Current Projection",
+            "meaning": "The unofficial projected grade for the selected period based on the assigned grading template and the records already encoded.",
+            "note": "This is the main estimate faculty should read first, but it can still change when more scores are encoded.",
+        },
+        {
+            "column": "Best Case",
+            "meaning": "The possible outcome if the remaining unencoded items are completed at full score.",
+            "note": "This shows the upper bound of the likely period result, not a guaranteed final outcome.",
+        },
+        {
+            "column": "Worst Case",
+            "meaning": "The possible outcome if the remaining unencoded items receive zero raw score.",
+            "note": "This helps identify the downside risk if missing work is never completed.",
+        },
+        {
+            "column": "Projected Final",
+            "meaning": "The unofficial projected final grade using the same final-grade rule configured by the system, including the official formula path for the course.",
+            "note": "This is a forward-looking estimate only. It is not yet an official final grade.",
+        },
+        {
+            "column": "Target Needed",
+            "meaning": "The approximate remaining performance needed to reach the target threshold used by the prediction engine.",
+            "note": "If the page says 'Already met', the current projection is already at or above the target. If it says 'Not reachable', the remaining items are not enough to hit the target even with perfect performance.",
+        },
+        {
+            "column": "Average Needed to Pass Final",
+            "meaning": "The average grade still needed across the remaining future periods to finish with a passing final grade.",
+            "note": "Example: if the page says '54.39% average needed across PRE-FINAL, FX', the student needs around that average on the remaining final periods to end with a passing final grade.",
+        },
+        {
+            "column": "Coverage",
+            "meaning": "How much of the expected graded work is already encoded for the student.",
+            "note": "Low coverage means the projection is still early and should be interpreted carefully.",
+        },
+        {
+            "column": "Remaining",
+            "meaning": "The count of still-unencoded activities or expected records that can still affect the prediction.",
+            "note": "The higher this number is, the more the current projection may still move.",
+        },
+        {
+            "column": "Risk",
+            "meaning": "At-risk status is shown when the projected grade is below the passing threshold currently used by the system.",
+            "note": "At-risk is an early warning tool, not an official failure decision.",
+        },
+    ]
+
+    sample_walkthrough = [
+        {
+            "title": "Example 1: Early in the period",
+            "body": (
+                "A student has only one quiz encoded and still has many missing activities. "
+                "Coverage may be low, so the Current Projection is still only an early estimate. "
+                "Faculty should avoid using this as a final judgment until more records are encoded."
+            ),
+        },
+        {
+            "title": "Example 2: Reading Best Case and Worst Case",
+            "body": (
+                "If Current Projection is 82.00, Best Case is 90.00, and Worst Case is 71.00, "
+                "the student still has enough remaining work to move upward or downward. "
+                "This range helps the faculty understand how sensitive the current grade is to the remaining items."
+            ),
+        },
+        {
+            "title": "Example 3: Using What-If Simulation",
+            "body": (
+                "If the faculty enters 80% as Remaining Performance, EduGradesPro does not save any grade. "
+                "It only answers: 'If the student performs at around 80% on the remaining items, what might the period grade become?' "
+                "The result is for planning and advising only."
+            ),
+        },
+        {
+            "title": "Example 4: Interpreting Projected Final",
+            "body": (
+                "If the course uses a final formula such as FG = (PG + MG + Pre-Final Class Standing + Final Exam) / 4, "
+                "then the Projected Final follows that same official rule path. "
+                "It is still unofficial because some periods or exams may still change later."
+            ),
+        },
+        {
+            "title": "Example 5: Average Needed to Pass Final",
+            "body": (
+                "If PRELIM is 91.43 and MIDTERM is 99.80, and the passing final grade is 75.00, "
+                "EduGradesPro can show the average still needed across the remaining final periods. "
+                "For example, it may say '54.39% average needed across PRE-FINAL, FX'."
+            ),
+        },
+    ]
+
+    interpretation_rules = [
+        "Prediction is unofficial and read-only. It never writes to the gradebook.",
+        "Prediction uses the assigned grading template and the official computation path of the class.",
+        "Low coverage means the prediction is still unstable and may move significantly.",
+        "What-if simulation is only a planning tool. It does not encode grades.",
+        "Faculty should continue relying on the official summary and encoded records for formal submission decisions.",
+    ]
+
+    context = {
+        "offering": offering,
+        "template": template,
+        "period": period,
+        "default_assumption_info": default_assumption_info,
+        "column_guides": column_guides,
+        "sample_walkthrough": sample_walkthrough,
+        "interpretation_rules": interpretation_rules,
+    }
+    return render(request, "faculty_portal/period_prediction_guide.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
 def period_submit_view(request, offering_id: int, period_id: int):
     if request.method != "POST":
         return redirect("faculty_portal:period_summary", offering_id=offering_id, period_id=period_id)
@@ -2009,12 +2508,17 @@ def period_correction_official_report_view(request, offering_id: int, period_id:
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def offering_enrollment_view(request, offering_id: int):
+    assignment = _find_faculty_assignment(request.user, offering_id)
+    if assignment and not assignment.is_accepted:
+        messages.error(request, "Please accept this faculty assignment first before opening the class.")
+        return redirect("faculty_portal:my_courses")
     offering = get_object_or_404(
         CourseOffering.objects.select_related("term", "course", "section", "campus", "department", "tenant"),
         id=offering_id,
         is_active=True,
         faculty_assignments__faculty_user_id=request.user.id,
         faculty_assignments__is_active=True,
+        faculty_assignments__accepted_at__isnull=False,
     )
     mode = EnrollmentService.get_enrollment_mode(offering.tenant_id)
     can_create_enrollment = EnrollmentService.can_create_or_update(

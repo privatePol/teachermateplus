@@ -786,7 +786,7 @@ class CourseOfferingForm(forms.ModelForm):
 class FacultyAssignmentForm(forms.ModelForm):
     class Meta:
         model = FacultyAssignment
-        fields = ["offering", "faculty_user", "is_primary", "is_active"]
+        fields = ["offering", "faculty_user", "assignment_note", "is_primary", "is_active"]
 
     def __init__(self, *args, offering_queryset=None, faculty_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1483,6 +1483,83 @@ class ConfigurableFeatureSettingForm(forms.Form):
         widget=forms.Textarea(attrs={"rows": 2}),
         help_text="Fallback recipient list used when a campus-specific branch email is not configured. Separate multiple emails with commas or new lines.",
     )
+    faculty_assignment_reminders_enabled = forms.BooleanField(
+        required=False,
+        label="Enable faculty assignment reminder notifications",
+        help_text="When enabled, pending faculty assignments can queue reminder notifications before the response deadline.",
+    )
+    faculty_assignment_auto_expire_enabled = forms.BooleanField(
+        required=False,
+        label="Enable automatic expiration of overdue faculty assignments",
+        help_text="When enabled, pending faculty assignments automatically move to expired status after the response deadline.",
+    )
+    faculty_assignment_response_window_days = forms.IntegerField(
+        required=True,
+        min_value=1,
+        label="Faculty assignment response window (days)",
+        help_text="How many days faculty have to accept, request clarification, or decline a newly assigned load.",
+    )
+    faculty_assignment_first_reminder_days = forms.IntegerField(
+        required=True,
+        min_value=0,
+        label="First reminder after assignment (days)",
+        help_text="How many days after assignment before the first reminder is queued. Use 0 for same-day reminders.",
+    )
+    faculty_assignment_repeat_reminder_days = forms.IntegerField(
+        required=True,
+        min_value=1,
+        label="Repeat reminder interval (days)",
+        help_text="How many days between follow-up reminders while the assignment is still pending.",
+    )
+    grade_prediction_enabled = forms.BooleanField(
+        required=False,
+        label="Enable grade prediction module",
+        help_text="Turns the prediction module on or off without affecting the official gradebook.",
+    )
+    grade_prediction_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed to access grade prediction",
+        help_text="Select which roles may open prediction pages once the feature is enabled.",
+    )
+    grade_prediction_what_if_enabled = forms.BooleanField(
+        required=False,
+        label="Enable what-if simulator",
+        help_text="Allows approved roles to run unofficial scenarios on remaining graded work.",
+    )
+    grade_prediction_what_if_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed to use what-if simulator",
+        help_text="Select which roles may run what-if simulations.",
+    )
+    grade_prediction_at_risk_enabled = forms.BooleanField(
+        required=False,
+        label="Enable at-risk flags",
+        help_text="Highlights students whose projected grade is below the passing threshold.",
+    )
+    grade_prediction_show_best_case = forms.BooleanField(
+        required=False,
+        label="Show best-case projection",
+    )
+    grade_prediction_show_worst_case = forms.BooleanField(
+        required=False,
+        label="Show worst-case projection",
+    )
+    grade_prediction_show_target_needed = forms.BooleanField(
+        required=False,
+        label="Show target-needed calculation",
+    )
+    grade_prediction_default_assumption = forms.ChoiceField(
+        required=False,
+        label="Default prediction assumption",
+        choices=[
+            ("IGNORE_MISSING", "Ignore Missing"),
+            ("RAW_ZERO", "Assume Zero Raw Score"),
+            ("FULL_SCORE", "Assume Full Score"),
+        ],
+        help_text="Controls the primary projected grade shown on prediction tables.",
+    )
 
     def __init__(self, *args, role_queryset=None, campus_queryset=None, campus_initial_map=None, **kwargs):
         self.campus_fields = []
@@ -1492,6 +1569,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
         if role_queryset is not None:
             self.fields["correction_submission_approval_email_roles"].queryset = role_queryset
             self.fields["correction_registrar_auto_email_roles"].queryset = role_queryset
+            self.fields["grade_prediction_roles"].queryset = role_queryset
+            self.fields["grade_prediction_what_if_roles"].queryset = role_queryset
         _enforce_active_reference_choices(self)
 
         for campus in campus_queryset or []:
@@ -1548,6 +1627,41 @@ class ConfigurableFeatureSettingForm(forms.Form):
                     "correction_registrar_default_recipients",
                     "Provide a default registrar recipient or at least one campus-specific recipient before enabling automatic email.",
                 )
+
+        response_window_days = cleaned.get("faculty_assignment_response_window_days")
+        first_reminder_days = cleaned.get("faculty_assignment_first_reminder_days")
+        repeat_reminder_days = cleaned.get("faculty_assignment_repeat_reminder_days")
+        if (
+            response_window_days is not None
+            and first_reminder_days is not None
+            and first_reminder_days > response_window_days
+        ):
+            self.add_error(
+                "faculty_assignment_first_reminder_days",
+                "First reminder day cannot be later than the assignment response window.",
+            )
+        if (
+            response_window_days is not None
+            and repeat_reminder_days is not None
+            and repeat_reminder_days > response_window_days
+        ):
+            self.add_error(
+                "faculty_assignment_repeat_reminder_days",
+                "Repeat reminder interval should not be longer than the assignment response window.",
+            )
+
+        if cleaned.get("grade_prediction_enabled") and not cleaned.get("grade_prediction_roles"):
+            self.add_error(
+                "grade_prediction_roles",
+                "Select at least one role before enabling grade prediction.",
+            )
+        if cleaned.get("grade_prediction_what_if_enabled") and not cleaned.get("grade_prediction_what_if_roles"):
+            self.add_error(
+                "grade_prediction_what_if_roles",
+                "Select at least one role before enabling the what-if simulator.",
+            )
+        if not cleaned.get("grade_prediction_default_assumption"):
+            cleaned["grade_prediction_default_assumption"] = "IGNORE_MISSING"
 
         cleaned["correction_registrar_campus_recipient_map"] = campus_recipient_map
         return cleaned

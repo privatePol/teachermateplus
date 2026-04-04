@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
@@ -63,7 +65,7 @@ from apps.admin_portal.forms import (
     UserRoleAssignmentForm,
     UserUpdateForm,
 )
-from apps.academics.services import AcademicGovernanceService
+from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
 from apps.admin_portal.services import AdminScopeService, model_before_after
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.auditlog.models import AuditLog
@@ -106,6 +108,7 @@ from apps.grading.services import (
 )
 from apps.imports.models import ImportBatch
 from apps.navigation.models import MenuGroup, MenuItem, MenuItemPermission
+from apps.predictions.services import PredictionAuditService, PredictionSnapshotService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
@@ -184,6 +187,16 @@ def _safe_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _format_decimal_display(value):
+    if value in (None, ""):
+        return ""
+    decimal_value = Decimal(str(value))
+    formatted = format(decimal_value.quantize(Decimal("0.01")), "f")
+    if "." in formatted:
+        formatted = formatted.rstrip("0").rstrip(".")
+    return formatted
 
 
 def _redirect_back_or_default(request, fallback_route_name: str, **kwargs):
@@ -314,6 +327,56 @@ def _gradebook_metrics(rows, *, passing_threshold: Decimal):
     ]
 
 
+def _assignment_counts(queryset, *, now=None):
+    now = now or timezone.now()
+    due_soon_cutoff = now + timedelta(days=1)
+    assigned_count = queryset.count()
+    accepted_count = queryset.filter(response_status=FacultyAssignment.ResponseStatus.ACCEPTED).count()
+    pending_count = queryset.filter(response_status=FacultyAssignment.ResponseStatus.PENDING).count()
+    clarification_count = queryset.filter(
+        response_status=FacultyAssignment.ResponseStatus.CLARIFICATION_REQUESTED
+    ).count()
+    declined_count = queryset.filter(response_status=FacultyAssignment.ResponseStatus.DECLINED).count()
+    expired_count = queryset.filter(response_status=FacultyAssignment.ResponseStatus.EXPIRED).count()
+    due_soon_count = queryset.filter(
+        response_status=FacultyAssignment.ResponseStatus.PENDING,
+        response_due_at__isnull=False,
+        response_due_at__gt=now,
+        response_due_at__lte=due_soon_cutoff,
+    ).count()
+    acceptance_rate = round((accepted_count / assigned_count) * 100, 1) if assigned_count else 0
+    return {
+        "assigned_count": assigned_count,
+        "accepted_count": accepted_count,
+        "pending_acceptance_count": pending_count,
+        "clarification_count": clarification_count,
+        "declined_count": declined_count,
+        "expired_count": expired_count,
+        "due_soon_count": due_soon_count,
+        "acceptance_rate": acceptance_rate,
+    }
+
+
+def _faculty_assignment_scope_snapshot(assignment):
+    campus = getattr(assignment.faculty_user, "default_campus", None) or assignment.campus or assignment.offering.campus
+    department = (
+        getattr(assignment.faculty_user, "default_department", None)
+        or assignment.offering.department
+    )
+    full_name = (getattr(assignment.faculty_user, "full_name", "") or "").strip()
+    username = (getattr(assignment.faculty_user, "username", "") or "").strip()
+    faculty_label = f"{full_name} ({username})" if full_name and full_name != username else (full_name or username)
+    return {
+        "campus": campus,
+        "campus_id": getattr(campus, "id", None),
+        "campus_label": getattr(campus, "code", None) or getattr(campus, "name", None) or "-",
+        "department": department,
+        "department_id": getattr(department, "id", None),
+        "department_label": getattr(department, "name", None) or getattr(department, "code", None) or "-",
+        "faculty_label": faculty_label or "-",
+    }
+
+
 def _send_new_user_credentials_email(request, user, temporary_password: str) -> int:
     admin_login_url = request.build_absolute_uri(reverse("accounts:admin_login"))
     faculty_public_url = request.build_absolute_uri(reverse("faculty_portal:public_index"))
@@ -336,6 +399,19 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
     )
     message.attach_alternative(html_body, "text/html")
     return message.send(fail_silently=False)
+
+
+def admin_portal_root_view(request):
+    if not request.user.is_authenticated:
+        return redirect("accounts:admin_login")
+    if not PermissionService.has_permission(
+        request.user,
+        "admin_portal.access",
+        tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+        campus_id=getattr(request, "scope", {}).get("campus_id"),
+    ):
+        return HttpResponseForbidden("Admin portal access denied.")
+    return redirect("admin_portal:dashboard")
 
 
 @portal_required("ADMIN")
@@ -361,6 +437,12 @@ def dashboard_view(request):
     has_system_settings_update = PermissionService.has_permission(
         request.user,
         "system_settings.update",
+        tenant_id=current_tenant_id,
+        campus_id=current_campus_id,
+    )
+    has_faculty_assignments_read = PermissionService.has_permission(
+        request.user,
+        "faculty_assignments.read",
         tenant_id=current_tenant_id,
         campus_id=current_campus_id,
     )
@@ -444,6 +526,7 @@ def dashboard_view(request):
         "has_import_read": has_import_read,
         "has_users_read": has_users_read,
         "has_system_settings_update": has_system_settings_update,
+        "has_faculty_assignments_read": has_faculty_assignments_read,
         "import_stats": import_stats,
         "active_user_sessions": active_user_sessions,
         "active_user_count": len(active_user_sessions),
@@ -1436,6 +1519,58 @@ def configurable_features_settings_view(request):
     current_role_codes = FeatureSettingsService.get_correction_registrar_auto_email_role_codes(tenant_id=tenant_id)
     current_default_recipients = FeatureSettingsService.get_correction_registrar_default_recipients(tenant_id=tenant_id)
     current_campus_recipients = FeatureSettingsService.get_correction_registrar_campus_recipients(tenant_id=tenant_id)
+    current_assignment_reminders_enabled = FeatureSettingsService.is_faculty_assignment_reminders_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_assignment_auto_expire_enabled = FeatureSettingsService.is_faculty_assignment_auto_expire_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_response_window_days = FeatureSettingsService.get_faculty_assignment_response_window_days(
+        tenant_id=tenant_id,
+        default=3,
+    )
+    current_first_reminder_days = FeatureSettingsService.get_faculty_assignment_first_reminder_days(
+        tenant_id=tenant_id,
+        default=1,
+    )
+    current_repeat_reminder_days = FeatureSettingsService.get_faculty_assignment_repeat_reminder_days(
+        tenant_id=tenant_id,
+        default=1,
+    )
+    current_grade_prediction_enabled = FeatureSettingsService.is_grade_prediction_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_grade_prediction_role_codes = FeatureSettingsService.get_grade_prediction_role_codes(tenant_id=tenant_id)
+    current_grade_prediction_what_if_enabled = FeatureSettingsService.is_grade_prediction_what_if_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_grade_prediction_what_if_role_codes = FeatureSettingsService.get_grade_prediction_what_if_role_codes(
+        tenant_id=tenant_id
+    )
+    current_grade_prediction_at_risk_enabled = FeatureSettingsService.is_grade_prediction_at_risk_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_grade_prediction_show_best_case = FeatureSettingsService.show_grade_prediction_best_case(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_grade_prediction_show_worst_case = FeatureSettingsService.show_grade_prediction_worst_case(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_grade_prediction_show_target_needed = FeatureSettingsService.show_grade_prediction_target_needed(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_grade_prediction_default_assumption = FeatureSettingsService.get_grade_prediction_default_assumption(
+        tenant_id=tenant_id,
+        default="IGNORE_MISSING",
+    )
 
     form = ConfigurableFeatureSettingForm(
         request.POST or None,
@@ -1446,6 +1581,20 @@ def configurable_features_settings_view(request):
             "correction_registrar_auto_email_enabled": current_auto_email_enabled,
             "correction_registrar_auto_email_roles": role_queryset.filter(code__in=current_role_codes),
             "correction_registrar_default_recipients": ", ".join(current_default_recipients),
+            "faculty_assignment_reminders_enabled": current_assignment_reminders_enabled,
+            "faculty_assignment_auto_expire_enabled": current_assignment_auto_expire_enabled,
+            "faculty_assignment_response_window_days": current_response_window_days,
+            "faculty_assignment_first_reminder_days": current_first_reminder_days,
+            "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
+            "grade_prediction_enabled": current_grade_prediction_enabled,
+            "grade_prediction_roles": role_queryset.filter(code__in=current_grade_prediction_role_codes),
+            "grade_prediction_what_if_enabled": current_grade_prediction_what_if_enabled,
+            "grade_prediction_what_if_roles": role_queryset.filter(code__in=current_grade_prediction_what_if_role_codes),
+            "grade_prediction_at_risk_enabled": current_grade_prediction_at_risk_enabled,
+            "grade_prediction_show_best_case": current_grade_prediction_show_best_case,
+            "grade_prediction_show_worst_case": current_grade_prediction_show_worst_case,
+            "grade_prediction_show_target_needed": current_grade_prediction_show_target_needed,
+            "grade_prediction_default_assumption": current_grade_prediction_default_assumption,
         },
         role_queryset=role_queryset,
         campus_queryset=campus_queryset,
@@ -1459,6 +1608,12 @@ def configurable_features_settings_view(request):
         )
         selected_role_codes = list(
             form.cleaned_data["correction_registrar_auto_email_roles"].values_list("code", flat=True)
+        )
+        selected_grade_prediction_role_codes = list(
+            form.cleaned_data["grade_prediction_roles"].values_list("code", flat=True)
+        )
+        selected_grade_prediction_what_if_role_codes = list(
+            form.cleaned_data["grade_prediction_what_if_roles"].values_list("code", flat=True)
         )
         selected_default_recipients = form.cleaned_data["correction_registrar_default_recipient_list"]
         selected_campus_recipients = form.cleaned_data["correction_registrar_campus_recipient_map"]
@@ -1512,6 +1667,104 @@ def configurable_features_settings_view(request):
             value_type="JSON",
             is_active=True,
         )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_ASSIGNMENT_REMINDERS_ENABLED_KEY,
+            bool(form.cleaned_data["faculty_assignment_reminders_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED_KEY,
+            bool(form.cleaned_data["faculty_assignment_auto_expire_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY,
+            int(form.cleaned_data["faculty_assignment_response_window_days"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY,
+            int(form.cleaned_data["faculty_assignment_first_reminder_days"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS_KEY,
+            int(form.cleaned_data["faculty_assignment_repeat_reminder_days"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_PREDICTION_ENABLED_KEY,
+            bool(form.cleaned_data["grade_prediction_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_PREDICTION_ROLE_CODES_KEY,
+            selected_grade_prediction_role_codes,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_PREDICTION_WHAT_IF_ENABLED_KEY,
+            bool(form.cleaned_data["grade_prediction_what_if_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_PREDICTION_WHAT_IF_ROLE_CODES_KEY,
+            selected_grade_prediction_what_if_role_codes,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_PREDICTION_AT_RISK_ENABLED_KEY,
+            bool(form.cleaned_data["grade_prediction_at_risk_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_PREDICTION_SHOW_BEST_CASE_KEY,
+            bool(form.cleaned_data["grade_prediction_show_best_case"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_PREDICTION_SHOW_WORST_CASE_KEY,
+            bool(form.cleaned_data["grade_prediction_show_worst_case"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_PREDICTION_SHOW_TARGET_NEEDED_KEY,
+            bool(form.cleaned_data["grade_prediction_show_target_needed"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_PREDICTION_DEFAULT_ASSUMPTION_KEY,
+            str(form.cleaned_data["grade_prediction_default_assumption"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
 
         AuditService.log_event(
             action="UPDATE_SYSTEM_SETTING",
@@ -1529,6 +1782,20 @@ def configurable_features_settings_view(request):
                 "correction_registrar_auto_email_role_codes": current_role_codes,
                 "correction_registrar_default_recipients": current_default_recipients,
                 "correction_registrar_campus_recipients": current_campus_recipients,
+                "faculty_assignment_reminders_enabled": current_assignment_reminders_enabled,
+                "faculty_assignment_auto_expire_enabled": current_assignment_auto_expire_enabled,
+                "faculty_assignment_response_window_days": current_response_window_days,
+                "faculty_assignment_first_reminder_days": current_first_reminder_days,
+                "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
+                "grade_prediction_enabled": current_grade_prediction_enabled,
+                "grade_prediction_role_codes": current_grade_prediction_role_codes,
+                "grade_prediction_what_if_enabled": current_grade_prediction_what_if_enabled,
+                "grade_prediction_what_if_role_codes": current_grade_prediction_what_if_role_codes,
+                "grade_prediction_at_risk_enabled": current_grade_prediction_at_risk_enabled,
+                "grade_prediction_show_best_case": current_grade_prediction_show_best_case,
+                "grade_prediction_show_worst_case": current_grade_prediction_show_worst_case,
+                "grade_prediction_show_target_needed": current_grade_prediction_show_target_needed,
+                "grade_prediction_default_assumption": current_grade_prediction_default_assumption,
             },
             after_data={
                 "correction_official_report_enabled": bool(form.cleaned_data["correction_official_report_enabled"]),
@@ -1540,6 +1807,20 @@ def configurable_features_settings_view(request):
                 "correction_registrar_auto_email_role_codes": selected_role_codes,
                 "correction_registrar_default_recipients": selected_default_recipients,
                 "correction_registrar_campus_recipients": selected_campus_recipients,
+                "faculty_assignment_reminders_enabled": bool(form.cleaned_data["faculty_assignment_reminders_enabled"]),
+                "faculty_assignment_auto_expire_enabled": bool(form.cleaned_data["faculty_assignment_auto_expire_enabled"]),
+                "faculty_assignment_response_window_days": int(form.cleaned_data["faculty_assignment_response_window_days"]),
+                "faculty_assignment_first_reminder_days": int(form.cleaned_data["faculty_assignment_first_reminder_days"]),
+                "faculty_assignment_repeat_reminder_days": int(form.cleaned_data["faculty_assignment_repeat_reminder_days"]),
+                "grade_prediction_enabled": bool(form.cleaned_data["grade_prediction_enabled"]),
+                "grade_prediction_role_codes": selected_grade_prediction_role_codes,
+                "grade_prediction_what_if_enabled": bool(form.cleaned_data["grade_prediction_what_if_enabled"]),
+                "grade_prediction_what_if_role_codes": selected_grade_prediction_what_if_role_codes,
+                "grade_prediction_at_risk_enabled": bool(form.cleaned_data["grade_prediction_at_risk_enabled"]),
+                "grade_prediction_show_best_case": bool(form.cleaned_data["grade_prediction_show_best_case"]),
+                "grade_prediction_show_worst_case": bool(form.cleaned_data["grade_prediction_show_worst_case"]),
+                "grade_prediction_show_target_needed": bool(form.cleaned_data["grade_prediction_show_target_needed"]),
+                "grade_prediction_default_assumption": str(form.cleaned_data["grade_prediction_default_assumption"]),
             },
             metadata={
                 "setting_keys": [
@@ -1550,6 +1831,20 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.CORRECTION_REGISTRAR_AUTO_EMAIL_ROLE_CODES_KEY,
                     FeatureSettingsService.CORRECTION_REGISTRAR_DEFAULT_RECIPIENTS_KEY,
                     FeatureSettingsService.CORRECTION_REGISTRAR_CAMPUS_RECIPIENTS_KEY,
+                    FeatureSettingsService.FACULTY_ASSIGNMENT_REMINDERS_ENABLED_KEY,
+                    FeatureSettingsService.FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED_KEY,
+                    FeatureSettingsService.FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY,
+                    FeatureSettingsService.FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY,
+                    FeatureSettingsService.FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS_KEY,
+                    FeatureSettingsService.GRADE_PREDICTION_ENABLED_KEY,
+                    FeatureSettingsService.GRADE_PREDICTION_ROLE_CODES_KEY,
+                    FeatureSettingsService.GRADE_PREDICTION_WHAT_IF_ENABLED_KEY,
+                    FeatureSettingsService.GRADE_PREDICTION_WHAT_IF_ROLE_CODES_KEY,
+                    FeatureSettingsService.GRADE_PREDICTION_AT_RISK_ENABLED_KEY,
+                    FeatureSettingsService.GRADE_PREDICTION_SHOW_BEST_CASE_KEY,
+                    FeatureSettingsService.GRADE_PREDICTION_SHOW_WORST_CASE_KEY,
+                    FeatureSettingsService.GRADE_PREDICTION_SHOW_TARGET_NEEDED_KEY,
+                    FeatureSettingsService.GRADE_PREDICTION_DEFAULT_ASSUMPTION_KEY,
                 ],
             },
             request=request,
@@ -2952,6 +3247,7 @@ def offering_update_view(request, offering_id: int):
 @portal_required("ADMIN")
 @permission_required("faculty_assignments.read")
 def faculty_assignment_list_view(request):
+    FacultyAssignmentWorkflowService.expire_overdue_assignments()
     faculty_ids = AdminScopeService.scoped_faculty_users(request)
     all_faculty = (
         User.objects.filter(id__in=faculty_ids, is_active=True)
@@ -2974,6 +3270,7 @@ def faculty_assignment_list_view(request):
 
     offering_q = request.GET.get("offering_q", "").strip()
     selected_section_id = _safe_int(request.GET.get("section_id"))
+    assignment_note = (request.GET.get("assignment_note") or "").strip()
     sections = AdminScopeService.scoped_sections(request).filter(is_active=True).order_by("code")
     assignable_offerings = AdminScopeService.scoped_course_offerings(request).filter(is_active=True).exclude(
         faculty_assignments__is_active=True
@@ -2991,16 +3288,75 @@ def faculty_assignment_list_view(request):
 
     selected_faculty_assignments = None
     assigned_count = 0
+    accepted_count = 0
+    pending_acceptance_count = 0
+    declined_count = 0
+    clarification_count = 0
+    expired_count = 0
+    due_soon_count = 0
+    assignment_metric_cards = []
     if selected_faculty:
         selected_faculty_assignments = (
             AdminScopeService.scoped_faculty_assignments(request)
             .filter(faculty_user_id=selected_faculty.id, is_active=True)
-            .select_related("offering", "offering__course", "offering__section", "offering__term", "offering__academic_year")
+            .select_related(
+                "accepted_by",
+                "offering",
+                "offering__course",
+                "offering__section",
+                "offering__term",
+                "offering__academic_year",
+            )
             .order_by("offering__academic_year__start_date", "offering__term__sequence_no", "offering__course__code")
         )
         if selected_section_id:
             selected_faculty_assignments = selected_faculty_assignments.filter(offering__section_id=selected_section_id)
-        assigned_count = selected_faculty_assignments.count()
+        count_snapshot = _assignment_counts(selected_faculty_assignments)
+        assigned_count = count_snapshot["assigned_count"]
+        accepted_count = count_snapshot["accepted_count"]
+        pending_acceptance_count = count_snapshot["pending_acceptance_count"]
+        declined_count = count_snapshot["declined_count"]
+        clarification_count = count_snapshot["clarification_count"]
+        expired_count = count_snapshot["expired_count"]
+        due_soon_count = count_snapshot["due_soon_count"]
+        acceptance_rate = count_snapshot["acceptance_rate"]
+        assignment_metric_cards = [
+            {
+                "label": "Assigned Offerings",
+                "value": assigned_count,
+                "meta": "All active offerings currently assigned to this faculty.",
+            },
+            {
+                "label": "Accepted",
+                "value": accepted_count,
+                "meta": f"{acceptance_rate:.1f}% of assigned offerings acknowledged.",
+            },
+            {
+                "label": "Pending Acceptance",
+                "value": pending_acceptance_count,
+                "meta": "Assignments still waiting for faculty acknowledgment.",
+            },
+            {
+                "label": "Due Within 24 Hours",
+                "value": due_soon_count,
+                "meta": "Pending assignments that are nearing response expiry.",
+            },
+            {
+                "label": "Expired",
+                "value": expired_count,
+                "meta": "Assignments that need admin follow-up or a renewed response window.",
+            },
+            {
+                "label": "Clarification / Declined",
+                "value": clarification_count + declined_count,
+                "meta": f"{clarification_count} clarification, {declined_count} declined.",
+            },
+            {
+                "label": "Primary Load",
+                "value": selected_faculty_assignments.filter(is_primary=True).count(),
+                "meta": "Offerings currently tagged as primary teaching load.",
+            },
+        ]
 
     context = {
         "faculty_q": faculty_q,
@@ -3009,11 +3365,23 @@ def faculty_assignment_list_view(request):
         "show_assign_box": show_assign_box,
         "offering_q": offering_q,
         "selected_section_id": selected_section_id,
+        "assignment_note": assignment_note,
         "sections": sections,
         "assignable_offerings": assignable_offerings,
         "assignable_count": assignable_count,
         "selected_faculty_assignments": selected_faculty_assignments,
         "assigned_count": assigned_count,
+        "accepted_count": accepted_count,
+        "pending_acceptance_count": pending_acceptance_count,
+        "declined_count": declined_count,
+        "clarification_count": clarification_count,
+        "expired_count": expired_count,
+        "due_soon_count": due_soon_count,
+        "assignment_metric_cards": assignment_metric_cards,
+        "grade_prediction_enabled": FeatureSettingsService.can_user_access_grade_prediction(
+            user=request.user,
+            tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+        ),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/academics/faculty_assignment_list.html", context)
@@ -3217,9 +3585,430 @@ def faculty_gradebook_monitor_view(request):
         "q": q,
         "is_masked": is_masked,
         "table_colspan": table_colspan,
+        "grade_prediction_enabled": FeatureSettingsService.can_user_access_grade_prediction(
+            user=request.user,
+            tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+        ),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/academics/faculty_gradebook_monitor.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("faculty_assignments.read")
+def grade_prediction_monitor_view(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    if tenant_id and not FeatureSettingsService.can_user_access_grade_prediction(user=request.user, tenant_id=tenant_id):
+        messages.error(request, "Grade prediction is currently disabled for your role.")
+        return _redirect_back_or_default(request, "admin_portal:dashboard")
+
+    faculty_ids = AdminScopeService.scoped_faculty_users(request)
+    all_faculty = User.objects.filter(id__in=faculty_ids, is_active=True).order_by("last_name", "first_name", "username")
+
+    faculty_q = request.GET.get("faculty_q", "").strip()
+    faculty_candidates = all_faculty
+    if faculty_q:
+        faculty_candidates = faculty_candidates.filter(
+            Q(username__icontains=faculty_q)
+            | Q(email__icontains=faculty_q)
+            | Q(first_name__icontains=faculty_q)
+            | Q(last_name__icontains=faculty_q)
+        )
+
+    selected_faculty_id = _safe_int(request.GET.get("faculty_user_id"))
+    selected_faculty = all_faculty.filter(id=selected_faculty_id).first() if selected_faculty_id else None
+    selected_offering = None
+    selected_period = None
+    periods = []
+    prediction_rows = []
+    summary = None
+    metric_cards = []
+    selected_faculty_assignments = FacultyAssignment.objects.none()
+    is_masked = _should_mask_gradebook_student_identity(request.user)
+    q = request.GET.get("q", "").strip()
+
+    if selected_faculty:
+        selected_faculty_assignments = (
+            AdminScopeService.scoped_faculty_assignments(request)
+            .filter(faculty_user_id=selected_faculty.id, is_active=True)
+            .select_related(
+                "offering",
+                "offering__course",
+                "offering__section",
+                "offering__term",
+                "offering__academic_year",
+                "offering__campus",
+            )
+            .order_by("offering__academic_year__start_date", "offering__term__sequence_no", "offering__course__code")
+        )
+        offering_map = {assignment.offering_id: assignment.offering for assignment in selected_faculty_assignments}
+        selected_offering_id = _safe_int(request.GET.get("offering_id"))
+        if selected_offering_id in offering_map:
+            selected_offering = offering_map[selected_offering_id]
+        elif offering_map:
+            selected_offering = next(iter(offering_map.values()))
+
+        if selected_offering:
+            try:
+                template = FacultyGradingService.resolve_template_for_offering(selected_offering)
+            except ValidationError as exc:
+                messages.error(request, str(exc))
+                template = None
+            if template:
+                periods = list(template.periods.filter(is_active=True).order_by("sequence_no", "id"))
+                period_map = {period.id: period for period in periods}
+                selected_period_id = _safe_int(request.GET.get("period_id"))
+                if selected_period_id in period_map:
+                    selected_period = period_map[selected_period_id]
+                elif periods:
+                    selected_period = periods[0]
+
+            if selected_period:
+                force_refresh = request.GET.get("refresh") == "1"
+                prediction_data = PredictionSnapshotService.get_period_predictions(
+                    offering=selected_offering,
+                    template_period=selected_period,
+                    user=request.user,
+                    force_refresh=force_refresh,
+                )
+                PredictionAuditService.log_view(
+                    user=request.user,
+                    offering=selected_offering,
+                    template_period=selected_period,
+                    view_mode="CLASS_SUMMARY",
+                )
+                summary = prediction_data["summary"]
+                prediction_rows = prediction_data["rows"]
+                if q:
+                    prediction_rows = [
+                        row
+                        for row in prediction_rows
+                        if q.lower() in row.student.student_no.lower()
+                        or q.lower() in row.student.last_name.lower()
+                        or q.lower() in row.student.first_name.lower()
+                    ]
+                metric_cards = [
+                    {"label": "Students", "value": summary.student_count, "meta": "Active students in this monitored class."},
+                    {
+                        "label": "With Projection",
+                        "value": summary.students_with_projection,
+                        "meta": f"{summary.avg_coverage_percent}% average coverage",
+                    },
+                    {"label": "At Risk", "value": summary.at_risk_count, "meta": "Projected below passing threshold."},
+                    {
+                        "label": "Average Projection",
+                        "value": _format_decimal_display(summary.avg_projected_grade),
+                        "meta": "Unofficial projected period grade.",
+                    },
+                    {
+                        "label": "Best Case",
+                        "value": _format_decimal_display(summary.avg_best_case_grade),
+                        "meta": "If remaining items are completed at full score.",
+                    },
+                    {
+                        "label": "Worst Case",
+                        "value": _format_decimal_display(summary.avg_worst_case_grade),
+                        "meta": "If remaining items get zero raw score.",
+                    },
+                ]
+
+    context = {
+        "faculty_q": faculty_q,
+        "faculty_candidates": faculty_candidates,
+        "selected_faculty": selected_faculty,
+        "selected_faculty_assignments": selected_faculty_assignments,
+        "selected_offering": selected_offering,
+        "selected_period": selected_period,
+        "periods": periods,
+        "rows": prediction_rows,
+        "summary": summary,
+        "metric_cards": metric_cards,
+        "is_masked": is_masked,
+        "q": q,
+        "at_risk_enabled": FeatureSettingsService.is_grade_prediction_at_risk_enabled(tenant_id=tenant_id, default=True),
+        "show_best_case": FeatureSettingsService.show_grade_prediction_best_case(tenant_id=tenant_id, default=True),
+        "show_worst_case": FeatureSettingsService.show_grade_prediction_worst_case(tenant_id=tenant_id, default=True),
+        "show_target_needed": FeatureSettingsService.show_grade_prediction_target_needed(tenant_id=tenant_id, default=True),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/academics/grade_prediction_monitor.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("faculty_assignments.read")
+def faculty_assignment_dashboard_view(request):
+    FacultyAssignmentWorkflowService.expire_overdue_assignments()
+
+    selected_campus_id = _safe_int(request.GET.get("campus_id"))
+    selected_department_id = _safe_int(request.GET.get("department_id"))
+    faculty_q = (request.GET.get("faculty_q") or "").strip()
+
+    campus_options = AdminScopeService.scoped_campuses(request).order_by("code", "name")
+    department_options = AdminScopeService.scoped_departments(request).order_by("campus__code", "name")
+    if selected_campus_id:
+        department_options = department_options.filter(campus_id=selected_campus_id)
+
+    assignment_queryset = (
+        AdminScopeService.scoped_faculty_assignments(request)
+        .filter(is_active=True)
+        .select_related(
+            "faculty_user",
+            "faculty_user__default_campus",
+            "faculty_user__default_department",
+            "offering",
+            "offering__course",
+            "offering__section",
+            "offering__campus",
+            "offering__department",
+        )
+    )
+
+    assignment_rows = []
+    lowered_faculty_q = faculty_q.lower()
+    for assignment in assignment_queryset:
+        scope_snapshot = _faculty_assignment_scope_snapshot(assignment)
+        if selected_campus_id and scope_snapshot["campus_id"] != selected_campus_id:
+            continue
+        if selected_department_id and scope_snapshot["department_id"] != selected_department_id:
+            continue
+        if faculty_q:
+            faculty_haystack = " ".join(
+                [
+                    scope_snapshot["faculty_label"],
+                    assignment.faculty_user.username or "",
+                    assignment.faculty_user.email or "",
+                ]
+            ).lower()
+            if lowered_faculty_q not in faculty_haystack:
+                continue
+        assignment.scope_snapshot = scope_snapshot
+        assignment_rows.append(assignment)
+
+    now = timezone.now()
+    due_soon_cutoff = now + timedelta(days=1)
+    faculty_ids = {assignment.faculty_user_id for assignment in assignment_rows}
+    overall_counts = {
+        "assigned_count": len(assignment_rows),
+        "accepted_count": 0,
+        "pending_acceptance_count": 0,
+        "clarification_count": 0,
+        "declined_count": 0,
+        "expired_count": 0,
+        "due_soon_count": 0,
+    }
+
+    def _apply_bucket_counts(bucket, assignment):
+        bucket["assigned_count"] += 1
+        status = assignment.response_status
+        if status == FacultyAssignment.ResponseStatus.ACCEPTED:
+            bucket["accepted_count"] += 1
+        elif status == FacultyAssignment.ResponseStatus.PENDING:
+            bucket["pending_acceptance_count"] += 1
+            if assignment.response_due_at and now < assignment.response_due_at <= due_soon_cutoff:
+                bucket["due_soon_count"] += 1
+        elif status == FacultyAssignment.ResponseStatus.CLARIFICATION_REQUESTED:
+            bucket["clarification_count"] += 1
+        elif status == FacultyAssignment.ResponseStatus.DECLINED:
+            bucket["declined_count"] += 1
+        elif status == FacultyAssignment.ResponseStatus.EXPIRED:
+            bucket["expired_count"] += 1
+
+    campus_buckets = {}
+    department_buckets = {}
+    faculty_buckets = {}
+    for assignment in assignment_rows:
+        _apply_bucket_counts(overall_counts, assignment)
+        scope_snapshot = assignment.scope_snapshot
+        campus_key = scope_snapshot["campus_id"] or f"campus:{scope_snapshot['campus_label']}"
+        department_key = (
+            scope_snapshot["campus_id"],
+            scope_snapshot["department_id"] or f"department:{scope_snapshot['department_label']}",
+        )
+        faculty_key = assignment.faculty_user_id
+
+        campus_bucket = campus_buckets.setdefault(
+            campus_key,
+            {
+                "campus_label": scope_snapshot["campus_label"],
+                "faculty_ids": set(),
+                "assigned_count": 0,
+                "accepted_count": 0,
+                "pending_acceptance_count": 0,
+                "clarification_count": 0,
+                "declined_count": 0,
+                "expired_count": 0,
+                "due_soon_count": 0,
+            },
+        )
+        campus_bucket["faculty_ids"].add(assignment.faculty_user_id)
+        _apply_bucket_counts(campus_bucket, assignment)
+
+        department_bucket = department_buckets.setdefault(
+            department_key,
+            {
+                "campus_label": scope_snapshot["campus_label"],
+                "department_label": scope_snapshot["department_label"],
+                "faculty_ids": set(),
+                "assigned_count": 0,
+                "accepted_count": 0,
+                "pending_acceptance_count": 0,
+                "clarification_count": 0,
+                "declined_count": 0,
+                "expired_count": 0,
+                "due_soon_count": 0,
+            },
+        )
+        department_bucket["faculty_ids"].add(assignment.faculty_user_id)
+        _apply_bucket_counts(department_bucket, assignment)
+
+        faculty_bucket = faculty_buckets.setdefault(
+            faculty_key,
+            {
+                "faculty_user_id": assignment.faculty_user_id,
+                "faculty_label": scope_snapshot["faculty_label"],
+                "campus_label": scope_snapshot["campus_label"],
+                "department_label": scope_snapshot["department_label"],
+                "assigned_count": 0,
+                "accepted_count": 0,
+                "pending_acceptance_count": 0,
+                "clarification_count": 0,
+                "declined_count": 0,
+                "expired_count": 0,
+                "due_soon_count": 0,
+            },
+        )
+        _apply_bucket_counts(faculty_bucket, assignment)
+
+    def _decorate_rows(rows, include_faculty_total=False):
+        decorated = []
+        for row in rows:
+            assigned = row["assigned_count"]
+            row["acceptance_rate"] = round((row["accepted_count"] / assigned) * 100, 1) if assigned else 0
+            if "faculty_ids" in row:
+                row["faculty_count"] = len(row["faculty_ids"])
+            decorated.append(row)
+        return decorated
+
+    campus_rows = sorted(
+        _decorate_rows(list(campus_buckets.values())),
+        key=lambda item: (item["campus_label"], -item["assigned_count"]),
+    )
+    department_rows = sorted(
+        _decorate_rows(list(department_buckets.values())),
+        key=lambda item: (item["campus_label"], item["department_label"], -item["assigned_count"]),
+    )
+    faculty_rows = sorted(
+        _decorate_rows(list(faculty_buckets.values())),
+        key=lambda item: (-item["pending_acceptance_count"], -item["expired_count"], item["faculty_label"]),
+    )
+
+    metric_cards = [
+        {
+            "label": "Faculty In Scope",
+            "value": len(faculty_ids),
+            "meta": "Faculty members with at least one assignment in the current filter.",
+        },
+        {
+            "label": "Assigned Loads",
+            "value": overall_counts["assigned_count"],
+            "meta": "Total active faculty assignments in scope.",
+        },
+        {
+            "label": "Accepted",
+            "value": overall_counts["accepted_count"],
+            "meta": f"{round((overall_counts['accepted_count'] / overall_counts['assigned_count']) * 100, 1) if overall_counts['assigned_count'] else 0:.1f}% acknowledged.",
+        },
+        {
+            "label": "Pending Acceptance",
+            "value": overall_counts["pending_acceptance_count"],
+            "meta": "Loads still waiting for faculty response.",
+        },
+        {
+            "label": "Due Within 24 Hours",
+            "value": overall_counts["due_soon_count"],
+            "meta": "Pending assignments that need immediate follow-up.",
+        },
+        {
+            "label": "Expired",
+            "value": overall_counts["expired_count"],
+            "meta": "Loads that now require admin renewal.",
+        },
+    ]
+
+    context = {
+        "title": "Faculty Assignment Dashboard",
+        "selected_campus_id": selected_campus_id,
+        "selected_department_id": selected_department_id,
+        "faculty_q": faculty_q,
+        "campus_options": campus_options,
+        "department_options": department_options,
+        "metric_cards": metric_cards,
+        "campus_rows": campus_rows,
+        "department_rows": department_rows,
+        "faculty_rows": faculty_rows,
+        "overall_counts": overall_counts,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/academics/faculty_assignment_dashboard.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("faculty_assignments.update")
+def faculty_assignment_renew_window_view(request, assignment_id: int):
+    if request.method != "POST":
+        return HttpResponseForbidden("Invalid request method.")
+
+    row = get_object_or_404(AdminScopeService.scoped_faculty_assignments(request), id=assignment_id, is_active=True)
+    redirect_params = {}
+    faculty_user_id = _safe_int(request.POST.get("faculty_user_id"))
+    faculty_q = (request.POST.get("faculty_q") or "").strip()
+    offering_q = (request.POST.get("offering_q") or "").strip()
+    selected_section_id = _safe_int(request.POST.get("section_id"))
+    if faculty_user_id:
+        redirect_params["faculty_user_id"] = faculty_user_id
+    if faculty_q:
+        redirect_params["faculty_q"] = faculty_q
+    if offering_q:
+        redirect_params["offering_q"] = offering_q
+    if selected_section_id:
+        redirect_params["section_id"] = selected_section_id
+
+    if row.response_status != FacultyAssignment.ResponseStatus.EXPIRED:
+        messages.error(request, "Only expired faculty assignments can be renewed from this action.")
+        return redirect(f"{reverse('admin_portal:faculty_assignment_list')}?{urlencode(redirect_params)}")
+
+    before = model_before_after(row)
+    FacultyAssignmentWorkflowService.reset_response_window(row, note=row.assignment_note)
+    row.save(
+        update_fields=[
+            "assignment_note",
+            "accepted_at",
+            "accepted_by",
+            "response_status",
+            "faculty_response_note",
+            "responded_at",
+            "response_due_at",
+            "last_reminded_at",
+            "reminder_count",
+            "updated_at",
+        ]
+    )
+    AuditService.log_event(
+        action="UPDATE",
+        portal="ADMIN",
+        entity_type="FacultyAssignment",
+        entity_id=row.id,
+        actor=request.user,
+        before_data=before,
+        after_data=model_before_after(row),
+        metadata={"event": "renew_response_window"},
+        request=request,
+    )
+    messages.success(
+        request,
+        f"Response window renewed for {row.offering.course.code} / {row.offering.section.code}.",
+    )
+    return redirect(f"{reverse('admin_portal:faculty_assignment_list')}?{urlencode(redirect_params)}")
 
 
 @portal_required("ADMIN")
@@ -3242,6 +4031,7 @@ def faculty_assignment_assign_view(request):
     faculty_q = (request.POST.get("faculty_q") or "").strip()
     offering_q = (request.POST.get("offering_q") or "").strip()
     selected_section_id = _safe_int(request.POST.get("section_id"))
+    assignment_note = (request.POST.get("assignment_note") or "").strip()
 
     redirect_params = {"assign": "1"}
     if faculty_user_id:
@@ -3252,6 +4042,8 @@ def faculty_assignment_assign_view(request):
         redirect_params["offering_q"] = offering_q
     if selected_section_id:
         redirect_params["section_id"] = selected_section_id
+    if assignment_note:
+        redirect_params["assignment_note"] = assignment_note
 
     if not faculty_user_id or not selected_ids:
         messages.error(request, "Select faculty and at least one course offering before assigning.")
@@ -3288,7 +4080,22 @@ def faculty_assignment_assign_view(request):
         if existing and not existing.is_active:
             before = model_before_after(existing)
             existing.is_active = True
-            existing.save(update_fields=["is_active", "updated_at"])
+            FacultyAssignmentWorkflowService.reset_response_window(existing, note=assignment_note or None)
+            existing.save(
+                update_fields=[
+                    "is_active",
+                    "assignment_note",
+                    "accepted_at",
+                    "accepted_by",
+                    "response_status",
+                    "faculty_response_note",
+                    "responded_at",
+                    "response_due_at",
+                    "last_reminded_at",
+                    "reminder_count",
+                    "updated_at",
+                ]
+            )
             AuditService.log_event(
                 action="UPDATE",
                 portal="ADMIN",
@@ -3313,6 +4120,21 @@ def faculty_assignment_assign_view(request):
             faculty_user=faculty_user,
             is_primary=False,
             is_active=True,
+        )
+        FacultyAssignmentWorkflowService.reset_response_window(created, note=assignment_note or None)
+        created.save(
+            update_fields=[
+                "assignment_note",
+                "accepted_at",
+                "accepted_by",
+                "response_status",
+                "faculty_response_note",
+                "responded_at",
+                "response_due_at",
+                "last_reminded_at",
+                "reminder_count",
+                "updated_at",
+            ]
         )
         AuditService.log_event(
             action="CREATE",
@@ -3493,6 +4315,7 @@ def faculty_assignment_create_view(request):
         row = form.save(commit=False)
         row.tenant_id = row.offering.tenant_id
         row.campus_id = row.offering.campus_id
+        FacultyAssignmentWorkflowService.reset_response_window(row, note=row.assignment_note)
         row.save()
         AuditService.log_event(
             action="CREATE",
@@ -3528,6 +4351,20 @@ def faculty_assignment_update_view(request, assignment_id: int):
         row = form.save(commit=False)
         row.tenant_id = row.offering.tenant_id
         row.campus_id = row.offering.campus_id
+        should_reset_window = (
+            before.get("offering") != row.offering_id
+            or before.get("faculty_user") != row.faculty_user_id
+            or (
+                before.get("assignment_note") != row.assignment_note
+                and row.response_status in {
+                    FacultyAssignment.ResponseStatus.CLARIFICATION_REQUESTED,
+                    FacultyAssignment.ResponseStatus.DECLINED,
+                    FacultyAssignment.ResponseStatus.EXPIRED,
+                }
+            )
+        )
+        if should_reset_window:
+            FacultyAssignmentWorkflowService.reset_response_window(row, note=row.assignment_note)
         row.save()
         AuditService.log_event(
             action="UPDATE",

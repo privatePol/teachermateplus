@@ -126,6 +126,13 @@ class CourseOffering(TimeStampedModel, ActivatableModel):
 
 
 class FacultyAssignment(TimeStampedModel, ActivatableModel):
+    class ResponseStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        ACCEPTED = "ACCEPTED", "Accepted"
+        DECLINED = "DECLINED", "Declined"
+        CLARIFICATION_REQUESTED = "CLARIFICATION_REQUESTED", "Clarification Requested"
+        EXPIRED = "EXPIRED", "Expired"
+
     tenant = models.ForeignKey(
         "tenants.Tenant",
         on_delete=models.PROTECT,
@@ -146,6 +153,25 @@ class FacultyAssignment(TimeStampedModel, ActivatableModel):
     faculty_user = models.ForeignKey(
         "accounts.User", on_delete=models.PROTECT, related_name="faculty_assignments"
     )
+    assignment_note = models.TextField(blank=True, null=True)
+    accepted_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="accepted_faculty_assignments",
+        blank=True,
+        null=True,
+    )
+    response_status = models.CharField(
+        max_length=32,
+        choices=ResponseStatus.choices,
+        default=ResponseStatus.PENDING,
+    )
+    faculty_response_note = models.TextField(blank=True, null=True)
+    responded_at = models.DateTimeField(blank=True, null=True)
+    accepted_at = models.DateTimeField(blank=True, null=True)
+    response_due_at = models.DateTimeField(blank=True, null=True)
+    last_reminded_at = models.DateTimeField(blank=True, null=True)
+    reminder_count = models.PositiveIntegerField(default=0)
     is_primary = models.BooleanField(default=False)
     assigned_at = models.DateTimeField(auto_now_add=True)
 
@@ -158,3 +184,7 @@ class FacultyAssignment(TimeStampedModel, ActivatableModel):
 
     def __str__(self):
         return f"{self.offering_id}:{self.faculty_user.username}"
+
+    @property
+    def is_accepted(self):
+        return self.response_status == self.ResponseStatus.ACCEPTED and self.accepted_at is not None

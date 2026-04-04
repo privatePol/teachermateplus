@@ -7,6 +7,23 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Faculty assignment acceptance workflow:
+  - faculty must accept newly assigned classes before opening grading or class-list screens
+  - acceptance stores both `accepted_at` and `accepted_by` on the faculty assignment row
+  - faculty `My Courses` now surfaces pending assignments with direct accept actions.
+- Faculty assignment response workflow:
+  - admin can attach assignment instructions/notes to a faculty load
+  - faculty can request clarification or decline with a written note
+  - admin faculty-assignment view now shows response status, admin instructions, and faculty response notes.
+- Faculty assignment reminder/expiry workflow:
+  - pending assignments now track a response due date, reminder count, and last reminder timestamp
+  - overdue pending assignments automatically move to `EXPIRED`
+  - a new command `manage.py process_faculty_assignment_reminders` can queue reminder notifications and expire overdue loads
+  - admin and faculty pages now surface due-soon and expired assignment status directly in the UI.
+- Admin assignment operations expanded further:
+  - expired faculty loads now support a one-click `Renew Response Window` action from Faculty Assignments
+  - a new Faculty Assignment Dashboard summarizes assignment status across campus, department, and faculty
+  - admin dashboard and faculty public homepage now surface help cards that explain the assignment-acceptance rule before users open the full guides.
 - Faculty public landing page with top-nav login, workflow/features/integration/support sections.
 - Faculty guide and help-center style content linked from the faculty portal help icon (`?`).
 - CSV import framework with strict template matching and preview/confirm flow.
@@ -76,6 +93,28 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - AC/Dean/CAO can open a read-only gradebook monitor for scoped faculty members
   - monitor includes per-class metric cards and masked student identity for academic oversight roles
   - opening the monitor is captured in the audit trail.
+- Admin faculty assignment acceptance snapshot:
+  - assignment list now shows accepted vs pending status per offering
+  - admin can see who accepted and when
+  - metric cards summarize assigned, accepted, pending, and primary-load counts for the selected faculty.
+  - metric cards now also surface clarification-request and decline counts for faster load monitoring.
+- Admin Portal root landing paths now resolve cleanly:
+  - `/admin-portal` and `/admin-portal/` now redirect to the proper login/dashboard flow instead of showing an error page.
+- Admin Portal left navigation now supports collapse/expand behavior with stronger visual hierarchy:
+  - selected menu items use a green/yellow gradient highlight
+  - sidebar typography was tuned for readability
+  - sidebar state is persisted per browser.
+- Admin Portal sidebar navigation now uses icon-led group and link chips with arrow-only collapse/expand controls:
+  - collapsed view preserves the NCBA/logo area better
+  - sidebar greens were deepened to reduce the yellow cast
+  - group headers and menu entries use icons for quicker scanability.
+- Sidebar collapse control moved to the top-right corner of the nav column, and collapsed mode now keeps icon-only menu visibility instead of hiding the menu block entirely.
+- Admin Portal sidebar menu hierarchy refined further:
+  - `+` markers now belong only to group headers
+  - menu items use their own icons and are indented under the group
+  - collapsed mode hides child menu items again so only group-level controls remain visible
+  - sidebar toggle spacing was adjusted to avoid overlapping the logo.
+- Collapsed sidebar icons now show hover tooltips and act as direct shortcuts to the first linked page under each group.
 
 ### Changed
 - Comparison section wording updated to neutral term: **Standalone Grade Files / Spreadsheets**.
@@ -131,6 +170,41 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Course form campus-to-department mapping is now safer:
   - the department dropdown stays aligned to the selected campus instead of listing departments from every campus at once
   - admins are guided to choose campus first before mapping a campus-specific department to a course.
+- Faculty assignment monitoring now includes response-window governance:
+  - admin metric cards show due-within-24-hours and expired load counts
+  - faculty pending-assignment cards show response due date, reminder history, and expired-state guidance.
+- Configurable Features now exposes faculty-assignment acceptance workflow controls:
+  - enable/disable reminders
+  - enable/disable automatic expiry
+  - response-window days
+  - first-reminder day
+  - repeat-reminder interval.
+- Grade prediction module foundations are now available behind configurable features:
+  - read-only faculty prediction page per class/period
+  - admin prediction monitor for scoped academic oversight
+  - what-if simulator controls by role
+  - snapshot + dirty-queue architecture to keep projection pages fast without touching the official gradebook
+  - prediction settings for role access, default assumption, at-risk flags, and best/worst/target-needed display.
+- Faculty prediction now includes a dedicated interpretation page:
+  - explains each prediction column in plain language
+  - gives examples of best-case, worst-case, projected final, and what-if usage
+  - is linked directly from the faculty prediction screen to reduce misinterpretation.
+- Faculty prediction interpretation wording was simplified further so the explainer reads in shorter, clearer faculty-friendly language with a very basic example.
+- Grade prediction now snaps completed periods to the official gradebook values:
+  - when `Remaining = 0`, current/best/worst period projection matches `StudentPeriodGrade`
+  - projected final aligns with the official final-grade record when available
+  - stale snapshots from older prediction logic are automatically refreshed by computation-version checking
+  - what-if now warns faculty when there are no remaining items left to simulate.
+- Faculty prediction now shows `Needed for Passing Final`:
+  - computes the average still needed across remaining future periods such as `PRE-FINAL` and `FX`
+  - helps faculty answer how much the student still needs to reach a passing final grade
+  - reuses the same final-grade averaging logic used by the current grading engine.
+- Prediction wording for passing-final guidance is now more faculty-friendly:
+  - clearer messages for missing earlier periods
+  - clearer message when no future periods remain
+  - clearer message when passing is already secured or no longer reachable.
+- Faculty-facing label changed from `Needed for Passing Final` to `Average Needed to Pass Final` for clearer reading.
+- Faculty prediction guide now displays the dedicated `grades_prediction.png` screenshot and uses shorter reading-order guidance for faster faculty scanning.
 
 ### Fixed
 - Multiple grading summary/runtime errors reported during faculty usage:
@@ -151,6 +225,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - submission and registrar notification cards now use NCBA green styling and include petitioner name
   - period label in email notifications now uses period name only (no internal period code)
   - inline logo embedding improved for better logo rendering across mail clients.
+- Configurable Features now remains backward-compatible when older posts omit the new grade-prediction assumption field; the form safely falls back to `Ignore Missing`.
+- Faculty formal manual was restored and expanded with dedicated sections for assignment-acceptance governance and grade-prediction governance.
 
 ## [0.75] - Bulk Import Stabilization
 

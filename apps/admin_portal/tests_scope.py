@@ -364,3 +364,15 @@ class FacultyMonitoringScopeTests(TestCase):
         self.assertEqual(audit_log.actor_user, self.ac_user)
         self.assertEqual(audit_log.portal, AuditLog.Portal.ADMIN)
         self.assertEqual(audit_log.metadata_json.get("masked_student_identity"), True)
+
+    def test_admin_portal_root_redirects_to_login_for_anonymous_users(self):
+        response = self.client.get("/admin-portal", follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin-portal/login/", response["Location"])
+
+    def test_admin_portal_root_slash_redirects_to_login_for_anonymous_users(self):
+        response = self.client.get("/admin-portal/", follow=False)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin-portal/login/", response["Location"])

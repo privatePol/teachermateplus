@@ -195,6 +195,7 @@
       <a href="{% url 'admin_portal:grade_submission_list' %}">Grade Submissions</a>
       <a href="{% url 'admin_portal:grade_correction_request_list' %}">Correction Requests</a>
       <a href="{% url 'admin_portal:faculty_gradebook_monitor' %}">Faculty Grade Book Monitor</a>
+      <a href="{% url 'admin_portal:grade_prediction_monitor' %}">Grade Prediction Monitor</a>
       <a href="{% url 'admin_portal:audit_log_list' %}">Audit Logs</a>
     </div>
   </div>
@@ -211,9 +212,10 @@
       <li><a href="#submission">7. Submission and Reopen Control</a></li>
       <li><a href="#corrections">8. Correction Workflow (System vs Manual)</a></li>
       <li><a href="#security">9. Security and User Administration</a></li>
-      <li><a href="#audit">10. Audit and Monitoring</a></li>
-      <li><a href="#ops">11. End-of-Term Checklist</a></li>
-      <li><a href="#policies">12. Policy and Governance Reference</a></li>
+      <li><a href="#assignment-acceptance">10. Faculty Assignment Acceptance and Monitoring</a></li>
+      <li><a href="#audit">11. Audit and Monitoring</a></li>
+      <li><a href="#ops">12. End-of-Term Checklist</a></li>
+      <li><a href="#policies">13. Policy and Governance Reference</a></li>
     </ul>
   </div>
 
@@ -482,8 +484,48 @@
     </div>
   </section>
 
+  <section class="guide-section" id="assignment-acceptance">
+    <div class="guide-section-head"><h3>10. Faculty Assignment Acceptance and Monitoring</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <div class="guide-subhead">Workflow Summary</div>
+          <ul class="guide-list">
+            <li>Newly assigned classes remain pending until the faculty member acknowledges the load.</li>
+            <li>Pending assignments block access to grading and class-list work.</li>
+            <li>Faculty may accept, request clarification, or decline with a written note.</li>
+            <li>Pending assignments carry a response deadline and may expire if left unanswered.</li>
+            <li>Expired assignments require admin refresh before the faculty member can respond again.</li>
+          </ul>
+          <div class="guide-subhead">Admin Procedure</div>
+          <ol class="guide-steps">
+            <li>Open <strong>Faculty Assignments</strong> and select the faculty member.</li>
+            <li>Assign the offering and include instructions when needed.</li>
+            <li>Monitor the load status for <strong>Pending</strong>, <strong>Accepted</strong>, <strong>Clarification Requested</strong>, <strong>Declined</strong>, or <strong>Expired</strong>.</li>
+            <li>Use the metric cards to watch <strong>Accepted</strong>, <strong>Pending Acceptance</strong>, <strong>Due Within 24 Hours</strong>, and <strong>Expired</strong>.</li>
+            <li>Review clarification or decline notes before editing or reissuing the assignment.</li>
+            <li>If the assignment expired, refresh or reissue the load so a new response window is created.</li>
+          </ol>
+        </div>
+        <div>
+          <div class="guide-subhead">Admin Rules</div>
+          <ul class="guide-list">
+            <li>Do not treat a class as ready for grading until the assignment is accepted.</li>
+            <li>Use assignment instructions for schedule notes, room clarifications, or load-specific guidance.</li>
+            <li>Reissuing or changing the load should reset the acknowledgment window so the faculty confirms the latest version.</li>
+            <li>Follow up quickly on items marked <strong>Due Within 24 Hours</strong>.</li>
+            <li>Schedule <code>manage.py process_faculty_assignment_reminders</code> so reminders and expirations run automatically.</li>
+          </ul>
+          <div class="guide-note">
+            This workflow creates a formal checkpoint between load assignment and grading access, helping protect both faculty accountability and class-start readiness.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="guide-section" id="audit">
-    <div class="guide-section-head"><h3>10. Audit and Monitoring</h3></div>
+    <div class="guide-section-head"><h3>11. Audit and Monitoring</h3></div>
     <div class="guide-section-body">
       <div class="guide-grid single">
         <div>
@@ -496,6 +538,9 @@
           <div class="guide-subhead">Faculty Grade Book Monitoring</div>
           <ol class="guide-steps">
             <li>Open Faculty Assignments and select the faculty member within your allowed tenant, campus, and department scope.</li>
+            <li>Use the acceptance status and metric cards to confirm whether the faculty member already acknowledged the assigned load.</li>
+            <li>Watch the <strong>Due Within 24 Hours</strong> and <strong>Expired</strong> metric cards so pending loads do not stall class opening and grading start-up.</li>
+            <li>Review any assignment instructions, clarification requests, or decline notes directly on the assigned-offerings table before changing the load.</li>
             <li>Click <strong>Open Grade Book</strong>, then choose the class and grading period to review.</li>
             <li>Review the metric cards first for class coverage, averages, and pass rate before drilling into detailed rows.</li>
             <li>Use the student search box when you need to isolate a specific record during review.</li>
@@ -503,13 +548,24 @@
           <div class="guide-note">
             AC, Dean, and CAO monitoring opens the grade book in read-only mode. Student identity can be masked by role, and every monitor open is recorded in the audit trail.
           </div>
+          <div class="guide-note mt-3">
+            Operations tip: schedule <code>manage.py process_faculty_assignment_reminders</code> in cron so pending loads are reminded automatically and overdue loads are marked expired without waiting for a user to open the page.
+          </div>
+          <div class="guide-subhead">Grade Prediction Monitor</div>
+          <ul class="guide-list">
+            <li>Prediction is unofficial and read-only. It must be enabled first in <strong>Configurable Features</strong>.</li>
+            <li>Open <strong>Grade Prediction Monitor</strong> to review projected outcomes for the scoped faculty, class, and period.</li>
+            <li>Use the monitor to spot low coverage, at-risk students, and likely grade outcomes before submission deadlines.</li>
+            <li>Prediction uses the same grading template path as the official computation engine, but it never writes to the gradebook.</li>
+            <li>Refresh the prediction snapshot after major score changes when you need an updated projection immediately.</li>
+          </ul>
         </div>
       </div>
     </div>
   </section>
 
   <section class="guide-section" id="ops">
-    <div class="guide-section-head"><h3>11. End-of-Term Checklist</h3></div>
+    <div class="guide-section-head"><h3>12. End-of-Term Checklist</h3></div>
     <div class="guide-section-body">
       <div class="guide-grid">
         <div>
@@ -529,7 +585,7 @@
   </section>
 
   <section class="guide-section" id="policies">
-    <div class="guide-section-head"><h3>12. Policy and Governance Reference</h3></div>
+    <div class="guide-section-head"><h3>13. Policy and Governance Reference</h3></div>
     <div class="guide-section-body">
       <div class="guide-grid">
         <div>

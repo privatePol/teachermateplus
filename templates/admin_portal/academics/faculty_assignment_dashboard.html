@@ -1,0 +1,217 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .assignment-dashboard {
+    max-width: 1360px;
+    margin: 0 auto;
+  }
+  .assignment-dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.9rem;
+  }
+  .assignment-dashboard-card {
+    border: 1px solid #d8e3d8;
+    border-radius: 1rem;
+    background: linear-gradient(135deg, #ffffff 0%, #f6fbf4 56%, #f2f7ea 100%);
+    box-shadow: 0 10px 24px rgba(21, 56, 33, 0.06);
+    padding: 1rem;
+  }
+  .assignment-dashboard-card .label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6b7d70;
+    margin-bottom: 0.35rem;
+  }
+  .assignment-dashboard-card .value {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: #173c25;
+    line-height: 1.1;
+  }
+  .assignment-dashboard-card .meta {
+    font-size: 0.83rem;
+    color: #617166;
+    margin-top: 0.35rem;
+  }
+</style>
+
+<div class="assignment-dashboard">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+      <h2 class="h5 mb-1">Faculty Assignment Dashboard</h2>
+      <div class="text-muted small">Assignment acceptance status across campus, department, and faculty within your allowed scope.</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:faculty_assignment_list' %}">Open Faculty Assignments</a>
+      <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:guide' %}#assignment-acceptance">Open Guide Section</a>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+      <form class="row g-2 align-items-end">
+        <div class="col-md-4">
+          <label class="form-label">Campus</label>
+          <select class="form-select" name="campus_id">
+            <option value="">All Campuses</option>
+            {% for campus in campus_options %}
+            <option value="{{ campus.id }}" {% if selected_campus_id == campus.id %}selected{% endif %}>{{ campus.code }} - {{ campus.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Department</label>
+          <select class="form-select" name="department_id">
+            <option value="">All Departments</option>
+            {% for department in department_options %}
+            <option value="{{ department.id }}" {% if selected_department_id == department.id %}selected{% endif %}>{{ department.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Search Faculty</label>
+          <input class="form-control" type="text" name="faculty_q" value="{{ faculty_q }}" placeholder="Search by faculty name, username, or email">
+        </div>
+        <div class="col-12 d-flex gap-2">
+          <button class="btn btn-primary" type="submit">Refresh Dashboard</button>
+          <a class="btn btn-outline-dark" href="{% url 'admin_portal:faculty_assignment_dashboard' %}">Reset</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="assignment-dashboard-grid mb-3">
+    {% for card in metric_cards %}
+    <div class="assignment-dashboard-card">
+      <div class="label">{{ card.label }}</div>
+      <div class="value">{{ card.value }}</div>
+      <div class="meta">{{ card.meta }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="row g-3">
+    <div class="col-xl-4">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white"><strong>Campus Snapshot</strong></div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Campus</th>
+                <th>Faculty</th>
+                <th>Assigned</th>
+                <th>Pending</th>
+                <th>Expired</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in campus_rows %}
+              <tr>
+                <td>{{ row.campus_label }}</td>
+                <td>{{ row.faculty_count }}</td>
+                <td>{{ row.assigned_count }}</td>
+                <td>{{ row.pending_acceptance_count }}</td>
+                <td>{{ row.expired_count }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="text-center text-muted py-4">No assignment records in the current filter.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-8">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white"><strong>Department Snapshot</strong></div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Campus</th>
+                <th>Department</th>
+                <th>Faculty</th>
+                <th>Assigned</th>
+                <th>Accepted</th>
+                <th>Pending</th>
+                <th>Due Soon</th>
+                <th>Expired</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in department_rows %}
+              <tr>
+                <td>{{ row.campus_label }}</td>
+                <td>{{ row.department_label }}</td>
+                <td>{{ row.faculty_count }}</td>
+                <td>{{ row.assigned_count }}</td>
+                <td>{{ row.accepted_count }}</td>
+                <td>{{ row.pending_acceptance_count }}</td>
+                <td>{{ row.due_soon_count }}</td>
+                <td>{{ row.expired_count }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="8" class="text-center text-muted py-4">No department assignment records in the current filter.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mt-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+      <strong>Faculty Snapshot</strong>
+      <span class="text-muted small">{{ faculty_rows|length }} faculty row{% if faculty_rows|length != 1 %}s{% endif %}</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Faculty</th>
+            <th>Campus</th>
+            <th>Department</th>
+            <th>Assigned</th>
+            <th>Accepted</th>
+            <th>Pending</th>
+            <th>Clarification</th>
+            <th>Declined</th>
+            <th>Due Soon</th>
+            <th>Expired</th>
+            <th>Acceptance Rate</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in faculty_rows %}
+          <tr>
+            <td>{{ row.faculty_label }}</td>
+            <td>{{ row.campus_label }}</td>
+            <td>{{ row.department_label }}</td>
+            <td>{{ row.assigned_count }}</td>
+            <td>{{ row.accepted_count }}</td>
+            <td>{{ row.pending_acceptance_count }}</td>
+            <td>{{ row.clarification_count }}</td>
+            <td>{{ row.declined_count }}</td>
+            <td>{{ row.due_soon_count }}</td>
+            <td>{{ row.expired_count }}</td>
+            <td>{{ row.acceptance_rate }}%</td>
+            <td>
+              <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:faculty_assignment_list' %}?faculty_user_id={{ row.faculty_user_id }}">Open</a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="12" class="text-center text-muted py-4">No faculty assignment records in the current filter.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

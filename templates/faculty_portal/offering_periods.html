@@ -230,6 +230,16 @@
             >
               &#128202;
             </a>
+            {% if grade_prediction_enabled %}
+              <a
+                class="btn btn-sm btn-outline-primary"
+                href="{% url 'faculty_portal:period_prediction' offering.id item.period.id %}"
+                title="Prediction"
+                aria-label="Prediction"
+              >
+                &#10024;
+              </a>
+            {% endif %}
             {% if "corrections.create" in effective_permissions and system_correction_enabled %}
               <a
                 class="btn btn-sm btn-outline-warning"

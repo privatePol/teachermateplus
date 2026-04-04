@@ -1,9 +1,46 @@
 {% extends "admin_portal/base.html" %}
 
 {% block admin_content %}
+<style>
+  .assignment-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.85rem;
+  }
+  .assignment-metric-card {
+    border: 1px solid #d8e2d8;
+    border-radius: 1rem;
+    background: linear-gradient(135deg, #fbfdf8 0%, #f4f8ef 100%);
+    box-shadow: 0 8px 18px rgba(30, 63, 40, 0.06);
+    padding: 1rem;
+  }
+  .assignment-metric-label {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6a7d6d;
+    margin-bottom: 0.35rem;
+  }
+  .assignment-metric-value {
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: #173b24;
+    line-height: 1.1;
+  }
+  .assignment-metric-meta {
+    font-size: 0.84rem;
+    color: #607065;
+    margin-top: 0.35rem;
+  }
+  .text-expired {
+    color: #6a2ea0;
+  }
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Faculty Assignments</h2>
   <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:faculty_assignment_dashboard' %}">Assignment Dashboard</a>
     {% if "faculty_assignments.import" in effective_permissions %}
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_template_download' 'faculty-assignments' %}">Download Template</a>
     <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:import_upload' 'faculty-assignments' %}">Upload CSV</a>
@@ -58,6 +95,14 @@
         >
           OPEN GRADE BOOK
         </a>
+        {% if grade_prediction_enabled %}
+          <a
+            class="btn btn-outline-primary"
+            href="{% url 'admin_portal:grade_prediction_monitor' %}?faculty_user_id={{ selected_faculty.id }}&faculty_q={{ faculty_q|urlencode }}"
+          >
+            OPEN PREDICTION
+          </a>
+        {% endif %}
         {% if "faculty_assignments.create" in effective_permissions %}
         <a
           class="btn btn-primary"
@@ -73,6 +118,18 @@
 </div>
 
 {% if selected_faculty %}
+{% if assignment_metric_cards %}
+<div class="assignment-metric-grid mb-3">
+  {% for card in assignment_metric_cards %}
+  <div class="assignment-metric-card">
+    <div class="assignment-metric-label">{{ card.label }}</div>
+    <div class="assignment-metric-value">{{ card.value }}</div>
+    <div class="assignment-metric-meta">{{ card.meta }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="d-flex flex-column gap-3">
   {% if show_assign_box %}
   <div class="card border-0 shadow-sm">
@@ -119,6 +176,12 @@
         <input type="hidden" name="faculty_q" value="{{ faculty_q }}">
         <input type="hidden" name="offering_q" value="{{ offering_q }}">
         <input type="hidden" name="section_id" value="{{ selected_section_id|default:'' }}">
+
+        <div class="mb-3">
+          <label class="form-label">Assignment Instructions / Notes</label>
+          <textarea class="form-control" name="assignment_note" rows="3" placeholder="Optional instructions for the faculty member. Example: Please confirm schedule conflict resolution before accepting this load.">{{ assignment_note }}</textarea>
+          <div class="form-text">This note will be shown to the faculty member on the pending-assignment card.</div>
+        </div>
 
         <div class="d-flex justify-content-between align-items-center mb-2">
           <div class="form-check">
@@ -203,6 +266,8 @@
                 <th>Course</th>
                 <th>Section</th>
                 <th>Schedule / Time</th>
+                <th>Instructions</th>
+                <th>Acceptance</th>
                 <th>Primary</th>
               </tr>
             </thead>
@@ -215,6 +280,55 @@
                 <td>{{ row.offering.course.title }} <span class="text-muted">({{ row.offering.course.code }})</span></td>
                 <td>{{ row.offering.section.name|default:row.offering.section.code }}</td>
                 <td>{{ row.offering.schedule_text|default:"-" }}</td>
+                <td>
+                  {% if row.assignment_note %}
+                    <div class="small">{{ row.assignment_note }}</div>
+                  {% else %}
+                    <span class="text-muted small">No instructions</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.response_status == "ACCEPTED" and row.accepted_at %}
+                    <div class="fw-semibold text-success">Accepted</div>
+                    <div class="small text-muted">
+                      {% if row.accepted_by and row.accepted_by.full_name and row.accepted_by.full_name != row.accepted_by.username %}
+                        {{ row.accepted_by.full_name }}
+                      {% elif row.accepted_by %}
+                        {{ row.accepted_by.username }}
+                      {% else %}
+                        {{ selected_faculty.full_name|default:selected_faculty.username }}
+                      {% endif %}
+                    </div>
+                    <div class="small text-muted">{{ row.accepted_at|date:"M d, Y h:i A" }}</div>
+                  {% elif row.response_status == "CLARIFICATION_REQUESTED" %}
+                    <div class="fw-semibold text-primary">Clarification Requested</div>
+                    {% if row.responded_at %}<div class="small text-muted">{{ row.responded_at|date:"M d, Y h:i A" }}</div>{% endif %}
+                    {% if row.faculty_response_note %}<div class="small text-muted">{{ row.faculty_response_note }}</div>{% endif %}
+                  {% elif row.response_status == "DECLINED" %}
+                    <div class="fw-semibold text-danger">Declined</div>
+                    {% if row.responded_at %}<div class="small text-muted">{{ row.responded_at|date:"M d, Y h:i A" }}</div>{% endif %}
+                    {% if row.faculty_response_note %}<div class="small text-muted">{{ row.faculty_response_note }}</div>{% endif %}
+                  {% elif row.response_status == "EXPIRED" %}
+                    <div class="fw-semibold text-expired">Expired</div>
+                    {% if row.responded_at %}<div class="small text-muted">{{ row.responded_at|date:"M d, Y h:i A" }}</div>{% endif %}
+                    <div class="small text-muted">Admin needs to refresh the response window.</div>
+                    {% if "faculty_assignments.update" in effective_permissions %}
+                    <form method="post" action="{% url 'admin_portal:faculty_assignment_renew_window' row.id %}" class="mt-2">
+                      {% csrf_token %}
+                      <input type="hidden" name="faculty_user_id" value="{{ selected_faculty.id }}">
+                      <input type="hidden" name="faculty_q" value="{{ faculty_q }}">
+                      <input type="hidden" name="offering_q" value="{{ offering_q }}">
+                      <input type="hidden" name="section_id" value="{{ selected_section_id|default:'' }}">
+                      <button type="submit" class="btn btn-sm btn-outline-success">Renew Response Window</button>
+                    </form>
+                    {% endif %}
+                  {% else %}
+                    <span class="badge text-bg-warning text-dark">Pending Acceptance</span>
+                    {% if row.response_due_at %}<div class="small text-muted mt-1">Due {{ row.response_due_at|date:"M d, Y h:i A" }}</div>{% endif %}
+                    {% if row.reminder_count %}<div class="small text-muted">Reminders {{ row.reminder_count }}</div>{% endif %}
+                    {% if row.last_reminded_at %}<div class="small text-muted">Last reminder {{ row.last_reminded_at|date:"M d, Y h:i A" }}</div>{% endif %}
+                  {% endif %}
+                </td>
                 <td>
                   <div class="d-flex align-items-center gap-2">
                     {% if row.is_primary %}
@@ -236,7 +350,7 @@
               </tr>
               {% empty %}
               <tr>
-                <td colspan="5" class="text-center text-muted py-4">No assigned offerings found in the current scope.</td>
+                <td colspan="7" class="text-center text-muted py-4">No assigned offerings found in the current scope.</td>
               </tr>
               {% endfor %}
             </tbody>

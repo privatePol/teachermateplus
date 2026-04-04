@@ -407,8 +407,10 @@
           </div>
           <div class="guide-anchor-nav">
             <a href="#guide-workflow">Daily Workflow</a>
+            <a href="#guide-assignments">Assignment Acceptance</a>
             <a href="#guide-activities">Activities and Scores</a>
             <a href="#guide-attendance-summary">Attendance and Summary</a>
+            <a href="#guide-prediction">Grade Prediction</a>
             <a href="#guide-submission">Submission Rules</a>
             <a href="#guide-corrections">Corrections and Reopen</a>
             <a href="#guide-classlist">Class List and Archives</a>
@@ -522,6 +524,41 @@
     </div>
   </div>
 
+  <div class="row g-3 mb-4" id="guide-assignments">
+    <div class="col-lg-6">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Faculty Assignment Acceptance Rules</div>
+          <ul class="guide-list">
+            <li>Every newly assigned class must be accepted first before you can open grading or class-list tools.</li>
+            <li>The pending-assignment card shows the response due date. Respond before the deadline so the assignment does not expire.</li>
+            <li>If there is a concern about the load, use <strong>Request Clarification</strong> and include a note for admin.</li>
+            <li>If the load should not be assigned to you, use <strong>Decline</strong> and explain the reason clearly.</li>
+            <li>If the assignment already expired, wait for admin to refresh the response window before responding again.</li>
+          </ul>
+          <div class="guide-mini-note">
+            Good routine: check pending assignments first each time you log in, especially after load changes or at the beginning of a new term.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">How to Respond to a New Assignment</div>
+          <ol class="guide-list">
+            <li>Open <strong>My Courses</strong>.</li>
+            <li>Review the <strong>Pending Faculty Assignments</strong> section first.</li>
+            <li>Read the course, section, schedule, and any admin instructions carefully.</li>
+            <li>If the load is correct, click <strong>Accept Assignment</strong>.</li>
+            <li>If the load needs discussion, enter your note and choose <strong>Request Clarification</strong> or <strong>Decline</strong>.</li>
+            <li>After acceptance, the class becomes available for grading and class-list work.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="guide-divider">
     <h2>Part 2: Encoding and Review</h2>
     <p>Set up activities correctly, then check attendance and summary before submission.</p>
@@ -544,7 +581,9 @@
           </div>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Create Grade Activity</h6>
           <ol class="guide-list">
-            <li>Open <strong>My Courses</strong> -> choose class -> choose period -> click the <strong>Activities</strong> icon.</li>
+            <li>Open <strong>My Courses</strong> and accept any pending assignment first if the class is newly assigned. Watch the response due date on the pending card so the load does not expire before you acknowledge it.</li>
+            <li>If there is a problem with the load, use the clarification or decline action with a note to admin. Once an assignment expires, only admin can refresh the response window.</li>
+            <li>Choose class -> choose period -> click the <strong>Activities</strong> icon.</li>
             <li>Select <strong>Component</strong> first.</li>
             <li>Select <strong>Subcomponent</strong> only if the selected component requires it.</li>
             <li>Select <strong>Detail</strong> only if the selected subcomponent requires it.</li>
@@ -614,6 +653,43 @@
           <div class="guide-mini-note">
             If a value looks unexpected, review the activity setup, score entry method, total score, and class list status before submitting.
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4" id="guide-prediction">
+    <div class="col-lg-6">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">Grade Prediction and What-If Simulation</div>
+          <ul class="guide-list">
+            <li>Prediction is unofficial and read-only. It never changes the official gradebook.</li>
+            <li>EduGradesPro uses the same assigned grading template structure and current encoded data to estimate outcomes.</li>
+            <li>The primary projected grade follows the default assumption configured by admin for your tenant.</li>
+            <li>If enabled, the system can also show best-case, worst-case, and target-needed guidance.</li>
+            <li>If enabled for your role, the what-if simulator lets you test remaining performance scenarios before actual encoding.</li>
+            <li>The Prediction page now includes a dedicated interpretation guide so faculty can review column meanings and examples before relying on the values.</li>
+            <li>The page can also show the average still needed across the remaining final periods to reach a passing final grade.</li>
+          </ul>
+          <div class="guide-mini-note">
+            Treat prediction as planning support only. Official grades still depend on actual encoded scores, submission status, and approved governance actions.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card guide-section-card">
+        <div class="card-body">
+          <div class="guide-section-title">How to Use the Prediction Page</div>
+          <ol class="guide-list">
+            <li>Open <strong>My Classes</strong>, choose the class, then open the period card.</li>
+            <li>Click the <strong>Prediction</strong> icon.</li>
+            <li>Open <strong>How Prediction Works</strong> when you need the full explanation of each column and sample scenarios.</li>
+            <li>Review current projection, coverage, remaining items, and at-risk indicators.</li>
+            <li>If what-if is enabled, select a student and enter an estimated remaining performance percentage.</li>
+            <li>Use <strong>Refresh Prediction</strong> after major score changes if you want a fresh snapshot immediately.</li>
+          </ol>
         </div>
       </div>
     </div>

@@ -11,6 +11,44 @@ class FeatureSettingsService:
     CORRECTION_REGISTRAR_AUTO_EMAIL_ROLE_CODES_KEY = "FEATURE_CORRECTION_REGISTRAR_AUTO_EMAIL_ROLE_CODES"
     CORRECTION_REGISTRAR_DEFAULT_RECIPIENTS_KEY = "FEATURE_CORRECTION_REGISTRAR_DEFAULT_RECIPIENTS"
     CORRECTION_REGISTRAR_CAMPUS_RECIPIENTS_KEY = "FEATURE_CORRECTION_REGISTRAR_CAMPUS_RECIPIENTS"
+    FACULTY_ASSIGNMENT_REMINDERS_ENABLED_KEY = "FEATURE_FACULTY_ASSIGNMENT_REMINDERS_ENABLED"
+    FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED_KEY = "FEATURE_FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED"
+    FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY = "FEATURE_FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS"
+    FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY = "FEATURE_FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS"
+    FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS_KEY = "FEATURE_FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS"
+    GRADE_PREDICTION_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_ENABLED"
+    GRADE_PREDICTION_ROLE_CODES_KEY = "FEATURE_GRADE_PREDICTION_ROLE_CODES"
+    GRADE_PREDICTION_WHAT_IF_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_WHAT_IF_ENABLED"
+    GRADE_PREDICTION_WHAT_IF_ROLE_CODES_KEY = "FEATURE_GRADE_PREDICTION_WHAT_IF_ROLE_CODES"
+    GRADE_PREDICTION_AT_RISK_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_AT_RISK_ENABLED"
+    GRADE_PREDICTION_SHOW_BEST_CASE_KEY = "FEATURE_GRADE_PREDICTION_SHOW_BEST_CASE"
+    GRADE_PREDICTION_SHOW_WORST_CASE_KEY = "FEATURE_GRADE_PREDICTION_SHOW_WORST_CASE"
+    GRADE_PREDICTION_SHOW_TARGET_NEEDED_KEY = "FEATURE_GRADE_PREDICTION_SHOW_TARGET_NEEDED"
+    GRADE_PREDICTION_DEFAULT_ASSUMPTION_KEY = "FEATURE_GRADE_PREDICTION_DEFAULT_ASSUMPTION"
+
+    @staticmethod
+    def _positive_int(value, *, default: int, minimum: int = 0) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(parsed, minimum)
+
+    @staticmethod
+    def _role_code_list(value) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip().upper() for item in value if str(item).strip()]
+
+    @staticmethod
+    def _user_role_codes(user) -> set[str]:
+        if getattr(user, "is_superuser", False):
+            return {"SUPER_ADMIN"}
+        return {
+            str(code).strip().upper()
+            for code in user.user_roles.filter(is_active=True, role__is_active=True).values_list("role__code", flat=True)
+            if str(code).strip()
+        }
 
     @classmethod
     def is_correction_official_report_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
@@ -112,3 +150,186 @@ class FeatureSettingsService:
                 emails = []
             normalized[str(campus_id)] = emails
         return normalized
+
+    @classmethod
+    def is_faculty_assignment_reminders_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_ASSIGNMENT_REMINDERS_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_faculty_assignment_auto_expire_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def get_faculty_assignment_response_window_days(cls, *, tenant_id: int | None, default: int = 3) -> int:
+        return cls._positive_int(
+            SystemSettingService.get(
+                cls.FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            ),
+            default=default,
+            minimum=1,
+        )
+
+    @classmethod
+    def get_faculty_assignment_first_reminder_days(cls, *, tenant_id: int | None, default: int = 1) -> int:
+        return cls._positive_int(
+            SystemSettingService.get(
+                cls.FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            ),
+            default=default,
+            minimum=0,
+        )
+
+    @classmethod
+    def get_faculty_assignment_repeat_reminder_days(cls, *, tenant_id: int | None, default: int = 1) -> int:
+        return cls._positive_int(
+            SystemSettingService.get(
+                cls.FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            ),
+            default=default,
+            minimum=1,
+        )
+
+    @classmethod
+    def is_grade_prediction_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.GRADE_PREDICTION_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def get_grade_prediction_role_codes(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: list[str] | None = None,
+    ) -> list[str]:
+        value = SystemSettingService.get(
+            cls.GRADE_PREDICTION_ROLE_CODES_KEY,
+            tenant_id=tenant_id,
+            default=default or ["FACULTY", "DEAN", "REGISTRAR", "CAMPUS_ADMIN", "TENANT_ADMIN", "SUPER_ADMIN"],
+        )
+        return cls._role_code_list(value)
+
+    @classmethod
+    def is_grade_prediction_what_if_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.GRADE_PREDICTION_WHAT_IF_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def get_grade_prediction_what_if_role_codes(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: list[str] | None = None,
+    ) -> list[str]:
+        value = SystemSettingService.get(
+            cls.GRADE_PREDICTION_WHAT_IF_ROLE_CODES_KEY,
+            tenant_id=tenant_id,
+            default=default or ["FACULTY", "SUPER_ADMIN"],
+        )
+        return cls._role_code_list(value)
+
+    @classmethod
+    def is_grade_prediction_at_risk_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.GRADE_PREDICTION_AT_RISK_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def show_grade_prediction_best_case(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.GRADE_PREDICTION_SHOW_BEST_CASE_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def show_grade_prediction_worst_case(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.GRADE_PREDICTION_SHOW_WORST_CASE_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def show_grade_prediction_target_needed(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.GRADE_PREDICTION_SHOW_TARGET_NEEDED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def get_grade_prediction_default_assumption(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: str = "IGNORE_MISSING",
+    ) -> str:
+        value = str(
+            SystemSettingService.get(
+                cls.GRADE_PREDICTION_DEFAULT_ASSUMPTION_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+            or default
+        ).strip().upper()
+        if value not in {"IGNORE_MISSING", "RAW_ZERO", "FULL_SCORE"}:
+            return default
+        return value
+
+    @classmethod
+    def can_user_access_grade_prediction(cls, *, user, tenant_id: int | None) -> bool:
+        if not cls.is_grade_prediction_enabled(tenant_id=tenant_id):
+            return False
+        allowed_role_codes = set(cls.get_grade_prediction_role_codes(tenant_id=tenant_id))
+        if not allowed_role_codes:
+            return True
+        return bool(cls._user_role_codes(user) & allowed_role_codes)
+
+    @classmethod
+    def can_user_access_grade_prediction_what_if(cls, *, user, tenant_id: int | None) -> bool:
+        if not cls.can_user_access_grade_prediction(user=user, tenant_id=tenant_id):
+            return False
+        if not cls.is_grade_prediction_what_if_enabled(tenant_id=tenant_id):
+            return False
+        allowed_role_codes = set(cls.get_grade_prediction_what_if_role_codes(tenant_id=tenant_id))
+        if not allowed_role_codes:
+            return True
+        return bool(cls._user_role_codes(user) & allowed_role_codes)

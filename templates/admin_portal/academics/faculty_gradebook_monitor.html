@@ -159,7 +159,12 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Faculty Grade Book Monitor</h2>
-  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:faculty_assignment_list' %}">Back to Faculty Assignments</a>
+  <div class="d-flex gap-2">
+    {% if grade_prediction_enabled and selected_faculty and selected_offering and selected_period %}
+    <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grade_prediction_monitor' %}?faculty_user_id={{ selected_faculty.id }}&offering_id={{ selected_offering.id }}&period_id={{ selected_period.id }}">Open Prediction</a>
+    {% endif %}
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:faculty_assignment_list' %}">Back to Faculty Assignments</a>
+  </div>
 </div>
 
 <div class="monitor-shell">

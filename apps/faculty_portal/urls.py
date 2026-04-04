@@ -4,6 +4,8 @@ from .views import (
     activity_scores_view,
     analytics_view,
     dashboard_view,
+    faculty_assignment_accept_view,
+    faculty_assignment_response_view,
     guide_view,
     guide_manual_view,
     my_courses_view,
@@ -13,6 +15,8 @@ from .views import (
     public_index_view,
     period_activities_view,
     period_attendance_view,
+    period_prediction_view,
+    period_prediction_guide_view,
     period_correction_official_report_view,
     period_correction_finalize_view,
     period_corrections_view,
@@ -31,6 +35,16 @@ urlpatterns = [
     path("faculty/dashboard/", dashboard_view, name="dashboard"),
     path("faculty/analytics/", analytics_view, name="analytics"),
     path("faculty/my-courses/", my_courses_view, name="my_courses"),
+    path(
+        "faculty/my-courses/assignments/<int:assignment_id>/accept/",
+        faculty_assignment_accept_view,
+        name="faculty_assignment_accept",
+    ),
+    path(
+        "faculty/my-courses/assignments/<int:assignment_id>/respond/",
+        faculty_assignment_response_view,
+        name="faculty_assignment_response",
+    ),
     path("faculty/my-courses/<int:offering_id>/periods/", offering_periods_view, name="offering_periods"),
     path(
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/activities/",
@@ -61,6 +75,16 @@ urlpatterns = [
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/summary/",
         period_summary_view,
         name="period_summary",
+    ),
+    path(
+        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/prediction/",
+        period_prediction_view,
+        name="period_prediction",
+    ),
+    path(
+        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/prediction/guide/",
+        period_prediction_guide_view,
+        name="period_prediction_guide",
     ),
     path(
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/submit/",

@@ -1,0 +1,211 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .prediction-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.85rem;
+  }
+  .prediction-card {
+    border-radius: 1rem;
+    padding: 1rem 1.05rem;
+    background:
+      radial-gradient(circle at top right, rgba(244, 204, 61, 0.42) 0%, rgba(244, 204, 61, 0) 42%),
+      linear-gradient(145deg, #0f6c3c 0%, #2e8f4f 58%, #cfb33d 100%);
+    color: #fffdf5;
+    box-shadow: 0 0.8rem 1.4rem rgba(18, 73, 43, 0.13);
+  }
+  .prediction-label {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255, 250, 234, 0.9);
+  }
+  .prediction-value {
+    font-size: 1.45rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-top: 0.3rem;
+  }
+  .prediction-meta {
+    margin-top: 0.45rem;
+    font-size: 0.83rem;
+    color: rgba(252, 249, 240, 0.92);
+  }
+  .risk-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.22rem 0.65rem;
+    font-size: 0.74rem;
+    font-weight: 700;
+  }
+  .risk-pill.at-risk {
+    background: #fde0e0;
+    color: #8f2020;
+  }
+  .risk-pill.ok {
+    background: #dff3e7;
+    color: #1f6d3f;
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h4 mb-0">Prediction | {{ offering.course.code }} | {{ period.name }}</h2>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-info" href="{% url 'faculty_portal:period_prediction_guide' offering.id period.id %}">How Prediction Works</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+  </div>
+</div>
+
+<div class="alert alert-info">
+  Projected grades are unofficial and read-only. EduGradesPro uses the assigned grading template and current encoded records to estimate possible outcomes without writing anything into the gradebook.
+  <div class="mt-2">
+    <a class="alert-link" href="{% url 'faculty_portal:period_prediction_guide' offering.id period.id %}">Open the prediction interpretation guide</a>
+    for column definitions, examples, and simulation reminders.
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+      <div>
+        <div class="fw-semibold">{{ offering.course.title }}</div>
+        <div class="text-muted small">{{ offering.section.name|default:offering.section.code }} | {{ offering.academic_year.name|default:offering.academic_year.code }} / {{ offering.term.name|default:offering.term.code }}</div>
+        <div class="text-muted small mt-1">Default assumption: <strong>{{ settings_snapshot.get_assumption_mode_display }}</strong></div>
+      </div>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="refresh">
+        <button class="btn btn-primary" type="submit">Refresh Prediction</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="prediction-grid mb-3">
+  {% for card in metric_cards %}
+  <div class="prediction-card">
+    <div class="prediction-label">{{ card.label }}</div>
+    <div class="prediction-value">{{ card.value|default:"-" }}</div>
+    <div class="prediction-meta">{{ card.meta }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if can_use_what_if %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><strong>What-If Simulator</strong></div>
+  <div class="card-body">
+    <form method="post" class="row g-3 align-items-end">
+      {% csrf_token %}
+      <div class="col-lg-4">
+        <label class="form-label">Student</label>
+        <select class="form-select" name="student_id">
+          {% for row in rows %}
+          <option value="{{ row.student_id }}" {% if what_if_student and what_if_student.id == row.student_id %}selected{% endif %}>{{ row.student.last_name }}, {{ row.student.first_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label">Remaining Performance %</label>
+        <input class="form-control" type="number" step="0.01" min="0" max="100" name="assumed_remaining_percent" value="{{ request.POST.assumed_remaining_percent|default:'50' }}">
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label">Scenario Name</label>
+        <input class="form-control" type="text" name="scenario_name" value="{{ request.POST.scenario_name|default:'' }}" placeholder="Optional draft name">
+      </div>
+      <div class="col-lg-2 d-flex gap-2">
+        <button class="btn btn-outline-primary flex-fill" type="submit" name="action" value="simulate">Simulate</button>
+        <button class="btn btn-outline-success flex-fill" type="submit" name="action" value="save_draft">Save</button>
+      </div>
+    </form>
+    {% if what_if_result and what_if_student %}
+    <div class="alert alert-light border mt-3 mb-0">
+      <strong>{{ what_if_student.last_name }}, {{ what_if_student.first_name }}</strong><br>
+      Projected {{ period.name }} Grade: <strong>{{ what_if_result.projected_period_grade|default:"-" }}</strong><br>
+      Projected Final Grade: <strong>{{ what_if_result.projected_final_grade|default:"-" }}</strong><br>
+      Average Needed to Pass Final:
+      <strong>{{ what_if_result.final_requirement.label }}</strong>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <form method="get" class="row g-3 align-items-end mb-3">
+      <div class="col-md-8">
+        <label class="form-label">Search Student</label>
+        <input class="form-control" name="q" value="{{ q }}" placeholder="Search by student number or name">
+      </div>
+      <div class="col-md-4 d-flex gap-2">
+        <button class="btn btn-outline-primary flex-fill" type="submit">Filter</button>
+        <a class="btn btn-outline-secondary flex-fill" href="{% url 'faculty_portal:period_prediction' offering.id period.id %}">Reset</a>
+      </div>
+    </form>
+
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Student No.</th>
+            <th>Student Name</th>
+            <th>Current Projection</th>
+            {% if show_best_case %}<th>Best Case</th>{% endif %}
+            {% if show_worst_case %}<th>Worst Case</th>{% endif %}
+            <th>Projected Final</th>
+            {% if show_target_needed %}<th>Target Needed</th>{% endif %}
+            <th>Average Needed to Pass Final</th>
+            <th>Coverage</th>
+            <th>Remaining</th>
+            {% if at_risk_enabled %}<th>Risk</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ row.student.student_no }}</td>
+            <td>{{ row.student.last_name }}, {{ row.student.first_name }}</td>
+            <td><strong>{{ row.current_projected_period_grade|default:"-" }}</strong></td>
+            {% if show_best_case %}<td>{{ row.best_case_period_grade|default:"-" }}</td>{% endif %}
+            {% if show_worst_case %}<td>{{ row.worst_case_period_grade|default:"-" }}</td>{% endif %}
+            <td>{{ row.current_projected_final_grade|default:"-" }}</td>
+            {% if show_target_needed %}
+            <td>
+              {% if row.target_needed_percent is None %}
+                <span class="text-muted">Not reachable</span>
+              {% elif row.target_needed_percent == 0 %}
+                <span class="text-success">Already met</span>
+              {% else %}
+                {{ row.target_needed_percent }}%
+              {% endif %}
+            </td>
+            {% endif %}
+            <td>
+              {{ row.final_requirement_label }}
+            </td>
+            <td>{{ row.coverage_percent }}%</td>
+            <td>{{ row.remaining_item_count }}</td>
+            {% if at_risk_enabled %}
+            <td>
+              {% if row.at_risk_flag %}
+              <span class="risk-pill at-risk">At Risk</span>
+              {% else %}
+              <span class="risk-pill ok">On Track</span>
+              {% endif %}
+            </td>
+            {% endif %}
+          </tr>
+          {% empty %}
+          <tr><td colspan="12" class="text-center text-muted py-4">No prediction rows available yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

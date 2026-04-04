@@ -1884,7 +1884,7 @@ class FacultyGradingService:
         )
         GradingGovernanceService.assert_encoding_allowed(offering=offering, template_period=template_period)
 
-        return GradeActivity.objects.create(
+        activity = GradeActivity.objects.create(
             tenant_id=offering.tenant_id,
             campus_id=offering.campus_id,
             offering=offering,
@@ -1898,6 +1898,12 @@ class FacultyGradingService:
             created_by_user=user,
             is_active=True,
         )
+        cls._mark_prediction_dirty(
+            offering=offering,
+            template_period=template_period,
+            reason="ACTIVITY_CHANGE",
+        )
+        return activity
 
     @classmethod
     @transaction.atomic
@@ -2024,6 +2030,11 @@ class FacultyGradingService:
                 },
             )
             saved += 1
+        cls._mark_prediction_dirty(
+            offering=activity.offering,
+            template_period=activity.template_period,
+            reason="SCORE_CHANGE",
+        )
         return saved
 
     @classmethod
@@ -2056,6 +2067,11 @@ class FacultyGradingService:
                 "is_active": True,
             },
         )
+        cls._mark_prediction_dirty(
+            offering=offering,
+            template_period=template_period,
+            reason="ATTENDANCE_CHANGE",
+        )
         return session, created
 
     @classmethod
@@ -2074,6 +2090,11 @@ class FacultyGradingService:
             user=user,
             offering=activity.offering,
             template_period=activity.template_period,
+        )
+        cls._mark_prediction_dirty(
+            offering=activity.offering,
+            template_period=activity.template_period,
+            reason="ACTIVITY_CHANGE",
         )
         return activity
 
@@ -2111,6 +2132,11 @@ class FacultyGradingService:
                 },
             )
             saved += 1
+        cls._mark_prediction_dirty(
+            offering=session.offering,
+            template_period=session.template_period,
+            reason="ATTENDANCE_CHANGE",
+        )
         return saved
 
     @classmethod
@@ -2151,6 +2177,19 @@ class FacultyGradingService:
         if not vals:
             return None
         return cls._round(sum(vals) / Decimal(len(vals)))
+
+    @staticmethod
+    def _mark_prediction_dirty(*, offering, template_period, reason: str):
+        try:
+            from apps.predictions.services import PredictionDirtyQueueService
+
+            PredictionDirtyQueueService.mark_dirty(
+                offering=offering,
+                template_period=template_period,
+                reason=reason,
+            )
+        except Exception:
+            return
 
     @classmethod
     @transaction.atomic
@@ -2350,6 +2389,12 @@ class FacultyGradingService:
                     "is_submitted": False,
                 },
             )
+
+        cls._mark_prediction_dirty(
+            offering=offering,
+            template_period=template_period,
+            reason="SCORE_CHANGE",
+        )
 
         return {
             "rows": rows,
