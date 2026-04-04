@@ -1,12 +1,57 @@
 {% extends "admin_portal/base.html" %}
 
 {% block admin_content %}
+<style>
+  .assignment-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.9rem;
+  }
+  .assignment-metric-card {
+    border: 0;
+    border-radius: 1rem;
+    padding: 1rem 1.05rem;
+    background:
+      radial-gradient(circle at top right, rgba(232, 194, 71, 0.28), transparent 36%),
+      linear-gradient(145deg, #17633b 0%, #2c8a4d 58%, #b7ad3b 100%);
+    color: #fffef7;
+    box-shadow: 0 0.75rem 1.35rem rgba(18, 72, 42, 0.13);
+  }
+  .assignment-metric-label {
+    font-size: 0.76rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 252, 239, 0.92);
+  }
+  .assignment-metric-value {
+    font-size: 1.55rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-top: 0.35rem;
+  }
+  .assignment-metric-meta {
+    margin-top: 0.45rem;
+    color: rgba(255, 250, 236, 0.94);
+    font-size: 0.85rem;
+  }
+</style>
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Course Template Assignments</h2>
   {% if "course_template_assignments.create" in effective_permissions %}
-  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:course_template_assignment_create' %}">Assign Template</a>
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:course_template_assignment_create' %}">Bulk Assign Template</a>
   {% endif %}
 </div>
+
+<div class="assignment-metrics mb-3">
+  {% for card in metric_cards %}
+  <div class="assignment-metric-card">
+    <div class="assignment-metric-label">{{ card.label }}</div>
+    <div class="assignment-metric-value">{{ card.value }}</div>
+    <div class="assignment-metric-meta">{{ card.meta }}</div>
+  </div>
+  {% endfor %}
+</div>
+
 <form class="row g-2 mb-3">
   <div class="col-md-2">
     <select class="form-select" name="tenant_id">
@@ -27,10 +72,21 @@
   <div class="col-md-4">
     <input class="form-control" name="q" value="{{ q }}" placeholder="Search course/template">
   </div>
-  <div class="col-md-2">
+  <div class="col-md-2 d-flex align-items-center">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" name="without_template" value="1" id="id_without_template" {% if without_template %}checked{% endif %}>
+      <label class="form-check-label" for="id_without_template">Courses with no grading template</label>
+    </div>
+  </div>
+  <div class="col-md-1">
     <button class="btn btn-outline-secondary w-100">Filter</button>
   </div>
 </form>
+{% if without_template %}
+<div class="alert alert-info">
+  Showing <strong>{{ filtered_without_template_count }}</strong> course(s) with no active grading template assignment in the current filtered scope.
+</div>
+{% endif %}
 <div class="card border-0 shadow-sm">
   <div class="table-responsive">
     <table class="table table-hover mb-0">
@@ -47,18 +103,34 @@
       {% for row in page_obj %}
         <tr>
           <td>{{ row.course.title }} <span class="text-muted">({{ row.course.code }})</span></td>
-          <td>{{ row.grading_template.name }} <span class="text-muted">({{ row.grading_template.code }})</span></td>
-          <td>{{ row.effective_from_term.name|default:row.effective_from_term.code|default:"-" }}</td>
           <td>
-            {% if row.is_active %}
-              <span class="badge text-bg-success">Active</span>
+            {% if row.grading_template %}
+              {{ row.grading_template.name }} <span class="text-muted">({{ row.grading_template.code }})</span>
             {% else %}
+              <span class="badge text-bg-warning text-dark">No grading template assigned</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.effective_from_term %}
+              {{ row.effective_from_term.name|default:row.effective_from_term.code }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>
+            {% if row.grading_template and row.is_active %}
+              <span class="badge text-bg-success">Active</span>
+            {% elif row.grading_template %}
               <span class="badge text-bg-warning text-dark">Inactive</span>
+            {% else %}
+              <span class="badge text-bg-secondary">Missing</span>
             {% endif %}
           </td>
           <td class="text-end">
-            {% if "course_template_assignments.update" in effective_permissions %}
+            {% if row.grading_template and "course_template_assignments.update" in effective_permissions %}
             <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:course_template_assignment_update' row.id %}">Edit</a>
+            {% elif "course_template_assignments.create" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:course_template_assignment_create' %}">Assign Now</a>
             {% endif %}
           </td>
         </tr>

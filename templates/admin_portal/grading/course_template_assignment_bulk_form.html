@@ -1,0 +1,139 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .bulk-assignment-card {
+    border: 0;
+    border-radius: 1rem;
+    box-shadow: 0 12px 24px rgba(16, 50, 30, 0.06);
+  }
+  .bulk-assignment-note {
+    border-radius: 0.9rem;
+    background: #f7fbf7;
+    border: 1px solid #dce9de;
+    color: #4e6758;
+    padding: 0.85rem 0.95rem;
+  }
+  .course-pickbox {
+    min-height: 340px;
+  }
+  .bulk-help-list {
+    margin: 0;
+    padding-left: 1.1rem;
+    color: #566d5d;
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
+</div>
+
+<div class="bulk-assignment-note mb-3">
+  <strong>How this works:</strong> choose one published grading template, optionally choose an effective term,
+  then select multiple courses below. EduGradesPro will skip courses that already have a prior assignment in the same term scope.
+</div>
+
+<div class="card bulk-assignment-card">
+  <div class="card-body">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if request.GET.next or request.POST.next %}
+      <input type="hidden" name="next" value="{{ request.POST.next|default:request.GET.next }}">
+      {% endif %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <label class="form-label" for="{{ form.grading_template.id_for_label }}">{{ form.grading_template.label }}</label>
+          {{ form.grading_template }}
+          {% if form.grading_template.help_text %}<div class="form-text">{{ form.grading_template.help_text }}</div>{% endif %}
+          {% for error in form.grading_template.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="{{ form.effective_from_term.id_for_label }}">{{ form.effective_from_term.label }}</label>
+          {{ form.effective_from_term }}
+          {% if form.effective_from_term.help_text %}<div class="form-text">{{ form.effective_from_term.help_text }}</div>{% endif %}
+          {% for error in form.effective_from_term.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-lg-2 d-flex align-items-end">
+          <div class="form-check mb-2">
+            {{ form.is_active }}
+            <label class="form-check-label" for="{{ form.is_active.id_for_label }}">{{ form.is_active.label }}</label>
+          </div>
+        </div>
+      </div>
+
+      <hr class="my-4">
+
+      <div class="row g-3">
+        <div class="col-lg-8">
+          <label class="form-label" for="course-search">Search Courses</label>
+          <input id="course-search" class="form-control" type="text" placeholder="Type course title or code to filter the list">
+          <div class="form-text">Tip: hold <strong>Ctrl</strong> while clicking to select multiple courses.</div>
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="{{ form.courses.id_for_label }}">{{ form.courses.label }}</label>
+          <div class="form-text mb-2">Selected count updates automatically while you choose courses.</div>
+          <div class="fw-semibold text-success" id="selected-count">0 course(s) selected</div>
+        </div>
+        <div class="col-12">
+          {{ form.courses }}
+          {% if form.courses.help_text %}<div class="form-text">{{ form.courses.help_text }}</div>{% endif %}
+          {% for error in form.courses.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+
+      <div class="bulk-assignment-note mt-4 mb-3">
+        <strong>Prior assignment check:</strong> if a course already has a course-template assignment for the same
+        term scope, EduGradesPro will skip it and show a warning instead of creating a conflicting assignment.
+      </div>
+
+      <ul class="bulk-help-list mb-4">
+        <li>Use blank <strong>Effective term</strong> for a general assignment.</li>
+        <li>Use a specific term when only that term should use the selected template.</li>
+        <li>If a course already has a prior assignment for the same scope, edit the existing row instead of bulk-creating another one.</li>
+      </ul>
+
+      <button class="btn btn-primary" type="submit">Assign Template to Selected Courses</button>
+    </form>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const searchField = document.getElementById("course-search");
+    const courseField = document.getElementById("id_courses");
+    const selectedCount = document.getElementById("selected-count");
+
+    if (!courseField) {
+      return;
+    }
+
+    courseField.classList.add("course-pickbox");
+
+    function updateCount() {
+      const count = Array.from(courseField.options).filter(function (option) {
+        return option.selected;
+      }).length;
+      selectedCount.textContent = count + " course(s) selected";
+    }
+
+    function filterCourses() {
+      const query = (searchField.value || "").trim().toLowerCase();
+      Array.from(courseField.options).forEach(function (option) {
+        const text = (option.textContent || "").toLowerCase();
+        option.hidden = query && !text.includes(query);
+      });
+    }
+
+    updateCount();
+    courseField.addEventListener("change", updateCount);
+    if (searchField) {
+      searchField.addEventListener("input", filterCourses);
+    }
+  });
+</script>
+{% endblock %}

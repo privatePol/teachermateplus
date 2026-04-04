@@ -93,6 +93,9 @@
             <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:grading_template_builder' row.id %}">Builder</a>
             {% endif %}
             <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:grading_template_structure' row.id %}">Structure</a>
+            {% if "grading_templates.read" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:grading_template_calculator' %}?grading_template={{ row.id }}&sample_value=85.00">Test Calculator</a>
+            {% endif %}
             {% if "grading_templates.update" in effective_permissions %}
             <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grading_template_update' row.id %}">Edit</a>
             {% endif %}

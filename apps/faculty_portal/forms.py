@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 
 from django import forms
 
+from apps.academics.models import CourseOffering
 from apps.enrollment.models import Enrollment
 from apps.grading.models import (
     GradeActivity,
@@ -11,6 +12,8 @@ from apps.grading.models import (
     GradingTemplateDetail,
     GradingTemplateSubcomponent,
 )
+from apps.notifications.models import FacultyMemo
+from apps.students.models import Student
 
 
 def _active_only_queryset(queryset):
@@ -28,6 +31,31 @@ def _enforce_active_reference_choices(form):
             queryset = getattr(field, "queryset", None)
             if queryset is not None:
                 field.queryset = _active_only_queryset(queryset)
+
+
+def _offering_label(obj):
+    course = getattr(obj, "course", None)
+    section = getattr(obj, "section", None)
+    term = getattr(obj, "term", None)
+    course_label = " ".join(
+        part for part in [getattr(course, "title", ""), f"({getattr(course, 'code', '')})"] if part
+    ).strip()
+    section_label = getattr(section, "name", None) or getattr(section, "code", None) or "-"
+    term_label = getattr(term, "name", None) or getattr(term, "code", None) or "-"
+    return f"{course_label} | {section_label} | {term_label}"
+
+
+def _student_label(obj):
+    student_no = getattr(obj, "student_no", None) or ""
+    name_parts = [
+        getattr(obj, "last_name", ""),
+        getattr(obj, "first_name", ""),
+        getattr(obj, "middle_name", ""),
+    ]
+    name = " ".join(part for part in name_parts if part).strip()
+    if student_no and name:
+        return f"{student_no} - {name}"
+    return student_no or name or str(obj)
 
 
 class FacultyEnrollmentForm(forms.Form):
@@ -298,4 +326,126 @@ class GradeCorrectionRequestForm(forms.Form):
         if not items:
             self.add_error(None, "Enter at least one corrected value before submitting the request.")
         cleaned["items"] = items
+        return cleaned
+
+
+class FacultyReminderForm(forms.Form):
+    title = forms.CharField(
+        max_length=160,
+        label="Reminder title",
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+    reminder_type = forms.ChoiceField(
+        choices=[
+            ("ACTIVITY_PREPARATION", "Activity Preparation"),
+            ("SCORE_ENCODING", "Score Encoding"),
+            ("ASSIGNMENT_ACCEPTANCE", "Assignment Acceptance"),
+            ("GRADE_SUBMISSION", "Grade Submission"),
+            ("CORRECTION_WINDOW", "Correction Window"),
+            ("AT_RISK_FOLLOWUP", "At-Risk Follow-up"),
+            ("CUSTOM", "Custom"),
+        ],
+        label="Reminder type",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    offering = forms.ModelChoiceField(
+        queryset=CourseOffering.objects.none(),
+        label="Class",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    period_label = forms.CharField(
+        max_length=120,
+        required=False,
+        label="Period / Phase",
+        help_text="Optional. Example: PRELIM, MIDTERM, PRE-FINAL, Final Exam.",
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+    remind_at = forms.DateTimeField(
+        label="Remind at",
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local", "class": "form-control"}),
+    )
+    due_at = forms.DateTimeField(
+        required=False,
+        label="Due at",
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local", "class": "form-control"}),
+    )
+    send_email = forms.BooleanField(
+        required=False,
+        label="Send email reminder",
+        help_text="Queue an email reminder to the faculty email address when this reminder becomes due.",
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )
+    notes = forms.CharField(
+        required=False,
+        label="Notes",
+        widget=forms.Textarea(attrs={"rows": 4, "class": "form-control"}),
+    )
+
+    def __init__(self, *args, offering_queryset=None, send_email_enabled: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        if offering_queryset is not None:
+            self.fields["offering"].queryset = offering_queryset
+        _enforce_active_reference_choices(self)
+        self.fields["offering"].label_from_instance = _offering_label
+        self.fields["title"].widget.attrs["placeholder"] = "Example: Prepare Quiz 1"
+        self.fields["period_label"].widget.attrs["placeholder"] = "Example: PRELIM"
+        self.fields["notes"].widget.attrs["placeholder"] = "Add a short note for future reference."
+        if not send_email_enabled:
+            self.fields["send_email"].initial = False
+            self.fields["send_email"].help_text = (
+                "Email reminders are currently disabled by configuration. You can still save the reminder."
+            )
+
+    def clean(self):
+        cleaned = super().clean()
+        remind_at = cleaned.get("remind_at")
+        due_at = cleaned.get("due_at")
+        if remind_at and due_at and due_at < remind_at:
+            self.add_error("due_at", "Due date cannot be earlier than the reminder date.")
+        if not cleaned.get("send_email"):
+            cleaned["send_email"] = False
+        return cleaned
+
+
+class FacultyMemoForm(forms.ModelForm):
+    class Meta:
+        model = FacultyMemo
+        fields = ["memo_type", "offering", "student", "title", "body", "is_pinned"]
+        widgets = {
+            "memo_type": forms.Select(attrs={"class": "form-select"}),
+            "offering": forms.Select(attrs={"class": "form-select"}),
+            "student": forms.Select(attrs={"class": "form-select"}),
+            "title": forms.TextInput(attrs={"class": "form-control"}),
+            "body": forms.Textarea(attrs={"rows": 5, "class": "form-control"}),
+            "is_pinned": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+        }
+
+    def __init__(self, *args, offering_queryset=None, student_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if offering_queryset is not None:
+            self.fields["offering"].queryset = offering_queryset
+        if student_queryset is not None:
+            self.fields["student"].queryset = student_queryset
+        _enforce_active_reference_choices(self)
+        self.fields["offering"].required = False
+        self.fields["student"].required = False
+        self.fields["offering"].label_from_instance = _offering_label
+        self.fields["student"].label_from_instance = _student_label
+        self.fields["title"].widget.attrs["placeholder"] = "Example: Follow up on Quiz 1"
+        self.fields["body"].widget.attrs["placeholder"] = "Write a private note for yourself or future follow-up."
+
+    def clean(self):
+        cleaned = super().clean()
+        offering = cleaned.get("offering")
+        student = cleaned.get("student")
+        memo_type = cleaned.get("memo_type") or FacultyMemo.MemoType.GENERAL
+        if memo_type == FacultyMemo.MemoType.CLASS and not offering:
+            self.add_error("offering", "Select a class memo should be linked to.")
+        if memo_type == FacultyMemo.MemoType.STUDENT and not student:
+            self.add_error("student", "Select a student memo should be linked to.")
+        if offering and student:
+            if not Enrollment.objects.filter(course_offering=offering, student=student, is_active=True).exists():
+                self.add_error("student", "The selected student is not enrolled in the selected class.")
+        if offering is not None and student is not None and offering.tenant_id != student.tenant_id:
+            self.add_error("student", "The selected student does not belong to this tenant scope.")
         return cleaned

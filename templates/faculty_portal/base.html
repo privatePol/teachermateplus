@@ -272,6 +272,30 @@
           <span class="sidebar-label">Archived Classes</span>
           <span class="sidebar-sub">Archive</span>
         </a>
+        <a
+          href="{% url 'faculty_portal:reminder_center' %}"
+          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:reminder_center' %}active{% endif %}"
+          title="Faculty Reminder Center"
+        >
+          <span class="sidebar-icon">&#128276;</span>
+          <span class="sidebar-label">Reminders</span>
+        </a>
+        <a
+          href="{% url 'faculty_portal:memo_center' %}"
+          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:memo_center' or request.resolver_match.view_name == 'faculty_portal:memo_edit' %}active{% endif %}"
+          title="Faculty Notes / Private Memo"
+        >
+          <span class="sidebar-icon">&#128221;</span>
+          <span class="sidebar-label">Notes</span>
+        </a>
+        <a
+          href="{% url 'faculty_portal:student_at_risk_monitor' %}"
+          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:student_at_risk_monitor' %}active{% endif %}"
+          title="Student At-Risk Monitor"
+        >
+          <span class="sidebar-icon">&#9888;</span>
+          <span class="sidebar-label">At-Risk Monitor</span>
+        </a>
       </div>
     </aside>
     <main class="faculty-main">

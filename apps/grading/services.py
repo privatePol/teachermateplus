@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
@@ -164,6 +164,475 @@ class GradingTemplateService:
             ]
         )
         return template
+
+
+class GradingTemplateTestingCalculatorService:
+    DEFAULT_SAMPLE_VALUE = Decimal("85.00")
+
+    @classmethod
+    def prefetch_templates(cls, queryset):
+        return queryset.prefetch_related(
+            Prefetch(
+                "periods",
+                queryset=GradingTemplatePeriod.objects.filter(is_active=True)
+                .order_by("sequence_no", "id")
+                .prefetch_related(
+                    Prefetch(
+                        "components",
+                        queryset=GradingTemplateComponent.objects.filter(is_active=True)
+                        .order_by("sort_order", "id")
+                        .prefetch_related(
+                            Prefetch(
+                                "subcomponents",
+                                queryset=GradingTemplateSubcomponent.objects.filter(is_active=True)
+                                .order_by("sort_order", "id")
+                                .prefetch_related(
+                                    Prefetch(
+                                        "details",
+                                        queryset=GradingTemplateDetail.objects.filter(is_active=True).order_by(
+                                            "sort_order", "id"
+                                        ),
+                                    )
+                                ),
+                            )
+                        ),
+                    )
+                ),
+            )
+        )
+
+    @staticmethod
+    def _round(value: Decimal) -> Decimal:
+        return FacultyGradingService._round(value)
+
+    @staticmethod
+    def _to_decimal(value) -> Decimal:
+        if value is None or value == "":
+            return Decimal("0")
+        return Decimal(str(value))
+
+    @classmethod
+    def _leaf_key(
+        cls,
+        *,
+        component: GradingTemplateComponent,
+        subcomponent: GradingTemplateSubcomponent | None = None,
+        detail: GradingTemplateDetail | None = None,
+    ) -> str:
+        if detail:
+            return f"detail_{detail.id}"
+        if subcomponent:
+            return f"subcomponent_{subcomponent.id}"
+        return f"component_{component.id}"
+
+    @classmethod
+    def _leaf_label(
+        cls,
+        *,
+        component: GradingTemplateComponent,
+        subcomponent: GradingTemplateSubcomponent | None = None,
+        detail: GradingTemplateDetail | None = None,
+    ) -> str:
+        if detail:
+            return detail.name or detail.code
+        if subcomponent:
+            return subcomponent.name or subcomponent.code
+        return component.name or component.code
+
+    @classmethod
+    def _leaf_level_label(
+        cls,
+        *,
+        subcomponent: GradingTemplateSubcomponent | None = None,
+        detail: GradingTemplateDetail | None = None,
+    ) -> str:
+        if detail:
+            return "Detail"
+        if subcomponent:
+            return "Subcomponent"
+        return "Component"
+
+    @classmethod
+    def _parse_decimal_or_default(cls, raw_value, *, default_value: Decimal, minimum: Decimal | None = None):
+        if raw_value in {None, ""}:
+            return default_value, "", None
+        try:
+            value = Decimal(str(raw_value))
+        except (InvalidOperation, TypeError, ValueError):
+            return default_value, str(raw_value), "Enter a valid number."
+        if minimum is not None and value < minimum:
+            return default_value, str(raw_value), f"Value must be {minimum:.2f} or higher."
+        return cls._round(value), str(raw_value), None
+
+    @classmethod
+    def _resolve_leaf_input(
+        cls,
+        *,
+        raw_inputs: dict | None,
+        default_sample: Decimal,
+        input_key: str,
+        component: GradingTemplateComponent,
+        subcomponent: GradingTemplateSubcomponent | None = None,
+        detail: GradingTemplateDetail | None = None,
+        base_value: Decimal,
+        entry_method: str,
+        local_weight: Decimal,
+        effective_weight: Decimal,
+        effective_weight_formula: str,
+    ):
+        score_input_mode = FacultyGradingService.resolve_score_input_mode(
+            template_component=component,
+            template_subcomponent=subcomponent,
+            template_detail=detail,
+        )
+        raw_name = f"{input_key}_raw"
+        total_name = f"{input_key}_total"
+        raw_value = None if raw_inputs is None else raw_inputs.get(raw_name)
+        total_value = None if raw_inputs is None else raw_inputs.get(total_name)
+        entered_score, display_raw_value, raw_error = cls._parse_decimal_or_default(
+            raw_value,
+            default_value=default_sample,
+            minimum=Decimal("0"),
+        )
+        total_score = Decimal("100")
+        display_total_value = "100.00"
+        total_error = None
+        if score_input_mode != "DIRECT_PERCENTAGE":
+            total_score, display_total_value, total_error = cls._parse_decimal_or_default(
+                total_value,
+                default_value=Decimal("100.00"),
+                minimum=Decimal("0.01"),
+            )
+        else:
+            if entered_score > Decimal("100"):
+                raw_error = "Direct percentage score must stay between 0.00 and 100.00."
+                entered_score = default_sample
+                display_raw_value = str(raw_value or "")
+        computed_score = entered_score
+        formula = f"Direct percentage input = {entered_score:.2f}"
+        score_error = raw_error or total_error
+        if score_input_mode != "DIRECT_PERCENTAGE":
+            try:
+                computed_score = FacultyGradingService.compute_activity_score(
+                    raw_score=entered_score,
+                    total_score=total_score,
+                    base_value=base_value,
+                    score_input_mode=score_input_mode,
+                )
+            except ValidationError as exc:
+                score_error = str(exc)
+                entered_score = default_sample
+                total_score = Decimal("100.00")
+                computed_score = FacultyGradingService.compute_activity_score(
+                    raw_score=entered_score,
+                    total_score=total_score,
+                    base_value=base_value,
+                    score_input_mode=score_input_mode,
+                )
+            formula = (
+                f"(({entered_score:.2f} / {total_score:.2f}) x {base_value:.2f}) + "
+                f"(100 - {base_value:.2f}) = {computed_score:.2f}"
+            )
+        row = {
+            "input_key": input_key,
+            "raw_name": raw_name,
+            "total_name": total_name,
+            "entry_method": entry_method,
+            "score_input_mode": score_input_mode,
+            "level": cls._leaf_level_label(subcomponent=subcomponent, detail=detail),
+            "label": cls._leaf_label(component=component, subcomponent=subcomponent, detail=detail),
+            "component_name": component.name or component.code,
+            "component_code": component.code,
+            "subcomponent_name": (subcomponent.name or subcomponent.code) if subcomponent else None,
+            "subcomponent_code": subcomponent.code if subcomponent else None,
+            "detail_name": (detail.name or detail.code) if detail else None,
+            "detail_code": detail.code if detail else None,
+            "raw_score": entered_score,
+            "display_raw_value": display_raw_value if display_raw_value != "" else f"{entered_score:.2f}",
+            "total_score": total_score,
+            "display_total_value": display_total_value if display_total_value != "" else f"{total_score:.2f}",
+            "computed_score": computed_score,
+            "formula": formula,
+            "error": score_error,
+            "uses_total_score": score_input_mode != "DIRECT_PERCENTAGE",
+            "weight_percentage": local_weight,
+            "effective_weight_percentage": cls._round(effective_weight),
+            "effective_weight_formula": effective_weight_formula,
+        }
+        return computed_score, row
+
+    @classmethod
+    def build_calculation(
+        cls,
+        *,
+        template: GradingTemplate,
+        raw_inputs: dict | None = None,
+        default_sample: Decimal | None = None,
+    ):
+        default_sample = cls._round(default_sample or cls.DEFAULT_SAMPLE_VALUE)
+        period_rows = []
+        input_errors = []
+        active_periods = list(template.periods.all())
+        base_value = cls._to_decimal(template.default_base_value or Decimal("50.00"))
+
+        for period in active_periods:
+            component_rows = []
+            period_input_rows = []
+            class_standing = Decimal("0")
+            exam_grade = None
+            weighted_period_grade = Decimal("0")
+            has_exam_component = False
+            has_exam_data = False
+
+            components = list(period.components.all())
+            for component in components:
+                component_weight = cls._to_decimal(component.weight_percentage)
+                component_entry_method = FacultyGradingService.score_input_mode_label(
+                    FacultyGradingService.resolve_score_input_mode(template_component=component)
+                )
+                subcomponents = list(component.subcomponents.all())
+                component_input_rows = []
+
+                if subcomponents:
+                    sub_weight_total = sum(cls._to_decimal(sub.weight_percentage) for sub in subcomponents)
+                    sub_denominator = sub_weight_total if sub_weight_total > 0 else Decimal("100")
+                    component_raw = Decimal("0")
+                    subcomponent_rows = []
+
+                    for subcomponent in subcomponents:
+                        sub_weight = cls._to_decimal(subcomponent.weight_percentage)
+                        sub_entry_method = FacultyGradingService.score_input_mode_label(
+                            FacultyGradingService.resolve_score_input_mode(
+                                template_component=component,
+                                template_subcomponent=subcomponent,
+                            )
+                        )
+                        details = list(subcomponent.details.all())
+                        sub_input_rows = []
+
+                        if details:
+                            detail_weight_total = sum(cls._to_decimal(detail.weight_percentage) for detail in details)
+                            detail_denominator = detail_weight_total if detail_weight_total > 0 else Decimal("100")
+                            detail_raw = Decimal("0")
+                            detail_rows = []
+                            for detail in details:
+                                input_key = cls._leaf_key(
+                                    component=component,
+                                    subcomponent=subcomponent,
+                                    detail=detail,
+                                )
+                                detail_value, detail_input_row = cls._resolve_leaf_input(
+                                    raw_inputs=raw_inputs,
+                                    default_sample=default_sample,
+                                    input_key=input_key,
+                                    component=component,
+                                    subcomponent=subcomponent,
+                                    detail=detail,
+                                    base_value=base_value,
+                                    entry_method=FacultyGradingService.score_input_mode_label(
+                                        FacultyGradingService.resolve_score_input_mode(
+                                            template_component=component,
+                                            template_subcomponent=subcomponent,
+                                            template_detail=detail,
+                                        )
+                                    ),
+                                    local_weight=cls._to_decimal(detail.weight_percentage),
+                                    effective_weight=(
+                                        (component_weight / Decimal("100"))
+                                        * (sub_weight / sub_denominator)
+                                        * cls._to_decimal(detail.weight_percentage)
+                                        / detail_denominator
+                                        * Decimal("100")
+                                    ),
+                                    effective_weight_formula=(
+                                        f"{component_weight}% x ({sub_weight}% / {sub_denominator}%) x "
+                                        f"({cls._to_decimal(detail.weight_percentage)}% / {detail_denominator}%)"
+                                    ),
+                                )
+                                component_input_rows.append(detail_input_row)
+                                sub_input_rows.append(detail_input_row)
+                                period_input_rows.append(detail_input_row)
+                                if detail_input_row["error"]:
+                                    input_errors.append(detail_input_row["error"])
+                                weighted_detail = (cls._to_decimal(detail.weight_percentage) / detail_denominator) * detail_value
+                                detail_rows.append(
+                                    {
+                                        "row": detail,
+                                        "input": detail_input_row,
+                                        "score": detail_value,
+                                        "weight": cls._to_decimal(detail.weight_percentage),
+                                        "contribution": cls._round(weighted_detail),
+                                        "formula": (
+                                            f"({detail.weight_percentage}% / {detail_denominator}%) x {detail_value:.2f}"
+                                        ),
+                                    }
+                                )
+                                detail_raw += weighted_detail
+
+                            sub_score = cls._round(detail_raw)
+                            subcomponent_rows.append(
+                                {
+                                    "row": subcomponent,
+                                    "weight": sub_weight,
+                                    "entry_method": sub_entry_method,
+                                    "input_rows": sub_input_rows,
+                                    "details": detail_rows,
+                                    "sub_score": sub_score,
+                                    "formula": (
+                                        " + ".join(detail_row["formula"] for detail_row in detail_rows)
+                                        if detail_rows
+                                        else "-"
+                                    ),
+                                }
+                            )
+                        else:
+                            input_key = cls._leaf_key(component=component, subcomponent=subcomponent)
+                            sub_score, sub_input_row = cls._resolve_leaf_input(
+                                raw_inputs=raw_inputs,
+                                default_sample=default_sample,
+                                input_key=input_key,
+                                component=component,
+                                subcomponent=subcomponent,
+                                base_value=base_value,
+                                entry_method=sub_entry_method,
+                                local_weight=sub_weight,
+                                effective_weight=(component_weight / Decimal("100")) * sub_weight,
+                                effective_weight_formula=f"{component_weight}% x ({sub_weight}% / {sub_denominator}%)",
+                            )
+                            component_input_rows.append(sub_input_row)
+                            sub_input_rows.append(sub_input_row)
+                            period_input_rows.append(sub_input_row)
+                            if sub_input_row["error"]:
+                                input_errors.append(sub_input_row["error"])
+                            subcomponent_rows.append(
+                                {
+                                    "row": subcomponent,
+                                    "weight": sub_weight,
+                                    "entry_method": sub_entry_method,
+                                    "input_rows": sub_input_rows,
+                                    "details": [],
+                                    "sub_score": sub_score,
+                                    "formula": f"Input {sub_score:.2f}",
+                                }
+                            )
+
+                        component_raw += (sub_weight / sub_denominator) * sub_score
+
+                    component_score = cls._round(component_raw)
+                    component_formula = " + ".join(
+                        f"({row['weight']}% / {sub_denominator}%) x {row['sub_score']:.2f}"
+                        for row in subcomponent_rows
+                    )
+                else:
+                    input_key = cls._leaf_key(component=component)
+                    component_score, component_input_row = cls._resolve_leaf_input(
+                        raw_inputs=raw_inputs,
+                        default_sample=default_sample,
+                        input_key=input_key,
+                        component=component,
+                        base_value=base_value,
+                        entry_method=component_entry_method,
+                        local_weight=component_weight,
+                        effective_weight=component_weight,
+                        effective_weight_formula=f"{component_weight}% of the period",
+                    )
+                    component_input_rows.append(component_input_row)
+                    period_input_rows.append(component_input_row)
+                    if component_input_row["error"]:
+                        input_errors.append(component_input_row["error"])
+                    subcomponent_rows = []
+                    component_formula = f"Input {component_score:.2f}"
+
+                weighted_contribution = cls._round((component_weight / Decimal("100")) * component_score)
+                component_rows.append(
+                    {
+                        "row": component,
+                        "weight": component_weight,
+                        "entry_method": component_entry_method,
+                        "component_score": component_score,
+                        "weighted_contribution": weighted_contribution,
+                        "formula": component_formula,
+                        "subcomponents": subcomponent_rows,
+                        "input_rows": component_input_rows,
+                    }
+                )
+
+                if "EXAM" in component.code.upper():
+                    has_exam_component = True
+                    exam_grade = (exam_grade or Decimal("0")) + component_score
+                    has_exam_data = True
+                else:
+                    class_standing += component_score
+                weighted_period_grade += (component_weight / Decimal("100")) * component_score
+
+            class_standing = cls._round(class_standing)
+            exam_grade = cls._round(exam_grade) if exam_grade is not None else None
+            period_grade = cls._round(weighted_period_grade) if (not has_exam_component or has_exam_data) else None
+
+            period_rows.append(
+                {
+                    "row": period,
+                    "components": component_rows,
+                    "class_standing": class_standing,
+                    "exam_grade": exam_grade,
+                    "period_grade": period_grade,
+                    "input_rows": period_input_rows,
+                    "period_formula": " + ".join(
+                        f"({component_row['weight']}% / 100%) x {component_row['component_score']:.2f}"
+                        for component_row in component_rows
+                    ),
+                }
+            )
+
+        computed_periods = [row for row in period_rows if row["period_grade"] is not None]
+        final_grade = None
+        final_formula = "No period grade available yet."
+        if computed_periods:
+            final_grade = cls._round(
+                sum((row["period_grade"] for row in computed_periods), Decimal("0"))
+                / Decimal(len(computed_periods))
+            )
+            final_formula = (
+                "("
+                + " + ".join(f"{row['period_grade']:.2f}" for row in computed_periods)
+                + f") / {len(computed_periods)} = {final_grade:.2f}"
+            )
+
+        return {
+            "period_rows": period_rows,
+            "default_sample": default_sample,
+            "base_value": base_value,
+            "final_grade": final_grade,
+            "final_formula": final_formula,
+            "metric_cards": [
+                {
+                    "label": "Active Periods",
+                    "value": len(active_periods),
+                    "meta": "Periods that will be included in the testing breakdown.",
+                },
+                {
+                    "label": "Weighted Components",
+                    "value": sum(len(period_row["components"]) for period_row in period_rows),
+                    "meta": "Active component rows used by the selected template.",
+                },
+                {
+                    "label": "Raw-Score Input Rows",
+                    "value": sum(len(period_row["input_rows"]) for period_row in period_rows),
+                    "meta": "Lowest-level rows where the calculator accepts raw score and total score inputs.",
+                },
+                {
+                    "label": "Base Value",
+                    "value": f"{base_value:.2f}",
+                    "meta": "Used when EduGradesPro converts raw score to computed percentage for Base-50 items.",
+                },
+                {
+                    "label": "Computed Final Grade",
+                    "value": f"{final_grade:.2f}" if final_grade is not None else "-",
+                    "meta": "Read-only result using the same current EduGradesPro final-grade averaging logic.",
+                },
+            ],
+            "input_errors": input_errors,
+        }
 
 
 class TemplateHotfixService:

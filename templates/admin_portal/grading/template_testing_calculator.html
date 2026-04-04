@@ -1,0 +1,578 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .calculator-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.9rem;
+  }
+  .calculator-card {
+    border: 0;
+    border-radius: 1rem;
+    padding: 1rem 1.05rem;
+    background:
+      radial-gradient(circle at top right, rgba(232, 194, 71, 0.22), transparent 36%),
+      linear-gradient(145deg, #17633b 0%, #2f8e51 60%, #7faf46 100%);
+    color: #fffef7;
+    box-shadow: 0 0.75rem 1.35rem rgba(18, 72, 42, 0.13);
+  }
+  .calculator-card-label {
+    font-size: 0.76rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 252, 239, 0.92);
+  }
+  .calculator-card-value {
+    font-size: 1.55rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-top: 0.35rem;
+  }
+  .calculator-card-meta {
+    margin-top: 0.45rem;
+    color: rgba(255, 250, 236, 0.94);
+    font-size: 0.85rem;
+  }
+  .period-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.85rem;
+  }
+  .period-summary-card {
+    border: 1px solid rgba(34, 84, 54, 0.08);
+    border-radius: 1rem;
+    background: #ffffff;
+    box-shadow: 0 0.5rem 1rem rgba(24, 68, 40, 0.08);
+    padding: 1rem;
+  }
+  .period-summary-card.final-card {
+    background: linear-gradient(140deg, #f7f9f3 0%, #eef6ed 60%, #f4f0cf 100%);
+  }
+  .period-summary-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #5c6f62;
+  }
+  .period-summary-value {
+    margin-top: 0.35rem;
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: #143928;
+  }
+  .formula-box {
+    background: #f8fbf8;
+    border: 1px solid #d8e7da;
+    border-radius: 0.9rem;
+    padding: 0.85rem 1rem;
+  }
+  .input-table td,
+  .input-table th,
+  .breakdown-table td,
+  .breakdown-table th {
+    vertical-align: middle;
+  }
+  .input-table .text-muted-small,
+  .breakdown-table .text-muted-small {
+    font-size: 0.82rem;
+    color: #6b7280;
+  }
+  .period-input-card {
+    border: 1px solid rgba(30, 86, 53, 0.1);
+    border-radius: 0.95rem;
+    background: #fbfcf8;
+  }
+  .period-breakdown-card {
+    border: 0;
+    border-radius: 1rem;
+    box-shadow: 0 0.5rem 1rem rgba(20, 57, 40, 0.08);
+    overflow: hidden;
+  }
+  .period-header {
+    color: #fff;
+    border-bottom: 0;
+  }
+  .period-header.period-prelim {
+    background: linear-gradient(135deg, #1b7f5a 0%, #3ba96d 100%);
+  }
+  .period-header.period-midterm {
+    background: linear-gradient(135deg, #16608c 0%, #3c88bb 100%);
+  }
+  .period-header.period-prefinal {
+    background: linear-gradient(135deg, #8a6a14 0%, #c39b28 100%);
+  }
+  .period-header.period-final {
+    background: linear-gradient(135deg, #7a2e2e 0%, #b24e4e 100%);
+  }
+  .period-header.period-default {
+    background: linear-gradient(135deg, #315f46 0%, #4c8a63 100%);
+  }
+  .period-header .text-muted {
+    color: rgba(255, 255, 255, 0.8) !important;
+  }
+  .calc-walkthrough {
+    display: grid;
+    gap: 0.85rem;
+  }
+  .calc-step-card {
+    border: 1px solid #d8e7da;
+    border-radius: 0.95rem;
+    background: #fff;
+    padding: 0.95rem 1rem;
+  }
+  .calc-step-title {
+    font-size: 0.83rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #315f46;
+    margin-bottom: 0.55rem;
+  }
+  .calc-step-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px dashed rgba(58, 99, 76, 0.14);
+    font-size: 0.95rem;
+  }
+  .calc-step-line:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+  .calc-step-line strong {
+    color: #163d29;
+  }
+  .calc-eq {
+    font-family: Consolas, "Courier New", monospace;
+    color: #8f1f58;
+    font-size: 0.95rem;
+    line-height: 1.65;
+  }
+  .calc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.28rem 0.7rem;
+    background: #edf6ee;
+    color: #214b33;
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+  .calc-result-box {
+    border-radius: 0.95rem;
+    padding: 0.9rem 1rem;
+    background: linear-gradient(135deg, #f6fbf5 0%, #edf7ee 55%, #f8f1d3 100%);
+    border: 1px solid #d8e7da;
+  }
+  .calc-result-box .result-label {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #54725e;
+  }
+  .calc-result-box .result-value {
+    margin-top: 0.25rem;
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #173c28;
+  }
+  .builder-summary {
+    border: 1px solid #d8e7da;
+    border-radius: 0.95rem;
+    background: #fff;
+    padding: 1rem;
+  }
+  .builder-formula {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #173c28;
+  }
+  .builder-tree {
+    margin-top: 0.85rem;
+  }
+  .builder-tree-title {
+    font-size: 0.85rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #315f46;
+    margin-bottom: 0.45rem;
+  }
+  .builder-tree ul {
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+  .builder-tree li {
+    margin-bottom: 0.3rem;
+  }
+  .simple-calc-list {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .simple-calc-item {
+    border: 1px solid #d8e7da;
+    border-radius: 0.95rem;
+    background: #fff;
+    padding: 0.9rem 1rem;
+  }
+  .simple-calc-label {
+    font-size: 0.84rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #315f46;
+    margin-bottom: 0.45rem;
+  }
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h2 class="h5 mb-1">Grading Template Testing Calculator</h2>
+    <div class="text-muted small">Use sample raw scores and totals to validate how EduGradesPro computes each period grade and the final grade from the selected grading template.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:grading_template_list' %}">Back to Grading Templates</a>
+    <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:guide' %}#grading-template-calculator">Open Guide</a>
+  </div>
+</div>
+
+<div class="alert alert-info">
+  <div class="fw-semibold mb-1">How this testing calculator works</div>
+  <ul class="mb-0 ps-3">
+    {% for note in usage_notes %}
+    <li>{{ note }}</li>
+    {% endfor %}
+  </ul>
+</div>
+
+<form method="post" class="card border-0 shadow-sm mb-3">
+  {% csrf_token %}
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <label class="form-label" for="{{ form.grading_template.id_for_label }}">{{ form.grading_template.label }}</label>
+        {{ form.grading_template }}
+        {% if form.grading_template.help_text %}<div class="form-text">{{ form.grading_template.help_text }}</div>{% endif %}
+        {% for error in form.grading_template.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="{{ form.sample_value.id_for_label }}">{{ form.sample_value.label }}</label>
+        {{ form.sample_value }}
+        {% if form.sample_value.help_text %}<div class="form-text">{{ form.sample_value.help_text }}</div>{% endif %}
+        {% for error in form.sample_value.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-lg-3 d-flex align-items-end">
+        <div class="d-grid w-100">
+          <button type="submit" class="btn btn-primary">Load / Recompute Calculator</button>
+        </div>
+      </div>
+    </div>
+
+    {% if selected_template and calculation %}
+    <hr class="my-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+      <div>
+        <div class="fw-semibold">{{ selected_template.name }}</div>
+        <div class="text-muted small">{{ selected_template.code }} | {{ selected_template.tenant.code }}</div>
+      </div>
+      <div class="text-muted small">
+        Default sample raw score applied to blank rows: <strong>{{ calculation.default_sample }}</strong>
+        | Base Value: <strong>{{ calculation.base_value }}</strong>
+      </div>
+    </div>
+
+    <div class="calculator-metrics mb-3">
+      {% for card in calculation.metric_cards %}
+      <div class="calculator-card">
+        <div class="calculator-card-label">{{ card.label }}</div>
+        <div class="calculator-card-value">{{ card.value }}</div>
+        <div class="calculator-card-meta">{{ card.meta }}</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="period-summary-grid mb-3">
+      {% for period in calculation.period_rows %}
+      <div class="period-summary-card">
+        <div class="period-summary-label">{{ period.row.name }}</div>
+        <div class="period-summary-value">{{ period.period_grade|default:"-" }}</div>
+        <div class="small text-muted mt-2">Class Standing: <strong>{{ period.class_standing|default:"-" }}</strong></div>
+        <div class="small text-muted">Exam Grade: <strong>{{ period.exam_grade|default:"-" }}</strong></div>
+      </div>
+      {% endfor %}
+      <div class="period-summary-card final-card">
+        <div class="period-summary-label">Final Grade</div>
+        <div class="period-summary-value">{{ calculation.final_grade|default:"-" }}</div>
+        <div class="small text-muted mt-2">Current EduGradesPro final-grade averaging result.</div>
+      </div>
+    </div>
+
+    <div class="formula-box mb-4">
+      <div class="fw-semibold mb-1">Final Grade Formula Used</div>
+      <div class="small text-muted mb-1">EduGradesPro currently computes the final grade by averaging the active period grades produced by this template.</div>
+      <div class="calc-walkthrough mt-3">
+        <div class="calc-step-card">
+          <div class="calc-step-title">Step 1: Gather active period grades</div>
+          {% for period in calculation.period_rows %}
+          <div class="calc-step-line">
+            <span>{{ period.row.name }}</span>
+            <strong>{{ period.period_grade|default:"-" }}</strong>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="calc-step-card">
+          <div class="calc-step-title">Step 2: Average the active period grades</div>
+          <div class="calc-eq">{{ calculation.final_formula }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-grid gap-3">
+      {% for period in calculation.period_rows %}
+      <div class="card period-breakdown-card">
+        <div class="card-header period-header {% if 'PRELIM' in period.row.code|upper or 'PRELIM' in period.row.name|upper %}period-prelim{% elif 'MIDTERM' in period.row.code|upper or 'MIDTERM' in period.row.name|upper %}period-midterm{% elif 'PREFINAL' in period.row.code|upper or 'PRE-FINAL' in period.row.name|upper or 'PRE FINAL' in period.row.name|upper %}period-prefinal{% elif 'FINAL' in period.row.code|upper or 'FINAL' in period.row.name|upper or 'EXAM' in period.row.code|upper %}period-final{% else %}period-default{% endif %} d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div>
+            <div class="fw-semibold">{{ period.row.name }}</div>
+            <div class="small text-muted">{{ period.row.code }}</div>
+          </div>
+          <div class="text-end small">
+            <div>Class Standing: <strong>{{ period.class_standing|default:"-" }}</strong></div>
+            <div>Exam Grade: <strong>{{ period.exam_grade|default:"-" }}</strong></div>
+            <div>Period Grade: <strong>{{ period.period_grade|default:"-" }}</strong></div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="builder-summary mb-3">
+            <div class="builder-formula mb-2">
+              {{ period.row.name|upper }} GRADE =
+              {% for component in period.components %}
+                {{ component.row.name }} ({{ component.weight }}%){% if not forloop.last %} + {% endif %}
+              {% endfor %}
+            </div>
+            <div class="small text-muted">Simple view of the selected template, following the same format faculty usually recognize from the grading template builder.</div>
+
+            {% for component in period.components %}
+              {% if component.subcomponents %}
+              <div class="builder-tree">
+                <div class="builder-tree-title">{{ component.row.name }}</div>
+                <ul>
+                  {% for sub in component.subcomponents %}
+                  <li>
+                    {{ sub.row.name }} = {{ sub.weight }}%
+                    {% if sub.details %}
+                    <ul class="mt-1">
+                      {% for detail in sub.details %}
+                      <li>{{ detail.row.name }} = {{ detail.weight }}%</li>
+                      {% endfor %}
+                    </ul>
+                    {% endif %}
+                  </li>
+                  {% endfor %}
+                </ul>
+              </div>
+              {% endif %}
+            {% endfor %}
+          </div>
+
+          <div class="period-input-card p-3 mb-3">
+            <div class="fw-semibold mb-2">Sample Inputs for {{ period.row.name }}</div>
+            <div class="small text-muted mb-3">
+              Start here: enter raw score and total score so the calculator can show the whole process from raw score to computed percentage, then to the period grade.
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle input-table mb-0">
+                <thead>
+                  <tr>
+                    <th>Component</th>
+                    <th>Subcomponent</th>
+                    <th>Detail / Lowest Active Level</th>
+                    <th>Entry Method</th>
+                    <th>Weight</th>
+                    <th style="min-width: 140px;">Raw Score</th>
+                    <th style="min-width: 140px;">Total Score</th>
+                    <th>Computed %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in period.input_rows %}
+                  <tr>
+                    <td>
+                      <div>{{ row.component_name }}</div>
+                      <div class="text-muted-small">{{ row.component_code }}</div>
+                    </td>
+                    <td>
+                      {% if row.subcomponent_name %}
+                        <div>{{ row.subcomponent_name }}</div>
+                        <div class="text-muted-small">{{ row.subcomponent_code }}</div>
+                      {% else %}
+                        <span class="text-muted">-</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <div>{{ row.label }}</div>
+                      <div class="text-muted-small">{{ row.level }}</div>
+                    </td>
+                    <td>{{ row.entry_method }}</td>
+                    <td>
+                      <div>{{ row.weight_percentage }}%</div>
+                      <div class="text-muted-small">
+                        {% if row.level == "Component" %}
+                        Period weight
+                        {% else %}
+                        Within parent
+                        {% endif %}
+                      </div>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        name="{{ row.raw_name }}"
+                        value="{{ row.display_raw_value }}"
+                        class="form-control {% if row.error %}is-invalid{% endif %}"
+                      >
+                    </td>
+                    <td>
+                      {% if row.uses_total_score %}
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        name="{{ row.total_name }}"
+                        value="{{ row.display_total_value }}"
+                        class="form-control {% if row.error %}is-invalid{% endif %}"
+                      >
+                      {% else %}
+                      <input
+                        type="text"
+                        value="Not needed"
+                        class="form-control"
+                        disabled
+                      >
+                      {% endif %}
+                    </td>
+                    <td>
+                      <strong>{{ row.computed_score }}</strong>
+                      {% if row.error %}<div class="invalid-feedback d-block">{{ row.error }}</div>{% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="simple-calc-list mb-3">
+            <div class="simple-calc-item">
+              <div class="simple-calc-label">1. Raw Score to Computed Percentage</div>
+              {% for row in period.input_rows %}
+              <div class="calc-step-line">
+                <div>
+                  <strong>{{ row.label }}</strong>
+                  <div class="text-muted-small">{{ row.entry_method }}</div>
+                </div>
+                <div class="text-end">
+                  <div><strong>{{ row.computed_score }}</strong></div>
+                  <div class="calc-eq mt-1">{{ row.formula }}</div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+
+            <div class="simple-calc-item">
+              <div class="simple-calc-label">2. Component Results</div>
+              {% for component in period.components %}
+              <div class="calc-step-line">
+                <div>
+                  <strong>{{ component.row.name }}</strong>
+                  <div class="text-muted-small">{{ component.weight }}% of {{ period.row.name }}</div>
+                </div>
+                <div class="text-end">
+                  <div><strong>{{ component.component_score }}</strong></div>
+                  <div class="text-muted-small">Contribution: {{ component.weighted_contribution }}</div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+
+            <div class="calc-result-box">
+              <div class="result-label">3. {{ period.row.name }} Grade</div>
+              <div class="result-value">{{ period.period_grade|default:"-" }}</div>
+              <div class="builder-formula mt-2">
+                {{ period.row.name|upper }} GRADE =
+                {% for component in period.components %}
+                  {{ component.row.name }} ({{ component.weight }}%){% if not forloop.last %} + {% endif %}
+                {% endfor %}
+              </div>
+              <div class="calc-eq mt-2">{{ period.period_formula }}</div>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-sm align-middle breakdown-table mb-0">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Weight</th>
+                  <th>Component Score</th>
+                  <th>Weighted Contribution</th>
+                  <th>Computation</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for component in period.components %}
+                <tr>
+                  <td>
+                    <div>{{ component.row.name }}</div>
+                    <div class="text-muted-small">{{ component.row.code }} | {{ component.entry_method }}</div>
+                  </td>
+                  <td>{{ component.weight }}%</td>
+                  <td>{{ component.component_score }}</td>
+                  <td>{{ component.weighted_contribution }}</td>
+                  <td>
+                    <div class="calc-eq">{{ component.formula }}</div>
+                    {% if component.subcomponents %}
+                    <div class="mt-2">
+                      {% for sub in component.subcomponents %}
+                        <div class="small mb-2">
+                          <div><strong>{{ sub.row.name }}</strong> = <span class="text-muted">{{ sub.weight }}%</span></div>
+                          <div class="text-muted-small">{{ sub.entry_method }} | Score: <strong>{{ sub.sub_score }}</strong></div>
+                          {% if sub.details %}
+                          <div class="mt-2 ms-3">
+                            {% for detail in sub.details %}
+                              <div class="small">
+                                {{ detail.row.name }} = <span class="text-muted">{{ detail.weight }}%</span>
+                                <span class="text-muted">| Score <strong>{{ detail.score }}</strong></span>
+                              </div>
+                            {% endfor %}
+                          </div>
+                          {% endif %}
+                        </div>
+                      {% endfor %}
+                    </div>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="formula-box mt-3">
+            <div class="fw-semibold mb-1">Raw Score Conversion Notes</div>
+            <ul class="mb-0 ps-3 small">
+              <li><strong>Raw Score (Base-50)</strong>: <code>((Raw Score / Total Score) x {{ calculation.base_value }}) + (100 - {{ calculation.base_value }})</code></li>
+              <li><strong>Direct Percentage</strong>: the entered value is already treated as the computed percentage.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

@@ -132,12 +132,15 @@
   <h2 class="h4 mb-0 period-page-title">
     {{ offering.course.code }} | {{ offering.section.code }} | {{ offering.term.code }}
   </h2>
-  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:my_courses' %}">Back</a>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-primary" href="{% url 'faculty_portal:offering_grading_template' offering.id %}">View Grading Template</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:my_courses' %}">Back</a>
+  </div>
 </div>
 
 {% if template %}
 <div class="alert period-meta mb-3">
-  Template: <strong>{{ template.code }}</strong> - {{ template.name }} | Students: <strong>{{ enrollment_count }}</strong>
+  Template: <strong>{{ template.name }}</strong> | Students: <strong>{{ enrollment_count }}</strong>
 </div>
 {% endif %}
 

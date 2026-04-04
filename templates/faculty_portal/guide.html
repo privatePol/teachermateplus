@@ -415,6 +415,7 @@
             <a href="#guide-corrections">Corrections and Reopen</a>
             <a href="#guide-classlist">Class List and Archives</a>
             <a href="#guide-archived">Archived Classes</a>
+            <a href="#guide-notes">Private Memo</a>
             <a href="#guide-password">Password Help</a>
             <a href="#guide-first-login">First Login Consent</a>
             <a href="#guide-privacy">Privacy and Governance</a>
@@ -547,9 +548,10 @@
         <div class="card-body">
           <div class="guide-section-title">How to Respond to a New Assignment</div>
           <ol class="guide-list">
-            <li>Open <strong>My Courses</strong>.</li>
+            <li>Open <strong>My Classes</strong>.</li>
             <li>Review the <strong>Pending Faculty Assignments</strong> section first.</li>
             <li>Read the course, section, schedule, and any admin instructions carefully.</li>
+            <li>Review the <strong>Grading Template</strong> shown on the assignment or class card so you know the grading structure attached to that class.</li>
             <li>If the load is correct, click <strong>Accept Assignment</strong>.</li>
             <li>If the load needs discussion, enter your note and choose <strong>Request Clarification</strong> or <strong>Decline</strong>.</li>
             <li>After acceptance, the class becomes available for grading and class-list work.</li>
@@ -581,7 +583,8 @@
           </div>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Create Grade Activity</h6>
           <ol class="guide-list">
-            <li>Open <strong>My Courses</strong> and accept any pending assignment first if the class is newly assigned. Watch the response due date on the pending card so the load does not expire before you acknowledge it.</li>
+            <li>Open <strong>My Classes</strong> and accept any pending assignment first if the class is newly assigned. Watch the response due date on the pending card so the load does not expire before you acknowledge it.</li>
+            <li>Click <strong>Template</strong> on the class card whenever you want to review the assigned grading structure before encoding activities or scores.</li>
             <li>If there is a problem with the load, use the clarification or decline action with a note to admin. Once an assignment expires, only admin can refresh the response window.</li>
             <li>Choose class -> choose period -> click the <strong>Activities</strong> icon.</li>
             <li>Select <strong>Component</strong> first.</li>
@@ -671,6 +674,7 @@
             <li>If enabled for your role, the what-if simulator lets you test remaining performance scenarios before actual encoding.</li>
             <li>The Prediction page now includes a dedicated interpretation guide so faculty can review column meanings and examples before relying on the values.</li>
             <li>The page can also show the average still needed across the remaining final periods to reach a passing final grade.</li>
+            <li>The Faculty Portal also includes a Student At-Risk Monitor that groups students by class and period so you can see who needs attention first.</li>
           </ul>
           <div class="guide-mini-note">
             Treat prediction as planning support only. Official grades still depend on actual encoded scores, submission status, and approved governance actions.
@@ -687,6 +691,7 @@
             <li>Click the <strong>Prediction</strong> icon.</li>
             <li>Open <strong>How Prediction Works</strong> when you need the full explanation of each column and sample scenarios.</li>
             <li>Review current projection, coverage, remaining items, and at-risk indicators.</li>
+            <li>Open the <strong>At-Risk Monitor</strong> from the sidebar when you want a class-by-class list of students who are currently below the passing line.</li>
             <li>If what-if is enabled, select a student and enter an estimated remaining performance percentage.</li>
             <li>Use <strong>Refresh Prediction</strong> after major score changes if you want a fresh snapshot immediately.</li>
           </ol>
@@ -812,7 +817,7 @@
           </ul>
           <h6 class="mt-3 mb-2 fw-bold text-success">How to View Archived Classes</h6>
           <ol class="guide-list">
-            <li>Open <strong>My Courses</strong>.</li>
+            <li>Open <strong>My Classes</strong>.</li>
             <li>Switch to <strong>Archived</strong> tab/filter.</li>
             <li>Open class card if review access is allowed by policy.</li>
           </ol>
@@ -891,6 +896,14 @@
           <h3>Management-Ready</h3>
           <p>Prepared to support later review with academics, deans, registrars, and institutional decision-makers.</p>
         </div>
+      </div>
+      <div class="guide-management-item mt-3">
+        <h3>Faculty Reminder Center</h3>
+        <p>Faculty can save future activity reminders, snooze them, mark them completed, and optionally queue reminder emails once the feature is enabled by tenant configuration.</p>
+      </div>
+      <div class="guide-management-item mt-3" id="guide-notes">
+        <h3>Faculty Notes / Private Memo</h3>
+        <p>Faculty can keep private notes about a class or student, pin important follow-ups, and return to them later without exposing the note to students.</p>
       </div>
       <div class="guide-hero-actions mt-3 mb-0">
         <a class="guide-cta-primary" href="{% url 'faculty_portal:guide_manual' %}">Open Formal Policy Manual</a>

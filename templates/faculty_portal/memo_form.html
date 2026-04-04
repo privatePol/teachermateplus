@@ -1,0 +1,161 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .memo-form-shell {
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+  .memo-form-hero {
+    border: 1px solid #d8e5d6;
+    border-radius: 1.15rem;
+    background: linear-gradient(135deg, #ffffff 0%, #f6fbf4 56%, #f7f3e5 100%);
+    box-shadow: 0 12px 28px rgba(18, 56, 34, 0.08);
+    padding: 1.2rem 1.35rem;
+    margin-bottom: 1rem;
+  }
+  .memo-form-hero h2 { margin: 0; color: #163f28; font-weight: 800; letter-spacing: -0.02em; }
+  .memo-form-hero p { margin: 0.35rem 0 0; color: #5b7263; }
+  .memo-form-card,
+  .memo-form-help {
+    border: 1px solid #dde8db;
+    border-radius: 1rem;
+    box-shadow: 0 8px 20px rgba(17, 50, 30, 0.07);
+    background: #fff;
+  }
+  .memo-form-card .card-header,
+  .memo-form-help .card-header {
+    background: linear-gradient(180deg, #fffefb 0%, #f9fbf8 100%);
+    border-bottom: 1px solid #e7eee7;
+    padding: 0.95rem 1.1rem;
+  }
+  .memo-form-card .card-body,
+  .memo-form-help .card-body {
+    padding: 1rem 1.1rem 1.05rem;
+  }
+  .memo-form-title {
+    margin: 0;
+    font-size: 1.03rem;
+    font-weight: 800;
+    color: #173d27;
+  }
+  .memo-form-copy {
+    margin: 0.35rem 0 0;
+    color: #5d7264;
+    font-size: 0.92rem;
+  }
+  .memo-form-label { font-weight: 700; color: #294336; margin-bottom: 0.35rem; }
+  .memo-form-note { color: #6a7e70; font-size: 0.84rem; }
+  .memo-form-summary {
+    border: 1px solid #edf1eb;
+    border-radius: 0.85rem;
+    background: #fbfdfa;
+    padding: 0.75rem 0.85rem;
+    color: #294336;
+  }
+  .memo-form-summary strong {
+    display: block;
+    margin-bottom: 0.15rem;
+    color: #173d27;
+  }
+  .memo-form-summary + .memo-form-summary {
+    margin-top: 0.7rem;
+  }
+</style>
+
+<div class="memo-form-shell">
+  <div class="memo-form-hero">
+    <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
+      <div>
+        <h2>Edit Private Memo</h2>
+        <p>Update the note, linked class, linked student, or pin state. The memo remains private to your faculty account.</p>
+      </div>
+      <div>
+        <a class="btn btn-outline-success rounded-pill px-4" href="{% url 'faculty_portal:memo_center' %}">Back to Notes</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-xl-8">
+      <div class="card memo-form-card">
+        <div class="card-header">
+          <div class="memo-form-title">Memo Details</div>
+          <div class="memo-form-copy">Edit the memo fields below and save when finished.</div>
+        </div>
+        <div class="card-body">
+          <form method="post" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+              <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <div class="row g-3">
+              <div class="col-lg-4">
+                <label class="memo-form-label" for="{{ form.memo_type.id_for_label }}">{{ form.memo_type.label }}</label>
+                {{ form.memo_type }}
+                {% for error in form.memo_type.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-8">
+                <label class="memo-form-label" for="{{ form.title.id_for_label }}">{{ form.title.label }}</label>
+                {{ form.title }}
+                {% for error in form.title.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-6">
+                <label class="memo-form-label" for="{{ form.offering.id_for_label }}">{{ form.offering.label }}</label>
+                {{ form.offering }}
+                {% for error in form.offering.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-6">
+                <label class="memo-form-label" for="{{ form.student.id_for_label }}">{{ form.student.label }}</label>
+                {{ form.student }}
+                {% for error in form.student.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12">
+                <label class="memo-form-label" for="{{ form.body.id_for_label }}">{{ form.body.label }}</label>
+                {{ form.body }}
+                {% for error in form.body.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  {{ form.is_pinned }}
+                  <label class="form-check-label" for="{{ form.is_pinned.id_for_label }}">{{ form.is_pinned.label|default:"Pin this memo" }}</label>
+                </div>
+                {% for error in form.is_pinned.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+            </div>
+            <div class="mt-4 d-flex flex-wrap gap-2 align-items-center">
+              <button class="btn btn-success rounded-pill px-4" type="submit">Save Changes</button>
+              <a class="btn btn-outline-secondary rounded-pill px-4" href="{% url 'faculty_portal:memo_center' %}">Cancel</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-4">
+      <div class="card memo-form-help">
+        <div class="card-header">
+          <div class="memo-form-title">Memo Snapshot</div>
+        </div>
+        <div class="card-body">
+          <div class="memo-form-summary">
+            <strong>Current Title</strong>
+            {{ memo.title }}
+          </div>
+          <div class="memo-form-summary">
+            <strong>Current Type</strong>
+            {{ memo.get_memo_type_display }}
+          </div>
+          <div class="memo-form-summary">
+            <strong>Current Status</strong>
+            {% if memo.is_pinned %}Pinned{% else %}Not pinned{% endif %}
+          </div>
+          <div class="memo-form-summary">
+            <strong>Guidance</strong>
+            Keep the memo short and direct so it is easy to revisit later.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

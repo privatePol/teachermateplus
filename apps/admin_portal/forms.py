@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 
 from django import forms
 from django.db import models
@@ -1050,6 +1051,85 @@ class CourseTemplateAssignmentForm(forms.ModelForm):
         return cleaned
 
 
+class BulkCourseTemplateAssignmentForm(forms.Form):
+    courses = forms.ModelMultipleChoiceField(
+        queryset=Course.objects.none(),
+        label="Courses",
+        help_text="Select one or more courses to assign to the same grading template.",
+        widget=forms.SelectMultiple(attrs={"size": 14}),
+    )
+    grading_template = forms.ModelChoiceField(
+        queryset=GradingTemplate.objects.none(),
+        label="Grading template",
+    )
+    effective_from_term = forms.ModelChoiceField(
+        queryset=Term.objects.none(),
+        required=False,
+        label="Effective term",
+        help_text="Leave blank to create a general assignment used when no term-specific assignment exists.",
+    )
+    is_active = forms.BooleanField(
+        required=False,
+        initial=True,
+        label="Active",
+    )
+
+    def __init__(self, *args, course_queryset=None, template_queryset=None, term_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if course_queryset is not None:
+            self.fields["courses"].queryset = course_queryset.order_by("title", "code", "id")
+        if template_queryset is not None:
+            self.fields["grading_template"].queryset = template_queryset
+        if term_queryset is not None:
+            self.fields["effective_from_term"].queryset = term_queryset
+        _set_choice_label(self.fields.get("grading_template"), lambda obj: getattr(obj, "name", None) or getattr(obj, "code", str(obj)))
+        _set_choice_label(self.fields.get("effective_from_term"), _term_label)
+        self.fields["courses"].label_from_instance = _course_label
+        _enforce_active_reference_choices(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        courses = cleaned.get("courses")
+        grading_template = cleaned.get("grading_template")
+        effective_from_term = cleaned.get("effective_from_term")
+        if courses and grading_template:
+            tenant_ids = {course.tenant_id for course in courses}
+            if grading_template.tenant_id not in tenant_ids or len(tenant_ids) > 1:
+                raise forms.ValidationError("Selected courses and grading template must belong to the same tenant.")
+        if effective_from_term and courses:
+            tenant_ids = {course.tenant_id for course in courses}
+            if effective_from_term.tenant_id not in tenant_ids or len(tenant_ids) > 1:
+                raise forms.ValidationError("Effective term must belong to the same tenant as the selected courses.")
+        return cleaned
+
+
+class GradingTemplateTestingCalculatorForm(forms.Form):
+    grading_template = forms.ModelChoiceField(
+        queryset=GradingTemplate.objects.none(),
+        label="Grading template",
+        help_text="Select the grading template you want to test using sample raw score and total score values.",
+    )
+    sample_value = forms.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        max_value=Decimal("100"),
+        initial=Decimal("85.00"),
+        label="Default sample raw score",
+        help_text="This value will prefill blank raw-score inputs. For Base-50 items, EduGradesPro will still compute the percentage from raw score and total score.",
+    )
+
+    def __init__(self, *args, template_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if template_queryset is not None:
+            self.fields["grading_template"].queryset = template_queryset.order_by("name", "code", "id")
+        _set_choice_label(
+            self.fields.get("grading_template"),
+            lambda obj: getattr(obj, "name", None) or getattr(obj, "code", str(obj)),
+        )
+        _enforce_active_reference_choices(self)
+
+
 class CourseBaseValueOverrideForm(forms.ModelForm):
     class Meta:
         model = CourseBaseValueOverride
@@ -1493,6 +1573,26 @@ class ConfigurableFeatureSettingForm(forms.Form):
         label="Enable automatic expiration of overdue faculty assignments",
         help_text="When enabled, pending faculty assignments automatically move to expired status after the response deadline.",
     )
+    faculty_assignment_primary_default_enabled = forms.BooleanField(
+        required=False,
+        label="Set new faculty assignments as primary by default",
+        help_text="When enabled, new faculty assignments start as primary. Admins may still change the primary tag manually afterward.",
+    )
+    faculty_reminder_center_enabled = forms.BooleanField(
+        required=False,
+        label="Enable faculty reminder center",
+        help_text="Shows the faculty reminder center page and related reminder actions in the faculty portal.",
+    )
+    faculty_reminder_email_enabled = forms.BooleanField(
+        required=False,
+        label="Enable faculty reminder email queue",
+        help_text="Queues reminder emails in the background when faculty reminders become due.",
+    )
+    faculty_memo_center_enabled = forms.BooleanField(
+        required=False,
+        label="Enable faculty memo center",
+        help_text="Shows a private notes/memo area for faculty to keep class and student reminders inside the portal.",
+    )
     faculty_assignment_response_window_days = forms.IntegerField(
         required=True,
         min_value=1,
@@ -1662,6 +1762,13 @@ class ConfigurableFeatureSettingForm(forms.Form):
             )
         if not cleaned.get("grade_prediction_default_assumption"):
             cleaned["grade_prediction_default_assumption"] = "IGNORE_MISSING"
+
+        if not cleaned.get("faculty_reminder_center_enabled"):
+            cleaned["faculty_reminder_center_enabled"] = False
+        if not cleaned.get("faculty_reminder_email_enabled"):
+            cleaned["faculty_reminder_email_enabled"] = False
+        if not cleaned.get("faculty_memo_center_enabled"):
+            cleaned["faculty_memo_center_enabled"] = False
 
         cleaned["correction_registrar_campus_recipient_map"] = campus_recipient_map
         return cleaned

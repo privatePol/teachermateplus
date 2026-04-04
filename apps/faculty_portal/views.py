@@ -1,4 +1,5 @@
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import re
@@ -25,6 +26,8 @@ from apps.enrollment.services import EnrollmentService
 from apps.faculty_portal.forms import (
     AttendanceSessionForm,
     FacultyEnrollmentForm,
+    FacultyMemoForm,
+    FacultyReminderForm,
     GradeActivityForm,
     GradeCorrectionRequestForm,
 )
@@ -34,7 +37,10 @@ from apps.grading.models import (
     GradeCorrectionRequestItem,
     GradeSubmission,
     GradeActivity,
+    GradingTemplate,
+    GradingTemplateComponent,
     GradingTemplateDetail,
+    GradingTemplatePeriod,
     GradingTemplateSubcomponent,
     StudentActivityScore,
     StudentPeriodGrade,
@@ -48,6 +54,7 @@ from apps.predictions.services import (
     PredictionSnapshotService,
     PredictionWhatIfService,
 )
+from apps.notifications.models import FacultyMemo, FacultyReminder
 from apps.students.models import Student
 
 
@@ -185,6 +192,14 @@ def _require_pending_faculty_assignment_or_404(request, assignment_id: int):
         _faculty_assignment_queryset(request.user).filter(accepted_at__isnull=True),
         id=assignment_id,
     )
+
+
+def _require_faculty_reminder_or_404(request, reminder_id: int):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    qs = FacultyReminder.objects.filter(id=reminder_id, faculty_user=request.user, is_active=True)
+    if tenant_id:
+        qs = qs.filter(tenant_id=tenant_id)
+    return get_object_or_404(qs.select_related("tenant", "campus", "offering", "offering__course", "offering__section"))
 
 
 def _find_faculty_assignment(user, offering_id: int):
@@ -473,6 +488,114 @@ def _build_summary_layout(period, activities):
     return {
         "class_standing_blocks": class_standing_blocks,
         "exam_components": exam_components,
+    }
+
+
+def _load_template_preview(template_id: int):
+    return (
+        GradingTemplate.objects.filter(id=template_id)
+        .select_related("tenant")
+        .prefetch_related(
+            Prefetch(
+                "periods",
+                queryset=GradingTemplatePeriod.objects.filter(is_active=True)
+                .order_by("sequence_no", "id")
+                .prefetch_related(
+                    Prefetch(
+                        "components",
+                        queryset=GradingTemplateComponent.objects.filter(is_active=True)
+                        .order_by("sort_order", "id")
+                        .prefetch_related(
+                            Prefetch(
+                                "subcomponents",
+                                queryset=GradingTemplateSubcomponent.objects.filter(is_active=True)
+                                .order_by("sort_order", "id")
+                                .prefetch_related(
+                                    Prefetch(
+                                        "details",
+                                        queryset=GradingTemplateDetail.objects.filter(is_active=True).order_by(
+                                            "sort_order", "id"
+                                        ),
+                                    )
+                                ),
+                            )
+                        ),
+                    )
+                ),
+            )
+        )
+        .first()
+    )
+
+
+def _build_faculty_template_preview(template):
+    period_rows = []
+    active_period_names = []
+
+    for period in template.periods.all():
+        active_period_names.append(period.name)
+        component_rows = []
+        formula_parts = []
+        for component in period.components.all():
+            component_weight = Decimal(component.weight_percentage or 0)
+            formula_parts.append(f"{component.name} ({component_weight}%)")
+            subcomponent_rows = []
+            for subcomponent in component.subcomponents.all():
+                detail_rows = []
+                for detail in subcomponent.details.all():
+                    detail_rows.append(
+                        {
+                            "name": detail.name,
+                            "weight": Decimal(detail.weight_percentage or 0),
+                            "entry_method": FacultyGradingService.score_input_mode_label(
+                                FacultyGradingService.resolve_score_input_mode(
+                                    template_component=component,
+                                    template_subcomponent=subcomponent,
+                                    template_detail=detail,
+                                )
+                            ),
+                        }
+                    )
+                subcomponent_rows.append(
+                    {
+                        "name": subcomponent.name,
+                        "weight": Decimal(subcomponent.weight_percentage or 0),
+                        "entry_method": FacultyGradingService.score_input_mode_label(
+                            FacultyGradingService.resolve_score_input_mode(
+                                template_component=component,
+                                template_subcomponent=subcomponent,
+                            )
+                        ),
+                        "details": detail_rows,
+                    }
+                )
+
+            component_rows.append(
+                {
+                    "name": component.name,
+                    "weight": component_weight,
+                    "entry_method": FacultyGradingService.score_input_mode_label(
+                        FacultyGradingService.resolve_score_input_mode(template_component=component)
+                    ),
+                    "subcomponents": subcomponent_rows,
+                }
+            )
+
+        period_rows.append(
+            {
+                "row": period,
+                "formula": f"{period.name.upper()} GRADE = " + " + ".join(formula_parts) if formula_parts else None,
+                "components": component_rows,
+            }
+        )
+
+    final_formula = None
+    if active_period_names:
+        final_formula = "FINAL GRADE = Average of " + ", ".join(active_period_names)
+
+    return {
+        "period_rows": period_rows,
+        "final_formula": final_formula,
     }
 
 
@@ -913,6 +1036,655 @@ def analytics_view(request):
     return render(request, "faculty_portal/analytics.html", context)
 
 
+def _faculty_reminder_status(reminder, now):
+    if reminder.completed_at:
+        return "Completed", "success"
+    if reminder.snoozed_until and reminder.snoozed_until > now:
+        return "Snoozed", "secondary"
+    if reminder.due_at and reminder.due_at < now:
+        return "Overdue", "danger"
+    if reminder.due_at and reminder.due_at.date() == now.date():
+        return "Due Today", "warning"
+    if reminder.email_last_sent_at:
+        return "Sent", "info"
+    return "Upcoming", "primary"
+
+
+def _faculty_memo_queryset(user):
+    return FacultyMemo.objects.filter(
+        faculty_user_id=user.id,
+        is_active=True,
+    ).select_related(
+        "tenant",
+        "campus",
+        "offering",
+        "offering__tenant",
+        "offering__campus",
+        "offering__department",
+        "offering__term",
+        "offering__course",
+        "offering__section",
+        "student",
+        "created_by",
+    )
+
+
+def _require_faculty_memo_or_404(request, memo_id: int):
+    return get_object_or_404(
+        _faculty_memo_queryset(request.user),
+        id=memo_id,
+        faculty_user=request.user,
+    )
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def reminder_center_view(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    if not tenant_id:
+        messages.error(request, "Select a tenant scope first.")
+        return redirect("faculty_portal:dashboard")
+
+    if not FeatureSettingsService.is_faculty_reminder_center_enabled(tenant_id=tenant_id, default=True):
+        messages.info(
+            request,
+            "Faculty reminder center is disabled by configuration. You can still use other faculty portal features.",
+        )
+
+    now = timezone.now()
+    FacultyAssignmentWorkflowService.expire_overdue_assignments(tenant_id=tenant_id)
+    offering_qs = _faculty_offering_queryset(request.user).filter(tenant_id=tenant_id).distinct()
+    send_email_enabled = FeatureSettingsService.is_faculty_reminder_email_enabled(tenant_id=tenant_id, default=False)
+    center_enabled = FeatureSettingsService.is_faculty_reminder_center_enabled(tenant_id=tenant_id, default=True)
+    form = FacultyReminderForm(
+        request.POST or None,
+        offering_queryset=offering_qs,
+        send_email_enabled=send_email_enabled,
+    )
+
+    if request.method == "POST" and not center_enabled:
+        messages.error(request, "Faculty reminder center is disabled by configuration.")
+        return redirect("faculty_portal:dashboard")
+
+    if request.method == "POST" and form.is_valid():
+        reminder = FacultyReminder.objects.create(
+            tenant_id=tenant_id,
+            campus_id=form.cleaned_data["offering"].campus_id,
+            faculty_user=request.user,
+            offering=form.cleaned_data["offering"],
+            reminder_type=form.cleaned_data["reminder_type"],
+            title=form.cleaned_data["title"],
+            period_label=form.cleaned_data.get("period_label") or None,
+            notes=form.cleaned_data.get("notes") or None,
+            remind_at=form.cleaned_data["remind_at"],
+            due_at=form.cleaned_data.get("due_at"),
+            send_email=bool(form.cleaned_data.get("send_email")) and send_email_enabled,
+            created_by=request.user,
+            is_active=True,
+        )
+        AuditService.log_event(
+            action="CREATE",
+            portal="FACULTY",
+            entity_type="FacultyReminder",
+            entity_id=reminder.id,
+            actor=request.user,
+            tenant_id=tenant_id,
+            campus=reminder.campus,
+            after_data={
+                "title": reminder.title,
+                "reminder_type": reminder.reminder_type,
+                "offering_id": reminder.offering_id,
+                "remind_at": reminder.remind_at.isoformat(),
+                "due_at": reminder.due_at.isoformat() if reminder.due_at else None,
+                "send_email": reminder.send_email,
+            },
+            request=request,
+        )
+        messages.success(request, "Reminder saved.")
+        return redirect("faculty_portal:reminder_center")
+
+    reminders_qs = (
+        FacultyReminder.objects.filter(tenant_id=tenant_id, faculty_user=request.user, is_active=True)
+        .select_related("tenant", "campus", "offering", "offering__course", "offering__section")
+        .order_by("completed_at", "snoozed_until", "remind_at", "-created_at")
+    )
+
+    reminders = []
+    counts = {
+        "upcoming": 0,
+        "due_today": 0,
+        "overdue": 0,
+        "sent": 0,
+        "completed": 0,
+        "snoozed": 0,
+    }
+    for reminder in reminders_qs:
+        status_label, status_variant = _faculty_reminder_status(reminder, now)
+        if status_label == "Completed":
+            counts["completed"] += 1
+        elif status_label == "Snoozed":
+            counts["snoozed"] += 1
+        elif status_label == "Overdue":
+            counts["overdue"] += 1
+        elif status_label == "Due Today":
+            counts["due_today"] += 1
+        elif status_label == "Sent":
+            counts["sent"] += 1
+        else:
+            counts["upcoming"] += 1
+        reminders.append(
+            {
+                "obj": reminder,
+                "status_label": status_label,
+                "status_variant": status_variant,
+                "is_due_today": bool(reminder.due_at and reminder.due_at.date() == now.date()),
+                "is_overdue": bool(reminder.due_at and reminder.due_at < now and not reminder.completed_at),
+            }
+        )
+
+    context = {
+        "form": form,
+        "reminders": reminders,
+        "counts": counts,
+        "send_email_enabled": send_email_enabled,
+        "reminder_center_enabled": center_enabled,
+    }
+    return render(request, "faculty_portal/reminder_center.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def reminder_complete_view(request, reminder_id: int):
+    if request.method != "POST":
+        return redirect("faculty_portal:reminder_center")
+    reminder = _require_faculty_reminder_or_404(request, reminder_id)
+    before = {
+        "completed_at": reminder.completed_at.isoformat() if reminder.completed_at else None,
+        "snoozed_until": reminder.snoozed_until.isoformat() if reminder.snoozed_until else None,
+    }
+    reminder.completed_at = timezone.now()
+    reminder.snoozed_until = None
+    reminder.save(update_fields=["completed_at", "snoozed_until", "updated_at"])
+    AuditService.log_event(
+        action="UPDATE",
+        portal="FACULTY",
+        entity_type="FacultyReminder",
+        entity_id=reminder.id,
+        actor=request.user,
+        tenant=reminder.tenant,
+        campus=reminder.campus,
+        before_data=before,
+        after_data={
+            "completed_at": reminder.completed_at.isoformat() if reminder.completed_at else None,
+        },
+        request=request,
+    )
+    messages.success(request, "Reminder marked as completed.")
+    return redirect("faculty_portal:reminder_center")
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def reminder_snooze_view(request, reminder_id: int):
+    if request.method != "POST":
+        return redirect("faculty_portal:reminder_center")
+    reminder = _require_faculty_reminder_or_404(request, reminder_id)
+    try:
+        snooze_days = int(request.POST.get("snooze_days") or 1)
+    except (TypeError, ValueError):
+        snooze_days = 1
+    snooze_days = max(snooze_days, 1)
+    before = {
+        "snoozed_until": reminder.snoozed_until.isoformat() if reminder.snoozed_until else None,
+    }
+    reminder.snoozed_until = timezone.now() + timedelta(days=snooze_days)
+    reminder.save(update_fields=["snoozed_until", "updated_at"])
+    AuditService.log_event(
+        action="UPDATE",
+        portal="FACULTY",
+        entity_type="FacultyReminder",
+        entity_id=reminder.id,
+        actor=request.user,
+        tenant=reminder.tenant,
+        campus=reminder.campus,
+        before_data=before,
+        after_data={
+            "snoozed_until": reminder.snoozed_until.isoformat() if reminder.snoozed_until else None,
+        },
+        request=request,
+    )
+    messages.success(request, f"Reminder snoozed for {snooze_days} day(s).")
+    return redirect("faculty_portal:reminder_center")
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def memo_center_view(request):
+    scope = getattr(request, "scope", {})
+    tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    campus_id = scope.get("campus_id") or getattr(request.user, "default_campus_id", None)
+    if not tenant_id:
+        messages.error(request, "Select a tenant scope first.")
+        return redirect("faculty_portal:dashboard")
+
+    center_enabled = FeatureSettingsService.is_faculty_memo_center_enabled(tenant_id=tenant_id, default=True)
+    if request.method == "POST" and not center_enabled:
+        messages.error(request, "Faculty memo center is disabled by configuration.")
+        return redirect("faculty_portal:dashboard")
+
+    offering_qs = _faculty_offering_queryset(request.user).filter(tenant_id=tenant_id).distinct()
+    student_qs = Student.objects.filter(
+        id__in=Enrollment.objects.filter(course_offering__in=offering_qs, is_active=True)
+        .values_list("student_id", flat=True)
+        .distinct()
+    ).select_related("tenant", "campus", "program").order_by("last_name", "first_name", "student_no")
+
+    form = FacultyMemoForm(
+        request.POST or None,
+        offering_queryset=offering_qs,
+        student_queryset=student_qs,
+    )
+
+    if request.method == "POST" and form.is_valid():
+        memo = FacultyMemo.objects.create(
+            tenant_id=tenant_id,
+            campus_id=form.cleaned_data["offering"].campus_id if form.cleaned_data.get("offering") else campus_id,
+            faculty_user=request.user,
+            offering=form.cleaned_data.get("offering"),
+            student=form.cleaned_data.get("student"),
+            memo_type=form.cleaned_data["memo_type"],
+            title=form.cleaned_data["title"],
+            body=form.cleaned_data["body"],
+            is_pinned=bool(form.cleaned_data.get("is_pinned")),
+            created_by=request.user,
+            is_active=True,
+        )
+        AuditService.log_event(
+            action="CREATE",
+            portal="FACULTY",
+            entity_type="FacultyMemo",
+            entity_id=memo.id,
+            actor=request.user,
+            tenant=tenant_id,
+            campus=memo.campus,
+            after_data={
+                "title": memo.title,
+                "memo_type": memo.memo_type,
+                "offering_id": memo.offering_id,
+                "student_id": memo.student_id,
+                "is_pinned": memo.is_pinned,
+            },
+            request=request,
+        )
+        messages.success(request, "Memo saved.")
+        return redirect("faculty_portal:memo_center")
+
+    memos_qs = _faculty_memo_queryset(request.user).filter(tenant_id=tenant_id)
+    q = (request.GET.get("q") or "").strip()
+    pinned_only = request.GET.get("pinned") == "1"
+    if q:
+        memos_qs = memos_qs.filter(
+            Q(title__icontains=q)
+            | Q(body__icontains=q)
+            | Q(offering__course__title__icontains=q)
+            | Q(offering__course__code__icontains=q)
+            | Q(offering__section__code__icontains=q)
+            | Q(student__student_no__icontains=q)
+            | Q(student__last_name__icontains=q)
+            | Q(student__first_name__icontains=q)
+        )
+    if pinned_only:
+        memos_qs = memos_qs.filter(is_pinned=True)
+
+    memos_qs = memos_qs.select_related("offering__course", "offering__section", "student", "student__program")
+    memos_qs = memos_qs.order_by("-is_pinned", "-updated_at", "-created_at")
+    memos = []
+    counts = {"total": 0, "pinned": 0, "class": 0, "student": 0, "general": 0}
+    for memo in memos_qs:
+        counts["total"] += 1
+        if memo.is_pinned:
+            counts["pinned"] += 1
+        if memo.memo_type == FacultyMemo.MemoType.CLASS:
+            counts["class"] += 1
+        elif memo.memo_type == FacultyMemo.MemoType.STUDENT:
+            counts["student"] += 1
+        else:
+            counts["general"] += 1
+        memo_kind = {
+            FacultyMemo.MemoType.GENERAL: ("General", "primary"),
+            FacultyMemo.MemoType.CLASS: ("Class Memo", "success"),
+            FacultyMemo.MemoType.STUDENT: ("Student Memo", "warning"),
+            FacultyMemo.MemoType.CUSTOM: ("Custom", "secondary"),
+        }.get(memo.memo_type, ("Memo", "primary"))
+        memos.append(
+            {
+                "obj": memo,
+                "kind_label": memo_kind[0],
+                "kind_variant": memo_kind[1],
+            }
+        )
+
+    context = {
+        "form": form,
+        "memos": memos,
+        "counts": counts,
+        "memo_center_enabled": center_enabled,
+        "q": q,
+        "pinned_only": pinned_only,
+    }
+    return render(request, "faculty_portal/memo_center.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def memo_edit_view(request, memo_id: int):
+    memo = _require_faculty_memo_or_404(request, memo_id)
+    tenant_id = memo.tenant_id
+    center_enabled = FeatureSettingsService.is_faculty_memo_center_enabled(tenant_id=tenant_id, default=True)
+    if request.method == "POST" and not center_enabled:
+        messages.error(request, "Faculty memo center is disabled by configuration.")
+        return redirect("faculty_portal:memo_center")
+
+    offering_qs = _faculty_offering_queryset(request.user).filter(tenant_id=tenant_id).distinct()
+    student_qs = Student.objects.filter(
+        id__in=Enrollment.objects.filter(course_offering__in=offering_qs, is_active=True)
+        .values_list("student_id", flat=True)
+        .distinct()
+    ).select_related("tenant", "campus", "program").order_by("last_name", "first_name", "student_no")
+    form = FacultyMemoForm(
+        request.POST or None,
+        instance=memo,
+        offering_queryset=offering_qs,
+        student_queryset=student_qs,
+    )
+    if request.method == "POST" and form.is_valid():
+        updated = form.save(commit=False)
+        updated.tenant_id = tenant_id
+        updated.campus_id = form.cleaned_data["offering"].campus_id if form.cleaned_data.get("offering") else memo.campus_id
+        updated.faculty_user = request.user
+        updated.created_by = memo.created_by or request.user
+        updated.save()
+        AuditService.log_event(
+            action="UPDATE",
+            portal="FACULTY",
+            entity_type="FacultyMemo",
+            entity_id=memo.id,
+            actor=request.user,
+            tenant=tenant_id,
+            campus=updated.campus,
+            before_data={
+                "title": memo.title,
+                "memo_type": memo.memo_type,
+                "offering_id": memo.offering_id,
+                "student_id": memo.student_id,
+                "is_pinned": memo.is_pinned,
+                "body": memo.body,
+            },
+            after_data={
+                "title": updated.title,
+                "memo_type": updated.memo_type,
+                "offering_id": updated.offering_id,
+                "student_id": updated.student_id,
+                "is_pinned": updated.is_pinned,
+                "body": updated.body,
+            },
+            request=request,
+        )
+        messages.success(request, "Memo updated.")
+        return redirect("faculty_portal:memo_center")
+
+    context = {
+        "form": form,
+        "memo": memo,
+        "memo_center_enabled": center_enabled,
+        "is_edit": True,
+    }
+    return render(request, "faculty_portal/memo_form.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def memo_toggle_pin_view(request, memo_id: int):
+    if request.method != "POST":
+        return redirect("faculty_portal:memo_center")
+    memo = _require_faculty_memo_or_404(request, memo_id)
+    before = {"is_pinned": memo.is_pinned}
+    memo.is_pinned = not memo.is_pinned
+    memo.save(update_fields=["is_pinned", "updated_at"])
+    AuditService.log_event(
+        action="UPDATE",
+        portal="FACULTY",
+        entity_type="FacultyMemo",
+        entity_id=memo.id,
+        actor=request.user,
+        tenant=memo.tenant,
+        campus=memo.campus,
+        before_data=before,
+        after_data={"is_pinned": memo.is_pinned},
+        request=request,
+    )
+    messages.success(request, "Memo pin updated.")
+    return redirect("faculty_portal:memo_center")
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def memo_delete_view(request, memo_id: int):
+    if request.method != "POST":
+        return redirect("faculty_portal:memo_center")
+    memo = _require_faculty_memo_or_404(request, memo_id)
+    before = {"is_active": memo.is_active}
+    memo.is_active = False
+    memo.save(update_fields=["is_active", "updated_at"])
+    AuditService.log_event(
+        action="DELETE",
+        portal="FACULTY",
+        entity_type="FacultyMemo",
+        entity_id=memo.id,
+        actor=request.user,
+        tenant=memo.tenant,
+        campus=memo.campus,
+        before_data=before,
+        after_data={"is_active": memo.is_active},
+        request=request,
+    )
+    messages.success(request, "Memo removed.")
+    return redirect("faculty_portal:memo_center")
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def student_at_risk_monitor_view(request):
+    scope = getattr(request, "scope", {})
+    tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    campus_id = scope.get("campus_id") or getattr(request.user, "default_campus_id", None)
+    if not FeatureSettingsService.can_user_access_grade_prediction(user=request.user, tenant_id=tenant_id):
+        messages.error(request, "Grade prediction is currently disabled for your role.")
+        return redirect("faculty_portal:my_courses")
+    if not FeatureSettingsService.is_grade_prediction_at_risk_enabled(tenant_id=tenant_id, default=True):
+        messages.error(request, "Student at-risk monitoring is currently disabled by configuration.")
+        return redirect("faculty_portal:my_courses")
+
+    show_archived = request.GET.get("archived") == "1"
+    selected_offering_id = _safe_int(request.GET.get("offering_id"))
+    q = (request.GET.get("q") or "").strip()
+
+    assignment_qs = _faculty_assignment_queryset(request.user).filter(accepted_at__isnull=False)
+    if tenant_id:
+        assignment_qs = assignment_qs.filter(tenant_id=tenant_id)
+    if campus_id:
+        assignment_qs = assignment_qs.filter(campus_id=campus_id)
+
+    active_term_cache = {}
+
+    def _is_in_active_scope(offering):
+        tenant_key = offering.tenant_id
+        if tenant_key not in active_term_cache:
+            _, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_key)
+            active_term_cache[tenant_key] = active_term.id if active_term else None
+        active_term_id = active_term_cache[tenant_key]
+        if not active_term_id:
+            return True
+        return offering.term_id == active_term_id
+
+    monitored_offerings = []
+    for assignment in assignment_qs:
+        offering = assignment.offering
+        if selected_offering_id and offering.id != selected_offering_id:
+            continue
+        forced_archive = offering.status == CourseOffering.Status.ARCHIVED
+        outside_active_scope = not _is_in_active_scope(offering)
+        if not show_archived and (forced_archive or outside_active_scope):
+            continue
+        offering.assignment = assignment
+        monitored_offerings.append(offering)
+
+    monitor_groups = []
+    at_risk_student_count = 0
+    at_risk_group_count = 0
+    coverage_values = []
+    projection_values = []
+    final_needed_values = []
+
+    for offering in monitored_offerings:
+        try:
+            template = FacultyGradingService.resolve_template_for_offering(offering)
+        except ValidationError:
+            continue
+        for period in template.periods.filter(is_active=True).order_by("sequence_no", "id"):
+            prediction_data = PredictionSnapshotService.get_period_predictions(
+                offering=offering,
+                template_period=period,
+                user=request.user,
+            )
+            group_rows = []
+            for row in prediction_data["rows"]:
+                if not getattr(row, "at_risk_flag", False):
+                    continue
+                if q:
+                    student_no = getattr(row.student, "student_no", "") or ""
+                    student_name = " ".join(
+                        part
+                        for part in [
+                            getattr(row.student, "last_name", ""),
+                            getattr(row.student, "first_name", ""),
+                            getattr(row.student, "middle_name", ""),
+                        ]
+                        if part
+                    ).strip()
+                    if (
+                        q.lower() not in student_no.lower()
+                        and q.lower() not in student_name.lower()
+                        and q.lower() not in offering.course.code.lower()
+                        and q.lower() not in offering.course.title.lower()
+                        and q.lower() not in offering.section.code.lower()
+                        and q.lower() not in period.name.lower()
+                    ):
+                        continue
+
+                final_requirement = PredictionComputationService.final_requirement_for_remaining_periods(
+                    offering=offering,
+                    template_period=period,
+                    student_id=row.student_id,
+                    current_period_grade=row.current_projected_period_grade,
+                )
+                group_rows.append(
+                    {
+                        "student": row.student,
+                        "current_projected_period_grade": row.current_projected_period_grade,
+                        "current_projected_period_grade_display": _format_decimal_display(
+                            row.current_projected_period_grade
+                        ),
+                        "current_projected_final_grade": row.current_projected_final_grade,
+                        "current_projected_final_grade_display": _format_decimal_display(
+                            row.current_projected_final_grade
+                        ),
+                        "best_case_period_grade": row.best_case_period_grade,
+                        "best_case_period_grade_display": _format_decimal_display(row.best_case_period_grade),
+                        "worst_case_period_grade": row.worst_case_period_grade,
+                        "worst_case_period_grade_display": _format_decimal_display(row.worst_case_period_grade),
+                        "coverage_percent": row.coverage_percent,
+                        "coverage_percent_display": _format_decimal_display(row.coverage_percent),
+                        "remaining_item_count": row.remaining_item_count,
+                        "final_requirement_status": final_requirement["status"],
+                        "final_requirement_label": final_requirement["label"],
+                        "final_requirement_value": final_requirement["required_average"],
+                        "final_requirement_value_display": _format_decimal_display(
+                            final_requirement["required_average"]
+                        ),
+                        "final_requirement_period_names": final_requirement["remaining_period_names"],
+                        "risk_variant": "danger"
+                        if final_requirement["status"] == "NOT_REACHABLE"
+                        else "warning",
+                    }
+                )
+                at_risk_student_count += 1
+                coverage_values.append(Decimal(row.coverage_percent))
+                if row.current_projected_period_grade is not None:
+                    projection_values.append(Decimal(row.current_projected_period_grade))
+                if final_requirement["required_average"] not in (None, ""):
+                    try:
+                        final_needed_values.append(Decimal(str(final_requirement["required_average"])))
+                    except (InvalidOperation, TypeError, ValueError):
+                        pass
+
+            if group_rows:
+                at_risk_group_count += 1
+                monitor_groups.append(
+                    {
+                        "offering": offering,
+                        "period": period,
+                        "rows": group_rows,
+                        "at_risk_count": len(group_rows),
+                        "avg_coverage": _format_decimal_display(
+                            sum(coverage_values[-len(group_rows) :]) / Decimal(len(group_rows))
+                            if len(group_rows) else None
+                        ),
+                        "current_template_name": template.name,
+                    }
+                )
+
+    class_count = len(monitored_offerings)
+    avg_coverage = _format_decimal_display(
+        sum(coverage_values) / Decimal(len(coverage_values)) if coverage_values else None
+    )
+    avg_projection = _format_decimal_display(
+        sum(projection_values) / Decimal(len(projection_values)) if projection_values else None
+    )
+    avg_final_needed = _format_decimal_display(
+        sum(final_needed_values) / Decimal(len(final_needed_values)) if final_needed_values else None
+    )
+
+    offering_choices = [
+        {
+            "id": offering.id,
+            "label": f"{offering.course.title} ({offering.course.code}) | {offering.section.name or offering.section.code}",
+            "selected": offering.id == selected_offering_id,
+        }
+        for offering in monitored_offerings
+    ]
+    if not selected_offering_id:
+        offering_choices.insert(0, {"id": "", "label": "All Classes", "selected": True})
+
+    context = {
+        "monitor_groups": monitor_groups,
+        "offering_choices": offering_choices,
+        "selected_offering_id": selected_offering_id,
+        "show_archived": show_archived,
+        "q": q,
+        "summary_cards": [
+            {"label": "Classes Monitored", "value": class_count, "meta": "Accepted classes in the current scope."},
+            {"label": "At-Risk Groups", "value": at_risk_group_count, "meta": "Class/period combinations with risk."},
+            {"label": "At-Risk Students", "value": at_risk_student_count, "meta": "Students flagged below the pass line."},
+            {"label": "Average Coverage", "value": avg_coverage, "meta": "Average score coverage across at-risk rows."},
+            {"label": "Average Projection", "value": avg_projection, "meta": "Average projected period grade."},
+            {"label": "Average Needed", "value": avg_final_needed, "meta": "Average needed to reach passing final."},
+        ],
+        "at_risk_enabled": True,
+    }
+    return render(request, "faculty_portal/student_at_risk_monitor.html", context)
+
+
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def my_courses_view(request):
@@ -950,6 +1722,11 @@ def my_courses_view(request):
         offering = assignment.offering
         offering.assignment = assignment
         offering.enrollment_count = assignment.enrollment_count
+        try:
+            resolved_template = FacultyGradingService.resolve_template_for_offering(offering)
+        except ValidationError:
+            resolved_template = None
+        offering.resolved_template = resolved_template
         forced_archive = offering.status == CourseOffering.Status.ARCHIVED
         outside_active_scope = not _is_in_active_scope(offering)
         if not assignment.is_accepted and not forced_archive and not outside_active_scope:
@@ -1109,6 +1886,35 @@ def offering_periods_view(request, offering_id: int):
         ),
     }
     return render(request, "faculty_portal/offering_periods.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def offering_grading_template_view(request, offering_id: int):
+    assignment = _find_faculty_assignment(request.user, offering_id)
+    if assignment and not assignment.is_accepted:
+        messages.error(request, "Please accept this faculty assignment first before opening the class.")
+        return redirect("faculty_portal:my_courses")
+    offering = _require_faculty_offering_or_404(request, offering_id)
+    try:
+        resolved_template = FacultyGradingService.resolve_template_for_offering(offering)
+    except ValidationError as exc:
+        messages.error(request, str(exc))
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    template = _load_template_preview(resolved_template.id)
+    if not template:
+        messages.error(request, "The grading template for this class could not be loaded.")
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    preview = _build_faculty_template_preview(template)
+    context = {
+        "offering": offering,
+        "template": template,
+        "period_rows": preview["period_rows"],
+        "final_formula": preview["final_formula"],
+    }
+    return render(request, "faculty_portal/offering_grading_template.html", context)
 
 
 @portal_required("FACULTY")

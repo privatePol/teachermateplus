@@ -1,0 +1,167 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .template-page-title {
+    font-weight: 700;
+    color: #143b25;
+  }
+  .template-summary-card,
+  .template-period-card {
+    border: 1px solid #d9e5d8;
+    border-radius: 1rem;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(22, 58, 36, 0.07);
+  }
+  .template-period-header {
+    padding: 0.95rem 1rem 0.8rem;
+    color: #fff;
+    border-radius: 1rem 1rem 0 0;
+  }
+  .template-period-header.prelim {
+    background: linear-gradient(125deg, #1f6a40 0%, #2f8a53 58%, #91b842 100%);
+  }
+  .template-period-header.midterm {
+    background: linear-gradient(125deg, #1c5a3d 0%, #2c744b 54%, #84aa3f 100%);
+  }
+  .template-period-header.prefinal {
+    background: linear-gradient(125deg, #2b553d 0%, #4a7a49 54%, #c2aa4b 100%);
+  }
+  .template-period-header.final {
+    background: linear-gradient(125deg, #234c38 0%, #3c6e42 54%, #d4b95d 100%);
+  }
+  .template-period-header.default {
+    background: linear-gradient(125deg, #27563d 0%, #417950 54%, #9eb056 100%);
+  }
+  .template-formula {
+    font-size: 1.02rem;
+    font-weight: 800;
+    color: #173d27;
+  }
+  .template-note {
+    color: #5b7364;
+    font-size: 0.92rem;
+  }
+  .template-tree-title {
+    font-size: 0.86rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #315f46;
+    margin-bottom: 0.45rem;
+  }
+  .template-tree ul {
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+  .template-tree li {
+    color: #335444;
+    margin-bottom: 0.35rem;
+  }
+  .template-component-card {
+    border: 1px solid #e1ebe0;
+    border-radius: 0.9rem;
+    padding: 0.95rem 1rem;
+    background: #fcfdfb;
+    height: 100%;
+  }
+  .template-component-name {
+    font-weight: 700;
+    color: #173d27;
+  }
+  .template-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.28rem 0.68rem;
+    font-size: 0.76rem;
+    font-weight: 700;
+    background: #edf5ee;
+    color: #26513a;
+  }
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h2 class="h4 mb-1 template-page-title">Grading Template</h2>
+    <div class="text-muted small">Read-only view of the grading structure currently assigned to this class.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-success" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:my_courses' %}">Back to My Classes</a>
+  </div>
+</div>
+
+<div class="card template-summary-card mb-3">
+  <div class="card-body">
+    <div class="row g-2">
+      <div class="col-md-6"><strong>Course:</strong> {{ offering.course.title }}</div>
+      <div class="col-md-3"><strong>Section:</strong> {{ offering.section.code }}</div>
+      <div class="col-md-3"><strong>Term:</strong> {{ offering.term.code }}</div>
+      <div class="col-md-6"><strong>Template:</strong> {{ template.name }}</div>
+      <div class="col-md-3"><strong>Base Value:</strong> {{ template.default_base_value }}</div>
+      <div class="col-md-3"><strong>Campus:</strong> {{ offering.campus.code }}</div>
+    </div>
+    {% if final_formula %}
+    <div class="mt-3">
+      <div class="template-tree-title">Final Grade Rule</div>
+      <div class="template-formula">{{ final_formula }}</div>
+      <div class="template-note mt-1">EduGradesPro currently computes the final grade by averaging the active period grades in this assigned template.</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% for period in period_rows %}
+  {% with code=period.row.code|upper name=period.row.name|upper %}
+  <div class="card template-period-card mb-3">
+    <div class="template-period-header {% if 'PREFINAL' in code or 'PRE-FINAL' in name or 'PRE FINAL' in name %}prefinal{% elif 'MIDTERM' in code or 'MIDTERM' in name %}midterm{% elif 'FINAL' in code or 'FINAL' in name or 'EXAM' in code %}final{% elif 'PRELIM' in code or 'PRELIM' in name %}prelim{% else %}default{% endif %}">
+      <div class="fw-semibold">{{ period.row.name }}</div>
+      <div class="small opacity-75">This is the grading structure used when EduGradesPro computes this period.</div>
+    </div>
+    <div class="card-body">
+      <div class="template-formula mb-2">{{ period.formula }}</div>
+      <div class="template-note mb-3">The lines below show how each component is divided inside this period.</div>
+
+      <div class="row g-3">
+        {% for component in period.components %}
+        <div class="col-lg-6">
+          <div class="template-component-card">
+            <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+              <div class="template-component-name">{{ component.name }}</div>
+              <span class="template-chip">{{ component.weight }}%</span>
+            </div>
+            <div class="small text-muted mb-2">Entry Method: {{ component.entry_method }}</div>
+
+            {% if component.subcomponents %}
+            <div class="template-tree">
+              <div class="template-tree-title">{{ component.name }} Breakdown</div>
+              <ul>
+                {% for sub in component.subcomponents %}
+                <li>
+                  {{ sub.name }} = {{ sub.weight }}%
+                  {% if sub.details %}
+                  <ul class="mt-1">
+                    {% for detail in sub.details %}
+                    <li>{{ detail.name }} = {{ detail.weight }}%</li>
+                    {% endfor %}
+                  </ul>
+                  {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% else %}
+            <div class="template-note mb-0">This component accepts activities directly without subcomponents.</div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endwith %}
+{% empty %}
+<div class="alert alert-warning mb-0">No active grading periods are available for this template yet.</div>
+{% endfor %}
+{% endblock %}

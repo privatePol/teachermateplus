@@ -206,6 +206,7 @@
       <li><a href="#quick-start">1. Quick Start Sequence</a></li>
       <li><a href="#scope">2. Scope Selectors (Tenant/Campus)</a></li>
       <li><a href="#cfg">3. Configuration Setup</a></li>
+      <li><a href="#grading-template-calculator">3A. Grading Template Testing Calculator</a></li>
       <li><a href="#records">4. Records Management</a></li>
       <li><a href="#settings">5. Governance Settings</a></li>
       <li><a href="#imports">6. Tools and CSV Importing</a></li>
@@ -286,17 +287,52 @@
             <li>Create Academic Years and Terms.</li>
             <li>Create Courses and Sections.</li>
             <li>Create Course Offerings and Faculty Assignments.</li>
+            <li>Course Template Assignments can now bulk-assign one grading template to multiple courses in one action.</li>
+            <li>Use the metric cards and the <strong>Courses with no grading template</strong> filter to identify course masters that still need template coverage.</li>
             <li>Proceed to Enrollment and grading setup.</li>
           </ul>
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
             <li>Follow strict order: Tenant -> Campus -> Department/Program -> AY/Term.</li>
             <li>Create course/section masters, then offerings and faculty assignments.</li>
+            <li>When assigning a grading template to many courses, use the bulk assignment screen and let EduGradesPro skip courses that already have a prior assignment in the same term scope.</li>
             <li>Verify all references are active before import/operations.</li>
           </ol>
         </div>
         <div class="guide-image">
           <img src="{% get_media_prefix %}portal-img/1.png" alt="Configuration workflow screenshot">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="guide-section" id="grading-template-calculator">
+    <div class="guide-section-head"><h3>3A. Grading Template Testing Calculator</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid">
+        <div>
+          <ul class="guide-list">
+            <li>Use the calculator to validate how EduGradesPro will compute a grading template before live use.</li>
+            <li>The calculator is read-only and uses sample raw score and total score values only. It does not create grades, activities, or student records.</li>
+            <li>Testing inputs are accepted at the lowest active level of the selected template:
+              detail if present, otherwise subcomponent, otherwise component.</li>
+            <li>The page now uses a simpler builder-style presentation first, such as <strong>PRELIM GRADE = Prelim Exam (40%) + Class Standing (60%)</strong>, before showing the actual computed values.</li>
+            <li>This is the best place to explain to operations or deans how a template produces Prelim, Midterm, Pre-Final, Final Exam, and Final Grade outputs.</li>
+          </ul>
+          <div class="guide-subhead">How To</div>
+          <ol class="guide-steps">
+            <li>Open <strong>Grading Templates</strong> then click <strong>Test Calculator</strong> for the target template.</li>
+            <li>Confirm the default sample raw score or replace it with the sample value you want to use.</li>
+            <li>Review each period block and adjust raw score / total score rows where you want different test values.</li>
+            <li>Click <strong>Load / Recompute Calculator</strong>.</li>
+            <li>Review the period formula, the simple class-standing hierarchy, then the computed results per period.</li>
+          </ol>
+          <div class="guide-note">
+            Important: the calculator validates template weighting and period/final-grade computation. It does not replace actual grade entry and it does not simulate activity totals or raw-score encoding behavior.
+          </div>
+        </div>
+        <div class="guide-image">
+          <img src="{% get_media_prefix %}portal-img/grades_prediction.png" alt="Template testing calculator guidance screenshot">
         </div>
       </div>
     </div>
@@ -342,7 +378,7 @@
             <li>Set pre-deadline behavior (when SYSTEM_REQUEST is used).</li>
             <li>Set route matrix by requesting faculty department.</li>
             <li>Set document print header values.</li>
-            <li>Use Configurable Features for optional workflow toggles such as correction official report generation and registrar auto-email settings.</li>
+            <li>Use Configurable Features for optional workflow toggles such as correction official report generation, registrar auto-email settings, and the default primary assignment rule.</li>
           </ul>
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
@@ -501,6 +537,7 @@
           <ol class="guide-steps">
             <li>Open <strong>Faculty Assignments</strong> and select the faculty member.</li>
             <li>Assign the offering and include instructions when needed.</li>
+            <li>By default, EduGradesPro can mark new faculty assignments as primary. If that tenant setting is turned off, use the <strong>Set Primary</strong> button manually for the lead load.</li>
             <li>Monitor the load status for <strong>Pending</strong>, <strong>Accepted</strong>, <strong>Clarification Requested</strong>, <strong>Declined</strong>, or <strong>Expired</strong>.</li>
             <li>Use the metric cards to watch <strong>Accepted</strong>, <strong>Pending Acceptance</strong>, <strong>Due Within 24 Hours</strong>, and <strong>Expired</strong>.</li>
             <li>Review clarification or decline notes before editing or reissuing the assignment.</li>

@@ -170,6 +170,9 @@
         <a href="#manual-submission">Submission Governance</a>
         <a href="#manual-corrections">Corrections and Reopen</a>
         <a href="#manual-prediction">Grade Prediction</a>
+        <a href="#manual-at-risk">At-Risk Monitor</a>
+        <a href="#manual-reminders">Reminder Center</a>
+        <a href="#manual-notes">Private Memo</a>
         <a href="#manual-status">Student Status Rules</a>
         <a href="#manual-privacy">Privacy and Audit</a>
       </div>
@@ -234,7 +237,7 @@
         <tbody>
           <tr>
             <td>Class Selection</td>
-            <td>Faculty opens only assigned offerings in the current academic scope.</td>
+            <td>Faculty opens only assigned offerings in the current academic scope and may review the read-only grading template attached to each class before encoding work.</td>
             <td>Prevents unauthorized access outside assignment scope.</td>
           </tr>
           <tr>
@@ -290,6 +293,7 @@
           <li>Clarification and decline notes should be reviewed before a load is changed or reissued.</li>
           <li>Expired assignments require an admin renewal or reissue before the faculty member can respond again.</li>
           <li>Metric cards in Faculty Assignments should be reviewed for pending, due-within-24-hours, accepted, and expired loads.</li>
+          <li>The class card in Faculty Portal now shows the currently assigned grading template, and faculty may open a read-only template page to review period formulas and class-standing breakdowns before grading.</li>
           <li>Use <code>manage.py process_faculty_assignment_reminders</code> in scheduled operations so reminders and expirations are applied consistently.</li>
         </ul>
       </div>
@@ -373,6 +377,30 @@
     </div>
   </div>
 
+  <div class="card manual-section-card mb-4" id="manual-at-risk">
+    <div class="card-body">
+      <div class="manual-section-title">8.1 Student At-Risk Monitor</div>
+      <div class="manual-rule-grid">
+        <div class="manual-rule">
+          <strong>Purpose</strong>
+          <p>The at-risk monitor groups students by class and period so faculty can quickly spot who needs follow-up before the period closes.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>How to Use</strong>
+          <p>Open the monitor from the Faculty Portal sidebar, then review the students who are currently projected below the passing line.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Next Step</strong>
+          <p>Use the class prediction page or class summary page to inspect coverage, missing items, and the amount still needed to recover.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Governance Note</strong>
+          <p>This is an advisory tool only. It does not replace the official gradebook, submission, or correction process.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="manual-grid-2 mb-4" id="manual-status">
     <div class="card manual-section-card">
       <div class="card-body">
@@ -431,6 +459,54 @@
         As EduGradesPro governance is finalized, we can continue expanding this manual into a more formal institutional reference
         with approval matrices, deadline charts, and role-by-role accountability tables.
       </p>
+    </div>
+  </div>
+
+  <div class="card manual-section-card mt-4" id="manual-reminders">
+    <div class="card-body">
+      <div class="manual-section-title">12. Faculty Reminder Center and Email Queue</div>
+      <div class="manual-rule-grid">
+        <div class="manual-rule">
+          <strong>Reminder Center</strong>
+          <p>Faculty may create future activity reminders, due-date reminders, and follow-up notes in one portal location.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Completion and Snooze</strong>
+          <p>Reminder items can be marked completed or snoozed so the faculty list stays organized and practical.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Optional Email Queue</strong>
+          <p>When tenant configuration enables it, due reminders can queue email notifications to the faculty's registered email address without blocking the production web request.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Performance Safeguard</strong>
+          <p>The reminder email flow is queue-based and batch-processed so the web server does not attempt to send hundreds of emails in a single page request.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card manual-section-card mt-4" id="manual-notes">
+    <div class="card-body">
+      <div class="manual-section-title">13. Faculty Notes / Private Memo</div>
+      <div class="manual-rule-grid">
+        <div class="manual-rule">
+          <strong>Private to Faculty</strong>
+          <p>Faculty notes are private working memos for the faculty user and are not visible to students.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Optional Scope</strong>
+          <p>Each memo may remain general or be linked to a specific class or student for easier follow-up.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Pinning and Review</strong>
+          <p>Important notes may be pinned so they stay easy to find, while older notes remain searchable in the memo center.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Recommended Use</strong>
+          <p>Use private memos for intervention reminders, schedule concerns, make-up work notes, and other faculty-only follow-up items.</p>
+        </div>
+      </div>
     </div>
   </div>
 </div>

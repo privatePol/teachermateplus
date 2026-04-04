@@ -1,0 +1,342 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .risk-shell {
+    padding-bottom: 1rem;
+  }
+  .risk-hero {
+    border: 1px solid #d8e5d6;
+    border-radius: 1.15rem;
+    background: linear-gradient(135deg, #ffffff 0%, #f6fbf4 56%, #f9f2dc 100%);
+    box-shadow: 0 12px 28px rgba(18, 56, 34, 0.08);
+    padding: 1.2rem 1.35rem;
+    margin-bottom: 1rem;
+  }
+  .risk-hero h2 {
+    margin: 0;
+    color: #163f28;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .risk-hero p {
+    margin: 0.35rem 0 0;
+    color: #587062;
+    max-width: 72rem;
+  }
+  .risk-hero .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.85rem;
+  }
+  .risk-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.82);
+    border: 1px solid rgba(23, 61, 39, 0.08);
+    color: #3c5a4a;
+    font-size: 0.84rem;
+    font-weight: 700;
+  }
+  .risk-summary-card {
+    border: 1px solid #dde8db;
+    border-radius: 1rem;
+    box-shadow: 0 8px 18px rgba(22, 55, 34, 0.08);
+    overflow: hidden;
+    background: #fff;
+    height: 100%;
+  }
+  .risk-summary-card .card-body {
+    padding: 1rem 1.05rem;
+  }
+  .risk-summary-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6a8170;
+    margin-bottom: 0.25rem;
+    font-weight: 700;
+  }
+  .risk-summary-value {
+    font-size: 1.65rem;
+    font-weight: 800;
+    color: #143b25;
+    line-height: 1.02;
+  }
+  .risk-summary-meta {
+    margin-top: 0.3rem;
+    color: #6a7d70;
+    font-size: 0.84rem;
+  }
+  .risk-panel,
+  .risk-card,
+  .risk-filters,
+  .risk-empty {
+    border: 1px solid #dde8db;
+    border-radius: 1rem;
+    box-shadow: 0 8px 20px rgba(17, 50, 30, 0.07);
+    background: #ffffff;
+  }
+  .risk-panel .card-header,
+  .risk-filters .card-header,
+  .risk-card .card-header {
+    background: linear-gradient(180deg, #fffefb 0%, #f9fbf8 100%);
+    border-bottom: 1px solid #e7eee7;
+    padding: 0.95rem 1.1rem;
+  }
+  .risk-panel .card-body,
+  .risk-filters .card-body,
+  .risk-card .card-body {
+    padding: 1rem 1.1rem 1.05rem;
+  }
+  .risk-title {
+    margin: 0;
+    font-size: 1.03rem;
+    font-weight: 800;
+    color: #173d27;
+  }
+  .risk-copy {
+    margin: 0.35rem 0 0;
+    color: #5d7264;
+    font-size: 0.92rem;
+  }
+  .risk-filter-label {
+    font-weight: 700;
+    color: #294336;
+    margin-bottom: 0.35rem;
+  }
+  .risk-class-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.8rem;
+    align-items: flex-start;
+    margin-bottom: 0.9rem;
+  }
+  .risk-class-name {
+    font-size: 1.08rem;
+    font-weight: 800;
+    color: #173d27;
+    margin: 0 0 0.2rem;
+  }
+  .risk-class-meta {
+    color: #5d7264;
+    font-size: 0.92rem;
+    margin: 0;
+  }
+  .risk-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 0.25rem 0.6rem;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .risk-badge.danger { background: #f7d7d4; color: #8a251d; }
+  .risk-badge.warning { background: #f8e7a9; color: #725b07; }
+  .risk-badge.info { background: #dcecf9; color: #1b527b; }
+  .risk-badge.success { background: #d7f0df; color: #1c6b34; }
+  .risk-badge.secondary { background: #e8e4f6; color: #5c438c; }
+  .risk-table {
+    margin: 0;
+  }
+  .risk-table thead th {
+    background: #f7faf7;
+    color: #1f3f2b;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid #dfe8de;
+    white-space: nowrap;
+  }
+  .risk-table tbody td {
+    vertical-align: top;
+    color: #274133;
+  }
+  .risk-student {
+    font-weight: 700;
+    color: #173d27;
+  }
+  .risk-subtle {
+    color: #66796c;
+    font-size: 0.86rem;
+  }
+  .risk-score {
+    font-weight: 800;
+    color: #173d27;
+  }
+  .risk-note {
+    display: inline-block;
+    margin-top: 0.2rem;
+    color: #6c7f72;
+    font-size: 0.82rem;
+  }
+  .risk-empty {
+    border-style: dashed;
+    text-align: center;
+    padding: 1.6rem 1.2rem;
+    color: #577064;
+  }
+  .risk-empty h3 {
+    margin: 0 0 0.4rem;
+    color: #173d27;
+    font-size: 1.06rem;
+    font-weight: 800;
+  }
+  .risk-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+</style>
+
+<div class="risk-shell">
+  <div class="risk-hero">
+    <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
+      <div>
+        <h2>Student At-Risk Monitor</h2>
+        <p>Review students whose current prediction is below the passing threshold, then open the class prediction page to inspect coverage, missing work, and the amount still needed to recover.</p>
+        <div class="hero-meta">
+          <span class="risk-chip">Unofficial advisory view</span>
+          <span class="risk-chip">Read-only monitor</span>
+          <span class="risk-chip">Built from prediction snapshots</span>
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-2 justify-content-end">
+        <a class="btn btn-outline-success rounded-pill px-4" href="{% url 'faculty_portal:my_courses' %}">Back to Classes</a>
+        <a class="btn btn-outline-info rounded-pill px-4" href="{% url 'faculty_portal:guide' %}#guide-prediction">Prediction Guide</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    {% for card in summary_cards %}
+    <div class="col-md-2 col-6">
+      <div class="card risk-summary-card">
+        <div class="card-body">
+          <div class="risk-summary-label">{{ card.label }}</div>
+          <div class="risk-summary-value">{{ card.value }}</div>
+          <div class="risk-summary-meta">{{ card.meta }}</div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="card risk-filters mb-4">
+    <div class="card-header">
+      <div class="risk-title">Filters</div>
+      <div class="risk-copy">Use the filter panel to narrow the monitor to a specific class or archived view.</div>
+    </div>
+    <div class="card-body">
+      <form method="get" class="row g-3 align-items-end">
+        <div class="col-lg-5">
+          <label class="risk-filter-label" for="offering_id">Class</label>
+          <select class="form-select" id="offering_id" name="offering_id">
+            {% if not selected_offering_id %}<option value="" selected>All Classes</option>{% else %}<option value="">All Classes</option>{% endif %}
+            {% for offering in offering_choices %}
+              {% if offering.id %}
+                <option value="{{ offering.id }}" {% if offering.selected %}selected{% endif %}>{{ offering.label }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-5">
+          <label class="risk-filter-label" for="q">Search Student / Class / Period</label>
+          <input class="form-control" type="text" id="q" name="q" value="{{ q }}" placeholder="Student number, name, course, section, or period">
+        </div>
+        <div class="col-lg-2">
+          <div class="form-check mt-4">
+            <input class="form-check-input" type="checkbox" id="archived" name="archived" value="1" {% if show_archived %}checked{% endif %}>
+            <label class="form-check-label" for="archived">Show archived</label>
+          </div>
+        </div>
+        <div class="col-12 d-flex flex-wrap gap-2">
+          <button class="btn btn-success rounded-pill px-4" type="submit">Apply Filters</button>
+          <a class="btn btn-outline-secondary rounded-pill px-4" href="{% url 'faculty_portal:student_at_risk_monitor' %}">Reset</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% if monitor_groups %}
+    <div class="row g-4">
+      {% for group in monitor_groups %}
+      <div class="col-12">
+        <div class="card risk-card">
+          <div class="card-body">
+            <div class="risk-class-header">
+              <div>
+                <div class="risk-badge warning">At Risk: {{ group.at_risk_count }} student{{ group.at_risk_count|pluralize }}</div>
+                <div class="risk-class-name">{{ group.offering.course.title }} ({{ group.offering.course.code }})</div>
+                <p class="risk-class-meta">{{ group.offering.section.name|default:group.offering.section.code }} | {{ group.period.name }} | {{ group.current_template_name }}</p>
+              </div>
+              <div class="risk-action-row">
+                <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{% url 'faculty_portal:period_summary' group.offering.id group.period.id %}">Open Summary</a>
+                <a class="btn btn-outline-info btn-sm rounded-pill" href="{% url 'faculty_portal:period_prediction' group.offering.id group.period.id %}">Open Prediction</a>
+                <a class="btn btn-outline-success btn-sm rounded-pill" href="{% url 'faculty_portal:offering_periods' group.offering.id %}">Open Class</a>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle risk-table">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Current Projection</th>
+                    <th>Projected Final</th>
+                    <th>Average Needed to Pass Final</th>
+                    <th>Coverage</th>
+                    <th>Remaining</th>
+                    <th>Risk</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in group.rows %}
+                  <tr>
+                    <td>
+                      <div class="risk-student">{{ row.student.student_no }} - {{ row.student.last_name }}, {{ row.student.first_name }}</div>
+                      <div class="risk-subtle">{{ row.student.program.code|default:"" }}</div>
+                    </td>
+                    <td class="risk-score">{{ row.current_projected_period_grade_display|default:"-" }}</td>
+                    <td class="risk-score">{{ row.current_projected_final_grade_display|default:"-" }}</td>
+                    <td>
+                      <div class="risk-score">
+                        {% if row.final_requirement_value_display %}
+                          {{ row.final_requirement_value_display }}
+                        {% else %}
+                          {{ row.final_requirement_label }}
+                        {% endif %}
+                      </div>
+                      {% if row.final_requirement_period_names %}
+                        <span class="risk-note">{{ row.final_requirement_period_names|join:", " }}</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ row.coverage_percent_display }}%</td>
+                    <td>{{ row.remaining_item_count }}</td>
+                    <td>
+                      <span class="risk-badge {{ row.risk_variant }}">At Risk</span>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="risk-empty">
+      <h3>No at-risk students found</h3>
+      <p>There are no current at-risk rows for the selected class scope and filters. You can open the Prediction page to inspect a class in detail.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

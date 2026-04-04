@@ -67,6 +67,7 @@ from .views import (
     grading_template_publish_view,
     grading_template_submit_for_approval_view,
     grading_template_builder_view,
+    grading_template_calculator_view,
     grading_template_structure_view,
     grading_template_update_view,
     menu_group_create_view,
@@ -260,6 +261,11 @@ urlpatterns = [
     ),
     path("admin-portal/grading/templates/", grading_template_list_view, name="grading_template_list"),
     path("admin-portal/grading/templates/create/", grading_template_create_view, name="grading_template_create"),
+    path(
+        "admin-portal/grading/templates/calculator/",
+        grading_template_calculator_view,
+        name="grading_template_calculator",
+    ),
     path(
         "admin-portal/grading/templates/<int:template_id>/structure/",
         grading_template_structure_view,

@@ -7,14 +7,40 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Admin grading-template testing calculator:
+  - new read-only Admin Portal page for validating grading-template computation using sample fixed data
+  - now starts from sample raw score + total score so admins can see the raw-to-computed conversion path before weighted rollups
+  - computes and shows period-by-period results plus final grade using the same current EduGradesPro computation logic
+  - period cards now present the math as clearer step-by-step walkthroughs with color-coded period headers for easier reading during template validation
+  - calculator presentation was further simplified to match the grading-template builder more closely:
+    - period formulas now use plain expressions such as `PRELIM GRADE = Prelim Exam (40%) + Class Standing (60%)`
+    - class-standing structure is shown as a simple hierarchy list
+    - the extra `Effective Weight in Period` column was removed to reduce confusion
+  - includes template-level action links from Grading Templates and Template Structure screens.
 - Faculty assignment acceptance workflow:
   - faculty must accept newly assigned classes before opening grading or class-list screens
   - acceptance stores both `accepted_at` and `accepted_by` on the faculty assignment row
-  - faculty `My Courses` now surfaces pending assignments with direct accept actions.
+  - faculty `My Classes` now surfaces pending assignments with direct accept actions.
+- Faculty portal navigation cleanup:
+  - removed the duplicate sidebar `My Classes` link from the main Faculty Portal page so the dedicated `Classes` block remains the single entry point for the class list.
+- Faculty Notes / Private Memo:
+  - faculty now has a dedicated private note center for general, class-linked, and student-linked memos
+  - important memos can be pinned for quick follow-up
+  - the feature is configurable from Admin Portal tools.
 - Faculty assignment response workflow:
   - admin can attach assignment instructions/notes to a faculty load
   - faculty can request clarification or decline with a written note
   - admin faculty-assignment view now shows response status, admin instructions, and faculty response notes.
+- Faculty reminder center and email queue:
+  - faculty can save future activity reminders in a dedicated portal page
+  - reminders support snooze/complete actions and optional queue-based email notifications
+  - reminder emails are processed in background batches so production web requests stay responsive.
+  - reminder delivery and reminder-center visibility are governed by configurable feature toggles in the Admin Portal.
+  - reminder center layout was polished for clearer sections, summary cards, and easier scanning on the faculty side.
+- Faculty at-risk monitor:
+  - faculty can now open a dedicated at-risk monitor that groups students by class and period
+  - the monitor surfaces students currently projected below passing so faculty can prioritize follow-up
+  - each row links back to the class prediction and summary pages for deeper review.
 - Faculty assignment reminder/expiry workflow:
   - pending assignments now track a response due date, reminder count, and last reminder timestamp
   - overdue pending assignments automatically move to `EXPIRED`
@@ -24,8 +50,13 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - expired faculty loads now support a one-click `Renew Response Window` action from Faculty Assignments
   - a new Faculty Assignment Dashboard summarizes assignment status across campus, department, and faculty
   - admin dashboard and faculty public homepage now surface help cards that explain the assignment-acceptance rule before users open the full guides.
+  - faculty assignment creation now honors a configurable `Set new faculty assignments as primary by default` switch, while still allowing manual primary tagging when the switch is off.
 - Faculty public landing page with top-nav login, workflow/features/integration/support sections.
 - Faculty guide and help-center style content linked from the faculty portal help icon (`?`).
+- Faculty read-only grading template visibility:
+  - each class card now shows the currently resolved grading template name
+  - faculty can open a read-only grading template page per assigned class
+  - the page explains period formulas, component weights, and class-standing breakdown using the effective template for that offering.
 - CSV import framework with strict template matching and preview/confirm flow.
 - Admin tools grouping and bulk import screens.
 - KPI cards in faculty dashboard (submission/readiness-oriented metrics).
@@ -205,6 +236,11 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - clearer message when passing is already secured or no longer reachable.
 - Faculty-facing label changed from `Needed for Passing Final` to `Average Needed to Pass Final` for clearer reading.
 - Faculty prediction guide now displays the dedicated `grades_prediction.png` screenshot and uses shorter reading-order guidance for faster faculty scanning.
+- Course Template Assignment now supports bulk multi-course assignment in the Admin Portal:
+  - one published grading template can be assigned to multiple selected courses in one submit
+  - the bulk screen skips courses that already have a prior assignment in the same term scope
+  - exact inactive matches are reactivated instead of creating a duplicate-looking row.
+- Course Template Assignments list now includes admin metric cards and a `Courses with no grading template` filter so operations can quickly find missing template coverage.
 
 ### Fixed
 - Multiple grading summary/runtime errors reported during faculty usage:

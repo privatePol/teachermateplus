@@ -1,0 +1,53 @@
+{% load static %}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 0; padding: 0; background: #eef5ec; font-family: Arial, Helvetica, sans-serif; color: #183d28; }
+    .wrap { width: 100%; padding: 24px 12px; }
+    .card { max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #d9e6d7; border-radius: 18px; overflow: hidden; box-shadow: 0 12px 28px rgba(18, 56, 34, 0.12); }
+    .header { padding: 24px 26px 12px; text-align: center; background: linear-gradient(135deg, #f9fcf8 0%, #edf7ec 100%); border-bottom: 1px solid #e0e9de; }
+    .logo { max-width: 88px; height: auto; display: block; margin: 0 auto 10px; }
+    .school { font-size: 1.02rem; letter-spacing: .06em; font-weight: 800; color: #1a4d31; }
+    .title { padding: 22px 26px 0; font-size: 1.4rem; font-weight: 800; color: #153d27; }
+    .body { padding: 16px 26px 24px; }
+    .pill { display:inline-block; padding: 6px 12px; border-radius: 999px; background: #e0f0e1; color: #17623a; font-size: .78rem; font-weight: 700; margin-bottom: 12px; }
+    .row { margin: 8px 0; font-size: .98rem; line-height: 1.45; }
+    .row strong { color: #123c26; }
+    .note { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: #f8fbf8; border: 1px solid #dbe6da; color: #355243; white-space: pre-wrap; }
+    .cta { display: inline-block; margin-top: 18px; background: linear-gradient(90deg, #1b7a43 0%, #88a93a 100%); color: #fff !important; text-decoration: none; font-weight: 800; padding: 12px 18px; border-radius: 999px; }
+    .footer { padding: 0 26px 22px; font-size: .82rem; color: #637769; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="header">
+        <img class="logo" src="{{ logo_url }}" alt="NCBA">
+        <div class="school">NATIONAL COLLEGE OF BUSINESS AND ARTS</div>
+      </div>
+      <div class="title">Faculty Reminder Notification</div>
+      <div class="body">
+        <div class="pill">{{ reminder.get_reminder_type_display }}</div>
+        <div class="row"><strong>Title:</strong> {{ reminder.title }}</div>
+        <div class="row"><strong>Class:</strong> {{ reminder.offering.course.title }} ({{ reminder.offering.course.code }}) / {{ reminder.offering.section.code }}</div>
+        {% if reminder.period_label %}
+        <div class="row"><strong>Period:</strong> {{ reminder.period_label }}</div>
+        {% endif %}
+        <div class="row"><strong>Remind At:</strong> {{ reminder.remind_at|date:"F j, Y g:i A" }}</div>
+        {% if reminder.due_at %}
+        <div class="row"><strong>Due At:</strong> {{ reminder.due_at|date:"F j, Y g:i A" }}</div>
+        {% endif %}
+        {% if reminder.notes %}
+        <div class="note">{{ reminder.notes }}</div>
+        {% endif %}
+        {% if portal_url %}
+        <a class="cta" href="{{ portal_url }}">Open Reminder Center</a>
+        {% endif %}
+      </div>
+      <div class="footer">This reminder is sent by EduGradesPro and is intended to help you manage upcoming teaching tasks, deadlines, and follow-ups.</div>
+    </div>
+  </div>
+</body>
+</html>

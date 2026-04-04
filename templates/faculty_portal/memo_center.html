@@ -1,0 +1,281 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .memo-shell { padding-bottom: 1rem; }
+  .memo-hero {
+    border: 1px solid #d8e5d6;
+    border-radius: 1.15rem;
+    background: linear-gradient(135deg, #ffffff 0%, #f7fbf4 56%, #f7f3e5 100%);
+    box-shadow: 0 12px 28px rgba(18, 56, 34, 0.08);
+    padding: 1.2rem 1.35rem;
+    margin-bottom: 1rem;
+  }
+  .memo-hero h2 { margin: 0; color: #163f28; font-weight: 800; letter-spacing: -0.02em; }
+  .memo-hero p { margin: 0.35rem 0 0; color: #5b7263; max-width: 72rem; }
+  .memo-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.35rem 0.7rem; border-radius: 999px;
+    background: rgba(255,255,255,0.82); border: 1px solid rgba(23,61,39,0.08);
+    color: #3c5a4a; font-size: 0.84rem; font-weight: 700;
+  }
+  .memo-summary-card {
+    border: 1px solid #dde8db; border-radius: 1rem; box-shadow: 0 8px 18px rgba(22,55,34,0.08);
+    overflow: hidden; background: #fff; height: 100%;
+  }
+  .memo-summary-card .card-body { padding: 1rem 1.05rem; }
+  .memo-summary-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6a8170; margin-bottom: 0.25rem; font-weight: 700; }
+  .memo-summary-value { font-size: 1.65rem; font-weight: 800; color: #143b25; line-height: 1.02; }
+  .memo-summary-meta { margin-top: 0.3rem; color: #6a7d70; font-size: 0.84rem; }
+  .memo-panel, .memo-card, .memo-help, .memo-empty {
+    border: 1px solid #dde8db; border-radius: 1rem; box-shadow: 0 8px 20px rgba(17,50,30,0.07); background: #fff;
+  }
+  .memo-panel .card-header, .memo-help .card-header, .memo-card .card-header {
+    background: linear-gradient(180deg, #fffefb 0%, #f9fbf8 100%); border-bottom: 1px solid #e7eee7; padding: 0.95rem 1.1rem;
+  }
+  .memo-panel .card-body, .memo-help .card-body, .memo-card .card-body { padding: 1rem 1.1rem 1.05rem; }
+  .memo-title { margin: 0; font-size: 1.03rem; font-weight: 800; color: #173d27; }
+  .memo-copy { margin: 0.35rem 0 0; color: #5d7264; font-size: 0.92rem; }
+  .memo-filter-label { font-weight: 700; color: #294336; margin-bottom: 0.35rem; }
+  .memo-tip-list { list-style: none; padding: 0; margin: 0.8rem 0 0; }
+  .memo-tip-list li { position: relative; padding-left: 1.15rem; margin-bottom: 0.55rem; color: #4c6255; }
+  .memo-tip-list li::before { content: ""; position: absolute; left: 0; top: 0.55rem; width: 0.42rem; height: 0.42rem; border-radius: 50%; background: linear-gradient(135deg, #1a8f5b, #d7bf39); box-shadow: 0 0 0 4px rgba(26, 143, 91, 0.08); }
+  .memo-form-label { font-weight: 700; color: #294336; margin-bottom: 0.35rem; }
+  .memo-badge { display: inline-flex; align-items: center; border-radius: 999px; font-size: 0.72rem; font-weight: 800; padding: 0.25rem 0.6rem; letter-spacing: 0.02em; white-space: nowrap; }
+  .memo-badge.primary { background: #dbeeda; color: #135030; }
+  .memo-badge.warning { background: #f8e7a9; color: #725b07; }
+  .memo-badge.danger { background: #f7d7d4; color: #8a251d; }
+  .memo-badge.info { background: #dcecf9; color: #1b527b; }
+  .memo-badge.success { background: #d7f0df; color: #1c6b34; }
+  .memo-badge.secondary { background: #e8e4f6; color: #5c438c; }
+  .memo-card { height: 100%; overflow: hidden; border-left: 0.35rem solid #d8e5d6; }
+  .memo-card.pinned { border-left-color: #d6a719; }
+  .memo-card.class { border-left-color: #2e8b57; }
+  .memo-card.student { border-left-color: #7b6bd6; }
+  .memo-card.general { border-left-color: #79916f; }
+  .memo-card.custom { border-left-color: #8f6b4a; }
+  .memo-card .card-body { padding: 1rem 1.05rem 0.95rem; }
+  .memo-card-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.7rem; align-items: flex-start; margin-bottom: 0.75rem; }
+  .memo-note-title { font-size: 1.08rem; font-weight: 800; color: #173d27; margin: 0.15rem 0 0.2rem; }
+  .memo-note-subtitle { color: #5d7264; font-size: 0.92rem; margin: 0; }
+  .memo-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem 1rem; margin-top: 0.85rem; }
+  .memo-meta-item { border: 1px solid #edf1eb; border-radius: 0.85rem; background: #fbfdfa; padding: 0.7rem 0.8rem; }
+  .memo-meta-label { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #718376; margin-bottom: 0.18rem; font-weight: 700; }
+  .memo-meta-value { color: #294336; font-weight: 600; font-size: 0.92rem; word-break: break-word; }
+  .memo-body { margin-top: 0.85rem; padding: 0.85rem 0.95rem; border-radius: 0.9rem; background: linear-gradient(180deg, #fbfcfb 0%, #f5f8f4 100%); border: 1px dashed #d6e0d5; color: #415447; font-size: 0.92rem; white-space: pre-wrap; }
+  .memo-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.95rem; padding-top: 0.85rem; border-top: 1px solid #eef3ee; }
+  .memo-empty { border-style: dashed; text-align: center; padding: 1.6rem 1.2rem; color: #577064; }
+  .memo-empty h3 { margin: 0 0 0.4rem; color: #173d27; font-size: 1.06rem; font-weight: 800; }
+  .memo-empty p { margin: 0; }
+</style>
+
+<div class="memo-shell">
+  <div class="memo-hero">
+    <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
+      <div>
+        <h2>Faculty Notes / Private Memo</h2>
+        <p>Keep private class reminders, student follow-ups, and quick teaching notes in one portal location. Memos stay private to you and can optionally be tied to a class or student for easier follow-up.</p>
+        <div class="d-flex flex-wrap gap-2 mt-3">
+          <span class="memo-chip">Private to faculty</span>
+          <span class="memo-chip">Optional class or student link</span>
+          <span class="memo-chip">Fast follow-up notes</span>
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-2 justify-content-end">
+        <a class="btn btn-outline-success rounded-pill px-4" href="{% url 'faculty_portal:my_courses' %}">Back to Classes</a>
+        <a class="btn btn-outline-info rounded-pill px-4" href="{% url 'faculty_portal:guide' %}#guide-prediction">Faculty Guide</a>
+      </div>
+    </div>
+  </div>
+
+  {% if not memo_center_enabled %}
+    <div class="alert alert-warning border shadow-sm">
+      Faculty memo center is currently disabled by configuration. You can still review the page, but memo actions are limited until it is enabled.
+    </div>
+  {% endif %}
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-3 col-6">
+      <div class="card memo-summary-card">
+        <div class="card-body">
+          <div class="memo-summary-label">Total Memos</div>
+          <div class="memo-summary-value">{{ counts.total }}</div>
+          <div class="memo-summary-meta">All active private notes in your scope.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="card memo-summary-card">
+        <div class="card-body">
+          <div class="memo-summary-label">Pinned</div>
+          <div class="memo-summary-value">{{ counts.pinned }}</div>
+          <div class="memo-summary-meta">Important memos kept at the top.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="card memo-summary-card">
+        <div class="card-body">
+          <div class="memo-summary-label">Class Memos</div>
+          <div class="memo-summary-value">{{ counts.class }}</div>
+          <div class="memo-summary-meta">Notes linked to a specific class.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-6">
+      <div class="card memo-summary-card">
+        <div class="card-body">
+          <div class="memo-summary-label">Student Memos</div>
+          <div class="memo-summary-value">{{ counts.student }}</div>
+          <div class="memo-summary-meta">Notes linked to a specific student.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-xl-8">
+      <div class="card memo-panel h-100">
+        <div class="card-header">
+          <div class="memo-title">Create Memo</div>
+          <div class="memo-copy">Add a private note for your own reference. You can attach it to a class, student, or keep it general.</div>
+        </div>
+        <div class="card-body">
+          <form method="post" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+              <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <div class="row g-3">
+              <div class="col-lg-4">
+                <label class="memo-form-label" for="{{ form.memo_type.id_for_label }}">{{ form.memo_type.label }}</label>
+                {{ form.memo_type }}
+                {% for error in form.memo_type.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-8">
+                <label class="memo-form-label" for="{{ form.title.id_for_label }}">{{ form.title.label }}</label>
+                {{ form.title }}
+                {% for error in form.title.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-6">
+                <label class="memo-form-label" for="{{ form.offering.id_for_label }}">{{ form.offering.label }}</label>
+                {{ form.offering }}
+                {% for error in form.offering.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-6">
+                <label class="memo-form-label" for="{{ form.student.id_for_label }}">{{ form.student.label }}</label>
+                {{ form.student }}
+                {% for error in form.student.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12">
+                <label class="memo-form-label" for="{{ form.body.id_for_label }}">{{ form.body.label }}</label>
+                {{ form.body }}
+                {% for error in form.body.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12">
+                <div class="form-check form-switch">
+                  {{ form.is_pinned }}
+                  <label class="form-check-label" for="{{ form.is_pinned.id_for_label }}">{{ form.is_pinned.label|default:"Pin this memo" }}</label>
+                </div>
+                {% for error in form.is_pinned.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+            </div>
+            <div class="mt-4 d-flex flex-wrap gap-2 align-items-center">
+              <button class="btn btn-success rounded-pill px-4" type="submit">Save Memo</button>
+              <span class="text-muted small">Memos are private to you unless you decide to share the content outside EduGradesPro.</span>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-4">
+      <div class="card memo-help h-100">
+        <div class="card-header">
+          <div class="memo-title">Helpful Uses</div>
+          <div class="memo-copy">Short notes work best when they are specific and action-focused.</div>
+        </div>
+        <div class="card-body">
+          <ul class="memo-tip-list">
+            <li>Keep a follow-up note for a student who may be at risk.</li>
+            <li>Write a reminder about a class schedule concern or special rule.</li>
+            <li>Store a private note about make-up work or missing requirements.</li>
+            <li>Pin important notes so they stay visible at the top of the list.</li>
+            <li>Use a class link or student link when you need the memo connected to a specific record.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if memos %}
+    <div class="row g-3">
+      {% for memo in memos %}
+      <div class="col-xl-6">
+        <div class="card memo-card {{ memo.obj.memo_type|lower }} {% if memo.obj.is_pinned %}pinned{% endif %}">
+          <div class="card-body">
+            <div class="memo-card-head">
+              <div>
+                <div class="memo-badge {{ memo.kind_variant }}">{{ memo.kind_label }}</div>
+                {% if memo.obj.is_pinned %}<div class="memo-badge warning ms-1">Pinned</div>{% endif %}
+                <div class="memo-note-title">{{ memo.obj.title }}</div>
+                <p class="memo-note-subtitle">Private memo for your reference</p>
+              </div>
+              <div class="text-end">
+                <div class="memo-badge {% if memo.obj.offering_id %}success{% elif memo.obj.student_id %}info{% else %}secondary{% endif %}">
+                  {% if memo.obj.offering_id %}Class{% elif memo.obj.student_id %}Student{% else %}General{% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="memo-meta-grid">
+              <div class="memo-meta-item">
+                <span class="memo-meta-label">Class</span>
+                <div class="memo-meta-value">
+                  {% if memo.obj.offering_id %}
+                    {{ memo.obj.offering.course.title }} ({{ memo.obj.offering.course.code }}) | {{ memo.obj.offering.section.name|default:memo.obj.offering.section.code }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </div>
+              </div>
+              <div class="memo-meta-item">
+                <span class="memo-meta-label">Student</span>
+                <div class="memo-meta-value">
+                  {% if memo.obj.student_id %}
+                    {{ memo.obj.student.student_no }} - {{ memo.obj.student.last_name }}, {{ memo.obj.student.first_name }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="memo-body">{{ memo.obj.body }}</div>
+
+            <div class="memo-actions">
+              {% if memo.obj.offering_id %}
+                <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{% url 'faculty_portal:offering_periods' memo.obj.offering.id %}">Open Class</a>
+              {% endif %}
+              <a class="btn btn-outline-primary btn-sm rounded-pill" href="{% url 'faculty_portal:memo_edit' memo.obj.id %}">Edit</a>
+              <form method="post" action="{% url 'faculty_portal:memo_toggle_pin' memo.obj.id %}">
+                {% csrf_token %}
+                <button class="btn btn-outline-warning btn-sm rounded-pill" type="submit">{% if memo.obj.is_pinned %}Unpin{% else %}Pin{% endif %}</button>
+              </form>
+              <form method="post" action="{% url 'faculty_portal:memo_delete' memo.obj.id %}" onsubmit="return confirm('Remove this memo?');">
+                {% csrf_token %}
+                <button class="btn btn-outline-danger btn-sm rounded-pill" type="submit">Remove</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="memo-empty">
+      <h3>No memos yet</h3>
+      <p>Create one above to keep private reminders about a class, a student, or a follow-up task.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -19,10 +19,12 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - Admin faculty-assignment operations now also include:
   - one-click renewal of expired response windows
   - a dedicated assignment dashboard with campus, department, and faculty rollups.
+  - configurable default-primary behavior for newly created faculty assignments, with manual override still available from the assignments list.
 - Enrollment management
 - Grading management:
   - templates
   - periods/components/subcomponents/details
+  - grading-template testing calculator (read-only validation using sample raw score + total score)
   - template assignment
   - period locks and deadlines
   - correction/reopen governance
@@ -42,11 +44,15 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 ### Faculty Portal
 - Public faculty index (`/faculty/`)
 - Faculty login/logout/password flows
-- My Courses and Archived Classes
+- My Classes and Archived Classes
+- Faculty Portal sidebar keeps only the dedicated `Classes` block for the class list; the duplicate top-level `My Classes` nav entry was removed to avoid confusion.
 - Newly assigned classes now require explicit faculty acceptance before the class can be opened for grading or class-list work.
 - Pending faculty assignments can now carry admin instructions, and faculty can respond with `accept`, `request clarification`, or `decline` plus a note.
 - Pending faculty assignments now show a response deadline and reminder history, while expired assignments stay blocked until admin refreshes the response window.
 - Faculty public homepage and admin dashboard now surface visible reminder/help cards for the assignment-acceptance rule so users encounter it even before opening the full guide pages.
+- Faculty Portal now includes a Reminder Center where faculty can save future activity reminders, snooze or complete them, and optionally queue email notifications to their profile email address.
+- The Reminder Center page has been visually polished into clearer sections with summary cards, a guided create form, and easier-to-scan reminder cards.
+- Faculty Portal now also includes a Student At-Risk Monitor that groups prediction-based risk rows by class and period so faculty can prioritize intervention before periods close.
 - Period actions:
   - create activities
   - encode scores
@@ -130,6 +136,8 @@ All business operations should respect these dimensions and permissions.
 - Email-based flows require SMTP configuration via environment variables.
 - Optional feature flows are being designed to use dedicated configurable feature settings with global toggles, role-aware control where appropriate, and tenant/campus-aware recipient configuration rather than hard-enabled behavior.
 - Faculty assignment reminder and expiry behavior is now also configurable from the dedicated Configurable Features screen instead of being fixed in code.
+- Faculty reminder center visibility and reminder-email queueing are also configurable from the same dedicated features screen so operations can turn them on/off without code changes.
+- Faculty Notes / Private Memo now provides a private faculty-only note center for general, class-linked, and student-linked memos with pinning support.
 - Grade prediction is now designed as a configurable, read-only module with snapshot/queue processing so projection pages stay fast and do not alter official gradebook data.
 - Correction submission approval notification email is now one of those configurable flows, with recipient roles managed per tenant.
 - Registrar auto-email after final approval is now available as a configurable flow and uses campus-specific recipient mapping with default fallback when configured.
@@ -160,6 +168,8 @@ All business operations should respect these dimensions and permissions.
   - `manage.py auto_lapse_correction_windows`
   - `manage.py queue_period_reminders`
   - `manage.py process_faculty_assignment_reminders`
+  - `manage.py queue_faculty_reminder_emails`
+  - `manage.py process_faculty_reminder_email_queue`
 
 ## 9. UX Direction (Already Requested by Stakeholders)
 - Cleaner, less confusing hierarchy in grading setup and faculty screens.
@@ -175,6 +185,12 @@ All business operations should respect these dimensions and permissions.
   - course choices prefer `Course Title (code)`
   - section choices prefer section name
   - offering labels combine readable course/section/term names with codes only as secondary reference.
+- Admin Portal now includes a grading-template testing calculator so operations can validate how a selected template will compute raw score conversion, Prelim, Midterm, Pre-Final, Final Exam, and Final Grade before live use.
+- The grading-template testing calculator now presents each period as its own guided walkthrough with clearer step sequencing and distinct period colors, helping admins explain the computation flow with less confusion.
+- The calculator presentation is now intentionally simpler and closer to the grading-template builder:
+  - period formulas are shown in plain builder-style form such as `PRELIM GRADE = Prelim Exam (40%) + Class Standing (60%)`
+  - nested class-standing structures are shown as a simple hierarchy list
+  - the previous `effective weight in period` column was removed because it added confusion for non-technical reviewers.
 - Faculty Grade Book Monitor now uses a greener/yellow metric-card treatment to align better with the NCBA visual direction and make oversight stats easier to scan.
 - Campus-wide academic reviewers such as CAO now resolve faculty visibility by campus-level FACULTY assignments correctly, even when a faculty user's default campus differs from the campus being reviewed.
 - Admin Portal has a dedicated root landing redirect so `/admin-portal` and `/admin-portal/` resolve cleanly to the correct login/dashboard flow.
@@ -194,7 +210,13 @@ All business operations should respect these dimensions and permissions.
 - Prediction now also calculates the average still needed across future periods to finish with a passing final grade, giving faculty a direct answer for cases such as completed `MIDTERM` with remaining `PRE-FINAL` and `FX`.
 - Faculty-facing prediction labels are being simplified so requirement messages read closer to plain advisory language instead of technical system phrasing.
 - The passing-final requirement label now uses clearer faculty wording: `Average Needed to Pass Final`.
+- Faculty Portal now also exposes the effective grading template per assigned class:
+  - class cards show the current grading template name
+  - faculty can open a read-only grading-template page for the class
+  - the page presents period formulas and class-standing breakdown using the template actually resolved for that offering.
 - The faculty prediction guide now includes the dedicated `grades_prediction.png` screenshot and a shorter “quick reading order” explanation to support non-technical faculty users.
+- Admin Portal course-template assignment now supports bulk multi-course assignment with prior-assignment checking in the same term scope, making template rollout faster while avoiding conflicting assignment rows.
+- Admin Portal course-template assignment list now also acts as a coverage monitor by surfacing metric cards and a direct filter for courses that still have no active grading template assignment.
 
 ## 10. Open Design/Governance Topics
 - Tenant-specific grading methodology options (engine profiles/switches).

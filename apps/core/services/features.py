@@ -13,9 +13,13 @@ class FeatureSettingsService:
     CORRECTION_REGISTRAR_CAMPUS_RECIPIENTS_KEY = "FEATURE_CORRECTION_REGISTRAR_CAMPUS_RECIPIENTS"
     FACULTY_ASSIGNMENT_REMINDERS_ENABLED_KEY = "FEATURE_FACULTY_ASSIGNMENT_REMINDERS_ENABLED"
     FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED_KEY = "FEATURE_FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED"
+    FACULTY_ASSIGNMENT_PRIMARY_DEFAULT_ENABLED_KEY = "FEATURE_FACULTY_ASSIGNMENT_PRIMARY_DEFAULT_ENABLED"
     FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY = "FEATURE_FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS"
     FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY = "FEATURE_FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS"
     FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS_KEY = "FEATURE_FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS"
+    FACULTY_REMINDER_CENTER_ENABLED_KEY = "FEATURE_FACULTY_REMINDER_CENTER_ENABLED"
+    FACULTY_REMINDER_EMAIL_ENABLED_KEY = "FEATURE_FACULTY_REMINDER_EMAIL_ENABLED"
+    FACULTY_MEMO_CENTER_ENABLED_KEY = "FEATURE_FACULTY_MEMO_CENTER_ENABLED"
     GRADE_PREDICTION_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_ENABLED"
     GRADE_PREDICTION_ROLE_CODES_KEY = "FEATURE_GRADE_PREDICTION_ROLE_CODES"
     GRADE_PREDICTION_WHAT_IF_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_WHAT_IF_ENABLED"
@@ -166,6 +170,46 @@ class FeatureSettingsService:
         return bool(
             SystemSettingService.get(
                 cls.FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_faculty_assignment_primary_default_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_ASSIGNMENT_PRIMARY_DEFAULT_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_faculty_reminder_center_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_REMINDER_CENTER_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_faculty_reminder_email_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_REMINDER_EMAIL_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_faculty_memo_center_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_MEMO_CENTER_ENABLED_KEY,
                 tenant_id=tenant_id,
                 default=default,
             )

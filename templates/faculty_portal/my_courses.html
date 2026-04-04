@@ -232,6 +232,14 @@
         <div class="meta">Campus: {{ assignment.offering.campus.code }}</div>
         <div class="meta">Schedule: {{ assignment.offering.schedule_text|default:"-" }}</div>
         <div class="meta">Assigned: {{ assignment.assigned_at|date:"M d, Y h:i A" }}</div>
+        <div class="meta">
+          Grading Template:
+          {% if assignment.offering.resolved_template %}
+            <strong>{{ assignment.offering.resolved_template.name }}</strong>
+          {% else %}
+            <span>Not available yet</span>
+          {% endif %}
+        </div>
         {% if assignment.response_due_at %}
         <div class="meta">Respond by: {{ assignment.response_due_at|date:"M d, Y h:i A" }}</div>
         {% elif assignment.response_status == "EXPIRED" and assignment.responded_at %}
@@ -293,11 +301,24 @@
             <div class="course-card-row"><span class="label">Schedule</span><span>{{ offering.schedule_text|default:"-" }}</span></div>
             <div class="course-card-row"><span class="label">Class Size</span><span>{{ offering.enrollment_count }}</span></div>
             <div class="course-card-row"><span class="label">Status</span><span>{{ offering.status|default:"-" }}</span></div>
+            <div class="course-card-row">
+              <span class="label">Grading Template</span>
+              <span>
+                {% if offering.resolved_template %}
+                  {{ offering.resolved_template.name }}
+                {% else %}
+                  Not available
+                {% endif %}
+              </span>
+            </div>
           </div>
 
           <footer class="course-card-footer">
             <a class="btn btn-outline-success" href="{% url 'faculty_portal:offering_periods' offering.id %}">
               Grading
+            </a>
+            <a class="btn btn-outline-primary" href="{% url 'faculty_portal:offering_grading_template' offering.id %}">
+              Template
             </a>
             <a class="btn btn-outline-secondary" href="{% url 'faculty_portal:offering_enrollment' offering.id %}">
               Class List / DR-W

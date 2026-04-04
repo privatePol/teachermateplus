@@ -1,0 +1,521 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+{% load static %}
+<style>
+  .reminder-page-shell {
+    position: relative;
+    padding-bottom: 1rem;
+  }
+  .reminder-hero {
+    border: 1px solid #d8e5d6;
+    border-radius: 1.15rem;
+    background: linear-gradient(135deg, #ffffff 0%, #f6fbf4 54%, #f7f4e2 100%);
+    box-shadow: 0 12px 28px rgba(18, 56, 34, 0.08);
+    padding: 1.25rem 1.4rem;
+    margin-bottom: 1rem;
+  }
+  .reminder-hero h2 {
+    margin: 0;
+    color: #163f28;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .reminder-hero p {
+    margin: 0.4rem 0 0;
+    color: #5b7263;
+    max-width: 72rem;
+  }
+  .reminder-hero .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .reminder-hero .hero-note {
+    margin-top: 0.8rem;
+    padding: 0.85rem 1rem;
+    border-radius: 0.9rem;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(23, 61, 39, 0.08);
+    color: #4d6557;
+  }
+  .reminder-stat {
+    border: 1px solid #dde8db;
+    border-radius: 1rem;
+    box-shadow: 0 8px 18px rgba(22, 55, 34, 0.08);
+    height: 100%;
+    overflow: hidden;
+    background: #fff;
+  }
+  .reminder-stat .card-body {
+    padding: 1rem 1.05rem;
+  }
+  .reminder-stat .stat-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6a8170;
+    margin-bottom: 0.25rem;
+    font-weight: 700;
+  }
+  .reminder-stat .stat-value {
+    font-size: 1.65rem;
+    font-weight: 800;
+    color: #143b25;
+    line-height: 1.02;
+  }
+  .reminder-stat .stat-caption {
+    margin-top: 0.3rem;
+    color: #6a7d70;
+    font-size: 0.84rem;
+  }
+  .reminder-panel,
+  .reminder-card,
+  .reminder-help {
+    border: 1px solid #dde8db;
+    border-radius: 1rem;
+    box-shadow: 0 8px 20px rgba(17, 50, 30, 0.07);
+    background: #ffffff;
+  }
+  .reminder-panel .card-header,
+  .reminder-help .card-header,
+  .reminder-card .card-header {
+    background: linear-gradient(180deg, #fffefb 0%, #f9fbf8 100%);
+    border-bottom: 1px solid #e7eee7;
+    padding: 0.95rem 1.1rem;
+  }
+  .reminder-panel .card-body,
+  .reminder-help .card-body,
+  .reminder-card .card-body {
+    padding: 1rem 1.1rem 1.05rem;
+  }
+  .reminder-section-title {
+    margin: 0;
+    font-size: 1.02rem;
+    font-weight: 800;
+    color: #173d27;
+  }
+  .reminder-section-text {
+    margin: 0.35rem 0 0;
+    color: #5f7365;
+    font-size: 0.92rem;
+  }
+  .reminder-tip-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.8rem 0 0;
+  }
+  .reminder-tip-list li {
+    position: relative;
+    padding-left: 1.15rem;
+    margin-bottom: 0.55rem;
+    color: #4c6255;
+  }
+  .reminder-tip-list li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.55rem;
+    width: 0.42rem;
+    height: 0.42rem;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #1a8f5b, #d7bf39);
+    box-shadow: 0 0 0 4px rgba(26, 143, 91, 0.08);
+  }
+  .reminder-form-label {
+    font-weight: 700;
+    color: #294336;
+    margin-bottom: 0.35rem;
+  }
+  .reminder-form-note {
+    margin-top: 0.45rem;
+    color: #6a7e70;
+    font-size: 0.84rem;
+  }
+  .reminder-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 0.25rem 0.65rem;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .reminder-badge.primary { background: #dbeeda; color: #135030; }
+  .reminder-badge.warning { background: #f8e7a9; color: #725b07; }
+  .reminder-badge.danger { background: #f7d7d4; color: #8a251d; }
+  .reminder-badge.info { background: #dcecf9; color: #1b527b; }
+  .reminder-badge.success { background: #d7f0df; color: #1c6b34; }
+  .reminder-badge.secondary { background: #e8e4f6; color: #5c438c; }
+  .reminder-badge.muted { background: #edf1ee; color: #5d6f63; }
+  .reminder-card {
+    height: 100%;
+    overflow: hidden;
+    border-left: 0.35rem solid #d8e5d6;
+  }
+  .reminder-card.overdue { border-left-color: #cf6e57; }
+  .reminder-card.today { border-left-color: #d6a719; }
+  .reminder-card.sent { border-left-color: #2e8b57; }
+  .reminder-card.completed { border-left-color: #5676b4; }
+  .reminder-card.snoozed { border-left-color: #8d6cbf; }
+  .reminder-card.upcoming { border-left-color: #7bb15d; }
+  .reminder-card .card-body {
+    padding: 1rem 1.05rem 0.95rem;
+  }
+  .reminder-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.7rem;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+  }
+  .reminder-title {
+    font-size: 1.08rem;
+    font-weight: 800;
+    color: #173d27;
+    margin: 0.15rem 0 0.2rem;
+  }
+  .reminder-subtitle {
+    color: #5d7264;
+    font-size: 0.92rem;
+    margin: 0;
+  }
+  .reminder-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 1rem;
+    margin-top: 0.85rem;
+  }
+  .reminder-meta-item {
+    border: 1px solid #edf1eb;
+    border-radius: 0.85rem;
+    background: #fbfdfa;
+    padding: 0.7rem 0.8rem;
+  }
+  .reminder-meta-label {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #718376;
+    margin-bottom: 0.18rem;
+    font-weight: 700;
+  }
+  .reminder-meta-value {
+    color: #294336;
+    font-weight: 600;
+    font-size: 0.92rem;
+    word-break: break-word;
+  }
+  .reminder-notes {
+    margin-top: 0.85rem;
+    padding: 0.85rem 0.95rem;
+    border-radius: 0.9rem;
+    background: linear-gradient(180deg, #fbfcfb 0%, #f5f8f4 100%);
+    border: 1px dashed #d6e0d5;
+    color: #415447;
+    font-size: 0.92rem;
+    white-space: pre-wrap;
+  }
+  .reminder-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.95rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid #eef3ee;
+  }
+  .reminder-empty {
+    border: 1px dashed #cfd8cf;
+    border-radius: 1rem;
+    background: linear-gradient(180deg, #ffffff 0%, #fbfdfb 100%);
+    padding: 1.4rem 1.2rem;
+    text-align: center;
+    color: #576c5f;
+  }
+  .reminder-empty h3 {
+    margin: 0 0 0.35rem;
+    color: #173d27;
+    font-size: 1.05rem;
+    font-weight: 800;
+  }
+  .reminder-empty p {
+    margin: 0;
+  }
+  .reminder-summary-row {
+    margin-bottom: 1rem;
+  }
+  .reminder-summary-row .card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .reminder-summary-row .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 20px rgba(20, 59, 37, 0.12);
+  }
+</style>
+
+<div class="reminder-page-shell">
+  <div class="reminder-hero">
+    <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
+      <div class="flex-grow-1">
+        <h2>Faculty Reminder Center</h2>
+        <p>Use this page for future class prep, encoding follow-ups, submission deadlines, and other teaching reminders. You can keep reminders in the portal and optionally queue email notices when tenant settings allow it.</p>
+        <div class="hero-note">
+          Tip: keep reminder titles short and action-focused, such as <strong>Prepare Quiz 1</strong> or <strong>Encode Midterm Class Standing</strong>.
+        </div>
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-outline-success rounded-pill px-4" href="{% url 'faculty_portal:my_courses' %}">Back to Classes</a>
+      </div>
+    </div>
+  </div>
+
+  {% if not reminder_center_enabled %}
+    <div class="alert alert-warning border shadow-sm">
+      Faculty reminder center is currently disabled by tenant configuration. You can still review the page, but reminder actions are limited until it is enabled.
+    </div>
+  {% endif %}
+
+  <div class="row g-3 reminder-summary-row mb-4">
+    <div class="col-md-2 col-6">
+      <div class="card reminder-stat">
+        <div class="card-body">
+          <div class="stat-label">Upcoming</div>
+          <div class="stat-value">{{ counts.upcoming }}</div>
+          <div class="stat-caption">Planned reminders waiting for their date.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="card reminder-stat">
+        <div class="card-body">
+          <div class="stat-label">Due Today</div>
+          <div class="stat-value">{{ counts.due_today }}</div>
+          <div class="stat-caption">Reminders that need attention today.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="card reminder-stat">
+        <div class="card-body">
+          <div class="stat-label">Overdue</div>
+          <div class="stat-value">{{ counts.overdue }}</div>
+          <div class="stat-caption">Past due reminders that should be checked.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="card reminder-stat">
+        <div class="card-body">
+          <div class="stat-label">Sent</div>
+          <div class="stat-value">{{ counts.sent }}</div>
+          <div class="stat-caption">Reminders already emailed.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="card reminder-stat">
+        <div class="card-body">
+          <div class="stat-label">Completed</div>
+          <div class="stat-value">{{ counts.completed }}</div>
+          <div class="stat-caption">Finished reminders you marked done.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="card reminder-stat">
+        <div class="card-body">
+          <div class="stat-label">Snoozed</div>
+          <div class="stat-value">{{ counts.snoozed }}</div>
+          <div class="stat-caption">Temporarily deferred reminders.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mb-4">
+    <div class="col-xl-8">
+      <div class="card reminder-panel h-100">
+        <div class="card-header">
+          <div class="reminder-section-title">Create Reminder</div>
+          <div class="reminder-section-text">Add one reminder for a specific class and future date. Email delivery is optional and depends on tenant settings.</div>
+        </div>
+        <div class="card-body">
+          <form method="post" novalidate>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+              <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <label class="reminder-form-label" for="{{ form.offering.id_for_label }}">{{ form.offering.label }}</label>
+                {{ form.offering }}
+                {% if form.offering.help_text %}<div class="reminder-form-note">{{ form.offering.help_text }}</div>{% endif %}
+                {% for error in form.offering.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-6">
+                <label class="reminder-form-label" for="{{ form.title.id_for_label }}">{{ form.title.label }}</label>
+                {{ form.title }}
+                {% for error in form.title.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-4">
+                <label class="reminder-form-label" for="{{ form.reminder_type.id_for_label }}">{{ form.reminder_type.label }}</label>
+                {{ form.reminder_type }}
+                {% for error in form.reminder_type.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-4">
+                <label class="reminder-form-label" for="{{ form.period_label.id_for_label }}">{{ form.period_label.label }}</label>
+                {{ form.period_label }}
+                {% if form.period_label.help_text %}<div class="reminder-form-note">{{ form.period_label.help_text }}</div>{% endif %}
+                {% for error in form.period_label.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-4 d-flex align-items-end">
+                <div class="form-check form-switch mb-1">
+                  {{ form.send_email }}
+                  <label class="form-check-label" for="{{ form.send_email.id_for_label }}">{{ form.send_email.label }}</label>
+                </div>
+              </div>
+              <div class="col-lg-6">
+                <label class="reminder-form-label" for="{{ form.remind_at.id_for_label }}">{{ form.remind_at.label }}</label>
+                {{ form.remind_at }}
+                {% for error in form.remind_at.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-lg-6">
+                <label class="reminder-form-label" for="{{ form.due_at.id_for_label }}">{{ form.due_at.label }}</label>
+                {{ form.due_at }}
+                {% for error in form.due_at.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+              <div class="col-12">
+                <label class="reminder-form-label" for="{{ form.notes.id_for_label }}">{{ form.notes.label }}</label>
+                {{ form.notes }}
+                {% for error in form.notes.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+              </div>
+            </div>
+            <div class="mt-4 d-flex flex-wrap gap-2 align-items-center">
+              <button class="btn btn-success rounded-pill px-4" type="submit">Save Reminder</button>
+              <span class="text-muted small">The reminder will appear in your list immediately after saving.</span>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-4">
+      <div class="card reminder-help h-100">
+        <div class="card-header">
+          <div class="reminder-section-title">Helpful Uses</div>
+          <div class="reminder-section-text">Keep the reminder list focused on teaching and grading work.</div>
+        </div>
+        <div class="card-body">
+          <ul class="reminder-tip-list">
+            <li>Prepare upcoming quiz or activity materials.</li>
+            <li>Follow up on missing grade encoding.</li>
+            <li>Watch deadlines for submissions or corrections.</li>
+            <li>Track class-specific follow-ups or special instructions.</li>
+            <li>Queue an email reminder only when you want an extra nudge.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if reminders %}
+    <div class="row g-3">
+      {% for reminder in reminders %}
+      <div class="col-xl-6">
+        <div class="card reminder-card {{ reminder.status_variant|default:'upcoming' }}">
+          <div class="card-body">
+            <div class="reminder-card-head">
+              <div>
+                <div class="reminder-badge {{ reminder.status_variant|default:'primary' }}">{{ reminder.status_label }}</div>
+                <div class="reminder-title">{{ reminder.obj.title }}</div>
+                <p class="reminder-subtitle">{{ reminder.obj.get_reminder_type_display }}</p>
+              </div>
+              <div class="text-end">
+                <div class="reminder-badge {% if reminder.obj.send_email %}info{% else %}muted{% endif %}">
+                  {% if reminder.obj.send_email %}Email Reminder{% else %}Portal Only{% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="reminder-meta-grid">
+              <div class="reminder-meta-item">
+                <span class="reminder-meta-label">Class</span>
+                <div class="reminder-meta-value">{{ reminder.obj.offering.course.title }} ({{ reminder.obj.offering.course.code }}) | {{ reminder.obj.offering.section.code }}</div>
+              </div>
+              <div class="reminder-meta-item">
+                <span class="reminder-meta-label">Period</span>
+                <div class="reminder-meta-value">{{ reminder.obj.period_label|default:"-" }}</div>
+              </div>
+              <div class="reminder-meta-item">
+                <span class="reminder-meta-label">Remind At</span>
+                <div class="reminder-meta-value">{{ reminder.obj.remind_at|date:"M d, Y h:i A" }}</div>
+              </div>
+              <div class="reminder-meta-item">
+                <span class="reminder-meta-label">Due At</span>
+                <div class="reminder-meta-value">{% if reminder.obj.due_at %}{{ reminder.obj.due_at|date:"M d, Y h:i A" }}{% else %}-{% endif %}</div>
+              </div>
+            </div>
+
+            {% if reminder.obj.snoozed_until or reminder.obj.email_last_queued_at or reminder.obj.email_last_sent_at %}
+            <div class="reminder-meta-grid mt-2">
+              <div class="reminder-meta-item">
+                <span class="reminder-meta-label">Snoozed Until</span>
+                <div class="reminder-meta-value">{% if reminder.obj.snoozed_until %}{{ reminder.obj.snoozed_until|date:"M d, Y h:i A" }}{% else %}-{% endif %}</div>
+              </div>
+              <div class="reminder-meta-item">
+                <span class="reminder-meta-label">Email Status</span>
+                <div class="reminder-meta-value">
+                  {% if reminder.obj.email_last_sent_at %}
+                    Sent {{ reminder.obj.email_last_sent_at|date:"M d, Y h:i A" }}
+                  {% elif reminder.obj.email_last_queued_at %}
+                    Queued {{ reminder.obj.email_last_queued_at|date:"M d, Y h:i A" }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            {% endif %}
+
+            {% if reminder.obj.notes %}
+            <div class="reminder-notes">{{ reminder.obj.notes }}</div>
+            {% endif %}
+
+            <div class="reminder-actions">
+              {% if reminder.obj.offering_id %}
+                <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{% url 'faculty_portal:offering_periods' reminder.obj.offering_id %}">Open Class</a>
+              {% endif %}
+              {% if not reminder.obj.completed_at %}
+                <form method="post" action="{% url 'faculty_portal:reminder_complete' reminder.obj.id %}">
+                  {% csrf_token %}
+                  <button class="btn btn-success btn-sm rounded-pill" type="submit">Mark Completed</button>
+                </form>
+                <form method="post" action="{% url 'faculty_portal:reminder_snooze' reminder.obj.id %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="snooze_days" value="1">
+                  <button class="btn btn-outline-primary btn-sm rounded-pill" type="submit">Snooze 1 Day</button>
+                </form>
+                <form method="post" action="{% url 'faculty_portal:reminder_snooze' reminder.obj.id %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="snooze_days" value="3">
+                  <button class="btn btn-outline-secondary btn-sm rounded-pill" type="submit">Snooze 3 Days</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="reminder-empty">
+      <h3>No reminders yet</h3>
+      <p>Create one above to track future activity prep, score encoding, or deadline follow-ups.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

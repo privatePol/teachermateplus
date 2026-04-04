@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -33,7 +34,9 @@ from apps.admin_portal.forms import (
     CourseForm,
     CourseOfferingForm,
     CourseBaseValueOverrideForm,
+    BulkCourseTemplateAssignmentForm,
     CourseTemplateAssignmentForm,
+    GradingTemplateTestingCalculatorForm,
     DocumentPrintSettingForm,
     DepartmentForm,
     FacultyAssignmentForm,
@@ -103,6 +106,7 @@ from apps.grading.reporting import CorrectionOfficialReportService
 from apps.grading.services import (
     FacultyGradingService,
     GradingGovernanceService,
+    GradingTemplateTestingCalculatorService,
     GradingTemplateService,
     TemplateHotfixService,
 )
@@ -1527,6 +1531,22 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default=True,
     )
+    current_assignment_primary_default_enabled = FeatureSettingsService.is_faculty_assignment_primary_default_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_faculty_reminder_center_enabled = FeatureSettingsService.is_faculty_reminder_center_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_faculty_reminder_email_enabled = FeatureSettingsService.is_faculty_reminder_email_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_faculty_memo_center_enabled = FeatureSettingsService.is_faculty_memo_center_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
     current_response_window_days = FeatureSettingsService.get_faculty_assignment_response_window_days(
         tenant_id=tenant_id,
         default=3,
@@ -1583,6 +1603,10 @@ def configurable_features_settings_view(request):
             "correction_registrar_default_recipients": ", ".join(current_default_recipients),
             "faculty_assignment_reminders_enabled": current_assignment_reminders_enabled,
             "faculty_assignment_auto_expire_enabled": current_assignment_auto_expire_enabled,
+            "faculty_assignment_primary_default_enabled": current_assignment_primary_default_enabled,
+            "faculty_reminder_center_enabled": current_faculty_reminder_center_enabled,
+            "faculty_reminder_email_enabled": current_faculty_reminder_email_enabled,
+            "faculty_memo_center_enabled": current_faculty_memo_center_enabled,
             "faculty_assignment_response_window_days": current_response_window_days,
             "faculty_assignment_first_reminder_days": current_first_reminder_days,
             "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
@@ -1677,6 +1701,34 @@ def configurable_features_settings_view(request):
         SystemSettingService.set(
             FeatureSettingsService.FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED_KEY,
             bool(form.cleaned_data["faculty_assignment_auto_expire_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_ASSIGNMENT_PRIMARY_DEFAULT_ENABLED_KEY,
+            bool(form.cleaned_data["faculty_assignment_primary_default_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_REMINDER_CENTER_ENABLED_KEY,
+            bool(form.cleaned_data["faculty_reminder_center_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_REMINDER_EMAIL_ENABLED_KEY,
+            bool(form.cleaned_data["faculty_reminder_email_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_MEMO_CENTER_ENABLED_KEY,
+            bool(form.cleaned_data["faculty_memo_center_enabled"]),
             tenant_id=tenant_id,
             value_type="BOOL",
             is_active=True,
@@ -1784,6 +1836,10 @@ def configurable_features_settings_view(request):
                 "correction_registrar_campus_recipients": current_campus_recipients,
                 "faculty_assignment_reminders_enabled": current_assignment_reminders_enabled,
                 "faculty_assignment_auto_expire_enabled": current_assignment_auto_expire_enabled,
+                "faculty_assignment_primary_default_enabled": current_assignment_primary_default_enabled,
+                "faculty_reminder_center_enabled": current_faculty_reminder_center_enabled,
+                "faculty_reminder_email_enabled": current_faculty_reminder_email_enabled,
+                "faculty_memo_center_enabled": current_faculty_memo_center_enabled,
                 "faculty_assignment_response_window_days": current_response_window_days,
                 "faculty_assignment_first_reminder_days": current_first_reminder_days,
                 "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
@@ -1809,6 +1865,12 @@ def configurable_features_settings_view(request):
                 "correction_registrar_campus_recipients": selected_campus_recipients,
                 "faculty_assignment_reminders_enabled": bool(form.cleaned_data["faculty_assignment_reminders_enabled"]),
                 "faculty_assignment_auto_expire_enabled": bool(form.cleaned_data["faculty_assignment_auto_expire_enabled"]),
+                "faculty_assignment_primary_default_enabled": bool(
+                    form.cleaned_data["faculty_assignment_primary_default_enabled"]
+                ),
+                "faculty_reminder_center_enabled": bool(form.cleaned_data["faculty_reminder_center_enabled"]),
+                "faculty_reminder_email_enabled": bool(form.cleaned_data["faculty_reminder_email_enabled"]),
+                "faculty_memo_center_enabled": bool(form.cleaned_data["faculty_memo_center_enabled"]),
                 "faculty_assignment_response_window_days": int(form.cleaned_data["faculty_assignment_response_window_days"]),
                 "faculty_assignment_first_reminder_days": int(form.cleaned_data["faculty_assignment_first_reminder_days"]),
                 "faculty_assignment_repeat_reminder_days": int(form.cleaned_data["faculty_assignment_repeat_reminder_days"]),
@@ -1833,6 +1895,10 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.CORRECTION_REGISTRAR_CAMPUS_RECIPIENTS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_REMINDERS_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_AUTO_EXPIRE_ENABLED_KEY,
+                    FeatureSettingsService.FACULTY_ASSIGNMENT_PRIMARY_DEFAULT_ENABLED_KEY,
+                    FeatureSettingsService.FACULTY_REMINDER_CENTER_ENABLED_KEY,
+                    FeatureSettingsService.FACULTY_REMINDER_EMAIL_ENABLED_KEY,
+                    FeatureSettingsService.FACULTY_MEMO_CENTER_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS_KEY,
@@ -4080,10 +4146,15 @@ def faculty_assignment_assign_view(request):
         if existing and not existing.is_active:
             before = model_before_after(existing)
             existing.is_active = True
+            existing.is_primary = FeatureSettingsService.is_faculty_assignment_primary_default_enabled(
+                tenant_id=offering.tenant_id,
+                default=True,
+            )
             FacultyAssignmentWorkflowService.reset_response_window(existing, note=assignment_note or None)
             existing.save(
                 update_fields=[
                     "is_active",
+                    "is_primary",
                     "assignment_note",
                     "accepted_at",
                     "accepted_by",
@@ -4118,7 +4189,10 @@ def faculty_assignment_assign_view(request):
             campus_id=offering.campus_id,
             offering=offering,
             faculty_user=faculty_user,
-            is_primary=False,
+            is_primary=FeatureSettingsService.is_faculty_assignment_primary_default_enabled(
+                tenant_id=offering.tenant_id,
+                default=True,
+            ),
             is_active=True,
         )
         FacultyAssignmentWorkflowService.reset_response_window(created, note=assignment_note or None)
@@ -4305,10 +4379,15 @@ def faculty_assignment_toggle_primary_view(request):
 def faculty_assignment_create_view(request):
     faculty_ids = AdminScopeService.scoped_faculty_users(request)
     faculty_queryset = User.objects.filter(id__in=faculty_ids).order_by("username")
+    default_primary_enabled = FeatureSettingsService.is_faculty_assignment_primary_default_enabled(
+        tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+        default=True,
+    )
     form = FacultyAssignmentForm(
         request.POST or None,
         offering_queryset=AdminScopeService.scoped_course_offerings(request),
         faculty_queryset=faculty_queryset,
+        initial={"is_primary": default_primary_enabled} if request.method != "POST" else None,
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -4790,6 +4869,49 @@ def grading_template_structure_view(request, template_id: int):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/template_structure_preview.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grading_templates.read")
+def grading_template_calculator_view(request):
+    template_queryset = GradingTemplateTestingCalculatorService.prefetch_templates(
+        AdminScopeService.scoped_grading_templates(request).filter(is_active=True).select_related("tenant")
+    )
+    bound_data = request.POST if request.method == "POST" else (request.GET if request.GET else None)
+    form = GradingTemplateTestingCalculatorForm(bound_data, template_queryset=template_queryset)
+    _style_form(form)
+
+    selected_template = None
+    calculation = None
+    if form.is_bound and form.is_valid():
+        selected_template = template_queryset.filter(id=form.cleaned_data["grading_template"].id).first()
+        if selected_template:
+            calculation = GradingTemplateTestingCalculatorService.build_calculation(
+                template=selected_template,
+                raw_inputs=request.POST if request.method == "POST" else None,
+                default_sample=Decimal(form.cleaned_data["sample_value"]),
+            )
+            if calculation["input_errors"]:
+                messages.warning(
+                    request,
+                    "Some sample rows had invalid percentages, so EduGradesPro temporarily used the default sample value for those rows.",
+                )
+
+    context = {
+        "title": "Grading Template Testing Calculator",
+        "form": form,
+        "selected_template": selected_template,
+        "calculation": calculation,
+        "usage_notes": [
+            "This tool is read-only. It does not create grades, activities, or student records.",
+            "Enter sample raw score and total score values at the lowest active level of the selected template.",
+            "EduGradesPro will first convert raw score to computed percentage, then roll the result upward into component, period, and final grades.",
+            "Period grades and final grade follow the same current EduGradesPro computation logic used by the official grading engine.",
+            "Final grade is computed from the active period grades currently defined in the selected grading template.",
+        ],
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/template_testing_calculator.html", context)
 
 
 @portal_required("ADMIN")
@@ -5834,19 +5956,87 @@ def tenant_grading_profile_update_view(request, profile_id: int):
 @portal_required("ADMIN")
 @permission_required("course_template_assignments.read")
 def course_template_assignment_list_view(request):
-    queryset = AdminScopeService.scoped_course_template_assignments(request)
-    if request.GET.get("tenant_id"):
-        queryset = queryset.filter(course__tenant_id=request.GET.get("tenant_id"))
-    if request.GET.get("course_id"):
-        queryset = queryset.filter(course_id=request.GET.get("course_id"))
+    courses_qs = AdminScopeService.scoped_courses(request).select_related("tenant", "campus", "department")
+    assignments_qs = AdminScopeService.scoped_course_template_assignments(request)
+    tenant_id = request.GET.get("tenant_id")
+    course_id = request.GET.get("course_id")
+    without_template = request.GET.get("without_template") == "1"
+    if tenant_id:
+        courses_qs = courses_qs.filter(tenant_id=tenant_id)
+        assignments_qs = assignments_qs.filter(course__tenant_id=tenant_id)
+    if course_id:
+        courses_qs = courses_qs.filter(id=course_id)
+        assignments_qs = assignments_qs.filter(course_id=course_id)
     q = request.GET.get("q", "").strip()
     if q:
-        queryset = queryset.filter(
+        assignments_qs = assignments_qs.filter(
             Q(course__code__icontains=q)
+            | Q(course__title__icontains=q)
             | Q(grading_template__code__icontains=q)
             | Q(grading_template__name__icontains=q)
         )
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+        courses_qs = courses_qs.filter(Q(code__icontains=q) | Q(title__icontains=q))
+
+    active_assignment_course_ids = set(
+        AdminScopeService.scoped_course_template_assignments(request)
+        .filter(is_active=True, grading_template__is_active=True)
+        .values_list("course_id", flat=True)
+        .distinct()
+    )
+    filtered_active_course_ids = set(
+        assignments_qs.filter(is_active=True, grading_template__is_active=True)
+        .values_list("course_id", flat=True)
+        .distinct()
+    )
+    filtered_course_ids = set(courses_qs.values_list("id", flat=True))
+    courses_without_assignment_count = len(filtered_course_ids - filtered_active_course_ids)
+
+    total_scoped_courses = AdminScopeService.scoped_courses(request).count()
+    courses_with_template_count = len(active_assignment_course_ids)
+    courses_without_template_total = max(total_scoped_courses - courses_with_template_count, 0)
+    active_assignment_rows = AdminScopeService.scoped_course_template_assignments(request).filter(
+        is_active=True,
+        grading_template__is_active=True,
+    ).count()
+
+    if without_template:
+        rows = [
+            SimpleNamespace(
+                row_type="course_without_template",
+                course=course,
+                grading_template=None,
+                effective_from_term=None,
+                is_active=False,
+            )
+            for course in courses_qs
+            if course.id not in active_assignment_course_ids
+        ]
+    else:
+        rows = list(assignments_qs)
+
+    context = {
+        "page_obj": _get_page(request, rows),
+        "q": q,
+        "without_template": without_template,
+        "metric_cards": [
+            {
+                "label": "Courses Without Grading Template",
+                "value": courses_without_template_total,
+                "meta": "Courses in the current scope with no active template assignment yet.",
+            },
+            {
+                "label": "Courses With Template",
+                "value": courses_with_template_count,
+                "meta": "Courses already covered by an active grading template assignment.",
+            },
+            {
+                "label": "Active Assignment Rows",
+                "value": active_assignment_rows,
+                "meta": "Active course-template assignment rows in the current scope.",
+            },
+        ],
+        "filtered_without_template_count": courses_without_assignment_count,
+    }
     context.update(_scope_context(request))
     context["courses"] = AdminScopeService.scoped_courses(request)
     return render(request, "admin_portal/grading/course_template_assignment_list.html", context)
@@ -5855,7 +6045,7 @@ def course_template_assignment_list_view(request):
 @portal_required("ADMIN")
 @permission_required("course_template_assignments.create")
 def course_template_assignment_create_view(request):
-    form = CourseTemplateAssignmentForm(
+    form = BulkCourseTemplateAssignmentForm(
         request.POST or None,
         course_queryset=AdminScopeService.scoped_courses(request),
         template_queryset=AdminScopeService.scoped_grading_templates(request).filter(is_published=True, is_active=True),
@@ -5863,23 +6053,97 @@ def course_template_assignment_create_view(request):
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
-        row = form.save()
-        AuditService.log_event(
-            action="CREATE",
-            portal="ADMIN",
-            entity_type="CourseTemplateAssignment",
-            entity_id=row.id,
-            actor=request.user,
-            tenant=row.course.tenant,
-            campus=row.course.campus,
-            after_data=model_before_after(row),
-            request=request,
-        )
-        messages.success(request, "Course template assignment created.")
+        courses = list(form.cleaned_data["courses"])
+        grading_template = form.cleaned_data["grading_template"]
+        effective_from_term = form.cleaned_data["effective_from_term"]
+        is_active = bool(form.cleaned_data["is_active"])
+
+        created_rows = []
+        reactivated_rows = []
+        skipped_courses = []
+        term_scope_label = effective_from_term.name if effective_from_term else "General / no term"
+
+        for course in courses:
+            prior_assignment = CourseTemplateAssignment.objects.filter(
+                course=course,
+                effective_from_term=effective_from_term,
+            ).select_related("grading_template").order_by("-is_active", "-created_at").first()
+            if prior_assignment:
+                if prior_assignment.grading_template_id == grading_template.id:
+                    if not prior_assignment.is_active and is_active:
+                        before = model_before_after(prior_assignment)
+                        prior_assignment.is_active = True
+                        prior_assignment.save(update_fields=["is_active", "updated_at"])
+                        reactivated_rows.append(prior_assignment)
+                        AuditService.log_event(
+                            action="UPDATE",
+                            portal="ADMIN",
+                            entity_type="CourseTemplateAssignment",
+                            entity_id=prior_assignment.id,
+                            actor=request.user,
+                            tenant=course.tenant,
+                            campus=course.campus,
+                            before_data=before,
+                            after_data=model_before_after(prior_assignment),
+                            request=request,
+                        )
+                    else:
+                        skipped_courses.append(
+                            f"{course.title} ({course.code}) already uses {prior_assignment.grading_template.name} for {term_scope_label}."
+                        )
+                    continue
+
+                skipped_courses.append(
+                    f"{course.title} ({course.code}) already has prior assignment {prior_assignment.grading_template.name} for {term_scope_label}."
+                )
+                continue
+
+            row = CourseTemplateAssignment.objects.create(
+                course=course,
+                grading_template=grading_template,
+                effective_from_term=effective_from_term,
+                is_active=is_active,
+            )
+            created_rows.append(row)
+            AuditService.log_event(
+                action="CREATE",
+                portal="ADMIN",
+                entity_type="CourseTemplateAssignment",
+                entity_id=row.id,
+                actor=request.user,
+                tenant=row.course.tenant,
+                campus=row.course.campus,
+                after_data=model_before_after(row),
+                request=request,
+            )
+
+        if created_rows:
+            messages.success(
+                request,
+                f"Assigned {grading_template.name} to {len(created_rows)} course(s).",
+            )
+        if reactivated_rows:
+            messages.success(
+                request,
+                f"Reactivated {len(reactivated_rows)} existing assignment(s) for {grading_template.name}.",
+            )
+        if skipped_courses:
+            preview = "; ".join(skipped_courses[:3])
+            extra = "" if len(skipped_courses) <= 3 else f" Plus {len(skipped_courses) - 3} more."
+            messages.warning(
+                request,
+                f"Skipped {len(skipped_courses)} course(s) with prior assignment in the same term scope. {preview}{extra}",
+            )
+        if not created_rows and not reactivated_rows and not skipped_courses:
+            messages.info(request, "No course assignments were changed.")
         return _redirect_back_or_default(request, "admin_portal:course_template_assignment_list")
-    context = {"form": form, "title": "Create Course Template Assignment"}
+    context = {
+        "form": form,
+        "title": "Bulk Assign Course Templates",
+        "term_scope_help": "EduGradesPro will skip courses that already have a prior assignment in the same term scope.",
+    }
     context.update(_scope_context(request))
-    return render(request, "admin_portal/shared/form_page.html", context)
+    return render(request, "admin_portal/grading/course_template_assignment_bulk_form.html", context)
 
 
 @portal_required("ADMIN")

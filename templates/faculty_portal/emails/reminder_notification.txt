@@ -1,0 +1,13 @@
+NCBA-EDUGRADESPRO Reminder
+
+{{ reminder.title }}
+Type: {{ reminder.get_reminder_type_display }}
+Class: {{ reminder.offering.course.title }} ({{ reminder.offering.course.code }}) / {{ reminder.offering.section.code }}
+{% if reminder.period_label %}Period: {{ reminder.period_label }}{% endif %}
+Reminder Date: {{ reminder.remind_at|date:"F j, Y g:i A" }}
+{% if reminder.due_at %}Due Date: {{ reminder.due_at|date:"F j, Y g:i A" }}{% endif %}
+
+{{ reminder.notes|default:"" }}
+
+Open the Faculty Reminder Center:
+{{ portal_url }}

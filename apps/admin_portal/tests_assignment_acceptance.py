@@ -9,6 +9,7 @@ from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.academics.services import FacultyAssignmentWorkflowService
 from apps.core.services.features import FeatureSettingsService
+from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.tenants.models import Campus, Department, Program, Tenant
 
@@ -114,6 +115,11 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             module="faculty_assignments",
             action="read",
         )
+        faculty_assignment_create = Permission.objects.create(
+            code="faculty_assignments.create",
+            module="faculty_assignments",
+            action="create",
+        )
         faculty_assignment_update = Permission.objects.create(
             code="faculty_assignments.update",
             module="faculty_assignments",
@@ -127,6 +133,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         RolePermission.objects.create(role=faculty_role, permission=faculty_access)
         RolePermission.objects.create(role=admin_role, permission=admin_access)
         RolePermission.objects.create(role=admin_role, permission=faculty_assignment_read)
+        RolePermission.objects.create(role=admin_role, permission=faculty_assignment_create)
         RolePermission.objects.create(role=admin_role, permission=faculty_assignment_update)
         RolePermission.objects.create(role=admin_role, permission=system_settings_update)
 
@@ -274,6 +281,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "correction_registrar_default_recipients": "",
                 "faculty_assignment_reminders_enabled": "on",
                 "faculty_assignment_auto_expire_enabled": "on",
+                "faculty_assignment_primary_default_enabled": "",
                 "faculty_assignment_response_window_days": "5",
                 "faculty_assignment_first_reminder_days": "2",
                 "faculty_assignment_repeat_reminder_days": "1",
@@ -292,3 +300,56 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             FeatureSettingsService.get_faculty_assignment_response_window_days(tenant_id=self.tenant.id),
             5,
         )
+        self.assertFalse(
+            FeatureSettingsService.is_faculty_assignment_primary_default_enabled(tenant_id=self.tenant.id)
+        )
+
+    def test_faculty_assignment_create_respects_primary_default_setting(self):
+        second_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="A133-TEST",
+            title="Testing Course",
+        )
+        second_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIT-1B",
+            name="BSIT 1B",
+        )
+        second_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=second_course,
+            section=second_section,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_ASSIGNMENT_PRIMARY_DEFAULT_ENABLED_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            reverse("admin_portal:faculty_assignment_create"),
+            {
+                "offering": second_offering.id,
+                "faculty_user": self.faculty_user.id,
+                "assignment_note": "Test assignment",
+                "is_primary": "",
+                "is_active": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created = FacultyAssignment.objects.get(offering=second_offering, faculty_user=self.faculty_user)
+        self.assertFalse(created.is_primary)

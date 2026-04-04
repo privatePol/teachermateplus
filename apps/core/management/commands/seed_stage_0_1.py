@@ -331,14 +331,20 @@ class Command(BaseCommand):
             ("ADMIN", "NAVIGATION", "Navigation", 90),
             ("ADMIN", "AUDIT", "Audit", 100),
             ("FACULTY", "DASHBOARD", "Dashboard", 10),
-            ("FACULTY", "COURSES", "My Courses", 20),
+            # The faculty sidebar uses the dedicated "Classes" block in the template.
+            # Keep this seeded group inactive so it does not duplicate the main page link.
+            ("FACULTY", "COURSES", "My Classes", 20),
         ]
         groups = {}
         for portal, code, label, sort_order in group_specs:
             group, _ = MenuGroup.objects.update_or_create(
                 portal=portal,
                 code=code,
-                defaults={"label": label, "sort_order": sort_order, "is_active": True},
+                defaults={
+                    "label": label,
+                    "sort_order": sort_order,
+                    "is_active": False if portal == "FACULTY" and code == "COURSES" else True,
+                },
             )
             groups[code if portal == "ADMIN" else f"{portal}_{code}"] = group
 
@@ -707,7 +713,7 @@ class Command(BaseCommand):
                 "FACULTY",
                 "MY_COURSES",
                 groups["FACULTY_COURSES"],
-                "My Courses",
+                "My Classes",
                 "faculty_portal:my_courses",
                 20,
                 "faculty_portal.access",
@@ -724,7 +730,7 @@ class Command(BaseCommand):
                     "label": label,
                     "route_name": route_name,
                     "sort_order": sort_order,
-                    "is_active": True,
+                    "is_active": False if portal == "FACULTY" and code == "MY_COURSES" else True,
                 },
             )
             menu_permission_pairs.append((item, permission_code))
