@@ -1,0 +1,24 @@
+<div class="faculty-deadline-banner faculty-deadline-banner-{{ reminder.variant }}">
+  <div class="faculty-deadline-banner-copy">
+    <div class="faculty-deadline-banner-eyebrow">Grade Submission Deadline</div>
+    <div class="faculty-deadline-banner-title">{{ reminder.title }}</div>
+    {% if reminder.has_deadline %}
+    <div class="faculty-deadline-banner-meta">
+      <span>Period: {{ reminder.period_name }}</span>
+      <span>Deadline: {{ reminder.deadline_at|date:"F j, Y g:i A" }}</span>
+      {% if reminder.affected_classes %}
+      <span>Classes Affected: {{ reminder.affected_classes }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
+    <p class="faculty-deadline-banner-note mb-0">{{ reminder.note }}</p>
+    {% if reminder.helper %}
+    <div class="faculty-deadline-banner-helper">{{ reminder.helper }}</div>
+    {% endif %}
+  </div>
+  {% if reminder.next_url %}
+  <div class="faculty-deadline-banner-action">
+    <a class="btn btn-sm btn-outline-dark" href="{{ reminder.next_url }}">Open Related Class</a>
+  </div>
+  {% endif %}
+</div>

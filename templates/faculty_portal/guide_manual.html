@@ -168,7 +168,7 @@
         <a href="#manual-workflow">Workflow</a>
         <a href="#manual-assignments">Assignment Acceptance</a>
         <a href="#manual-submission">Submission Governance</a>
-        <a href="#manual-corrections">Corrections and Reopen</a>
+        <a href="#manual-corrections">Grade Corrections and Reopen</a>
         <a href="#manual-prediction">Grade Prediction</a>
         <a href="#manual-at-risk">At-Risk Monitor</a>
         <a href="#manual-reminders">Reminder Center</a>
@@ -260,6 +260,16 @@
             <td>Faculty finalizes only when records are sufficiently complete for the period.</td>
             <td>Submission is treated as a governance checkpoint, not merely a save action.</td>
           </tr>
+          <tr>
+            <td>Active Period Control</td>
+            <td>When the campus-term active grading period is set, faculty performs normal grading work only in that active period. Other periods remain closed unless they are formally reopened or inside an approved correction window.</td>
+            <td>Prevents premature encoding in future periods while still preserving approved correction access for earlier periods.</td>
+          </tr>
+          <tr>
+            <td>Grade Book View History</td>
+            <td>Faculty may open the period-card <strong>Who Viewed</strong> action to review admin-side read-only grade book monitor openings recorded for that class period.</td>
+            <td>Improves transparency by letting faculty see when authorized academic monitors opened the grade book.</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -314,6 +324,10 @@
             <p>Submission windows are governed by period lock rules and may be auto-locked based on configured deadlines.</p>
           </div>
           <div class="manual-rule">
+            <strong>Deadline Reminder Banner</strong>
+            <p>EduGradesPro surfaces the current active grading period and the current grade submission deadline on the Faculty Dashboard, My Classes page, and the class period page so faculty can see both the official working period and its due date before final submission. If a configured deadline belongs to a different campus or term scope, or uses a period code that does not match the class template, the banner now explains that it does not match the faculty member's accepted classes.</p>
+          </div>
+          <div class="manual-rule">
             <strong>Print Record</strong>
             <p>The print sheet serves as a formal companion document for review, sign-off, and institutional filing.</p>
           </div>
@@ -322,7 +336,17 @@
     </div>
     <div class="card manual-section-card" id="manual-corrections">
       <div class="card-body">
-        <div class="manual-section-title">7. Corrections and Reopen Governance</div>
+        <div class="manual-section-title">7. Grade Corrections and Reopen Governance</div>
+        <div class="manual-rule-grid mb-3">
+          <div class="manual-rule">
+            <strong>System Request Mode</strong>
+            <p>Use the in-portal correction request when institutional policy allows electronic filing and approval tracking.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Manual Only Mode</strong>
+            <p>Use the paper route when the tenant policy requires manual approval and admin reopen processing outside the portal.</p>
+          </div>
+        </div>
         <div class="manual-rule-grid">
           <div class="manual-rule">
             <strong>Before Deadline</strong>
@@ -339,6 +363,10 @@
           <div class="manual-rule">
             <strong>Submission Notifications</strong>
             <p>When enabled by tenant configuration, filing a correction request can immediately notify selected approver roles such as the college dean and CAO through NCBA-branded email notification cards that include petitioner and period name details.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Direct Score Petition Posting</strong>
+            <p>When the correction petition already contains exact corrected score values, final approval allows EduGradesPro to post the approved values directly into the gradebook, recompute the submitted period, and close the request without any additional faculty finalize step.</p>
           </div>
         </div>
       </div>
@@ -420,17 +448,28 @@
               <td>Included in normal grading coverage and readiness checks.</td>
             </tr>
             <tr>
+              <td>Removed from Class</td>
+              <td>Student changed schedule and should be removed from this specific class master list without being marked dropped or withdrawn.</td>
+              <td>Excluded from active grading coverage for this class while preserving cleaner distinction from DR/W governance. Faculty uses the small remove icon beside the student number and must type <strong>remove</strong> to confirm the action.</td>
+            </tr>
+            <tr>
               <td>DR</td>
-              <td>Student is dropped from class coverage.</td>
+              <td>Student is dropped from this particular class.</td>
               <td>Excluded from active grading coverage and readiness calculations.</td>
             </tr>
             <tr>
               <td>W</td>
-              <td>Student is withdrawn from class coverage.</td>
+              <td>Student is withdrawn from the term.</td>
               <td>Excluded from active grading coverage and tracked separately from dropped students.</td>
             </tr>
           </tbody>
         </table>
+        <div class="manual-note">
+          When faculty adds a student to the class, EduGradesPro now supports typed lookup by student number or by the student's last name and first name before the faculty clicks <strong>Save</strong>.
+        </div>
+        <div class="manual-note">
+          For easier visual checking, the class list also shows a line number before the student number and formats names as <strong>LAST NAME</strong>, <strong>First Name</strong>.
+        </div>
       </div>
     </div>
     <div class="card manual-section-card" id="manual-privacy">
@@ -438,7 +477,7 @@
         <div class="manual-section-title">10. Privacy, Security, and Audit Controls</div>
         <ul class="manual-policy-list">
           <li>Faculty access is limited to assigned offerings and authorized portal functions.</li>
-          <li>Password, consent, and access settings are governed centrally.</li>
+          <li>Password complexity validation, forced password change, privacy consent, single-device session enforcement, and temporary login lockout are governed centrally.</li>
           <li>Operational actions may be audited, including submission, reopen, correction, and related record changes.</li>
           <li>Printed or exported records should be handled according to institutional data privacy requirements.</li>
           <li>The institutional privacy statement remains the authoritative privacy reference.</li>
@@ -468,7 +507,7 @@
       <div class="manual-rule-grid">
         <div class="manual-rule">
           <strong>Reminder Center</strong>
-          <p>Faculty may create future activity reminders, due-date reminders, and follow-up notes in one portal location.</p>
+          <p>Faculty may create future activity reminders, due-date reminders, and follow-up notes in one portal location. When a faculty member creates a future-dated activity, EduGradesPro can also auto-create a preparation reminder tied to that activity.</p>
         </div>
         <div class="manual-rule">
           <strong>Completion and Snooze</strong>

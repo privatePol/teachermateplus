@@ -1,0 +1,270 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
+</div>
+
+<div class="alert alert-info">
+  Use this page to decide who controls the grading-template lifecycle.
+  <strong>Phase 1</strong> is the role matrix for the existing actions.
+  <strong>Phase 2</strong> is the optional sequential workflow chain that adds step-by-step review and approval.
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white">
+        <strong>Recommended Setup: New Grading Template Issuance</strong>
+      </div>
+      <div class="card-body">
+        <div class="small text-muted mb-3">
+          Use this if your desired governance flow is:
+          <strong>Draft and Submit (SuperAdmin) -&gt; Review (AC) -&gt; Approval and Publishing (CAO)</strong>.
+        </div>
+        <div class="mb-2"><strong>Step 1. Phase 1 - Role Matrix</strong></div>
+        <ul class="small mb-3">
+          <li><strong>Draft Roles:</strong> SUPER_ADMIN</li>
+          <li><strong>Submit for Approval Roles:</strong> SUPER_ADMIN</li>
+          <li><strong>Approval Review Roles:</strong> AC, CAO</li>
+          <li><strong>Publish Roles:</strong> CAO</li>
+        </ul>
+        <div class="mb-2"><strong>Step 2. Phase 2 - Sequential Steps</strong></div>
+        <ul class="small mb-3">
+          <li><strong>Use a sequential template approval chain:</strong> ON</li>
+          <li><strong>Template Review:</strong> AC</li>
+          <li><strong>Final Approval:</strong> CAO</li>
+        </ul>
+        <div class="mb-2"><strong>Step 3. Workflow Safeguards</strong></div>
+        <ul class="small mb-0">
+          <li><strong>Require approval before publish:</strong> ON</li>
+          <li><strong>Allow same user to submit and review:</strong> OFF</li>
+          <li><strong>Allow same user to review and final-approve:</strong> OFF</li>
+          <li><strong>Allow same user to review and publish:</strong> ON only if CAO will both final-approve and publish</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white">
+        <strong>Recommended Setup: Hotfix</strong>
+      </div>
+      <div class="card-body">
+        <div class="small text-muted mb-3">
+          Hotfix is for <strong>changes to an already published template</strong>. It is separate from new-template review.
+          Use this if your desired governance flow is:
+          <strong>Hotfix Request (SuperAdmin) -&gt; Hotfix Review (AC) -&gt; Hotfix Final Apply (CAO)</strong>.
+        </div>
+        <div class="mb-2"><strong>Step 1. Phase 1 - Role Matrix</strong></div>
+        <ul class="small mb-3">
+          <li><strong>Hotfix Request Roles:</strong> SUPER_ADMIN</li>
+          <li><strong>Hotfix Review and Apply Roles:</strong> AC, CAO</li>
+        </ul>
+        <div class="mb-2"><strong>Step 2. Phase 2 - Sequential Steps</strong></div>
+        <ul class="small mb-3">
+          <li><strong>Use a sequential hotfix workflow:</strong> ON</li>
+          <li><strong>Hotfix Review:</strong> AC</li>
+          <li><strong>Hotfix Final Apply:</strong> CAO</li>
+        </ul>
+        <div class="mb-2"><strong>Step 3. Workflow Safeguards</strong></div>
+        <ul class="small mb-0">
+          <li><strong>Allow same user to request and apply a hotfix:</strong> OFF</li>
+          <li><strong>Allow same user to review and final-apply a hotfix:</strong> OFF</li>
+          <li>Keep hotfix duty separated from request duty to reduce abuse risk on live templates.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  {% for card in stage_cards %}
+  <div class="col-md-6 col-xl-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white"><strong>{{ card.label }}</strong></div>
+      <div class="card-body">
+        {% if card.role_names %}
+          <div class="d-flex flex-wrap gap-2 mb-2">
+            {% for role_name in card.role_names %}
+            <span class="badge text-bg-secondary">{{ role_name }}</span>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="text-muted small mb-2">No roles configured yet.</div>
+        {% endif %}
+        <div class="small text-muted">Role codes: {{ card.role_codes|join:", "|default:"-" }}</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<form method="post" novalidate>
+  {% csrf_token %}
+  {% if form.non_field_errors %}
+  <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+  {% endif %}
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Phase 1 - Role Matrix</strong></div>
+    <div class="card-body">
+      <div class="text-muted small mb-3">
+        This is the first layer of governance. It decides which roles are allowed to use the existing template actions:
+        <strong>Draft</strong>, <strong>Submit</strong>, <strong>Approval Review</strong>, <strong>Publish</strong>,
+        <strong>Hotfix Request</strong>, and <strong>Hotfix Review and Apply</strong>.
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.draft_roles.id_for_label }}">{{ form.draft_roles.label }}</label>
+          {{ form.draft_roles }}
+          {% if form.draft_roles.help_text %}<div class="form-text">{{ form.draft_roles.help_text }}</div>{% endif %}
+          {% for error in form.draft_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.submit_roles.id_for_label }}">{{ form.submit_roles.label }}</label>
+          {{ form.submit_roles }}
+          {% if form.submit_roles.help_text %}<div class="form-text">{{ form.submit_roles.help_text }}</div>{% endif %}
+          {% for error in form.submit_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.approval_review_roles.id_for_label }}">{{ form.approval_review_roles.label }}</label>
+          {{ form.approval_review_roles }}
+          {% if form.approval_review_roles.help_text %}<div class="form-text">{{ form.approval_review_roles.help_text }}</div>{% endif %}
+          {% for error in form.approval_review_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.publish_roles.id_for_label }}">{{ form.publish_roles.label }}</label>
+          {{ form.publish_roles }}
+          {% if form.publish_roles.help_text %}<div class="form-text">{{ form.publish_roles.help_text }}</div>{% endif %}
+          {% for error in form.publish_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.hotfix_request_roles.id_for_label }}">{{ form.hotfix_request_roles.label }}</label>
+          {{ form.hotfix_request_roles }}
+          {% if form.hotfix_request_roles.help_text %}<div class="form-text">{{ form.hotfix_request_roles.help_text }}</div>{% endif %}
+          {% for error in form.hotfix_request_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.hotfix_review_apply_roles.id_for_label }}">{{ form.hotfix_review_apply_roles.label }}</label>
+          {{ form.hotfix_review_apply_roles }}
+          {% if form.hotfix_review_apply_roles.help_text %}<div class="form-text">{{ form.hotfix_review_apply_roles.help_text }}</div>{% endif %}
+          {% for error in form.hotfix_review_apply_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Phase 2 - Sequential Steps</strong></div>
+    <div class="card-body">
+      <div class="text-muted small mb-3">
+        This is the second layer of governance. Turn this on only if you want EduGradesPro to require a true
+        step-by-step chain, such as <strong>Template Review -&gt; Final Approval</strong> or
+        <strong>Hotfix Review -&gt; Hotfix Final Apply</strong>.
+      </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.sequential_approval_enabled }}
+        <label class="form-check-label" for="{{ form.sequential_approval_enabled.id_for_label }}">{{ form.sequential_approval_enabled.label }}</label>
+        {% if form.sequential_approval_enabled.help_text %}<div class="form-text">{{ form.sequential_approval_enabled.help_text }}</div>{% endif %}
+        {% for error in form.sequential_approval_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.approval_review_step_roles.id_for_label }}">{{ form.approval_review_step_roles.label }}</label>
+          {{ form.approval_review_step_roles }}
+          {% if form.approval_review_step_roles.help_text %}<div class="form-text">{{ form.approval_review_step_roles.help_text }}</div>{% endif %}
+          {% for error in form.approval_review_step_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.approval_final_step_roles.id_for_label }}">{{ form.approval_final_step_roles.label }}</label>
+          {{ form.approval_final_step_roles }}
+          {% if form.approval_final_step_roles.help_text %}<div class="form-text">{{ form.approval_final_step_roles.help_text }}</div>{% endif %}
+          {% for error in form.approval_final_step_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+
+      <div class="form-check form-switch mb-3">
+        {{ form.sequential_hotfix_enabled }}
+        <label class="form-check-label" for="{{ form.sequential_hotfix_enabled.id_for_label }}">{{ form.sequential_hotfix_enabled.label }}</label>
+        {% if form.sequential_hotfix_enabled.help_text %}<div class="form-text">{{ form.sequential_hotfix_enabled.help_text }}</div>{% endif %}
+        {% for error in form.sequential_hotfix_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.hotfix_review_step_roles.id_for_label }}">{{ form.hotfix_review_step_roles.label }}</label>
+          {{ form.hotfix_review_step_roles }}
+          {% if form.hotfix_review_step_roles.help_text %}<div class="form-text">{{ form.hotfix_review_step_roles.help_text }}</div>{% endif %}
+          {% for error in form.hotfix_review_step_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="{{ form.hotfix_apply_step_roles.id_for_label }}">{{ form.hotfix_apply_step_roles.label }}</label>
+          {{ form.hotfix_apply_step_roles }}
+          {% if form.hotfix_apply_step_roles.help_text %}<div class="form-text">{{ form.hotfix_apply_step_roles.help_text }}</div>{% endif %}
+          {% for error in form.hotfix_apply_step_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Workflow Safeguards</strong></div>
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.require_approval_before_publish }}
+        <label class="form-check-label" for="{{ form.require_approval_before_publish.id_for_label }}">{{ form.require_approval_before_publish.label }}</label>
+        {% if form.require_approval_before_publish.help_text %}<div class="form-text">{{ form.require_approval_before_publish.help_text }}</div>{% endif %}
+        {% for error in form.require_approval_before_publish.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.allow_same_user_submit_review }}
+        <label class="form-check-label" for="{{ form.allow_same_user_submit_review.id_for_label }}">{{ form.allow_same_user_submit_review.label }}</label>
+        {% if form.allow_same_user_submit_review.help_text %}<div class="form-text">{{ form.allow_same_user_submit_review.help_text }}</div>{% endif %}
+        {% for error in form.allow_same_user_submit_review.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.allow_same_user_review_approve }}
+        <label class="form-check-label" for="{{ form.allow_same_user_review_approve.id_for_label }}">{{ form.allow_same_user_review_approve.label }}</label>
+        {% if form.allow_same_user_review_approve.help_text %}<div class="form-text">{{ form.allow_same_user_review_approve.help_text }}</div>{% endif %}
+        {% for error in form.allow_same_user_review_approve.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.allow_same_user_review_publish }}
+        <label class="form-check-label" for="{{ form.allow_same_user_review_publish.id_for_label }}">{{ form.allow_same_user_review_publish.label }}</label>
+        {% if form.allow_same_user_review_publish.help_text %}<div class="form-text">{{ form.allow_same_user_review_publish.help_text }}</div>{% endif %}
+        {% for error in form.allow_same_user_review_publish.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch">
+        {{ form.allow_same_user_hotfix_review_apply }}
+        <label class="form-check-label" for="{{ form.allow_same_user_hotfix_review_apply.id_for_label }}">{{ form.allow_same_user_hotfix_review_apply.label }}</label>
+        {% if form.allow_same_user_hotfix_review_apply.help_text %}<div class="form-text">{{ form.allow_same_user_hotfix_review_apply.help_text }}</div>{% endif %}
+        {% for error in form.allow_same_user_hotfix_review_apply.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch mt-3">
+        {{ form.allow_same_user_hotfix_request_apply }}
+        <label class="form-check-label" for="{{ form.allow_same_user_hotfix_request_apply.id_for_label }}">{{ form.allow_same_user_hotfix_request_apply.label }}</label>
+        {% if form.allow_same_user_hotfix_request_apply.help_text %}<div class="form-text">{{ form.allow_same_user_hotfix_request_apply.help_text }}</div>{% endif %}
+        {% for error in form.allow_same_user_hotfix_request_apply.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><strong>Recommended NCBA Starting Point</strong></div>
+    <div class="card-body">
+      <ul class="mb-0">
+        <li><strong>Draft</strong>, <strong>Submit</strong>, <strong>Publish</strong>, and <strong>Hotfix Request</strong>: keep these under the template steward roles only.</li>
+        <li><strong>Phase 2 Sequence</strong>: use <strong>Template Review</strong> for Dean/AC scrutiny, then <strong>Final Approval</strong> for CAO.</li>
+        <li><strong>Hotfix Sequence</strong>: use <strong>Hotfix Review</strong> for academic scrutiny, then <strong>Hotfix Final Apply</strong> for CAO or steward-controlled final execution.</li>
+        <li>Keep all same-user safeguard switches off unless the institution formally accepts combined duties.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="d-flex flex-wrap gap-2">
+    <button class="btn btn-success" type="submit">Save Template Governance</button>
+    <a class="btn btn-outline-secondary" href="{% url 'admin_portal:grading_template_list' %}">Back to Grading Templates</a>
+  </div>
+</form>
+{% endblock %}

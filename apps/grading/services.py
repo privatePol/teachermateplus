@@ -28,11 +28,14 @@ from apps.grading.models import (
     GradeActivity,
     GradingPeriodLock,
     GradingTemplate,
+    GradingTemplateApprovalStep,
+    GradingTemplateApprovalWorkflow,
     GradingTemplateComponent,
     GradingTemplateDetail,
     GradingTemplatePeriod,
     GradingTemplateSubcomponent,
     TemplateHotfixRequest,
+    TemplateHotfixWorkflowStep,
     TenantGradingProfile,
     StudentActivityScore,
     StudentFinalGrade,
@@ -100,15 +103,27 @@ class GradingTemplateService:
 
     @classmethod
     def publish(cls, *, template, actor):
-        if template.approval_status != template.ApprovalStatus.APPROVED:
+        approval_required = TemplateGovernanceWorkflowService.require_approval_before_publish(
+            tenant_id=template.tenant_id
+        )
+        if approval_required and template.approval_status != template.ApprovalStatus.APPROVED:
             raise ValidationError("Template must be approved before publishing.")
+        if not approval_required and template.approval_status == template.ApprovalStatus.FOR_APPROVAL:
+            raise ValidationError("Template is currently under approval review and cannot be published yet.")
         errors = cls.validate_publishable(template)
         if errors:
             raise ValidationError(errors)
+        if not approval_required and template.approval_status != template.ApprovalStatus.APPROVED:
+            template.approval_status = template.ApprovalStatus.APPROVED
+            template.approval_reviewed_by = actor
+            template.approval_reviewed_at = timezone.now()
         template.is_published = True
         template.published_at = timezone.now()
         template.published_by = actor
-        template.save(update_fields=["is_published", "published_at", "published_by", "updated_at"])
+        update_fields = ["is_published", "published_at", "published_by", "updated_at"]
+        if not approval_required:
+            update_fields.extend(["approval_status", "approval_reviewed_by", "approval_reviewed_at"])
+        template.save(update_fields=update_fields)
         return template
 
     @classmethod
@@ -136,24 +151,82 @@ class GradingTemplateService:
                 "updated_at",
             ]
         )
+        TemplateGovernanceWorkflowService.create_approval_workflow(template=template, actor=actor)
         return template
 
     @classmethod
     def review_approval(cls, *, template, actor, approve: bool, remarks: str | None = None):
         if template.approval_status != template.ApprovalStatus.FOR_APPROVAL:
             raise ValidationError("Only templates in FOR_APPROVAL status can be reviewed.")
+        workflow = TemplateGovernanceWorkflowService.get_pending_approval_workflow(template=template)
+        if not workflow:
+            raise ValidationError("No active approval workflow was found for this template.")
+        current_step = workflow.steps.filter(status=GradingTemplateApprovalStep.Status.PENDING).order_by("step_no").first()
+        if not current_step:
+            raise ValidationError("No pending approval step is available for this template.")
 
-        if approve:
+        current_step.acted_by_user = actor
+        current_step.acted_at = timezone.now()
+        current_step.remarks = (remarks or "").strip() or None
+
+        if not approve:
+            current_step.status = GradingTemplateApprovalStep.Status.REJECTED
+            current_step.save(update_fields=["acted_by_user", "acted_at", "remarks", "status", "updated_at"])
+            workflow.steps.filter(
+                step_no__gt=current_step.step_no,
+                status__in=[GradingTemplateApprovalStep.Status.QUEUED, GradingTemplateApprovalStep.Status.PENDING],
+            ).update(status=GradingTemplateApprovalStep.Status.SKIPPED)
+            workflow.status = GradingTemplateApprovalWorkflow.Status.REJECTED
+            workflow.completed_at = timezone.now()
+            workflow.current_step_no = current_step.step_no
+            workflow.save(update_fields=["status", "completed_at", "current_step_no", "updated_at"])
+            template.approval_status = template.ApprovalStatus.REJECTED
+            template.approval_reviewed_by = actor
+            template.approval_reviewed_at = timezone.now()
+            template.approval_remarks = current_step.remarks
+            template.save(
+                update_fields=[
+                    "approval_status",
+                    "approval_reviewed_by",
+                    "approval_reviewed_at",
+                    "approval_remarks",
+                    "updated_at",
+                ]
+            )
+            return template
+
+        if current_step.step_code in {
+            TemplateGovernanceWorkflowService.STEP_TEMPLATE_APPROVAL,
+            TemplateGovernanceWorkflowService.STAGE_APPROVAL_REVIEW,
+        }:
             errors = cls.validate_publishable(template)
             if errors:
                 raise ValidationError(errors)
-            template.approval_status = template.ApprovalStatus.APPROVED
-        else:
-            template.approval_status = template.ApprovalStatus.REJECTED
 
+        current_step.status = GradingTemplateApprovalStep.Status.APPROVED
+        current_step.save(update_fields=["acted_by_user", "acted_at", "remarks", "status", "updated_at"])
+
+        next_step = workflow.steps.filter(
+            step_no__gt=current_step.step_no,
+            status=GradingTemplateApprovalStep.Status.QUEUED,
+        ).order_by("step_no").first()
+        if next_step:
+            next_step.status = GradingTemplateApprovalStep.Status.PENDING
+            next_step.save(update_fields=["status", "updated_at"])
+            workflow.current_step_no = next_step.step_no
+            workflow.save(update_fields=["current_step_no", "updated_at"])
+            template.approval_remarks = current_step.remarks
+            template.save(update_fields=["approval_remarks", "updated_at"])
+            return template
+
+        workflow.status = GradingTemplateApprovalWorkflow.Status.APPROVED
+        workflow.completed_at = timezone.now()
+        workflow.current_step_no = current_step.step_no
+        workflow.save(update_fields=["status", "completed_at", "current_step_no", "updated_at"])
+        template.approval_status = template.ApprovalStatus.APPROVED
         template.approval_reviewed_by = actor
         template.approval_reviewed_at = timezone.now()
-        template.approval_remarks = (remarks or "").strip() or None
+        template.approval_remarks = current_step.remarks
         template.save(
             update_fields=[
                 "approval_status",
@@ -714,7 +787,7 @@ class TemplateHotfixService:
         if apply_mode == TemplateHotfixRequest.ApplyMode.SELECTED_OFFERINGS and not selected_offering_ids:
             raise ValidationError("Selected offerings are required for SELECTED_OFFERINGS mode.")
 
-        return TemplateHotfixRequest.objects.create(
+        hotfix_request = TemplateHotfixRequest.objects.create(
             tenant_id=template.tenant_id,
             template=template,
             apply_mode=apply_mode,
@@ -723,6 +796,8 @@ class TemplateHotfixService:
             selected_offering_ids_json=selected_offering_ids or None,
             requested_by_user=requested_by,
         )
+        TemplateGovernanceWorkflowService.create_hotfix_workflow_steps(hotfix_request=hotfix_request)
+        return hotfix_request
 
     @classmethod
     @transaction.atomic
@@ -736,12 +811,25 @@ class TemplateHotfixService:
     ):
         if hotfix_request.status != TemplateHotfixRequest.Status.PENDING:
             raise ValidationError("Only pending hotfix requests can be reviewed.")
+        current_step = TemplateGovernanceWorkflowService.get_current_hotfix_step(hotfix_request=hotfix_request)
+        if not current_step:
+            raise ValidationError("No pending hotfix workflow step is available for this request.")
+
+        current_step.acted_by_user = reviewer
+        current_step.acted_at = timezone.now()
+        current_step.remarks = (review_remarks or "").strip() or None
 
         hotfix_request.reviewed_by_user = reviewer
         hotfix_request.reviewed_at = timezone.now()
-        hotfix_request.review_remarks = (review_remarks or "").strip() or None
+        hotfix_request.review_remarks = current_step.remarks
 
         if not approve:
+            current_step.status = TemplateHotfixWorkflowStep.Status.REJECTED
+            current_step.save(update_fields=["acted_by_user", "acted_at", "remarks", "status", "updated_at"])
+            hotfix_request.workflow_steps.filter(
+                step_no__gt=current_step.step_no,
+                status__in=[TemplateHotfixWorkflowStep.Status.QUEUED, TemplateHotfixWorkflowStep.Status.PENDING],
+            ).update(status=TemplateHotfixWorkflowStep.Status.SKIPPED)
             hotfix_request.status = TemplateHotfixRequest.Status.REJECTED
             hotfix_request.save(
                 update_fields=[
@@ -749,6 +837,26 @@ class TemplateHotfixService:
                     "reviewed_at",
                     "review_remarks",
                     "status",
+                    "updated_at",
+                ]
+            )
+            return hotfix_request
+
+        current_step.status = TemplateHotfixWorkflowStep.Status.APPROVED
+        current_step.save(update_fields=["acted_by_user", "acted_at", "remarks", "status", "updated_at"])
+
+        next_step = hotfix_request.workflow_steps.filter(
+            step_no__gt=current_step.step_no,
+            status=TemplateHotfixWorkflowStep.Status.QUEUED,
+        ).order_by("step_no").first()
+        if next_step:
+            next_step.status = TemplateHotfixWorkflowStep.Status.PENDING
+            next_step.save(update_fields=["status", "updated_at"])
+            hotfix_request.save(
+                update_fields=[
+                    "reviewed_by_user",
+                    "reviewed_at",
+                    "review_remarks",
                     "updated_at",
                 ]
             )
@@ -845,6 +953,573 @@ class TemplateHotfixService:
             ]
         )
         return hotfix_request
+
+
+class TemplateGovernanceWorkflowService:
+    STAGE_DRAFT = "DRAFT"
+    STAGE_SUBMIT_FOR_APPROVAL = "SUBMIT_FOR_APPROVAL"
+    STAGE_APPROVAL_REVIEW = "APPROVAL_REVIEW"
+    STAGE_PUBLISH = "PUBLISH"
+    STAGE_HOTFIX_REQUEST = "HOTFIX_REQUEST"
+    STAGE_HOTFIX_REVIEW_APPLY = "HOTFIX_REVIEW_APPLY"
+    STEP_TEMPLATE_REVIEW = "TEMPLATE_REVIEW"
+    STEP_TEMPLATE_APPROVAL = "TEMPLATE_APPROVAL"
+    STEP_HOTFIX_REVIEW = "HOTFIX_REVIEW"
+    STEP_HOTFIX_APPLY = "HOTFIX_APPLY"
+
+    STAGE_CHOICES = (
+        (STAGE_DRAFT, "Draft"),
+        (STAGE_SUBMIT_FOR_APPROVAL, "Submit for Approval"),
+        (STAGE_APPROVAL_REVIEW, "Approval Review"),
+        (STAGE_PUBLISH, "Publish"),
+        (STAGE_HOTFIX_REQUEST, "Hotfix Request"),
+        (STAGE_HOTFIX_REVIEW_APPLY, "Hotfix Review and Apply"),
+    )
+
+    STAGE_ROLE_KEYS = {
+        STAGE_DRAFT: "TEMPLATE_WORKFLOW_DRAFT_ROLE_CODES",
+        STAGE_SUBMIT_FOR_APPROVAL: "TEMPLATE_WORKFLOW_SUBMIT_ROLE_CODES",
+        STAGE_APPROVAL_REVIEW: "TEMPLATE_WORKFLOW_APPROVAL_REVIEW_ROLE_CODES",
+        STAGE_PUBLISH: "TEMPLATE_WORKFLOW_PUBLISH_ROLE_CODES",
+        STAGE_HOTFIX_REQUEST: "TEMPLATE_WORKFLOW_HOTFIX_REQUEST_ROLE_CODES",
+        STAGE_HOTFIX_REVIEW_APPLY: "TEMPLATE_WORKFLOW_HOTFIX_REVIEW_APPLY_ROLE_CODES",
+    }
+
+    REQUIRE_APPROVAL_BEFORE_PUBLISH_KEY = "TEMPLATE_WORKFLOW_REQUIRE_APPROVAL_BEFORE_PUBLISH"
+    ALLOW_SAME_USER_SUBMIT_REVIEW_KEY = "TEMPLATE_WORKFLOW_ALLOW_SAME_USER_SUBMIT_REVIEW"
+    ALLOW_SAME_USER_REVIEW_APPROVE_KEY = "TEMPLATE_WORKFLOW_ALLOW_SAME_USER_REVIEW_APPROVE"
+    ALLOW_SAME_USER_REVIEW_PUBLISH_KEY = "TEMPLATE_WORKFLOW_ALLOW_SAME_USER_REVIEW_PUBLISH"
+    ALLOW_SAME_USER_HOTFIX_REQUEST_APPLY_KEY = "TEMPLATE_WORKFLOW_ALLOW_SAME_USER_HOTFIX_REQUEST_APPLY"
+    ALLOW_SAME_USER_HOTFIX_REVIEW_APPLY_KEY = "TEMPLATE_WORKFLOW_ALLOW_SAME_USER_HOTFIX_REVIEW_APPLY"
+
+    SEQUENTIAL_APPROVAL_ENABLED_KEY = "TEMPLATE_WORKFLOW_SEQUENTIAL_APPROVAL_ENABLED"
+    SEQUENTIAL_HOTFIX_ENABLED_KEY = "TEMPLATE_WORKFLOW_SEQUENTIAL_HOTFIX_ENABLED"
+    APPROVAL_REVIEW_STEP_ROLE_CODES_KEY = "TEMPLATE_WORKFLOW_APPROVAL_REVIEW_STEP_ROLE_CODES"
+    APPROVAL_FINAL_STEP_ROLE_CODES_KEY = "TEMPLATE_WORKFLOW_APPROVAL_FINAL_STEP_ROLE_CODES"
+    HOTFIX_REVIEW_STEP_ROLE_CODES_KEY = "TEMPLATE_WORKFLOW_HOTFIX_REVIEW_STEP_ROLE_CODES"
+    HOTFIX_APPLY_STEP_ROLE_CODES_KEY = "TEMPLATE_WORKFLOW_HOTFIX_APPLY_STEP_ROLE_CODES"
+
+    DEFAULT_STAGE_ROLE_CODES = {
+        STAGE_DRAFT: ["TENANT_ADMIN", "SUPER_ADMIN"],
+        STAGE_SUBMIT_FOR_APPROVAL: ["TENANT_ADMIN", "SUPER_ADMIN"],
+        STAGE_APPROVAL_REVIEW: ["CAO", "SUPER_ADMIN"],
+        STAGE_PUBLISH: ["TENANT_ADMIN", "SUPER_ADMIN"],
+        STAGE_HOTFIX_REQUEST: ["TENANT_ADMIN", "SUPER_ADMIN"],
+        STAGE_HOTFIX_REVIEW_APPLY: ["CAO", "SUPER_ADMIN"],
+    }
+
+    DEFAULT_SEQUENTIAL_STEP_ROLE_CODES = {
+        STEP_TEMPLATE_REVIEW: ["DEAN", "CAO"],
+        STEP_TEMPLATE_APPROVAL: ["CAO", "SUPER_ADMIN"],
+        STEP_HOTFIX_REVIEW: ["DEAN", "CAO"],
+        STEP_HOTFIX_APPLY: ["CAO", "SUPER_ADMIN"],
+    }
+
+    @classmethod
+    def stage_label(cls, stage_code: str) -> str:
+        return dict(cls.STAGE_CHOICES).get(stage_code, stage_code)
+
+    @classmethod
+    def _normalize_role_code_list(cls, raw_value, default):
+        if not isinstance(raw_value, list):
+            return list(default)
+        return [str(code).strip().upper() for code in raw_value if str(code).strip()]
+
+    @classmethod
+    def get_stage_role_codes(cls, *, stage_code: str, tenant_id: int | None):
+        key = cls.STAGE_ROLE_KEYS.get(stage_code)
+        default = cls.DEFAULT_STAGE_ROLE_CODES.get(stage_code, [])
+        if not key:
+            return list(default)
+        raw_value = SystemSettingService.get(key, tenant_id=tenant_id, default=default)
+        return cls._normalize_role_code_list(raw_value, default)
+
+    @classmethod
+    def sequential_template_approval_enabled(cls, *, tenant_id: int | None):
+        return bool(
+            SystemSettingService.get(
+                cls.SEQUENTIAL_APPROVAL_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=False,
+            )
+        )
+
+    @classmethod
+    def sequential_hotfix_enabled(cls, *, tenant_id: int | None):
+        return bool(
+            SystemSettingService.get(
+                cls.SEQUENTIAL_HOTFIX_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=False,
+            )
+        )
+
+    @classmethod
+    def get_sequential_step_role_codes(cls, *, step_code: str, tenant_id: int | None):
+        key_map = {
+            cls.STEP_TEMPLATE_REVIEW: cls.APPROVAL_REVIEW_STEP_ROLE_CODES_KEY,
+            cls.STEP_TEMPLATE_APPROVAL: cls.APPROVAL_FINAL_STEP_ROLE_CODES_KEY,
+            cls.STEP_HOTFIX_REVIEW: cls.HOTFIX_REVIEW_STEP_ROLE_CODES_KEY,
+            cls.STEP_HOTFIX_APPLY: cls.HOTFIX_APPLY_STEP_ROLE_CODES_KEY,
+        }
+        key = key_map.get(step_code)
+        default = cls.DEFAULT_SEQUENTIAL_STEP_ROLE_CODES.get(step_code, [])
+        if not key:
+            return list(default)
+        raw_value = SystemSettingService.get(key, tenant_id=tenant_id, default=default)
+        return cls._normalize_role_code_list(raw_value, default)
+
+    @classmethod
+    def require_approval_before_publish(cls, *, tenant_id: int | None):
+        return bool(
+            SystemSettingService.get(
+                cls.REQUIRE_APPROVAL_BEFORE_PUBLISH_KEY,
+                tenant_id=tenant_id,
+                default=True,
+            )
+        )
+
+    @classmethod
+    def allow_same_user_submit_review(cls, *, tenant_id: int | None):
+        return bool(
+            SystemSettingService.get(
+                cls.ALLOW_SAME_USER_SUBMIT_REVIEW_KEY,
+                tenant_id=tenant_id,
+                default=False,
+            )
+        )
+
+    @classmethod
+    def allow_same_user_review_approve(cls, *, tenant_id: int | None):
+        return bool(
+            SystemSettingService.get(
+                cls.ALLOW_SAME_USER_REVIEW_APPROVE_KEY,
+                tenant_id=tenant_id,
+                default=False,
+            )
+        )
+
+    @classmethod
+    def allow_same_user_review_publish(cls, *, tenant_id: int | None):
+        return bool(
+            SystemSettingService.get(
+                cls.ALLOW_SAME_USER_REVIEW_PUBLISH_KEY,
+                tenant_id=tenant_id,
+                default=False,
+            )
+        )
+
+    @classmethod
+    def allow_same_user_hotfix_request_apply(cls, *, tenant_id: int | None):
+        return bool(
+            SystemSettingService.get(
+                cls.ALLOW_SAME_USER_HOTFIX_REQUEST_APPLY_KEY,
+                tenant_id=tenant_id,
+                default=False,
+            )
+        )
+
+    @classmethod
+    def allow_same_user_hotfix_review_apply(cls, *, tenant_id: int | None):
+        return bool(
+            SystemSettingService.get(
+                cls.ALLOW_SAME_USER_HOTFIX_REVIEW_APPLY_KEY,
+                tenant_id=tenant_id,
+                default=False,
+            )
+        )
+
+    @classmethod
+    def _user_role_codes_for_tenant(cls, *, user, tenant_id: int | None):
+        if not user or not getattr(user, "is_authenticated", False):
+            return set()
+        if getattr(user, "is_superuser", False):
+            return set(Role.objects.filter(is_active=True).values_list("code", flat=True))
+
+        role_qs = UserRole.objects.filter(user=user, is_active=True, role__is_active=True)
+        if tenant_id is not None:
+            role_qs = role_qs.filter(
+                Q(tenant_id=tenant_id)
+                | Q(campus__tenant_id=tenant_id)
+                | (Q(tenant__isnull=True) & Q(campus__isnull=True))
+            )
+        return {code for code in role_qs.values_list("role__code", flat=True)}
+
+    @classmethod
+    def user_has_stage_role(cls, *, user, stage_code: str, tenant_id: int | None):
+        stage_codes = set(cls.get_stage_role_codes(stage_code=stage_code, tenant_id=tenant_id))
+        if not stage_codes:
+            return False
+        return bool(cls._user_role_codes_for_tenant(user=user, tenant_id=tenant_id) & stage_codes)
+
+    @classmethod
+    def ensure_user_can_perform_stage(cls, *, user, stage_code: str, tenant_id: int | None):
+        if not cls.user_has_stage_role(user=user, stage_code=stage_code, tenant_id=tenant_id):
+            raise ValidationError(
+                f"You are not included in the configured roles for {cls.stage_label(stage_code)}."
+            )
+
+    @classmethod
+    def _actor_matches_role_codes(cls, *, actor, role_codes: list[str], tenant_id: int | None):
+        if not role_codes:
+            return False
+        return bool(cls._user_role_codes_for_tenant(user=actor, tenant_id=tenant_id) & set(role_codes))
+
+    @classmethod
+    def get_approval_step_definitions(cls, *, tenant_id: int | None):
+        if cls.sequential_template_approval_enabled(tenant_id=tenant_id):
+            return [
+                {
+                    "step_no": 1,
+                    "step_code": cls.STEP_TEMPLATE_REVIEW,
+                    "step_label": "Template Review",
+                    "role_codes": cls.get_sequential_step_role_codes(
+                        step_code=cls.STEP_TEMPLATE_REVIEW,
+                        tenant_id=tenant_id,
+                    ),
+                },
+                {
+                    "step_no": 2,
+                    "step_code": cls.STEP_TEMPLATE_APPROVAL,
+                    "step_label": "Final Approval",
+                    "role_codes": cls.get_sequential_step_role_codes(
+                        step_code=cls.STEP_TEMPLATE_APPROVAL,
+                        tenant_id=tenant_id,
+                    ),
+                },
+            ]
+        return [
+            {
+                "step_no": 1,
+                "step_code": cls.STAGE_APPROVAL_REVIEW,
+                "step_label": cls.stage_label(cls.STAGE_APPROVAL_REVIEW),
+                "role_codes": cls.get_stage_role_codes(
+                    stage_code=cls.STAGE_APPROVAL_REVIEW,
+                    tenant_id=tenant_id,
+                ),
+            }
+        ]
+
+    @classmethod
+    def get_hotfix_step_definitions(cls, *, tenant_id: int | None):
+        if cls.sequential_hotfix_enabled(tenant_id=tenant_id):
+            return [
+                {
+                    "step_no": 1,
+                    "step_code": cls.STEP_HOTFIX_REVIEW,
+                    "step_label": "Hotfix Review",
+                    "role_codes": cls.get_sequential_step_role_codes(
+                        step_code=cls.STEP_HOTFIX_REVIEW,
+                        tenant_id=tenant_id,
+                    ),
+                },
+                {
+                    "step_no": 2,
+                    "step_code": cls.STEP_HOTFIX_APPLY,
+                    "step_label": "Hotfix Final Apply",
+                    "role_codes": cls.get_sequential_step_role_codes(
+                        step_code=cls.STEP_HOTFIX_APPLY,
+                        tenant_id=tenant_id,
+                    ),
+                },
+            ]
+        return [
+            {
+                "step_no": 1,
+                "step_code": cls.STAGE_HOTFIX_REVIEW_APPLY,
+                "step_label": cls.stage_label(cls.STAGE_HOTFIX_REVIEW_APPLY),
+                "role_codes": cls.get_stage_role_codes(
+                    stage_code=cls.STAGE_HOTFIX_REVIEW_APPLY,
+                    tenant_id=tenant_id,
+                ),
+            }
+        ]
+
+    @classmethod
+    def create_approval_workflow(cls, *, template, actor):
+        step_definitions = cls.get_approval_step_definitions(tenant_id=template.tenant_id)
+        if not step_definitions:
+            raise ValidationError("No template approval workflow steps are configured.")
+        workflow = GradingTemplateApprovalWorkflow.objects.create(
+            tenant_id=template.tenant_id,
+            template=template,
+            status=GradingTemplateApprovalWorkflow.Status.PENDING,
+            submitted_by_user=actor,
+            submitted_at=timezone.now(),
+            current_step_no=1,
+        )
+        step_rows = []
+        for step_definition in step_definitions:
+            step_rows.append(
+                GradingTemplateApprovalStep(
+                    workflow=workflow,
+                    step_no=step_definition["step_no"],
+                    step_code=step_definition["step_code"],
+                    step_label=step_definition["step_label"],
+                    role_codes_json=step_definition["role_codes"],
+                    status=(
+                        GradingTemplateApprovalStep.Status.PENDING
+                        if step_definition["step_no"] == 1
+                        else GradingTemplateApprovalStep.Status.QUEUED
+                    ),
+                )
+            )
+        GradingTemplateApprovalStep.objects.bulk_create(step_rows)
+        return workflow
+
+    @classmethod
+    def _build_fallback_approval_workflow(cls, *, template):
+        submitted_by = template.approval_requested_by or template.published_by
+        if not submitted_by:
+            raise ValidationError("This template has no recorded submitter for workflow reconstruction.")
+        workflow = GradingTemplateApprovalWorkflow.objects.create(
+            tenant_id=template.tenant_id,
+            template=template,
+            status=GradingTemplateApprovalWorkflow.Status.PENDING,
+            submitted_by_user=submitted_by,
+            submitted_at=template.approval_requested_at or template.updated_at or timezone.now(),
+            current_step_no=1,
+        )
+        step_definitions = cls.get_approval_step_definitions(tenant_id=template.tenant_id)
+        step_rows = []
+        for step_definition in step_definitions:
+            step_rows.append(
+                GradingTemplateApprovalStep(
+                    workflow=workflow,
+                    step_no=step_definition["step_no"],
+                    step_code=step_definition["step_code"],
+                    step_label=step_definition["step_label"],
+                    role_codes_json=step_definition["role_codes"],
+                    status=(
+                        GradingTemplateApprovalStep.Status.PENDING
+                        if step_definition["step_no"] == 1
+                        else GradingTemplateApprovalStep.Status.QUEUED
+                    ),
+                )
+            )
+        GradingTemplateApprovalStep.objects.bulk_create(step_rows)
+        return workflow
+
+    @classmethod
+    def get_pending_approval_workflow(cls, *, template):
+        workflow = (
+            template.approval_workflows.select_related("submitted_by_user")
+            .prefetch_related("steps")
+            .filter(status=GradingTemplateApprovalWorkflow.Status.PENDING)
+            .order_by("-created_at")
+            .first()
+        )
+        if workflow:
+            return workflow
+        if template.approval_status == template.ApprovalStatus.FOR_APPROVAL:
+            return cls._build_fallback_approval_workflow(template=template)
+        return None
+
+    @classmethod
+    def get_current_approval_step(cls, *, template):
+        workflow = cls.get_pending_approval_workflow(template=template)
+        if not workflow:
+            return None
+        return workflow.steps.filter(status=GradingTemplateApprovalStep.Status.PENDING).order_by("step_no").first()
+
+    @classmethod
+    def user_can_take_approval_step(cls, *, template, actor):
+        step = cls.get_current_approval_step(template=template)
+        if not step:
+            return False
+        if not cls._actor_matches_role_codes(actor=actor, role_codes=step.role_codes_json or [], tenant_id=template.tenant_id):
+            return False
+        workflow = step.workflow
+        if (
+            workflow.submitted_by_user_id == actor.id
+            and not cls.allow_same_user_submit_review(tenant_id=template.tenant_id)
+        ):
+            return False
+        previous_step = (
+            workflow.steps.filter(step_no__lt=step.step_no, status=GradingTemplateApprovalStep.Status.APPROVED)
+            .order_by("-step_no")
+            .first()
+        )
+        if (
+            previous_step
+            and previous_step.acted_by_user_id == actor.id
+            and step.step_no > 1
+            and not cls.allow_same_user_review_approve(tenant_id=template.tenant_id)
+        ):
+            return False
+        return True
+
+    @classmethod
+    def ensure_can_review_template(cls, *, template, actor):
+        step = cls.get_current_approval_step(template=template)
+        if not step:
+            raise ValidationError("There is no pending approval step for this template.")
+        if not cls._actor_matches_role_codes(actor=actor, role_codes=step.role_codes_json or [], tenant_id=template.tenant_id):
+            raise ValidationError(f"You are not included in the configured roles for {step.step_label}.")
+        if (
+            template.approval_requested_by_id
+            and template.approval_requested_by_id == actor.id
+            and not cls.allow_same_user_submit_review(tenant_id=template.tenant_id)
+        ):
+            raise ValidationError("The same user cannot submit and review this template under the current workflow.")
+        previous_step = (
+            step.workflow.steps.filter(step_no__lt=step.step_no, status=GradingTemplateApprovalStep.Status.APPROVED)
+            .order_by("-step_no")
+            .first()
+        )
+        if (
+            previous_step
+            and previous_step.acted_by_user_id == actor.id
+            and step.step_no > 1
+            and not cls.allow_same_user_review_approve(tenant_id=template.tenant_id)
+        ):
+            raise ValidationError(
+                "The same user cannot perform both the review and final approval steps under the current workflow."
+            )
+
+    @classmethod
+    def ensure_can_publish_template(cls, *, template, actor):
+        cls.ensure_user_can_perform_stage(
+            user=actor,
+            stage_code=cls.STAGE_PUBLISH,
+            tenant_id=template.tenant_id,
+        )
+        if (
+            template.approval_reviewed_by_id
+            and template.approval_reviewed_by_id == actor.id
+            and not cls.allow_same_user_review_publish(tenant_id=template.tenant_id)
+        ):
+            raise ValidationError("The same user cannot review and publish this template under the current workflow.")
+
+    @classmethod
+    def ensure_can_apply_hotfix(cls, *, hotfix_request: TemplateHotfixRequest, actor):
+        step = cls.get_current_hotfix_step(hotfix_request=hotfix_request)
+        if not step:
+            raise ValidationError("There is no pending hotfix workflow step for this request.")
+        if not cls._actor_matches_role_codes(
+            actor=actor,
+            role_codes=step.role_codes_json or [],
+            tenant_id=hotfix_request.tenant_id,
+        ):
+            raise ValidationError(f"You are not included in the configured roles for {step.step_label}.")
+        if (
+            hotfix_request.requested_by_user_id == actor.id
+            and not cls.allow_same_user_hotfix_request_apply(tenant_id=hotfix_request.tenant_id)
+        ):
+            raise ValidationError(
+                "The same user cannot request and apply this hotfix under the current workflow."
+            )
+        previous_step = (
+            hotfix_request.workflow_steps.filter(step_no__lt=step.step_no, status=TemplateHotfixWorkflowStep.Status.APPROVED)
+            .order_by("-step_no")
+            .first()
+        )
+        if (
+            previous_step
+            and previous_step.acted_by_user_id == actor.id
+            and step.step_no > 1
+            and not cls.allow_same_user_hotfix_review_apply(tenant_id=hotfix_request.tenant_id)
+        ):
+            raise ValidationError(
+                "The same user cannot perform both the hotfix review and final apply steps under the current workflow."
+            )
+
+    @classmethod
+    def user_can_take_hotfix_step(cls, *, hotfix_request, actor):
+        step = cls.get_current_hotfix_step(hotfix_request=hotfix_request)
+        if not step:
+            return False
+        if not cls._actor_matches_role_codes(
+            actor=actor,
+            role_codes=step.role_codes_json or [],
+            tenant_id=hotfix_request.tenant_id,
+        ):
+            return False
+        if (
+            hotfix_request.requested_by_user_id == actor.id
+            and not cls.allow_same_user_hotfix_request_apply(tenant_id=hotfix_request.tenant_id)
+        ):
+            return False
+        previous_step = (
+            hotfix_request.workflow_steps.filter(
+                step_no__lt=step.step_no,
+                status=TemplateHotfixWorkflowStep.Status.APPROVED,
+            )
+            .order_by("-step_no")
+            .first()
+        )
+        if (
+            previous_step
+            and previous_step.acted_by_user_id == actor.id
+            and step.step_no > 1
+            and not cls.allow_same_user_hotfix_review_apply(tenant_id=hotfix_request.tenant_id)
+        ):
+            return False
+        return True
+
+    @classmethod
+    def create_hotfix_workflow_steps(cls, *, hotfix_request):
+        step_definitions = cls.get_hotfix_step_definitions(tenant_id=hotfix_request.tenant_id)
+        if not step_definitions:
+            raise ValidationError("No hotfix workflow steps are configured.")
+        step_rows = []
+        for step_definition in step_definitions:
+            step_rows.append(
+                TemplateHotfixWorkflowStep(
+                    hotfix_request=hotfix_request,
+                    step_no=step_definition["step_no"],
+                    step_code=step_definition["step_code"],
+                    step_label=step_definition["step_label"],
+                    role_codes_json=step_definition["role_codes"],
+                    status=(
+                        TemplateHotfixWorkflowStep.Status.PENDING
+                        if step_definition["step_no"] == 1
+                        else TemplateHotfixWorkflowStep.Status.QUEUED
+                    ),
+                )
+            )
+        TemplateHotfixWorkflowStep.objects.bulk_create(step_rows)
+
+    @classmethod
+    def _build_fallback_hotfix_steps(cls, *, hotfix_request):
+        if hotfix_request.status != TemplateHotfixRequest.Status.PENDING:
+            return None
+        if hotfix_request.workflow_steps.exists():
+            return None
+        cls.create_hotfix_workflow_steps(hotfix_request=hotfix_request)
+        return hotfix_request.workflow_steps.order_by("step_no").first()
+
+    @classmethod
+    def get_current_hotfix_step(cls, *, hotfix_request):
+        step = hotfix_request.workflow_steps.filter(status=TemplateHotfixWorkflowStep.Status.PENDING).order_by("step_no").first()
+        if step:
+            return step
+        if hotfix_request.status == TemplateHotfixRequest.Status.PENDING:
+            return cls._build_fallback_hotfix_steps(hotfix_request=hotfix_request)
+        return None
+
+    @classmethod
+    def get_workflow_snapshot(cls, *, tenant_id: int | None):
+        return {
+            "require_approval_before_publish": cls.require_approval_before_publish(tenant_id=tenant_id),
+            "sequential_template_approval_enabled": cls.sequential_template_approval_enabled(tenant_id=tenant_id),
+            "sequential_hotfix_enabled": cls.sequential_hotfix_enabled(tenant_id=tenant_id),
+            "allow_same_user_submit_review": cls.allow_same_user_submit_review(tenant_id=tenant_id),
+            "allow_same_user_review_approve": cls.allow_same_user_review_approve(tenant_id=tenant_id),
+            "allow_same_user_review_publish": cls.allow_same_user_review_publish(tenant_id=tenant_id),
+            "allow_same_user_hotfix_request_apply": cls.allow_same_user_hotfix_request_apply(tenant_id=tenant_id),
+            "allow_same_user_hotfix_review_apply": cls.allow_same_user_hotfix_review_apply(tenant_id=tenant_id),
+            "stages": [
+                {
+                    "code": stage_code,
+                    "label": stage_label,
+                    "role_codes": cls.get_stage_role_codes(stage_code=stage_code, tenant_id=tenant_id),
+                }
+                for stage_code, stage_label in cls.STAGE_CHOICES
+            ],
+            "approval_steps": cls.get_approval_step_definitions(tenant_id=tenant_id),
+            "hotfix_steps": cls.get_hotfix_step_definitions(tenant_id=tenant_id),
+        }
 
 
 class GradingGovernanceService:

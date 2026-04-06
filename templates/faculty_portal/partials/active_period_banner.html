@@ -1,0 +1,19 @@
+{% if rows %}
+<div class="faculty-active-period-banner">
+  <div>
+    <div class="faculty-active-period-eyebrow">Current Active Grading Period</div>
+    <div class="faculty-active-period-title">EduGradesPro is currently focused on the period(s) below.</div>
+    <div class="faculty-active-period-note">You may still open other periods, but these are the active governance periods for the selected class scope.</div>
+  </div>
+  <div class="faculty-active-period-list">
+    {% for row in rows %}
+    <span class="faculty-active-period-chip">
+      {{ row.campus_code }} / {{ row.term_code }}: {{ row.period_name }} ({{ row.period_code }})
+      {% if row.auto_advanced_from_deadline %}
+      <span class="faculty-active-period-chip-meta">Auto-advanced</span>
+      {% endif %}
+    </span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

@@ -354,9 +354,9 @@
 
 {% if is_correction_active %}
 <div class="alert alert-warning no-print">
-  Approved correction window is active.
+  A governed manual correction window is active.
   {% if "corrections.create" in effective_permissions and system_correction_enabled %}
-    You can apply scoped edits then finalize in
+    This applies only to correction requests that still require controlled post-approval edits. You can review it in
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Corrections</a>.
   {% endif %}
 </div>

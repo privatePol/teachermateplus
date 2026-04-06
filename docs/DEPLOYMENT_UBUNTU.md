@@ -1,52 +1,432 @@
-# EduGradesPro V1 Deployment Guide (Ubuntu + Gunicorn + Nginx)
+# EduGradesPro Production Deployment Guide
 
-This guide deploys EduGradesPro on Ubuntu with:
+This guide is the recommended deployment path for **EduGradesPro V1** on **Ubuntu** using:
 
-- `gunicorn` (app server)
-- `systemd` (process manager)
-- `nginx` (reverse proxy + static/media serving)
-- `cron` (scheduled governance jobs)
+- `gunicorn`
+- `systemd`
+- `nginx`
+- `cron`
+- `GitHub` for source delivery
+- `MariaDB/MySQL` for production database
 
----
+## Quick Answer First
 
-## 1. Server Prerequisites
+If this is your first real rollout, use this:
+
+1. Ubuntu server
+2. MariaDB
+3. one staging instance
+4. one production instance
+5. GitHub pull deploys
+6. separate systemd service and nginx site per instance
+
+Related references:
+
+- [STAGING_WORKFLOW.md](/d:/edugradespro/docs/STAGING_WORKFLOW.md)
+- [PRODUCTION_DATA_PROMOTION.md](/d:/edugradespro/docs/PRODUCTION_DATA_PROMOTION.md)
+- [DB_SCHEMA.md](/d:/edugradespro/docs/DB_SCHEMA.md)
+- [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradespro/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
+- [NCBA_GO_LIVE_CHECKLIST.md](/d:/edugradespro/docs/NCBA_GO_LIVE_CHECKLIST.md)
+
+## Deployment Stages Only
+
+If you want the shortest operational sequence, this is the staged flow:
+
+### Stage 1. Prepare the server
+
+1. provision Ubuntu
+2. install Python, Nginx, Git, and MariaDB
+3. prepare DNS/subdomains
+4. prepare firewall and HTTPS plan
+
+### Stage 2. Prepare databases
+
+1. create one DB and DB user for staging
+2. create one DB and DB user for production
+3. never share the same DB between staging and production
+
+### Stage 3. Prepare app directories
+
+1. create `/opt/edugradespro-staging`
+2. create `/opt/edugradespro`
+3. create separate env files
+4. create separate log directories
+
+### Stage 4. Pull code from GitHub
+
+1. configure deploy key or token
+2. clone repo into staging path
+3. clone repo into production path
+
+### Stage 5. Bootstrap staging
+
+1. create virtualenv
+2. install requirements
+3. configure staging `.env`
+4. run `migrate`
+5. run `collectstatic`
+6. run `check`
+7. configure staging gunicorn
+8. configure staging nginx
+9. test staging
+
+### Stage 6. Bootstrap production
+
+1. create virtualenv
+2. install requirements
+3. configure production `.env`
+4. run `migrate`
+5. run `collectstatic`
+6. run `check`
+7. configure production gunicorn
+8. configure production nginx
+9. test production
+
+### Stage 7. Activate scheduled jobs
+
+1. install cron for staging if needed
+2. install cron for production
+3. verify log output
+
+### Stage 8. Release workflow
+
+1. develop locally
+2. push to GitHub
+3. deploy to staging
+4. test staging
+5. deploy the approved code to production
+
+## Multi-App Server Note
+
+You mentioned that the production server will host multiple Django applications.
+
+That is completely fine, but each app should have its own:
+
+- app directory
+- virtual environment
+- environment file
+- gunicorn service
+- nginx site/server block
+- unix socket
+- database or schema strategy
+- log directory
+
+For EduGradesPro specifically, keep it isolated like this:
+
+- app code: `/opt/edugradespro`
+- env file: `/etc/edugradespro/edugradespro.env`
+- logs: `/var/log/edugradespro`
+- socket: `/run/edugradespro/gunicorn.sock`
+- service: `edugradespro-gunicorn`
+
+Do not mix EduGradesPro inside another Django app's folders or service definitions.
+
+## 1. Recommended Production Stack
+
+For production, the recommended stack is:
+
+- **Ubuntu 22.04 LTS or 24.04 LTS**
+- **Python 3.11+**
+- **MariaDB 10.11+** or **MySQL 8.0+**
+- **Nginx**
+- **Gunicorn**
+- **GitHub private repository**
+
+### Database recommendation
+
+For production, prefer **MariaDB/MySQL** over SQLite.
+
+Why:
+
+- SQLite is fine for local development and small pilot usage
+- EduGradesPro has concurrent admin and faculty activity
+- production needs stronger locking/concurrency behavior
+- backups, monitoring, and recovery are easier with a server database
+
+### My recommendation
+
+If you are on Ubuntu and want the smoother path, use:
+
+- **MariaDB on Ubuntu**
+
+If your hosting provider or school infrastructure already standardizes on MySQL, then:
+
+- **MySQL 8.0 is also fine**
+
+EduGradesPro already supports MySQL-compatible deployment through the existing Django database settings and `PyMySQL`.
+
+## 2. High-Level Environment Strategy
+
+Do not jump straight from local to production if you can avoid it.
+
+Recommended environments:
+
+1. **Local**
+   - your laptop/workstation
+   - coding, debugging, feature testing
+
+2. **Staging**
+   - a safe deploy target that behaves like production
+   - used for smoke testing before going live
+
+3. **Production**
+   - the live system used by admin and faculty
+
+For a beginner-friendly explanation of staging, also see:
+
+- [STAGING_WORKFLOW.md](/d:/edugradespro/docs/STAGING_WORKFLOW.md)
+
+## 3. Simple Staging Workflow for Beginners
+
+If you are not familiar with staging yet, use this simple model:
+
+### Option A: Separate staging server
+
+Best if possible.
+
+- `staging.yourdomain.com`
+- separate database
+- separate app directory
+- separate env file
+- separate gunicorn service
+- separate nginx site
+
+### Option B: Same Ubuntu server, separate app instance
+
+This is the easiest beginner-friendly staging setup if you only have one VPS.
+
+Example:
+
+- production app: `/opt/edugradespro`
+- staging app: `/opt/edugradespro-staging`
+- production env: `/etc/edugradespro/edugradespro.env`
+- staging env: `/etc/edugradespro-staging/edugradespro.env`
+- production domain: `grades.yourdomain.com`
+- staging domain: `staging-grades.yourdomain.com`
+- production DB: `edugradespro`
+- staging DB: `edugradespro_staging`
+
+This works well and is enough for many first deployments.
+
+## 4. Recommended GitHub Deployment Workflow
+
+Use GitHub as the source of truth.
+
+Recommended branch flow:
+
+1. `main`
+   - production-ready code
+
+2. `staging`
+   - optional staging branch if you want a separate pre-production stream
+
+Simple workflow:
+
+1. develop and test locally
+2. push to GitHub
+3. pull and deploy to staging
+4. test staging
+5. merge to `main`
+6. pull and deploy to production
+
+If you want a simpler first rollout, you can use only:
+
+- `main`
+
+but still deploy to staging first before production.
+
+## 5. What To Prepare Before Copying EduGradesPro to Production
+
+Before you clone the repo on the production server, prepare these:
+
+### Infrastructure
+
+- Ubuntu server ready
+- domain or subdomain
+- open ports 80/443
+- SSH access
+- sudo access
+
+### App configuration
+
+- strong Django secret key
+- production hostnames
+- SMTP account/app password
+- database server and credentials
+- privacy consent version
+- SIS/API token if needed
+
+### Operational safety
+
+- backup plan
+- restore test plan
+- staging environment
+- incident runbook
+- one rollback procedure you understand
+
+### School data readiness
+
+- initial tenant/campus setup plan
+- admin accounts
+- role assignments
+- grading templates
+- template governance policy
+- correction governance policy
+
+## 6. Pre-Deployment Checklist
+
+Before first live deployment, confirm:
+
+1. `.env.example` has been reviewed
+2. `manage.py` uses environment-aware settings
+3. production will use **MariaDB/MySQL**
+4. DNS is ready
+5. SMTP settings are tested
+6. at least one superuser plan exists
+7. backup location is ready
+8. staging exists, even if on the same VPS
+
+## 7. Ubuntu Server Packages
+
+Update the server:
 
 ```bash
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip nginx git
+sudo apt update && sudo apt upgrade -y
 ```
 
-Optional for MySQL/MariaDB:
+Install required packages:
 
 ```bash
-sudo apt install -y default-libmysqlclient-dev build-essential
+sudo apt install -y python3 python3-venv python3-pip nginx git mariadb-server
 ```
 
----
+Optional but recommended:
 
-## 2. Create App User and Folders
+```bash
+sudo apt install -y ufw certbot python3-certbot-nginx
+```
+
+## 8. Create App Users and Folders
+
+### Why `/opt/edugradespro` instead of `/var/www/html/edugradespro`?
+
+For EduGradesPro, `/opt/edugradespro` is the better layout.
+
+Why:
+
+- `/opt` is appropriate for self-contained application stacks
+- EduGradesPro is not just static web content; it includes code, venv, management commands, cron jobs, and service-managed runtime pieces
+- `/var/www/html` is commonly used for simple web roots and static/PHP-style hosting layouts
+- you said this server will host multiple Django apps, so keeping each app isolated under `/opt/<app-name>` is cleaner and safer
+
+Recommended separation:
+
+- application code in `/opt/<app-name>`
+- environment files in `/etc/<app-name>/`
+- logs in `/var/log/<app-name>/`
+- nginx site config in `/etc/nginx/sites-available/`
+
+That structure scales better when one Ubuntu server runs multiple unrelated Django applications.
+
+### Production
 
 ```bash
 sudo useradd --system --create-home --shell /bin/bash edugradespro
 sudo mkdir -p /opt/edugradespro
-sudo chown -R edugradespro:edugradespro /opt/edugradespro
 sudo mkdir -p /etc/edugradespro
 sudo mkdir -p /var/log/edugradespro
+sudo chown -R edugradespro:edugradespro /opt/edugradespro
 sudo chown -R edugradespro:edugradespro /var/log/edugradespro
 ```
 
----
-
-## 3. Pull Source Code
+### Staging on the same server
 
 ```bash
-sudo -u edugradespro git clone https://github.com/privatePol/edugradepro.git /opt/edugradespro
+sudo useradd --system --create-home --shell /bin/bash edugradespro-staging
+sudo mkdir -p /opt/edugradespro-staging
+sudo mkdir -p /etc/edugradespro-staging
+sudo mkdir -p /var/log/edugradespro-staging
+sudo chown -R edugradespro-staging:edugradespro-staging /opt/edugradespro-staging
+sudo chown -R edugradespro-staging:edugradespro-staging /var/log/edugradespro-staging
+```
+
+## 9. Create the MariaDB/MySQL Database
+
+Open MariaDB:
+
+```bash
+sudo mysql
+```
+
+Create production DB and user:
+
+```sql
+CREATE DATABASE edugradespro CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'edugradespro_user'@'127.0.0.1' IDENTIFIED BY 'replace-with-strong-password';
+GRANT ALL PRIVILEGES ON edugradespro.* TO 'edugradespro_user'@'127.0.0.1';
+FLUSH PRIVILEGES;
+```
+
+Create staging DB and user:
+
+```sql
+CREATE DATABASE edugradespro_staging CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'edugradespro_staging_user'@'127.0.0.1' IDENTIFIED BY 'replace-with-strong-password';
+GRANT ALL PRIVILEGES ON edugradespro_staging.* TO 'edugradespro_staging_user'@'127.0.0.1';
+FLUSH PRIVILEGES;
+```
+
+Exit:
+
+```sql
+EXIT;
+```
+
+## 10. GitHub Repository Setup
+
+If the repository is private, choose one of these:
+
+### Option A: Deploy key
+
+Best for a production pull-only workflow.
+
+Generate SSH key on server:
+
+```bash
+sudo -u edugradespro ssh-keygen -t ed25519 -C "edugradespro-production" -f /home/edugradespro/.ssh/id_ed25519
+```
+
+Then add the public key to GitHub as a **Deploy Key** for the repo.
+
+Test it:
+
+```bash
+sudo -u edugradespro ssh -T git@github.com
+```
+
+### Option B: GitHub personal access token
+
+Works too, but deploy keys are cleaner for servers.
+
+## 11. Clone the Code
+
+### Production
+
+```bash
+sudo -u edugradespro git clone git@github.com:YOUR-ORG/YOUR-REPO.git /opt/edugradespro
 cd /opt/edugradespro
 ```
 
----
+### Staging
 
-## 4. Python Virtual Environment
+```bash
+sudo -u edugradespro-staging git clone git@github.com:YOUR-ORG/YOUR-REPO.git /opt/edugradespro-staging
+cd /opt/edugradespro-staging
+```
+
+## 12. Python Virtual Environment
+
+### Production
 
 ```bash
 sudo -u edugradespro python3 -m venv /opt/edugradespro/.venv
@@ -54,31 +434,42 @@ sudo -u edugradespro /opt/edugradespro/.venv/bin/pip install --upgrade pip
 sudo -u edugradespro /opt/edugradespro/.venv/bin/pip install -r /opt/edugradespro/requirements/production.txt
 ```
 
----
+### Staging
 
-## 5. Production Environment File
+```bash
+sudo -u edugradespro-staging python3 -m venv /opt/edugradespro-staging/.venv
+sudo -u edugradespro-staging /opt/edugradespro-staging/.venv/bin/pip install --upgrade pip
+sudo -u edugradespro-staging /opt/edugradespro-staging/.venv/bin/pip install -r /opt/edugradespro-staging/requirements/production.txt
+```
 
-Create `/etc/edugradespro/edugradespro.env`:
+## 13. Production Environment File
+
+Create:
+
+- `/etc/edugradespro/edugradespro.env`
+
+Start from:
+
+- [edugradespro.production.env.example](/d:/edugradespro/ops/env/edugradespro.production.env.example)
+
+Recommended production example:
 
 ```env
 DJANGO_ENV=production
+DJANGO_SETTINGS_MODULE=config.settings
 DJANGO_SECRET_KEY=replace-with-very-strong-secret
-DJANGO_ALLOWED_HOSTS=your-domain.com,www.your-domain.com,server-ip
+DJANGO_ALLOWED_HOSTS=grades.yourdomain.com,www.grades.yourdomain.com,server-ip
 DJANGO_TIME_ZONE=Asia/Manila
+DJANGO_SECURE_SSL_REDIRECT=True
+DJANGO_SECURE_HSTS_SECONDS=31536000
 
-# Database
-DB_ENGINE=django.db.backends.sqlite3
-DB_NAME=/opt/edugradespro/db.sqlite3
+DB_ENGINE=django.db.backends.mysql
+DB_NAME=edugradespro
+DB_USER=edugradespro_user
+DB_PASSWORD=replace-with-strong-password
+DB_HOST=127.0.0.1
+DB_PORT=3306
 
-# If external DB:
-# DB_ENGINE=django.db.backends.mysql
-# DB_NAME=edugradespro
-# DB_USER=edugradespro_user
-# DB_PASSWORD=replace-me
-# DB_HOST=127.0.0.1
-# DB_PORT=3306
-
-# SMTP
 EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
 EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
@@ -89,7 +480,6 @@ EMAIL_HOST_PASSWORD=replace-with-app-password
 DEFAULT_FROM_EMAIL=noreply@ncba.edu.ph
 EMAIL_TIMEOUT=10
 
-# Security and integration
 SIS_API_TOKEN=replace-with-strong-random-token
 PRIVACY_CONSENT_VERSION=2026-03
 ENFORCE_SINGLE_DEVICE_SESSION=True
@@ -102,9 +492,59 @@ sudo chown root:edugradespro /etc/edugradespro/edugradespro.env
 sudo chmod 640 /etc/edugradespro/edugradespro.env
 ```
 
----
+### Staging environment file
 
-## 6. Django Bootstrap
+Create:
+
+- `/etc/edugradespro-staging/edugradespro.env`
+
+Start from:
+
+- [edugradespro.staging.env.example](/d:/edugradespro/ops/env/edugradespro.staging.env.example)
+
+Recommended staging example:
+
+```env
+DJANGO_ENV=production
+DJANGO_SETTINGS_MODULE=config.settings
+DJANGO_SECRET_KEY=replace-with-another-strong-secret
+DJANGO_ALLOWED_HOSTS=staging-grades.yourdomain.com,server-ip
+DJANGO_TIME_ZONE=Asia/Manila
+DJANGO_SECURE_SSL_REDIRECT=True
+DJANGO_SECURE_HSTS_SECONDS=31536000
+
+DB_ENGINE=django.db.backends.mysql
+DB_NAME=edugradespro_staging
+DB_USER=edugradespro_staging_user
+DB_PASSWORD=replace-with-strong-password
+DB_HOST=127.0.0.1
+DB_PORT=3306
+
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_USE_SSL=False
+EMAIL_HOST_USER=noreply@ncba.edu.ph
+EMAIL_HOST_PASSWORD=replace-with-app-password
+DEFAULT_FROM_EMAIL=noreply@ncba.edu.ph
+EMAIL_TIMEOUT=10
+
+SIS_API_TOKEN=replace-with-strong-random-token
+PRIVACY_CONSENT_VERSION=2026-03
+ENFORCE_SINGLE_DEVICE_SESSION=True
+```
+
+Protect it:
+
+```bash
+sudo chown root:edugradespro-staging /etc/edugradespro-staging/edugradespro.env
+sudo chmod 640 /etc/edugradespro-staging/edugradespro.env
+```
+
+## 14. First Django Bootstrap
+
+### Production
 
 ```bash
 cd /opt/edugradespro
@@ -113,11 +553,29 @@ sudo -u edugradespro bash -lc 'set -a; source /etc/edugradespro/edugradespro.env
 sudo -u edugradespro bash -lc 'set -a; source /etc/edugradespro/edugradespro.env; set +a; /opt/edugradespro/.venv/bin/python manage.py check'
 ```
 
----
+### Create superuser
 
-## 7. Gunicorn systemd Service
+```bash
+sudo -u edugradespro bash -lc 'set -a; source /etc/edugradespro/edugradespro.env; set +a; /opt/edugradespro/.venv/bin/python manage.py createsuperuser'
+```
 
-Copy template:
+### Staging
+
+```bash
+cd /opt/edugradespro-staging
+sudo -u edugradespro-staging bash -lc 'set -a; source /etc/edugradespro-staging/edugradespro.env; set +a; /opt/edugradespro-staging/.venv/bin/python manage.py migrate --noinput'
+sudo -u edugradespro-staging bash -lc 'set -a; source /etc/edugradespro-staging/edugradespro.env; set +a; /opt/edugradespro-staging/.venv/bin/python manage.py collectstatic --noinput'
+sudo -u edugradespro-staging bash -lc 'set -a; source /etc/edugradespro-staging/edugradespro.env; set +a; /opt/edugradespro-staging/.venv/bin/python manage.py check'
+```
+
+## 15. Gunicorn systemd Service
+
+The repo already includes:
+
+- `ops/systemd/edugradespro-gunicorn.service`
+- `ops/systemd/edugradespro-staging-gunicorn.service`
+
+For production:
 
 ```bash
 sudo cp /opt/edugradespro/ops/systemd/edugradespro-gunicorn.service /etc/systemd/system/edugradespro-gunicorn.service
@@ -130,86 +588,290 @@ sudo systemctl status edugradespro-gunicorn --no-pager
 Logs:
 
 ```bash
-journalctl -u edugradespro-gunicorn -f
+sudo journalctl -u edugradespro-gunicorn -f
 ```
 
----
+### Staging on same server
 
-## 8. Nginx Site
+Create a second unit by copying and editing the production one.
 
-Copy template:
+Example:
+
+```bash
+sudo cp /opt/edugradespro/ops/systemd/edugradespro-gunicorn.service /etc/systemd/system/edugradespro-staging-gunicorn.service
+```
+
+Then change:
+
+- `User=edugradespro-staging`
+- `Group=edugradespro-staging`
+- `WorkingDirectory=/opt/edugradespro-staging`
+- `EnvironmentFile=/etc/edugradespro-staging/edugradespro.env`
+- `ExecStart=/opt/edugradespro-staging/.venv/bin/gunicorn ... --bind unix:/run/edugradespro-staging/gunicorn.sock`
+- `RuntimeDirectory=edugradespro-staging`
+
+Then enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable edugradespro-staging-gunicorn
+sudo systemctl start edugradespro-staging-gunicorn
+```
+
+## 16. Nginx Site
+
+The repo already includes:
+
+- `ops/nginx/edugradespro.conf`
+- `ops/nginx/edugradespro-staging.conf`
+
+### Production
+
+Copy and edit it:
 
 ```bash
 sudo cp /opt/edugradespro/ops/nginx/edugradespro.conf /etc/nginx/sites-available/edugradespro
+```
+
+Make sure:
+
+- `server_name` uses your real production host
+- `/static/` points to `/opt/edugradespro/staticfiles/`
+- `/media/` points to `/opt/edugradespro/media/`
+- `proxy_pass` points to `/run/edugradespro/gunicorn.sock`
+
+Enable it:
+
+```bash
 sudo ln -s /etc/nginx/sites-available/edugradespro /etc/nginx/sites-enabled/edugradespro
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Open firewall:
+### Staging
+
+Create another site file:
+
+```bash
+sudo cp /opt/edugradespro/ops/nginx/edugradespro.conf /etc/nginx/sites-available/edugradespro-staging
+```
+
+Change it to:
+
+- `server_name staging-grades.yourdomain.com`
+- `/static/ -> /opt/edugradespro-staging/staticfiles/`
+- `/media/ -> /opt/edugradespro-staging/media/`
+- `proxy_pass -> /run/edugradespro-staging/gunicorn.sock`
+
+Enable it:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/edugradespro-staging /etc/nginx/sites-enabled/edugradespro-staging
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### Firewall
 
 ```bash
 sudo ufw allow 'Nginx Full'
+sudo ufw enable
 ```
 
----
+## 17. TLS / HTTPS
 
-## 9. Cron Jobs (Auto-lock + Correction-Lapse + Reminders)
+Install certbot if not yet installed:
 
-Install cron entries for `edugradespro` user:
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+```
+
+### Production
+
+```bash
+sudo certbot --nginx -d grades.yourdomain.com -d www.grades.yourdomain.com
+```
+
+### Staging
+
+```bash
+sudo certbot --nginx -d staging-grades.yourdomain.com
+```
+
+After TLS is enabled, confirm:
+
+- `DJANGO_ALLOWED_HOSTS` is correct
+- `DJANGO_SECURE_SSL_REDIRECT=True`
+
+## 18. Cron Jobs
+
+The repo already includes:
+
+- `ops/cron/edugradespro.cron`
+
+### Production
 
 ```bash
 sudo -u edugradespro crontab /opt/edugradespro/ops/cron/edugradespro.cron
 sudo -u edugradespro crontab -l
 ```
 
-What runs:
+Current scheduled jobs:
 
-- `auto_lock_period_deadlines` every 5 minutes
-- `auto_lapse_correction_windows` every 10 minutes
-- `queue_period_reminders` every hour
+- `auto_lock_period_deadlines`
+- `auto_lapse_correction_windows`
+- `queue_period_reminders`
 
----
+### Staging
 
-## 10. Post-Deploy Smoke Test
+Use a separate staging cron file or copy and adapt the paths before installing.
 
-1. Open `/admin-portal/` login
-2. Open `/faculty/` public page + login flow
-3. Verify static files and images load
-4. Check:
-   - Admin dashboard renders
-   - Faculty my-courses and summary pages render
-   - Import pages open
-5. Verify cron logs in `/var/log/edugradespro/`
+Important:
 
----
+- staging jobs must not write into production logs
+- staging jobs must point to staging env and staging app paths
 
-## 11. Release Update Workflow
+## 19. First Smoke Test After Deploy
 
-Use helper script:
+### Production
+
+Check:
+
+1. `/admin-portal/`
+2. `/faculty/`
+3. Admin login
+4. Faculty login
+5. static files and images
+6. one Admin dashboard page
+7. one Faculty class page
+8. one grading summary page
+9. one import page
+10. cron logs under `/var/log/edugradespro/`
+
+### Staging
+
+Do the same before approving a production deploy.
+
+## 20. Suggested First Go-Live Workflow
+
+Use this simple process:
+
+### Step 1
+
+Prepare local and push code to GitHub.
+
+### Step 2
+
+Deploy to staging first.
+
+### Step 3
+
+Smoke-test staging:
+
+- admin login
+- faculty login
+- one class flow
+- one submission flow
+- one correction flow
+- one prediction page if enabled
+
+### Step 4
+
+If staging is good, deploy the same code to production.
+
+### Step 5
+
+Smoke-test production immediately.
+
+### Step 6
+
+Keep monitoring logs and user feedback for the first hours.
+
+## 21. Release Update Workflow
+
+The repo already includes:
+
+- `ops/scripts/deploy_release.sh`
+
+Use it:
 
 ```bash
 sudo bash /opt/edugradespro/ops/scripts/deploy_release.sh
 ```
 
-It will:
+It currently:
 
-1. pull latest code
-2. install/upgrade python deps
-3. run migrations
-4. collect static files
-5. run `manage.py check`
-6. restart gunicorn
+1. loads env
+2. pulls latest code
+3. installs/upgrades dependencies
+4. runs migrations
+5. collects static files
+6. runs `manage.py check`
+7. restarts gunicorn
 
----
+### Recommended staging-first release flow
 
-## 12. TLS/HTTPS (Recommended for Production)
+1. push changes to GitHub
+2. deploy to staging
+3. smoke-test staging
+4. merge or promote approved code
+5. deploy to production
 
-Install certbot:
+## 22. Backups
+
+Do not go live without backups.
+
+### MariaDB backup example
 
 ```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain.com -d www.your-domain.com
+mysqldump -u edugradespro_user -p --databases edugradespro > edugradespro_backup.sql
 ```
 
-Then confirm `DJANGO_ALLOWED_HOSTS` includes your production hostnames.
+### Media backup example
+
+```bash
+tar -czf edugradespro_media_backup.tar.gz /opt/edugradespro/media
+```
+
+Keep:
+
+- daily DB backups
+- media backups
+- off-server backup copy if possible
+
+## 23. Production Incident Response
+
+If EduGradesPro shows live errors in production, use:
+
+- [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradespro/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
+
+Use the incident runbook for:
+
+- outage triage
+- evidence capture
+- rollback vs hotfix decisions
+- remote Codex-assisted support
+
+## 24. My Final Recommendation For Your First Rollout
+
+If this is your first production deployment, I recommend:
+
+1. **Ubuntu + MariaDB**
+2. **one staging instance on the same VPS**
+3. **GitHub deploy keys**
+4. **deploy to staging first every time**
+5. **only then deploy to production**
+
+That gives you a setup that is:
+
+- practical
+- not too complex
+- much safer than local-to-production direct jumps
+
+If you want a next step after this guide, the best follow-up would be:
+
+- a ready-to-use **staging service file**
+- a ready-to-use **staging nginx config**
+- a ready-to-use **production env template**
+
+Those are the most helpful pieces to generate next.

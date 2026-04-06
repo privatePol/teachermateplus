@@ -20,6 +20,10 @@ class FeatureSettingsService:
     FACULTY_REMINDER_CENTER_ENABLED_KEY = "FEATURE_FACULTY_REMINDER_CENTER_ENABLED"
     FACULTY_REMINDER_EMAIL_ENABLED_KEY = "FEATURE_FACULTY_REMINDER_EMAIL_ENABLED"
     FACULTY_MEMO_CENTER_ENABLED_KEY = "FEATURE_FACULTY_MEMO_CENTER_ENABLED"
+    LOGIN_LOCKOUT_ENABLED_KEY = "FEATURE_LOGIN_LOCKOUT_ENABLED"
+    LOGIN_LOCKOUT_MAX_ATTEMPTS_KEY = "FEATURE_LOGIN_LOCKOUT_MAX_ATTEMPTS"
+    LOGIN_LOCKOUT_WINDOW_MINUTES_KEY = "FEATURE_LOGIN_LOCKOUT_WINDOW_MINUTES"
+    LOGIN_LOCKOUT_DURATION_MINUTES_KEY = "FEATURE_LOGIN_LOCKOUT_DURATION_MINUTES"
     GRADE_PREDICTION_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_ENABLED"
     GRADE_PREDICTION_ROLE_CODES_KEY = "FEATURE_GRADE_PREDICTION_ROLE_CODES"
     GRADE_PREDICTION_WHAT_IF_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_WHAT_IF_ENABLED"
@@ -213,6 +217,52 @@ class FeatureSettingsService:
                 tenant_id=tenant_id,
                 default=default,
             )
+        )
+
+    @classmethod
+    def is_login_lockout_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.LOGIN_LOCKOUT_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def get_login_lockout_max_attempts(cls, *, tenant_id: int | None, default: int = 5) -> int:
+        return cls._positive_int(
+            SystemSettingService.get(
+                cls.LOGIN_LOCKOUT_MAX_ATTEMPTS_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            ),
+            default=default,
+            minimum=1,
+        )
+
+    @classmethod
+    def get_login_lockout_window_minutes(cls, *, tenant_id: int | None, default: int = 15) -> int:
+        return cls._positive_int(
+            SystemSettingService.get(
+                cls.LOGIN_LOCKOUT_WINDOW_MINUTES_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            ),
+            default=default,
+            minimum=1,
+        )
+
+    @classmethod
+    def get_login_lockout_duration_minutes(cls, *, tenant_id: int | None, default: int = 15) -> int:
+        return cls._positive_int(
+            SystemSettingService.get(
+                cls.LOGIN_LOCKOUT_DURATION_MINUTES_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            ),
+            default=default,
+            minimum=1,
         )
 
     @classmethod

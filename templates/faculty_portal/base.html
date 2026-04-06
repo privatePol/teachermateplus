@@ -264,6 +264,14 @@
           <span class="sidebar-label">My Classes</span>
         </a>
         <a
+          href="{% url 'faculty_portal:student_at_risk_monitor' %}"
+          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:student_at_risk_monitor' %}active{% endif %}"
+          title="Students At-Risk Monitor"
+        >
+          <span class="sidebar-icon">&#9888;</span>
+          <span class="sidebar-label">Students At-Risk Monitor</span>
+        </a>
+        <a
           href="{% url 'faculty_portal:my_courses' %}?archived=1"
           class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:my_courses' and request.GET.archived == '1' %}active{% endif %}"
           title="Archived Classes"
@@ -272,6 +280,7 @@
           <span class="sidebar-label">Archived Classes</span>
           <span class="sidebar-sub">Archive</span>
         </a>
+        <div class="faculty-nav-group-title sidebar-label">Reminders and Notes</div>
         <a
           href="{% url 'faculty_portal:reminder_center' %}"
           class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:reminder_center' %}active{% endif %}"
@@ -287,14 +296,6 @@
         >
           <span class="sidebar-icon">&#128221;</span>
           <span class="sidebar-label">Notes</span>
-        </a>
-        <a
-          href="{% url 'faculty_portal:student_at_risk_monitor' %}"
-          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:student_at_risk_monitor' %}active{% endif %}"
-          title="Student At-Risk Monitor"
-        >
-          <span class="sidebar-icon">&#9888;</span>
-          <span class="sidebar-label">At-Risk Monitor</span>
         </a>
       </div>
     </aside>

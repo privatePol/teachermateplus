@@ -41,6 +41,81 @@ class Term(TimeStampedModel, ActivatableModel):
         return f"{self.academic_year.code}:{self.code}"
 
 
+class TenantTermGradingPeriod(TimeStampedModel, ActivatableModel):
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="term_grading_periods",
+    )
+    term = models.ForeignKey(
+        "academics.Term",
+        on_delete=models.PROTECT,
+        related_name="grading_periods",
+    )
+    code = models.CharField(max_length=50)
+    name = models.CharField(max_length=120)
+    sequence_no = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        db_table = "tenant_term_grading_periods"
+        ordering = ["tenant", "term", "sequence_no", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "term", "code"],
+                name="uq_term_grading_periods_term_code",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.term.code}:{self.code}"
+
+
+class ActiveGradingPeriodSetting(TimeStampedModel, ActivatableModel):
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="active_grading_period_settings",
+    )
+    campus = models.ForeignKey(
+        "tenants.Campus",
+        on_delete=models.PROTECT,
+        related_name="active_grading_period_settings",
+    )
+    term = models.ForeignKey(
+        "academics.Term",
+        on_delete=models.PROTECT,
+        related_name="active_grading_period_settings",
+    )
+    period = models.ForeignKey(
+        "academics.TenantTermGradingPeriod",
+        on_delete=models.PROTECT,
+        related_name="active_settings",
+    )
+    set_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        related_name="set_active_grading_periods",
+        blank=True,
+        null=True,
+    )
+    set_at = models.DateTimeField(auto_now=True)
+    auto_advanced_from_deadline = models.BooleanField(default=False)
+    remarks = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = "active_grading_period_settings"
+        ordering = ["tenant", "campus", "term"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "campus", "term"],
+                name="uq_active_grading_period_settings_scope",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.campus.code}:{self.term.code}:{self.period.code}"
+
+
 class Course(TimeStampedModel, ActivatableModel):
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="courses")
     campus = models.ForeignKey(

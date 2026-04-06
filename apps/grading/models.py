@@ -126,6 +126,124 @@ class TemplateHotfixRequest(TimeStampedModel):
         return f"{self.template.code}:{self.apply_mode}:{self.status}"
 
 
+class GradingTemplateApprovalWorkflow(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="grading_template_approval_workflows",
+    )
+    template = models.ForeignKey(
+        "grading.GradingTemplate",
+        on_delete=models.PROTECT,
+        related_name="approval_workflows",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    submitted_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="submitted_grading_template_workflows",
+    )
+    submitted_at = models.DateTimeField()
+    current_step_no = models.PositiveIntegerField(default=1)
+    completed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "grading_template_approval_workflows"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.template.code}:{self.status}:{self.current_step_no}"
+
+
+class GradingTemplateApprovalStep(TimeStampedModel):
+    class Status(models.TextChoices):
+        QUEUED = "QUEUED", "Queued"
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+        SKIPPED = "SKIPPED", "Skipped"
+
+    workflow = models.ForeignKey(
+        "grading.GradingTemplateApprovalWorkflow",
+        on_delete=models.CASCADE,
+        related_name="steps",
+    )
+    step_no = models.PositiveIntegerField()
+    step_code = models.CharField(max_length=40)
+    step_label = models.CharField(max_length=120)
+    role_codes_json = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    acted_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="acted_grading_template_approval_steps",
+    )
+    acted_at = models.DateTimeField(blank=True, null=True)
+    remarks = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = "grading_template_approval_steps"
+        ordering = ["workflow", "step_no"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workflow", "step_no"],
+                name="uq_template_approval_steps_workflow_step",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.workflow.template.code}:step{self.step_no}:{self.status}"
+
+
+class TemplateHotfixWorkflowStep(TimeStampedModel):
+    class Status(models.TextChoices):
+        QUEUED = "QUEUED", "Queued"
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+        SKIPPED = "SKIPPED", "Skipped"
+
+    hotfix_request = models.ForeignKey(
+        "grading.TemplateHotfixRequest",
+        on_delete=models.CASCADE,
+        related_name="workflow_steps",
+    )
+    step_no = models.PositiveIntegerField()
+    step_code = models.CharField(max_length=40)
+    step_label = models.CharField(max_length=120)
+    role_codes_json = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    acted_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="acted_template_hotfix_steps",
+    )
+    acted_at = models.DateTimeField(blank=True, null=True)
+    remarks = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = "template_hotfix_workflow_steps"
+        ordering = ["hotfix_request", "step_no"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["hotfix_request", "step_no"],
+                name="uq_template_hotfix_steps_request_step",
+            ),
+        ]
+
+    def __str__(self):
+        return f"hotfix:{self.hotfix_request_id}:step{self.step_no}:{self.status}"
+
+
 class GradingTemplatePeriod(TimeStampedModel, ActivatableModel):
     template = models.ForeignKey(
         "grading.GradingTemplate",

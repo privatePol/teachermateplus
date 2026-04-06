@@ -10,12 +10,12 @@
 
 {% if is_correction_active and active_correction_request %}
 <div class="alert alert-warning">
-  Correction window is active for request #{{ active_correction_request.id }}.
-  Apply scoped edits in Activities/Attendance, then finalize below.
+  A governed correction window is active for request #{{ active_correction_request.id }}.
+  This path is used only when a correction still requires controlled manual updates after approval.
   {% if active_correction_request.unlock_window %}
     Valid until <strong>{{ active_correction_request.unlock_window.end_at|date:"Y-m-d H:i" }}</strong>.
   {% endif %}
-  If not finalized within the validity window, the request is marked <strong>LAPSED</strong> and a new request is required.
+  If it is not finalized within the validity window, the request is marked <strong>LAPSED</strong> and a new request is required.
 </div>
 {% elif can_self_reopen_before_deadline %}
 <div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-3">
@@ -45,8 +45,8 @@
 
 {% if not is_correction_active %}
 <div class="alert alert-info">
-  Approved score corrections are automatically posted to the gradebook and recomputed by EduGradesPro.
-  No manual re-encoding is needed after approval.
+  Direct score correction petitions are automatically posted to the gradebook and recomputed by EduGradesPro after approval.
+  No manual re-encoding or finalize step is needed for that direct petition flow.
 </div>
 {% endif %}
 
@@ -124,10 +124,12 @@
               </a>
                 {% endif %}
               {% endif %}
-              {% if req.status == "APPROVED" and req.unlock_window and req.unlock_window.is_active and not req.unlock_window.is_consumed %}
+              {% if req.status == "CLOSED" and req.is_direct_score_request %}
+              <span class="badge text-bg-success">Auto-applied and closed</span>
+              {% elif req.status == "APPROVED" and req.requires_manual_finalize and req.unlock_window and req.unlock_window.is_active and not req.unlock_window.is_consumed %}
               <form method="post" action="{% url 'faculty_portal:period_correction_finalize' offering.id period.id req.id %}">
                 {% csrf_token %}
-                <button class="btn btn-sm btn-success" type="submit">Finalize & Re-lock</button>
+                <button class="btn btn-sm btn-success" type="submit">Finalize Manual Window</button>
               </form>
               {% endif %}
             </div>
@@ -182,7 +184,8 @@
           <strong>Step 1:</strong> Select <strong>all affected students</strong> first.<br>
           <strong>Step 2:</strong> Select <strong>all affected grading items</strong> next.<br>
           <strong>Step 3:</strong> Encode the corrected values below.<br>
-          <strong>Step 4:</strong> Add your justification and submit the request for approval.
+          <strong>Step 4:</strong> Add your justification and submit the request for approval.<br>
+          <strong>Step 5:</strong> Once approved, EduGradesPro applies the corrected values automatically.
         </div>
       </div>
       {{ form.correction_payload }}

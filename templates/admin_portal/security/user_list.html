@@ -3,9 +3,14 @@
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Users</h2>
-  {% if "users.create" in effective_permissions %}
-  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:user_create' %}">Add User</a>
-  {% endif %}
+  <div class="d-flex gap-2">
+    {% if "users.read" in effective_permissions %}
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:login_lockout_list' %}">Login Lockouts</a>
+    {% endif %}
+    {% if "users.create" in effective_permissions %}
+    <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:user_create' %}">Add User</a>
+    {% endif %}
+  </div>
 </div>
 <form class="row g-2 mb-3">
   <div class="col-md-2">

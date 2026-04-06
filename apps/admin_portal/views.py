@@ -24,8 +24,10 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 
+from apps.accounts.models import PortalLoginLockoutState
 from apps.admin_portal.forms import (
     ActiveAcademicTermSettingForm,
+    ActiveGradingPeriodSettingForm,
     AcademicYearForm,
     CampusForm,
     ConfigurableFeatureSettingForm,
@@ -59,6 +61,8 @@ from apps.admin_portal.forms import (
     SectionForm,
     StudentForm,
     TenantForm,
+    TenantTermGradingPeriodForm,
+    TemplateGovernanceSettingForm,
     TemplateHotfixRequestForm,
     TemplateHotfixReviewForm,
     TenantGradingProfileForm,
@@ -70,7 +74,16 @@ from apps.admin_portal.forms import (
 )
 from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
 from apps.admin_portal.services import AdminScopeService, model_before_after
-from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.academics.models import (
+    AcademicYear,
+    ActiveGradingPeriodSetting,
+    Course,
+    CourseOffering,
+    FacultyAssignment,
+    Section,
+    TenantTermGradingPeriod,
+    Term,
+)
 from apps.auditlog.models import AuditLog
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
@@ -108,6 +121,7 @@ from apps.grading.services import (
     GradingGovernanceService,
     GradingTemplateTestingCalculatorService,
     GradingTemplateService,
+    TemplateGovernanceWorkflowService,
     TemplateHotfixService,
 )
 from apps.imports.models import ImportBatch
@@ -361,6 +375,25 @@ def _assignment_counts(queryset, *, now=None):
     }
 
 
+def _scoped_login_lockout_queryset(request):
+    scope_tenant_ids = getattr(request, "scope", {}).get("tenant_ids", [])
+    scope_campus_ids = getattr(request, "scope", {}).get("campus_ids", [])
+    queryset = PortalLoginLockoutState.objects.select_related(
+        "user",
+        "user__default_tenant",
+        "user__default_campus",
+        "user__default_department",
+    ).order_by("-updated_at", "portal_code", "username")
+    if request.user.is_superuser:
+        return queryset
+    scope_filter = Q(user__isnull=True)
+    if scope_tenant_ids:
+        scope_filter |= Q(user__default_tenant_id__in=scope_tenant_ids)
+    if scope_campus_ids:
+        scope_filter |= Q(user__default_campus_id__in=scope_campus_ids)
+    return queryset.filter(scope_filter)
+
+
 def _faculty_assignment_scope_snapshot(assignment):
     campus = getattr(assignment.faculty_user, "default_campus", None) or assignment.campus or assignment.offering.campus
     department = (
@@ -459,10 +492,23 @@ def dashboard_view(request):
 
     active_academic_year = None
     active_term = None
+    active_grading_period = None
+    active_grading_period_auto_advance = False
     if current_tenant_id:
         active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(
             tenant_id=current_tenant_id
         )
+        if current_campus_id and active_term:
+            active_grading_period = AcademicGovernanceService.resolve_active_grading_period(
+                tenant_id=current_tenant_id,
+                campus_id=current_campus_id,
+                term_id=active_term.id,
+                now=now,
+            )
+            active_grading_period_auto_advance = AcademicGovernanceService.is_active_grading_period_auto_advance_enabled(
+                tenant_id=current_tenant_id,
+                default=True,
+            )
 
     import_stats = None
     if has_import_read:
@@ -536,6 +582,8 @@ def dashboard_view(request):
         "active_user_count": len(active_user_sessions),
         "active_academic_year": active_academic_year,
         "active_term": active_term,
+        "active_grading_period": active_grading_period,
+        "active_grading_period_auto_advance": active_grading_period_auto_advance,
         "has_grading_period_lock": has_grading_period_lock,
         "lock_monitor": lock_monitor,
     }
@@ -1173,6 +1221,7 @@ def grading_analytics_view(request):
 def admin_guide_view(request):
     context = {
         "title": "Admin Portal User Guide",
+        "show_production_incident_response": _user_has_role_code(request.user, "SUPER_ADMIN") or request.user.is_superuser,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/guide.html", context)
@@ -1254,6 +1303,266 @@ def active_academic_term_settings_view(request):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("system_settings.update")
+def active_grading_period_settings_view(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    if not tenant_id:
+        messages.error(request, "Select a tenant scope first.")
+        return _redirect_back_or_default(request, "admin_portal:dashboard")
+
+    campus_queryset = AdminScopeService.scoped_campuses(request).filter(tenant_id=tenant_id).order_by("name")
+    term_queryset = (
+        AdminScopeService.scoped_terms(request)
+        .filter(tenant_id=tenant_id)
+        .select_related("academic_year")
+        .order_by("-academic_year__start_date", "sequence_no", "name")
+    )
+    scope_campus_id = getattr(request, "scope", {}).get("campus_id")
+    _active_ay, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
+    selected_campus_id = _safe_int(request.GET.get("campus_id")) or scope_campus_id
+    selected_term_id = _safe_int(request.GET.get("term_id")) or (active_term.id if active_term else None)
+    selected_campus = campus_queryset.filter(id=selected_campus_id).first()
+    selected_term = term_queryset.filter(id=selected_term_id).first()
+
+    period_queryset = TenantTermGradingPeriod.objects.none()
+    if selected_term:
+        period_queryset = AcademicGovernanceService.get_term_grading_periods(
+            tenant_id=tenant_id,
+            term_id=selected_term.id,
+        )
+
+    active_setting = None
+    if selected_campus and selected_term:
+        active_setting = AcademicGovernanceService.resolve_active_grading_period(
+            tenant_id=tenant_id,
+            campus_id=selected_campus.id,
+            term_id=selected_term.id,
+            now=timezone.now(),
+        )
+
+    auto_advance_enabled = AcademicGovernanceService.is_active_grading_period_auto_advance_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
+
+    active_form = ActiveGradingPeriodSettingForm(
+        prefix="active",
+        campus_queryset=campus_queryset,
+        term_queryset=term_queryset,
+        period_queryset=period_queryset,
+        initial={
+            "campus": selected_campus.id if selected_campus else None,
+            "term": selected_term.id if selected_term else None,
+            "period": active_setting.period_id if active_setting else None,
+            "remarks": active_setting.remarks if active_setting else None,
+            "auto_advance_enabled": auto_advance_enabled,
+        },
+    )
+    period_form = TenantTermGradingPeriodForm(prefix="period")
+    _style_form(active_form)
+    _style_form(period_form)
+
+    if request.method == "POST":
+        action = request.POST.get("form_action")
+        if action == "save_active_period":
+            active_form = ActiveGradingPeriodSettingForm(
+                request.POST,
+                prefix="active",
+                campus_queryset=campus_queryset,
+                term_queryset=term_queryset,
+                period_queryset=AcademicGovernanceService.get_term_grading_periods(
+                    tenant_id=tenant_id,
+                    term_id=_safe_int(request.POST.get("active-term")),
+                ),
+            )
+            _style_form(active_form)
+            if active_form.is_valid():
+                selected_campus = active_form.cleaned_data["campus"]
+                selected_term = active_form.cleaned_data["term"]
+                selected_period = active_form.cleaned_data.get("period")
+                auto_advance_enabled = active_form.cleaned_data.get("auto_advance_enabled", False)
+                current_setting = AcademicGovernanceService.resolve_active_grading_period(
+                    tenant_id=tenant_id,
+                    campus_id=selected_campus.id,
+                    term_id=selected_term.id,
+                    now=timezone.now(),
+                )
+                before = {
+                    "campus_code": selected_campus.code,
+                    "term_code": selected_term.code,
+                    "active_period_code": current_setting.period.code if current_setting else None,
+                    "auto_advance_enabled": AcademicGovernanceService.is_active_grading_period_auto_advance_enabled(
+                        tenant_id=tenant_id,
+                        default=True,
+                    ),
+                }
+                AcademicGovernanceService.set_active_grading_period_auto_advance_enabled(
+                    tenant_id=tenant_id,
+                    enabled=auto_advance_enabled,
+                )
+                setting = AcademicGovernanceService.set_active_grading_period(
+                    tenant_id=tenant_id,
+                    campus=selected_campus,
+                    term=selected_term,
+                    period=selected_period,
+                    actor=request.user,
+                    remarks=active_form.cleaned_data.get("remarks"),
+                    auto_advanced_from_deadline=False,
+                )
+                after = {
+                    "campus_code": selected_campus.code,
+                    "term_code": selected_term.code,
+                    "active_period_code": setting.period.code if setting else None,
+                    "auto_advance_enabled": auto_advance_enabled,
+                }
+                AuditService.log_event(
+                    action="UPDATE_SYSTEM_SETTING",
+                    portal="ADMIN",
+                    entity_type="ActiveGradingPeriodSetting",
+                    entity_id=f"tenant:{tenant_id}:campus:{selected_campus.id}:term:{selected_term.id}",
+                    actor=request.user,
+                    tenant=tenant_id,
+                    campus=selected_campus.id,
+                    before_data=before,
+                    after_data=after,
+                    metadata={
+                        "setting_keys": [AcademicGovernanceService.ACTIVE_GRADING_PERIOD_AUTO_ADVANCE_KEY],
+                    },
+                    request=request,
+                )
+                if setting:
+                    messages.success(
+                        request,
+                        f"Active grading period set to {setting.period.name} ({setting.period.code}) for {selected_campus.code} / {selected_term.code}.",
+                    )
+                else:
+                    messages.success(request, "Active grading period cleared for the selected campus and term.")
+                return redirect(
+                    f"{reverse('admin_portal:active_grading_period_settings')}?{urlencode({'campus_id': selected_campus.id, 'term_id': selected_term.id})}"
+                )
+        elif action == "add_period":
+            period_form = TenantTermGradingPeriodForm(request.POST, prefix="period")
+            _style_form(period_form)
+            selected_term = term_queryset.filter(id=_safe_int(request.POST.get("selected_term_id"))).first()
+            selected_campus = campus_queryset.filter(id=_safe_int(request.POST.get("selected_campus_id"))).first() or selected_campus
+            if not selected_term:
+                messages.error(request, "Select a term first before adding a grading period.")
+            elif period_form.is_valid():
+                period_row = period_form.save(commit=False)
+                period_row.tenant_id = tenant_id
+                period_row.term = selected_term
+                duplicate_exists = TenantTermGradingPeriod.objects.filter(
+                    tenant_id=tenant_id,
+                    term=selected_term,
+                    code__iexact=period_row.code,
+                ).exclude(id=period_row.id).exists()
+                if duplicate_exists:
+                    period_form.add_error("code", "This period code already exists for the selected term.")
+                else:
+                    period_row.save()
+                    AuditService.log_event(
+                        action="CREATE",
+                        portal="ADMIN",
+                        entity_type="TenantTermGradingPeriod",
+                        entity_id=period_row.id,
+                        actor=request.user,
+                        tenant=tenant_id,
+                        campus=selected_campus.id if selected_campus else None,
+                        after_data=model_before_after(period_row),
+                        request=request,
+                    )
+                    messages.success(
+                        request,
+                        f"Grading period {period_row.name} ({period_row.code}) added for {selected_term.code}.",
+                    )
+                    redirect_params = {"term_id": selected_term.id}
+                    if selected_campus:
+                        redirect_params["campus_id"] = selected_campus.id
+                    return redirect(f"{reverse('admin_portal:active_grading_period_settings')}?{urlencode(redirect_params)}")
+        elif action == "seed_standard_periods":
+            selected_term = term_queryset.filter(id=_safe_int(request.POST.get("selected_term_id"))).first()
+            selected_campus = campus_queryset.filter(id=_safe_int(request.POST.get("selected_campus_id"))).first() or selected_campus
+            if not selected_term:
+                messages.error(request, "Select a term first before loading the standard period set.")
+            else:
+                created_rows = AcademicGovernanceService.seed_standard_term_periods(
+                    tenant_id=tenant_id,
+                    term=selected_term,
+                )
+                if created_rows:
+                    messages.success(
+                        request,
+                        f"Loaded {len(created_rows)} standard grading period(s) for {selected_term.code}.",
+                    )
+                else:
+                    messages.info(request, "All standard grading periods already exist for the selected term.")
+                redirect_params = {"term_id": selected_term.id}
+                if selected_campus:
+                    redirect_params["campus_id"] = selected_campus.id
+                return redirect(f"{reverse('admin_portal:active_grading_period_settings')}?{urlencode(redirect_params)}")
+        elif action == "toggle_period":
+            period_row = get_object_or_404(
+                TenantTermGradingPeriod,
+                id=_safe_int(request.POST.get("period_id")),
+                tenant_id=tenant_id,
+            )
+            before = model_before_after(period_row)
+            period_row.is_active = not period_row.is_active
+            period_row.save(update_fields=["is_active", "updated_at"])
+            AuditService.log_event(
+                action="UPDATE",
+                portal="ADMIN",
+                entity_type="TenantTermGradingPeriod",
+                entity_id=period_row.id,
+                actor=request.user,
+                tenant=tenant_id,
+                campus=_safe_int(request.POST.get("selected_campus_id")),
+                before_data=before,
+                after_data=model_before_after(period_row),
+                request=request,
+            )
+            messages.success(
+                request,
+                f"Grading period {period_row.name} is now {'active' if period_row.is_active else 'inactive'}.",
+            )
+            redirect_params = {"term_id": period_row.term_id}
+            selected_campus_id = _safe_int(request.POST.get("selected_campus_id"))
+            if selected_campus_id:
+                redirect_params["campus_id"] = selected_campus_id
+            return redirect(f"{reverse('admin_portal:active_grading_period_settings')}?{urlencode(redirect_params)}")
+
+    active_period_rows = list(period_queryset)
+    next_period = None
+    if active_setting:
+        next_period = (
+            TenantTermGradingPeriod.objects.filter(
+                tenant_id=tenant_id,
+                term_id=selected_term.id,
+                is_active=True,
+                sequence_no__gt=active_setting.period.sequence_no,
+            )
+            .order_by("sequence_no", "id")
+            .first()
+        )
+
+    context = {
+        "title": "Active Grading Period",
+        "active_form": active_form,
+        "period_form": period_form,
+        "campus_options": campus_queryset,
+        "term_options": term_queryset,
+        "selected_campus": selected_campus,
+        "selected_term": selected_term,
+        "active_setting": active_setting,
+        "active_period_rows": active_period_rows,
+        "next_period": next_period,
+        "auto_advance_enabled": auto_advance_enabled,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/tools/active_grading_period.html", context)
 
 
 @portal_required("ADMIN")
@@ -1498,11 +1807,86 @@ def document_print_settings_view(request):
 @permission_required("system_settings.update")
 def configurable_features_settings_view(request):
     tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    current_campus_id = getattr(request, "scope", {}).get("campus_id")
     if not tenant_id:
         messages.error(request, "Select a tenant scope first.")
         return _redirect_back_or_default(request, "admin_portal:dashboard")
 
     campus_queryset = AdminScopeService.scoped_campuses(request).filter(tenant_id=tenant_id).order_by("code", "name")
+    term_queryset = AdminScopeService.scoped_terms(request).filter(tenant_id=tenant_id).order_by(
+        "-academic_year__start_date",
+        "sequence_no",
+    )
+    faculty_queryset = (
+        User.objects.filter(
+            id__in=AdminScopeService.scoped_faculty_users(request),
+            is_active=True,
+        )
+        .order_by("last_name", "first_name", "username")
+    )
+    _active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
+    selected_term_id = _safe_int(
+        request.POST.get("class_master_list_term") if request.method == "POST" else request.GET.get("term_id")
+    ) or (active_term.id if active_term else None)
+    selected_term = term_queryset.filter(id=selected_term_id).first()
+    selected_faculty_id = _safe_int(
+        request.POST.get("class_master_list_faculty") if request.method == "POST" else request.GET.get("faculty_user_id")
+    )
+    selected_faculty = faculty_queryset.filter(id=selected_faculty_id).first()
+    offering_queryset = AdminScopeService.scoped_course_offerings(request).filter(tenant_id=tenant_id)
+    if current_campus_id:
+        offering_queryset = offering_queryset.filter(campus_id=current_campus_id)
+    if selected_term:
+        offering_queryset = offering_queryset.filter(term_id=selected_term.id)
+    else:
+        offering_queryset = offering_queryset.none()
+    if selected_faculty:
+        offering_queryset = offering_queryset.filter(
+            faculty_assignments__faculty_user_id=selected_faculty.id,
+            faculty_assignments__is_active=True,
+        )
+    offering_queryset = offering_queryset.prefetch_related(
+        Prefetch(
+            "faculty_assignments",
+            queryset=FacultyAssignment.objects.filter(is_active=True)
+            .select_related("faculty_user")
+            .order_by("faculty_user__last_name", "faculty_user__first_name"),
+        )
+    ).distinct()
+
+    def _offering_with_faculty_label(obj):
+        faculty_names = []
+        faculty_assignment_manager = getattr(obj, "faculty_assignments", None)
+        assignments = faculty_assignment_manager.all() if hasattr(faculty_assignment_manager, "all") else []
+        for assignment in assignments:
+            faculty_user = getattr(assignment, "faculty_user", None)
+            if not faculty_user:
+                continue
+            faculty_name = (getattr(faculty_user, "full_name", "") or "").strip() or faculty_user.username
+            if faculty_name and faculty_name not in faculty_names:
+                faculty_names.append(faculty_name)
+        faculty_suffix = f" ({', '.join(faculty_names)})" if faculty_names else ""
+        return (
+            f"{obj.course.title} ({obj.course.code}) | "
+            f"{obj.section.name} ({obj.section.code})"
+            f"{faculty_suffix}"
+        )
+
+    offering_labels = {offering.id: _offering_with_faculty_label(offering) for offering in offering_queryset}
+    offering_queryset = offering_queryset.order_by(
+        "course__code",
+        "section__code",
+        "id",
+    )
+    if request.method == "POST":
+        selected_offering_ids = [
+            offering_id
+            for offering_id in request.POST.getlist("class_master_list_offering")
+            if _safe_int(offering_id)
+        ]
+    else:
+        selected_offering_ids = request.GET.getlist("offering_id")
+    selected_offerings = offering_queryset.filter(id__in=selected_offering_ids)
     role_queryset = Role.objects.filter(is_active=True).order_by("name")
 
     current_report_enabled = FeatureSettingsService.is_correction_official_report_enabled(
@@ -1546,6 +1930,31 @@ def configurable_features_settings_view(request):
     current_faculty_memo_center_enabled = FeatureSettingsService.is_faculty_memo_center_enabled(
         tenant_id=tenant_id,
         default=True,
+    )
+    current_enrollment_ownership_mode = EnrollmentService.get_enrollment_mode(tenant_id)
+    current_enrollment_override_map = EnrollmentService.get_enrollment_mode_overrides(tenant_id)
+    selected_override_modes = {
+        current_enrollment_override_map.get(str(offering.id), "") for offering in selected_offerings
+    }
+    if len(selected_override_modes) == 1:
+        current_selected_offering_override_mode = selected_override_modes.pop()
+    else:
+        current_selected_offering_override_mode = ""
+    current_login_lockout_enabled = FeatureSettingsService.is_login_lockout_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_login_lockout_max_attempts = FeatureSettingsService.get_login_lockout_max_attempts(
+        tenant_id=tenant_id,
+        default=5,
+    )
+    current_login_lockout_window_minutes = FeatureSettingsService.get_login_lockout_window_minutes(
+        tenant_id=tenant_id,
+        default=15,
+    )
+    current_login_lockout_duration_minutes = FeatureSettingsService.get_login_lockout_duration_minutes(
+        tenant_id=tenant_id,
+        default=15,
     )
     current_response_window_days = FeatureSettingsService.get_faculty_assignment_response_window_days(
         tenant_id=tenant_id,
@@ -1607,6 +2016,15 @@ def configurable_features_settings_view(request):
             "faculty_reminder_center_enabled": current_faculty_reminder_center_enabled,
             "faculty_reminder_email_enabled": current_faculty_reminder_email_enabled,
             "faculty_memo_center_enabled": current_faculty_memo_center_enabled,
+            "enrollment_ownership_mode": current_enrollment_ownership_mode,
+            "class_master_list_term": selected_term.id if selected_term else None,
+            "class_master_list_faculty": selected_faculty.id if selected_faculty else None,
+            "class_master_list_offering": [offering.id for offering in selected_offerings],
+            "class_master_list_override_mode": current_selected_offering_override_mode,
+            "login_lockout_enabled": current_login_lockout_enabled,
+            "login_lockout_max_attempts": current_login_lockout_max_attempts,
+            "login_lockout_window_minutes": current_login_lockout_window_minutes,
+            "login_lockout_duration_minutes": current_login_lockout_duration_minutes,
             "faculty_assignment_response_window_days": current_response_window_days,
             "faculty_assignment_first_reminder_days": current_first_reminder_days,
             "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
@@ -1623,8 +2041,12 @@ def configurable_features_settings_view(request):
         role_queryset=role_queryset,
         campus_queryset=campus_queryset,
         campus_initial_map=current_campus_recipients,
+        term_queryset=term_queryset,
+        faculty_queryset=faculty_queryset,
+        offering_queryset=offering_queryset,
     )
     _style_form(form)
+    form.fields["class_master_list_offering"].label_from_instance = lambda obj: offering_labels.get(obj.id, obj.course.code)
 
     if request.method == "POST" and form.is_valid():
         selected_submission_email_role_codes = list(
@@ -1641,6 +2063,17 @@ def configurable_features_settings_view(request):
         )
         selected_default_recipients = form.cleaned_data["correction_registrar_default_recipient_list"]
         selected_campus_recipients = form.cleaned_data["correction_registrar_campus_recipient_map"]
+        selected_class_override_term = form.cleaned_data.get("class_master_list_term")
+        selected_class_override_faculty = form.cleaned_data.get("class_master_list_faculty")
+        selected_class_override_offerings = list(form.cleaned_data.get("class_master_list_offering") or [])
+        selected_class_override_mode = form.cleaned_data.get("class_master_list_override_mode") or ""
+        updated_enrollment_override_map = dict(current_enrollment_override_map)
+        for selected_class_override_offering in selected_class_override_offerings:
+            override_key = str(selected_class_override_offering.id)
+            if selected_class_override_mode in {EnrollmentService.ADMIN_ONLY, EnrollmentService.FACULTY_ALLOWED}:
+                updated_enrollment_override_map[override_key] = selected_class_override_mode
+            else:
+                updated_enrollment_override_map.pop(override_key, None)
 
         SystemSettingService.set(
             FeatureSettingsService.CORRECTION_OFFICIAL_REPORT_ENABLED_KEY,
@@ -1731,6 +2164,48 @@ def configurable_features_settings_view(request):
             bool(form.cleaned_data["faculty_memo_center_enabled"]),
             tenant_id=tenant_id,
             value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            EnrollmentService.MODE_KEY,
+            str(form.cleaned_data["enrollment_ownership_mode"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            EnrollmentService.MODE_OVERRIDE_MAP_KEY,
+            updated_enrollment_override_map,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.LOGIN_LOCKOUT_ENABLED_KEY,
+            bool(form.cleaned_data["login_lockout_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.LOGIN_LOCKOUT_MAX_ATTEMPTS_KEY,
+            int(form.cleaned_data["login_lockout_max_attempts"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.LOGIN_LOCKOUT_WINDOW_MINUTES_KEY,
+            int(form.cleaned_data["login_lockout_window_minutes"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.LOGIN_LOCKOUT_DURATION_MINUTES_KEY,
+            int(form.cleaned_data["login_lockout_duration_minutes"]),
+            tenant_id=tenant_id,
+            value_type="INT",
             is_active=True,
         )
         SystemSettingService.set(
@@ -1840,6 +2315,12 @@ def configurable_features_settings_view(request):
                 "faculty_reminder_center_enabled": current_faculty_reminder_center_enabled,
                 "faculty_reminder_email_enabled": current_faculty_reminder_email_enabled,
                 "faculty_memo_center_enabled": current_faculty_memo_center_enabled,
+                "enrollment_ownership_mode": current_enrollment_ownership_mode,
+                "enrollment_ownership_mode_by_offering": current_enrollment_override_map,
+                "login_lockout_enabled": current_login_lockout_enabled,
+                "login_lockout_max_attempts": current_login_lockout_max_attempts,
+                "login_lockout_window_minutes": current_login_lockout_window_minutes,
+                "login_lockout_duration_minutes": current_login_lockout_duration_minutes,
                 "faculty_assignment_response_window_days": current_response_window_days,
                 "faculty_assignment_first_reminder_days": current_first_reminder_days,
                 "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
@@ -1871,6 +2352,23 @@ def configurable_features_settings_view(request):
                 "faculty_reminder_center_enabled": bool(form.cleaned_data["faculty_reminder_center_enabled"]),
                 "faculty_reminder_email_enabled": bool(form.cleaned_data["faculty_reminder_email_enabled"]),
                 "faculty_memo_center_enabled": bool(form.cleaned_data["faculty_memo_center_enabled"]),
+                "enrollment_ownership_mode": str(form.cleaned_data["enrollment_ownership_mode"]),
+                "enrollment_ownership_mode_by_offering": updated_enrollment_override_map,
+                "selected_class_master_list_term": selected_class_override_term.code if selected_class_override_term else None,
+                "selected_class_master_list_faculty": (
+                    selected_class_override_faculty.full_name or selected_class_override_faculty.username
+                    if selected_class_override_faculty
+                    else None
+                ),
+                "selected_class_master_list_offerings": [
+                    offering_labels.get(selected_class_override_offering.id, selected_class_override_offering.course.code)
+                    for selected_class_override_offering in selected_class_override_offerings
+                ],
+                "selected_class_master_list_override_mode": selected_class_override_mode or "INHERIT_DEFAULT",
+                "login_lockout_enabled": bool(form.cleaned_data["login_lockout_enabled"]),
+                "login_lockout_max_attempts": int(form.cleaned_data["login_lockout_max_attempts"]),
+                "login_lockout_window_minutes": int(form.cleaned_data["login_lockout_window_minutes"]),
+                "login_lockout_duration_minutes": int(form.cleaned_data["login_lockout_duration_minutes"]),
                 "faculty_assignment_response_window_days": int(form.cleaned_data["faculty_assignment_response_window_days"]),
                 "faculty_assignment_first_reminder_days": int(form.cleaned_data["faculty_assignment_first_reminder_days"]),
                 "faculty_assignment_repeat_reminder_days": int(form.cleaned_data["faculty_assignment_repeat_reminder_days"]),
@@ -1899,6 +2397,12 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.FACULTY_REMINDER_CENTER_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_REMINDER_EMAIL_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_MEMO_CENTER_ENABLED_KEY,
+                    EnrollmentService.MODE_KEY,
+                    EnrollmentService.MODE_OVERRIDE_MAP_KEY,
+                    FeatureSettingsService.LOGIN_LOCKOUT_ENABLED_KEY,
+                    FeatureSettingsService.LOGIN_LOCKOUT_MAX_ATTEMPTS_KEY,
+                    FeatureSettingsService.LOGIN_LOCKOUT_WINDOW_MINUTES_KEY,
+                    FeatureSettingsService.LOGIN_LOCKOUT_DURATION_MINUTES_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS_KEY,
@@ -1916,16 +2420,385 @@ def configurable_features_settings_view(request):
             request=request,
         )
         messages.success(request, "Configurable features updated.")
-        return _redirect_back_or_default(request, "admin_portal:configurable_features_settings")
+        redirect_url = reverse("admin_portal:configurable_features_settings")
+        redirect_params = {}
+        if selected_class_override_term:
+            redirect_params["term_id"] = selected_class_override_term.id
+        if selected_class_override_faculty:
+            redirect_params["faculty_user_id"] = selected_class_override_faculty.id
+        if selected_class_override_offerings:
+            redirect_params["offering_id"] = [offering.id for offering in selected_class_override_offerings]
+        if redirect_params:
+            redirect_url = f"{redirect_url}?{urlencode(redirect_params, doseq=True)}"
+        return redirect(redirect_url)
 
     context = {
         "title": "Configurable Features",
         "form": form,
         "campus_count": campus_queryset.count(),
         "campus_field_rows": [{"campus": campus, "field": form[field_name]} for field_name, campus in form.campus_fields],
+        "selected_term": selected_term,
+        "selected_faculty": selected_faculty,
+        "class_master_list_offerings": list(offering_queryset),
+        "selected_offerings": list(selected_offerings),
+        "selected_offering_ids": [offering.id for offering in selected_offerings],
+        "selected_offering_override_mode": current_selected_offering_override_mode or "INHERIT_DEFAULT",
+        "current_enrollment_override_map_size": len(current_enrollment_override_map),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/tools/configurable_features.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("system_settings.update")
+def template_governance_settings_view(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    if not tenant_id:
+        messages.error(request, "Select a tenant scope first.")
+        return _redirect_back_or_default(request, "admin_portal:dashboard")
+
+    role_queryset = Role.objects.filter(is_active=True).order_by("name")
+    current_snapshot = TemplateGovernanceWorkflowService.get_workflow_snapshot(tenant_id=tenant_id)
+    current_stage_map = {row["code"]: row["role_codes"] for row in current_snapshot["stages"]}
+
+    form = TemplateGovernanceSettingForm(
+        request.POST or None,
+        initial={
+            "draft_roles": role_queryset.filter(
+                code__in=current_stage_map.get(TemplateGovernanceWorkflowService.STAGE_DRAFT, [])
+            ),
+            "submit_roles": role_queryset.filter(
+                code__in=current_stage_map.get(TemplateGovernanceWorkflowService.STAGE_SUBMIT_FOR_APPROVAL, [])
+            ),
+            "approval_review_roles": role_queryset.filter(
+                code__in=current_stage_map.get(TemplateGovernanceWorkflowService.STAGE_APPROVAL_REVIEW, [])
+            ),
+            "publish_roles": role_queryset.filter(
+                code__in=current_stage_map.get(TemplateGovernanceWorkflowService.STAGE_PUBLISH, [])
+            ),
+            "hotfix_request_roles": role_queryset.filter(
+                code__in=current_stage_map.get(TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST, [])
+            ),
+            "hotfix_review_apply_roles": role_queryset.filter(
+                code__in=current_stage_map.get(TemplateGovernanceWorkflowService.STAGE_HOTFIX_REVIEW_APPLY, [])
+            ),
+            "sequential_approval_enabled": current_snapshot["sequential_template_approval_enabled"],
+            "approval_review_step_roles": role_queryset.filter(
+                code__in=(current_snapshot.get("approval_steps") or [{}])[0].get("role_codes", [])
+            ),
+            "approval_final_step_roles": role_queryset.filter(
+                code__in=(current_snapshot.get("approval_steps") or [{}, {}])[1].get("role_codes", [])
+                if len(current_snapshot.get("approval_steps", [])) > 1
+                else []
+            ),
+            "sequential_hotfix_enabled": current_snapshot["sequential_hotfix_enabled"],
+            "hotfix_review_step_roles": role_queryset.filter(
+                code__in=(current_snapshot.get("hotfix_steps") or [{}])[0].get("role_codes", [])
+            ),
+            "hotfix_apply_step_roles": role_queryset.filter(
+                code__in=(current_snapshot.get("hotfix_steps") or [{}, {}])[1].get("role_codes", [])
+                if len(current_snapshot.get("hotfix_steps", [])) > 1
+                else []
+            ),
+            "require_approval_before_publish": current_snapshot["require_approval_before_publish"],
+            "allow_same_user_submit_review": current_snapshot["allow_same_user_submit_review"],
+            "allow_same_user_review_approve": current_snapshot["allow_same_user_review_approve"],
+            "allow_same_user_review_publish": current_snapshot["allow_same_user_review_publish"],
+            "allow_same_user_hotfix_request_apply": current_snapshot["allow_same_user_hotfix_request_apply"],
+            "allow_same_user_hotfix_review_apply": current_snapshot["allow_same_user_hotfix_review_apply"],
+        },
+        role_queryset=role_queryset,
+    )
+    _style_form(form)
+
+    if request.method == "POST" and form.is_valid():
+        selected_draft_roles = list(form.cleaned_data["draft_roles"].values_list("code", flat=True))
+        selected_submit_roles = list(form.cleaned_data["submit_roles"].values_list("code", flat=True))
+        selected_review_roles = list(form.cleaned_data["approval_review_roles"].values_list("code", flat=True))
+        selected_publish_roles = list(form.cleaned_data["publish_roles"].values_list("code", flat=True))
+        selected_hotfix_request_roles = list(form.cleaned_data["hotfix_request_roles"].values_list("code", flat=True))
+        selected_hotfix_review_apply_roles = list(
+            form.cleaned_data["hotfix_review_apply_roles"].values_list("code", flat=True)
+        )
+        selected_approval_review_step_roles = list(
+            form.cleaned_data["approval_review_step_roles"].values_list("code", flat=True)
+        )
+        selected_approval_final_step_roles = list(
+            form.cleaned_data["approval_final_step_roles"].values_list("code", flat=True)
+        )
+        selected_hotfix_review_step_roles = list(
+            form.cleaned_data["hotfix_review_step_roles"].values_list("code", flat=True)
+        )
+        selected_hotfix_apply_step_roles = list(
+            form.cleaned_data["hotfix_apply_step_roles"].values_list("code", flat=True)
+        )
+
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.STAGE_ROLE_KEYS[TemplateGovernanceWorkflowService.STAGE_DRAFT],
+            selected_draft_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.STAGE_ROLE_KEYS[
+                TemplateGovernanceWorkflowService.STAGE_SUBMIT_FOR_APPROVAL
+            ],
+            selected_submit_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.STAGE_ROLE_KEYS[
+                TemplateGovernanceWorkflowService.STAGE_APPROVAL_REVIEW
+            ],
+            selected_review_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.STAGE_ROLE_KEYS[TemplateGovernanceWorkflowService.STAGE_PUBLISH],
+            selected_publish_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.STAGE_ROLE_KEYS[
+                TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST
+            ],
+            selected_hotfix_request_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.STAGE_ROLE_KEYS[
+                TemplateGovernanceWorkflowService.STAGE_HOTFIX_REVIEW_APPLY
+            ],
+            selected_hotfix_review_apply_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.SEQUENTIAL_APPROVAL_ENABLED_KEY,
+            bool(form.cleaned_data["sequential_approval_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.APPROVAL_REVIEW_STEP_ROLE_CODES_KEY,
+            selected_approval_review_step_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.APPROVAL_FINAL_STEP_ROLE_CODES_KEY,
+            selected_approval_final_step_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.SEQUENTIAL_HOTFIX_ENABLED_KEY,
+            bool(form.cleaned_data["sequential_hotfix_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.HOTFIX_REVIEW_STEP_ROLE_CODES_KEY,
+            selected_hotfix_review_step_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.HOTFIX_APPLY_STEP_ROLE_CODES_KEY,
+            selected_hotfix_apply_step_roles,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.REQUIRE_APPROVAL_BEFORE_PUBLISH_KEY,
+            bool(form.cleaned_data["require_approval_before_publish"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.ALLOW_SAME_USER_SUBMIT_REVIEW_KEY,
+            bool(form.cleaned_data["allow_same_user_submit_review"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.ALLOW_SAME_USER_REVIEW_APPROVE_KEY,
+            bool(form.cleaned_data["allow_same_user_review_approve"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.ALLOW_SAME_USER_REVIEW_PUBLISH_KEY,
+            bool(form.cleaned_data["allow_same_user_review_publish"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.ALLOW_SAME_USER_HOTFIX_REQUEST_APPLY_KEY,
+            bool(form.cleaned_data["allow_same_user_hotfix_request_apply"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.ALLOW_SAME_USER_HOTFIX_REVIEW_APPLY_KEY,
+            bool(form.cleaned_data["allow_same_user_hotfix_review_apply"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+
+        AuditService.log_event(
+            action="UPDATE_SYSTEM_SETTING",
+            portal="ADMIN",
+            entity_type="SystemSetting",
+            entity_id=f"tenant:{tenant_id}:template-governance",
+            actor=request.user,
+            tenant=tenant_id,
+            campus=getattr(request, "scope", {}).get("campus_id"),
+            before_data=current_snapshot,
+            after_data={
+                "require_approval_before_publish": bool(form.cleaned_data["require_approval_before_publish"]),
+                "sequential_template_approval_enabled": bool(form.cleaned_data["sequential_approval_enabled"]),
+                "sequential_hotfix_enabled": bool(form.cleaned_data["sequential_hotfix_enabled"]),
+                "allow_same_user_submit_review": bool(form.cleaned_data["allow_same_user_submit_review"]),
+                "allow_same_user_review_approve": bool(form.cleaned_data["allow_same_user_review_approve"]),
+                "allow_same_user_review_publish": bool(form.cleaned_data["allow_same_user_review_publish"]),
+                "allow_same_user_hotfix_request_apply": bool(
+                    form.cleaned_data["allow_same_user_hotfix_request_apply"]
+                ),
+                "allow_same_user_hotfix_review_apply": bool(
+                    form.cleaned_data["allow_same_user_hotfix_review_apply"]
+                ),
+                "stages": [
+                    {
+                        "code": TemplateGovernanceWorkflowService.STAGE_DRAFT,
+                        "label": TemplateGovernanceWorkflowService.stage_label(
+                            TemplateGovernanceWorkflowService.STAGE_DRAFT
+                        ),
+                        "role_codes": selected_draft_roles,
+                    },
+                    {
+                        "code": TemplateGovernanceWorkflowService.STAGE_SUBMIT_FOR_APPROVAL,
+                        "label": TemplateGovernanceWorkflowService.stage_label(
+                            TemplateGovernanceWorkflowService.STAGE_SUBMIT_FOR_APPROVAL
+                        ),
+                        "role_codes": selected_submit_roles,
+                    },
+                    {
+                        "code": TemplateGovernanceWorkflowService.STAGE_APPROVAL_REVIEW,
+                        "label": TemplateGovernanceWorkflowService.stage_label(
+                            TemplateGovernanceWorkflowService.STAGE_APPROVAL_REVIEW
+                        ),
+                        "role_codes": selected_review_roles,
+                    },
+                    {
+                        "code": TemplateGovernanceWorkflowService.STAGE_PUBLISH,
+                        "label": TemplateGovernanceWorkflowService.stage_label(
+                            TemplateGovernanceWorkflowService.STAGE_PUBLISH
+                        ),
+                        "role_codes": selected_publish_roles,
+                    },
+                    {
+                        "code": TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST,
+                        "label": TemplateGovernanceWorkflowService.stage_label(
+                            TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST
+                        ),
+                        "role_codes": selected_hotfix_request_roles,
+                    },
+                    {
+                        "code": TemplateGovernanceWorkflowService.STAGE_HOTFIX_REVIEW_APPLY,
+                        "label": TemplateGovernanceWorkflowService.stage_label(
+                            TemplateGovernanceWorkflowService.STAGE_HOTFIX_REVIEW_APPLY
+                        ),
+                        "role_codes": selected_hotfix_review_apply_roles,
+                    },
+                ],
+                "approval_steps": [
+                    {
+                        "code": TemplateGovernanceWorkflowService.STEP_TEMPLATE_REVIEW,
+                        "label": "Template Review",
+                        "role_codes": selected_approval_review_step_roles,
+                    },
+                    {
+                        "code": TemplateGovernanceWorkflowService.STEP_TEMPLATE_APPROVAL,
+                        "label": "Final Approval",
+                        "role_codes": selected_approval_final_step_roles,
+                    },
+                ],
+                "hotfix_steps": [
+                    {
+                        "code": TemplateGovernanceWorkflowService.STEP_HOTFIX_REVIEW,
+                        "label": "Hotfix Review",
+                        "role_codes": selected_hotfix_review_step_roles,
+                    },
+                    {
+                        "code": TemplateGovernanceWorkflowService.STEP_HOTFIX_APPLY,
+                        "label": "Hotfix Final Apply",
+                        "role_codes": selected_hotfix_apply_step_roles,
+                    },
+                ],
+            },
+            metadata={
+                "setting_keys": [
+                    *TemplateGovernanceWorkflowService.STAGE_ROLE_KEYS.values(),
+                    TemplateGovernanceWorkflowService.SEQUENTIAL_APPROVAL_ENABLED_KEY,
+                    TemplateGovernanceWorkflowService.APPROVAL_REVIEW_STEP_ROLE_CODES_KEY,
+                    TemplateGovernanceWorkflowService.APPROVAL_FINAL_STEP_ROLE_CODES_KEY,
+                    TemplateGovernanceWorkflowService.SEQUENTIAL_HOTFIX_ENABLED_KEY,
+                    TemplateGovernanceWorkflowService.HOTFIX_REVIEW_STEP_ROLE_CODES_KEY,
+                    TemplateGovernanceWorkflowService.HOTFIX_APPLY_STEP_ROLE_CODES_KEY,
+                    TemplateGovernanceWorkflowService.REQUIRE_APPROVAL_BEFORE_PUBLISH_KEY,
+                    TemplateGovernanceWorkflowService.ALLOW_SAME_USER_SUBMIT_REVIEW_KEY,
+                    TemplateGovernanceWorkflowService.ALLOW_SAME_USER_REVIEW_APPROVE_KEY,
+                    TemplateGovernanceWorkflowService.ALLOW_SAME_USER_REVIEW_PUBLISH_KEY,
+                    TemplateGovernanceWorkflowService.ALLOW_SAME_USER_HOTFIX_REQUEST_APPLY_KEY,
+                    TemplateGovernanceWorkflowService.ALLOW_SAME_USER_HOTFIX_REVIEW_APPLY_KEY,
+                ],
+            },
+            request=request,
+        )
+        messages.success(request, "Template governance workflow updated.")
+        return _redirect_back_or_default(request, "admin_portal:template_governance_settings")
+
+    stage_cards = []
+    for stage in current_snapshot["stages"]:
+        stage_cards.append(
+            {
+                "label": stage["label"],
+                "role_names": list(role_queryset.filter(code__in=stage["role_codes"]).values_list("name", flat=True)),
+                "role_codes": stage["role_codes"],
+            }
+        )
+
+    context = {
+        "title": "Template Governance",
+        "form": form,
+        "stage_cards": stage_cards,
+        "workflow_snapshot": current_snapshot,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/tools/template_governance.html", context)
 
 
 def _scoped_users_queryset(request):
@@ -2372,6 +3245,111 @@ def user_list_view(request):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/security/user_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("users.read")
+def login_lockout_list_view(request):
+    queryset = _scoped_login_lockout_queryset(request)
+    portal_filter = request.GET.get("portal", "").strip().upper()
+    status_filter = request.GET.get("status", "").strip().lower()
+    q = request.GET.get("q", "").strip()
+    now = timezone.now()
+
+    if portal_filter in {"ADMIN", "FACULTY"}:
+        queryset = queryset.filter(portal_code=portal_filter)
+    if status_filter == "locked":
+        queryset = queryset.filter(locked_until__gt=now)
+    elif status_filter == "history":
+        queryset = queryset.filter(Q(locked_until__isnull=True) | Q(locked_until__lte=now))
+    if q:
+        queryset = queryset.filter(
+            Q(username__icontains=q)
+            | Q(user__email__icontains=q)
+            | Q(user__first_name__icontains=q)
+            | Q(user__last_name__icontains=q)
+        )
+
+    base_queryset = _scoped_login_lockout_queryset(request)
+    total_count = base_queryset.count()
+    currently_locked_count = base_queryset.filter(locked_until__gt=now).count()
+    admin_locked_count = base_queryset.filter(portal_code="ADMIN", locked_until__gt=now).count()
+    faculty_locked_count = base_queryset.filter(portal_code="FACULTY", locked_until__gt=now).count()
+
+    context = {
+        "page_obj": _get_page(request, queryset),
+        "portal_filter": portal_filter,
+        "status_filter": status_filter,
+        "q": q,
+        "metric_cards": [
+            {
+                "label": "Tracked Lockout Records",
+                "value": total_count,
+                "meta": "All portal lockout state rows in your visible scope.",
+            },
+            {
+                "label": "Currently Locked",
+                "value": currently_locked_count,
+                "meta": "Accounts temporarily blocked right now.",
+            },
+            {
+                "label": "Admin Portal Locked",
+                "value": admin_locked_count,
+                "meta": "Locked Admin Portal sign-ins.",
+            },
+            {
+                "label": "Faculty Portal Locked",
+                "value": faculty_locked_count,
+                "meta": "Locked Faculty Portal sign-ins.",
+            },
+        ],
+        "now": now,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/security/login_lockout_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("users.update")
+def login_lockout_unlock_view(request, lockout_id: int):
+    if request.method != "POST":
+        return redirect("admin_portal:login_lockout_list")
+    lockout_state = get_object_or_404(_scoped_login_lockout_queryset(request), id=lockout_id)
+    before = {
+        "failed_attempt_count": lockout_state.failed_attempt_count,
+        "locked_until": lockout_state.locked_until.isoformat() if lockout_state.locked_until else None,
+        "last_failed_at": lockout_state.last_failed_at.isoformat() if lockout_state.last_failed_at else None,
+    }
+    lockout_state.failed_attempt_count = 0
+    lockout_state.window_started_at = None
+    lockout_state.last_failed_at = None
+    lockout_state.locked_until = None
+    lockout_state.save(update_fields=["failed_attempt_count", "window_started_at", "last_failed_at", "locked_until", "updated_at"])
+    AuditService.log_event(
+        action="LOGIN_LOCKOUT_UNLOCK",
+        portal="ADMIN",
+        entity_type="PortalLoginLockoutState",
+        entity_id=lockout_state.id,
+        actor=request.user,
+        tenant=lockout_state.user.default_tenant_id if lockout_state.user_id else None,
+        campus=lockout_state.user.default_campus_id if lockout_state.user_id else None,
+        before_data=before,
+        after_data={
+            "failed_attempt_count": lockout_state.failed_attempt_count,
+            "locked_until": None,
+            "last_failed_at": None,
+        },
+        metadata={
+            "username": lockout_state.username,
+            "portal_code": lockout_state.portal_code,
+        },
+        request=request,
+    )
+    messages.success(
+        request,
+        f"Login lockout cleared for {lockout_state.username} ({lockout_state.portal_code.title()} Portal).",
+    )
+    return _redirect_back_or_default(request, "admin_portal:login_lockout_list")
 
 
 @portal_required("ADMIN")
@@ -4736,6 +5714,31 @@ def _ensure_template_editable_or_forbidden(request, template):
     return None
 
 
+def _ensure_template_workflow_stage_or_forbidden(request, *, tenant_id: int, stage_code: str, back_route: str):
+    try:
+        TemplateGovernanceWorkflowService.ensure_user_can_perform_stage(
+            user=request.user,
+            stage_code=stage_code,
+            tenant_id=tenant_id,
+        )
+    except ValidationError as exc:
+        messages.error(request, str(exc))
+        return _redirect_back_or_default(request, back_route)
+    return None
+
+
+def _ensure_template_draft_access_or_forbidden(request, template, back_route: str = "admin_portal:grading_template_list"):
+    locked_response = _ensure_template_editable_or_forbidden(request, template)
+    if locked_response:
+        return locked_response
+    return _ensure_template_workflow_stage_or_forbidden(
+        request,
+        tenant_id=template.tenant_id,
+        stage_code=TemplateGovernanceWorkflowService.STAGE_DRAFT,
+        back_route=back_route,
+    )
+
+
 @portal_required("ADMIN")
 @permission_required("grading_templates.read")
 def grading_template_list_view(request):
@@ -4752,8 +5755,79 @@ def grading_template_list_view(request):
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
+    page_obj = _get_page(request, queryset)
+    current_campus_id = getattr(request, "scope", {}).get("campus_id")
+    for row in page_obj:
+        current_approval_step = TemplateGovernanceWorkflowService.get_current_approval_step(template=row)
+        row.current_approval_step = current_approval_step
+        row.current_approval_step_label = current_approval_step.step_label if current_approval_step else ""
+        row.can_submit = (
+            PermissionService.has_permission(
+                request.user,
+                "grading_templates.submit_for_approval",
+                tenant_id=row.tenant_id,
+                campus_id=current_campus_id,
+            )
+            and not row.is_published
+            and row.approval_status != GradingTemplate.ApprovalStatus.FOR_APPROVAL
+            and TemplateGovernanceWorkflowService.user_has_stage_role(
+                user=request.user,
+                stage_code=TemplateGovernanceWorkflowService.STAGE_SUBMIT_FOR_APPROVAL,
+                tenant_id=row.tenant_id,
+            )
+        )
+        row.can_review_approval = (
+            PermissionService.has_permission(
+                request.user,
+                "grading_templates.approve",
+                tenant_id=row.tenant_id,
+                campus_id=current_campus_id,
+            )
+            and row.approval_status == GradingTemplate.ApprovalStatus.FOR_APPROVAL
+            and TemplateGovernanceWorkflowService.user_can_take_approval_step(
+                template=row,
+                actor=request.user,
+            )
+        )
+        row.can_publish_workflow = (
+            PermissionService.has_permission(
+                request.user,
+                "grading_templates.publish",
+                tenant_id=row.tenant_id,
+                campus_id=current_campus_id,
+            )
+            and not row.is_published
+            and (
+                row.approval_status == GradingTemplate.ApprovalStatus.APPROVED
+                or not TemplateGovernanceWorkflowService.require_approval_before_publish(tenant_id=row.tenant_id)
+            )
+            and row.approval_status != GradingTemplate.ApprovalStatus.FOR_APPROVAL
+            and TemplateGovernanceWorkflowService.user_has_stage_role(
+                user=request.user,
+                stage_code=TemplateGovernanceWorkflowService.STAGE_PUBLISH,
+                tenant_id=row.tenant_id,
+            )
+            and (
+                TemplateGovernanceWorkflowService.allow_same_user_review_publish(tenant_id=row.tenant_id)
+                or row.approval_reviewed_by_id != request.user.id
+            )
+        )
+        row.can_hotfix_request = (
+            PermissionService.has_permission(
+                request.user,
+                "template_hotfixes.create",
+                tenant_id=row.tenant_id,
+                campus_id=current_campus_id,
+            )
+            and row.is_published
+            and TemplateGovernanceWorkflowService.user_has_stage_role(
+                user=request.user,
+                stage_code=TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST,
+                tenant_id=row.tenant_id,
+            )
+        )
     context = {
-        "page_obj": _get_page(request, queryset),
+        "page_obj": page_obj,
         "q": q,
         "published": request.GET.get("published", ""),
         "approval_status": approval_status,
@@ -4984,6 +6058,14 @@ def grading_template_create_view(request):
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
+        stage_response = _ensure_template_workflow_stage_or_forbidden(
+            request,
+            tenant_id=form.cleaned_data["tenant"].id,
+            stage_code=TemplateGovernanceWorkflowService.STAGE_DRAFT,
+            back_route="admin_portal:grading_template_list",
+        )
+        if stage_response:
+            return stage_response
         row = form.save()
         AuditService.log_event(
             action="CREATE",
@@ -5005,7 +6087,7 @@ def grading_template_create_view(request):
 @permission_required("grading_templates.update")
 def grading_template_update_view(request, template_id: int):
     row = get_object_or_404(AdminScopeService.scoped_grading_templates(request), id=template_id)
-    locked_response = _ensure_template_editable_or_forbidden(request, row)
+    locked_response = _ensure_template_draft_access_or_forbidden(request, row)
     if locked_response:
         return locked_response
     before = model_before_after(row)
@@ -5066,6 +6148,7 @@ def grading_template_publish_view(request, template_id: int):
     row = get_object_or_404(AdminScopeService.scoped_grading_templates(request), id=template_id)
     before = model_before_after(row)
     try:
+        TemplateGovernanceWorkflowService.ensure_can_publish_template(template=row, actor=request.user)
         GradingTemplateService.publish(template=row, actor=request.user)
     except ValidationError as exc:
         if hasattr(exc, "messages"):
@@ -5101,6 +6184,11 @@ def grading_template_submit_for_approval_view(request, template_id: int):
     if request.method == "POST" and form.is_valid():
         before = model_before_after(row)
         try:
+            TemplateGovernanceWorkflowService.ensure_user_can_perform_stage(
+                user=request.user,
+                stage_code=TemplateGovernanceWorkflowService.STAGE_SUBMIT_FOR_APPROVAL,
+                tenant_id=row.tenant_id,
+            )
             GradingTemplateService.submit_for_approval(
                 template=row,
                 actor=request.user,
@@ -5144,6 +6232,7 @@ def grading_template_review_approval_view(request, template_id: int):
         decision = form.cleaned_data["decision"]
         approve = decision == GradingTemplateApprovalReviewForm.Decision.APPROVE
         try:
+            TemplateGovernanceWorkflowService.ensure_can_review_template(template=row, actor=request.user)
             GradingTemplateService.review_approval(
                 template=row,
                 actor=request.user,
@@ -5169,16 +6258,28 @@ def grading_template_review_approval_view(request, template_id: int):
             request=request,
             metadata={"workflow": "TEMPLATE_APPROVAL"},
         )
-        messages.success(
-            request,
-            f"Template {row.code} {'approved' if approve else 'rejected'} successfully.",
-        )
+        row.refresh_from_db()
+        next_step = TemplateGovernanceWorkflowService.get_current_approval_step(template=row)
+        if approve and row.approval_status == GradingTemplate.ApprovalStatus.FOR_APPROVAL and next_step:
+            messages.success(
+                request,
+                f"Template {row.code} advanced to the next workflow step: {next_step.step_label}.",
+            )
+        else:
+            messages.success(
+                request,
+                f"Template {row.code} {'approved' if approve else 'rejected'} successfully.",
+            )
         return _redirect_back_or_default(request, "admin_portal:grading_template_list")
 
+    approval_workflow = TemplateGovernanceWorkflowService.get_pending_approval_workflow(template=row)
     context = {
         "form": form,
         "title": f"Review Template Approval: {row.code}",
         "template_obj": row,
+        "approval_workflow": approval_workflow,
+        "approval_steps": list(approval_workflow.steps.order_by("step_no")) if approval_workflow else [],
+        "current_step": TemplateGovernanceWorkflowService.get_current_approval_step(template=row),
         "involved_personalities": TemplateHotfixService.involved_personalities(),
     }
     context.update(_scope_context(request))
@@ -5200,8 +6301,27 @@ def template_hotfix_list_view(request):
             | Q(template__name__icontains=q)
             | Q(requested_by_user__username__icontains=q)
         )
+    page_obj = _get_page(request, queryset)
+    current_campus_id = getattr(request, "scope", {}).get("campus_id")
+    for row in page_obj:
+        current_hotfix_step = TemplateGovernanceWorkflowService.get_current_hotfix_step(hotfix_request=row)
+        row.current_hotfix_step = current_hotfix_step
+        row.current_hotfix_step_label = current_hotfix_step.step_label if current_hotfix_step else ""
+        row.can_review_workflow = (
+            PermissionService.has_permission(
+                request.user,
+                "template_hotfixes.review",
+                tenant_id=row.tenant_id,
+                campus_id=current_campus_id,
+            )
+            and row.status == TemplateHotfixRequest.Status.PENDING
+            and TemplateGovernanceWorkflowService.user_can_take_hotfix_step(
+                hotfix_request=row,
+                actor=request.user,
+            )
+        )
     context = {
-        "page_obj": _get_page(request, queryset),
+        "page_obj": page_obj,
         "templates": AdminScopeService.scoped_grading_templates(request),
         "q": q,
         "status": request.GET.get("status", ""),
@@ -5229,6 +6349,11 @@ def template_hotfix_create_view(request, template_id: int):
     if request.method == "POST" and form.is_valid():
         selected_offerings = [row.id for row in form.cleaned_data.get("selected_offerings", [])]
         try:
+            TemplateGovernanceWorkflowService.ensure_user_can_perform_stage(
+                user=request.user,
+                stage_code=TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST,
+                tenant_id=template.tenant_id,
+            )
             hotfix = TemplateHotfixService.create_request(
                 template=template,
                 requested_by=request.user,
@@ -5273,6 +6398,10 @@ def template_hotfix_review_view(request, hotfix_id: int):
         before = model_before_after(hotfix)
         approve = form.cleaned_data["decision"] == TemplateHotfixReviewForm.Decision.APPROVE
         try:
+            TemplateGovernanceWorkflowService.ensure_can_apply_hotfix(
+                hotfix_request=hotfix,
+                actor=request.user,
+            )
             TemplateHotfixService.review_and_apply(
                 hotfix_request=hotfix,
                 reviewer=request.user,
@@ -5298,16 +6427,26 @@ def template_hotfix_review_view(request, hotfix_id: int):
                 "status": hotfix.status,
             },
         )
-        messages.success(
-            request,
-            f"Hotfix request #{hotfix.id} {'approved and applied' if approve else 'rejected'}.",
-        )
+        hotfix.refresh_from_db()
+        next_step = TemplateGovernanceWorkflowService.get_current_hotfix_step(hotfix_request=hotfix)
+        if approve and hotfix.status == TemplateHotfixRequest.Status.PENDING and next_step:
+            messages.success(
+                request,
+                f"Hotfix request #{hotfix.id} advanced to the next workflow step: {next_step.step_label}.",
+            )
+        else:
+            messages.success(
+                request,
+                f"Hotfix request #{hotfix.id} {'approved and applied' if approve else 'rejected'}.",
+            )
         return _redirect_back_or_default(request, "admin_portal:template_hotfix_list")
 
     context = {
         "form": form,
         "title": f"Review Hotfix Request #{hotfix.id} ({hotfix.template.code})",
         "hotfix": hotfix,
+        "workflow_steps": list(hotfix.workflow_steps.order_by("step_no")) if hotfix.workflow_steps.exists() else [],
+        "current_step": TemplateGovernanceWorkflowService.get_current_hotfix_step(hotfix_request=hotfix),
         "involved_personalities": TemplateHotfixService.involved_personalities(),
     }
     context.update(_scope_context(request))
@@ -5351,7 +6490,7 @@ def template_period_create_view(request):
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         parent_template = form.cleaned_data["template"]
-        locked_response = _ensure_template_editable_or_forbidden(request, parent_template)
+        locked_response = _ensure_template_draft_access_or_forbidden(request, parent_template)
         if locked_response:
             return locked_response
         row = form.save()
@@ -5379,7 +6518,7 @@ def template_period_create_view(request):
 @permission_required("template_periods.update")
 def template_period_update_view(request, period_id: int):
     row = get_object_or_404(AdminScopeService.scoped_template_periods(request), id=period_id)
-    locked_response = _ensure_template_editable_or_forbidden(request, row.template)
+    locked_response = _ensure_template_draft_access_or_forbidden(request, row.template)
     if locked_response:
         return locked_response
     before = model_before_after(row)
@@ -5391,7 +6530,7 @@ def template_period_update_view(request, period_id: int):
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         selected_template = form.cleaned_data["template"]
-        locked_response = _ensure_template_editable_or_forbidden(request, selected_template)
+        locked_response = _ensure_template_draft_access_or_forbidden(request, selected_template)
         if locked_response:
             return locked_response
         row = form.save()
@@ -5471,7 +6610,7 @@ def template_component_create_view(request):
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         parent_template = form.cleaned_data["template_period"].template
-        locked_response = _ensure_template_editable_or_forbidden(request, parent_template)
+        locked_response = _ensure_template_draft_access_or_forbidden(request, parent_template)
         if locked_response:
             return locked_response
         row = form.save()
@@ -5501,7 +6640,7 @@ def template_component_create_view(request):
 @permission_required("template_components.update")
 def template_component_update_view(request, component_id: int):
     row = get_object_or_404(AdminScopeService.scoped_template_components(request), id=component_id)
-    locked_response = _ensure_template_editable_or_forbidden(request, row.template_period.template)
+    locked_response = _ensure_template_draft_access_or_forbidden(request, row.template_period.template)
     if locked_response:
         return locked_response
     before = model_before_after(row)
@@ -5513,7 +6652,7 @@ def template_component_update_view(request, component_id: int):
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         selected_template = form.cleaned_data["template_period"].template
-        locked_response = _ensure_template_editable_or_forbidden(request, selected_template)
+        locked_response = _ensure_template_draft_access_or_forbidden(request, selected_template)
         if locked_response:
             return locked_response
         row = form.save()
@@ -5541,7 +6680,7 @@ def template_component_delete_view(request, component_id: int):
     if request.method != "POST":
         return HttpResponseForbidden("Invalid method.")
     row = get_object_or_404(AdminScopeService.scoped_template_components(request), id=component_id)
-    locked_response = _ensure_template_editable_or_forbidden(request, row.template_period.template)
+    locked_response = _ensure_template_draft_access_or_forbidden(request, row.template_period.template)
     if locked_response:
         return locked_response
 
@@ -5637,7 +6776,7 @@ def template_subcomponent_create_view(request):
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         parent_template = form.cleaned_data["template_component"].template_period.template
-        locked_response = _ensure_template_editable_or_forbidden(request, parent_template)
+        locked_response = _ensure_template_draft_access_or_forbidden(request, parent_template)
         if locked_response:
             return locked_response
         row = form.save()
@@ -5671,7 +6810,7 @@ def template_subcomponent_create_view(request):
 @permission_required("template_subcomponents.update")
 def template_subcomponent_update_view(request, subcomponent_id: int):
     row = get_object_or_404(AdminScopeService.scoped_template_subcomponents(request), id=subcomponent_id)
-    locked_response = _ensure_template_editable_or_forbidden(request, row.template_component.template_period.template)
+    locked_response = _ensure_template_draft_access_or_forbidden(request, row.template_component.template_period.template)
     if locked_response:
         return locked_response
     before = model_before_after(row)
@@ -5683,7 +6822,7 @@ def template_subcomponent_update_view(request, subcomponent_id: int):
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         selected_template = form.cleaned_data["template_component"].template_period.template
-        locked_response = _ensure_template_editable_or_forbidden(request, selected_template)
+        locked_response = _ensure_template_draft_access_or_forbidden(request, selected_template)
         if locked_response:
             return locked_response
         row = form.save()
@@ -5775,7 +6914,7 @@ def template_detail_create_view(request):
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         parent_template = form.cleaned_data["template_subcomponent"].template_component.template_period.template
-        locked_response = _ensure_template_editable_or_forbidden(request, parent_template)
+        locked_response = _ensure_template_draft_access_or_forbidden(request, parent_template)
         if locked_response:
             return locked_response
         row = form.save()
@@ -5812,7 +6951,7 @@ def template_detail_create_view(request):
 @permission_required("template_details.update")
 def template_detail_update_view(request, detail_id: int):
     row = get_object_or_404(AdminScopeService.scoped_template_details(request), id=detail_id)
-    locked_response = _ensure_template_editable_or_forbidden(
+    locked_response = _ensure_template_draft_access_or_forbidden(
         request,
         row.template_subcomponent.template_component.template_period.template,
     )
@@ -5827,7 +6966,7 @@ def template_detail_update_view(request, detail_id: int):
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         selected_template = form.cleaned_data["template_subcomponent"].template_component.template_period.template
-        locked_response = _ensure_template_editable_or_forbidden(request, selected_template)
+        locked_response = _ensure_template_draft_access_or_forbidden(request, selected_template)
         if locked_response:
             return locked_response
         row = form.save()

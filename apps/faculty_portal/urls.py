@@ -20,6 +20,7 @@ from .views import (
     offering_grading_template_view,
     offering_enrollment_view,
     offering_periods_view,
+    period_view_history_view,
     period_activity_delete_view,
     public_index_view,
     period_activities_view,
@@ -63,6 +64,11 @@ urlpatterns = [
         name="faculty_assignment_response",
     ),
     path("faculty/my-courses/<int:offering_id>/periods/", offering_periods_view, name="offering_periods"),
+    path(
+        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/view-history/",
+        period_view_history_view,
+        name="period_view_history",
+    ),
     path(
         "faculty/my-courses/<int:offering_id>/grading-template/",
         offering_grading_template_view,

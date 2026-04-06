@@ -9,18 +9,36 @@ from apps.enrollment.models import Enrollment
 
 class EnrollmentService:
     MODE_KEY = "ENROLLMENT_OWNERSHIP_MODE"
+    MODE_OVERRIDE_MAP_KEY = "ENROLLMENT_OWNERSHIP_MODE_BY_OFFERING"
     LEGACY_MODE_KEY = "enrollment_mode"
     ADMIN_ONLY = "ADMIN_ONLY"
     FACULTY_ALLOWED = "FACULTY_ALLOWED"
 
     @classmethod
-    def get_enrollment_mode(cls, tenant_id: int | None):
+    def get_enrollment_mode_overrides(cls, tenant_id: int | None) -> dict[str, str]:
+        raw_value = SystemSettingService.get(cls.MODE_OVERRIDE_MAP_KEY, tenant_id=tenant_id, default={}) or {}
+        if not isinstance(raw_value, dict):
+            return {}
+        cleaned = {}
+        for offering_id, mode in raw_value.items():
+            normalized_mode = str(mode or "").upper()
+            if normalized_mode in {cls.ADMIN_ONLY, cls.FACULTY_ALLOWED}:
+                cleaned[str(offering_id)] = normalized_mode
+        return cleaned
+
+    @classmethod
+    def get_enrollment_mode(cls, tenant_id: int | None, offering_id: int | None = None):
         mode = SystemSettingService.get(cls.MODE_KEY, tenant_id=tenant_id, default=None)
         if mode is None:
             mode = SystemSettingService.get(cls.LEGACY_MODE_KEY, tenant_id=tenant_id, default=cls.ADMIN_ONLY)
         mode = str(mode).upper() if mode else cls.ADMIN_ONLY
         if mode not in {cls.ADMIN_ONLY, cls.FACULTY_ALLOWED}:
-            return cls.ADMIN_ONLY
+            mode = cls.ADMIN_ONLY
+
+        if offering_id is not None:
+            override_mode = cls.get_enrollment_mode_overrides(tenant_id).get(str(offering_id))
+            if override_mode in {cls.ADMIN_ONLY, cls.FACULTY_ALLOWED}:
+                return override_mode
         return mode
 
     @classmethod
@@ -49,7 +67,7 @@ class EnrollmentService:
         if cls._is_admin_route_allowed(user, offering, action=action):
             return True
 
-        mode = cls.get_enrollment_mode(offering.tenant_id)
+        mode = cls.get_enrollment_mode(offering.tenant_id, offering_id=offering.id)
         if portal.upper() == "FACULTY" and mode == cls.FACULTY_ALLOWED:
             return cls._is_faculty_offering_owner(user, offering)
         return False

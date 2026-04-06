@@ -10,6 +10,7 @@ from django.utils import timezone
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
+from apps.grading.models import GradeActivity, GradingTemplate, GradingTemplateComponent, GradingTemplatePeriod
 from apps.notifications.models import FacultyReminder, FacultyReminderEmailQueue
 from apps.notifications.services import FacultyReminderService
 from apps.tenants.models import Campus, Department, Program, Tenant
@@ -115,6 +116,27 @@ class FacultyReminderServiceTests(TestCase):
             value_type="BOOL",
             is_active=True,
         )
+        self.template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="GENED",
+            name="General Education Template",
+            is_active=True,
+            is_published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        self.period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+        )
+        self.component = GradingTemplateComponent.objects.create(
+            template_period=self.period,
+            code="QUIZ",
+            name="Quizzes",
+            weight_percentage=100,
+            sort_order=1,
+        )
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@edugradespro.local")
     def test_queue_and_process_faculty_reminder_email(self):
@@ -149,3 +171,95 @@ class FacultyReminderServiceTests(TestCase):
         self.assertIsNotNone(reminder.email_last_sent_at)
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("Prepare Quiz 1", mail.outbox[0].subject)
+
+    def test_sync_activity_reminder_creates_future_activity_reminder(self):
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=self.component,
+            title="Quiz 2",
+            total_score="50.00",
+            activity_date=timezone.localdate() + timedelta(days=2),
+            created_by_user=self.user,
+            is_active=True,
+        )
+
+        reminder = FacultyReminderService.sync_activity_reminder(
+            activity=activity,
+            faculty_user=self.user,
+            created_by=self.user,
+        )
+
+        self.assertIsNotNone(reminder)
+        reminder.refresh_from_db()
+        self.assertEqual(reminder.grade_activity_id, activity.id)
+        self.assertEqual(reminder.title, "Prepare Activity: Quiz 2")
+        self.assertEqual(reminder.reminder_type, FacultyReminder.ReminderType.ACTIVITY_PREPARATION)
+        self.assertEqual(reminder.period_label, "Prelim")
+        self.assertTrue(reminder.send_email)
+
+    def test_sync_activity_reminder_cancels_when_activity_is_no_longer_future(self):
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=self.component,
+            title="Quiz 3",
+            total_score="50.00",
+            activity_date=timezone.localdate() + timedelta(days=3),
+            created_by_user=self.user,
+            is_active=True,
+        )
+        reminder = FacultyReminderService.sync_activity_reminder(
+            activity=activity,
+            faculty_user=self.user,
+            created_by=self.user,
+        )
+        self.assertIsNotNone(reminder)
+
+        activity.activity_date = timezone.localdate()
+        activity.save(update_fields=["activity_date", "updated_at"])
+
+        cancelled = FacultyReminderService.sync_activity_reminder(
+            activity=activity,
+            faculty_user=self.user,
+            created_by=self.user,
+        )
+
+        self.assertIsNone(cancelled)
+        reminder.refresh_from_db()
+        self.assertFalse(reminder.is_active)
+        self.assertIsNotNone(reminder.cancelled_at)
+
+    def test_sync_activity_reminder_respects_optional_email_setting(self):
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_REMINDER_EMAIL_ENABLED_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=self.component,
+            title="Quiz 4",
+            total_score="50.00",
+            activity_date=timezone.localdate() + timedelta(days=4),
+            created_by_user=self.user,
+            is_active=True,
+        )
+
+        reminder = FacultyReminderService.sync_activity_reminder(
+            activity=activity,
+            faculty_user=self.user,
+            created_by=self.user,
+        )
+
+        self.assertIsNotNone(reminder)
+        self.assertFalse(reminder.send_email)

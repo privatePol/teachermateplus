@@ -288,6 +288,16 @@
           <div class="scope-note mb-1">Faculty portal auto-archive basis</div>
           <div class="h6 mb-1">{{ active_academic_year.code }} / {{ active_term.code }}</div>
           <div class="text-muted small">{{ active_academic_year.name }} | {{ active_term.name }}</div>
+          <div class="mt-2">
+            {% if active_grading_period %}
+            <span class="badge text-bg-success">Active Grading Period: {{ active_grading_period.period.name }} ({{ active_grading_period.period.code }})</span>
+            {% if active_grading_period_auto_advance %}
+            <span class="badge text-bg-light border">Auto-advance On</span>
+            {% endif %}
+            {% else %}
+            <span class="badge text-bg-warning">No active grading period set yet</span>
+            {% endif %}
+          </div>
           {% elif current_tenant_id %}
           <div class="scope-note mb-1">Faculty portal auto-archive basis</div>
           <div class="h6 mb-1">Not configured</div>
@@ -301,6 +311,9 @@
         <div class="d-flex flex-wrap gap-2">
           <a class="btn btn-outline-success" href="{% url 'admin_portal:active_academic_term_settings' %}">
             Configure Active AY / Term
+          </a>
+          <a class="btn btn-outline-primary" href="{% url 'admin_portal:active_grading_period_settings' %}">
+            Configure Active Grading Period
           </a>
           <a class="btn btn-outline-secondary" href="{% url 'admin_portal:configurable_features_settings' %}">
             Configurable Features

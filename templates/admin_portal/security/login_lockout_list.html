@@ -1,0 +1,146 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h2 class="h5 mb-1">Login Lockout Monitor</h2>
+    <div class="text-muted small">Review temporary login blocks and clear them without direct database changes.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:user_list' %}">Back to Users</a>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  {% for card in metric_cards %}
+  <div class="col-md-6 col-xl-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-uppercase text-muted small mb-2">{{ card.label }}</div>
+        <div class="fs-3 fw-bold text-success mb-2">{{ card.value }}</div>
+        <div class="small text-muted">{{ card.meta }}</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <select class="form-select" name="portal">
+      <option value="">All Portals</option>
+      <option value="ADMIN" {% if portal_filter == "ADMIN" %}selected{% endif %}>Admin Portal</option>
+      <option value="FACULTY" {% if portal_filter == "FACULTY" %}selected{% endif %}>Faculty Portal</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="status">
+      <option value="">All States</option>
+      <option value="locked" {% if status_filter == "locked" %}selected{% endif %}>Currently Locked</option>
+      <option value="history" {% if status_filter == "history" %}selected{% endif %}>Cleared / History</option>
+    </select>
+  </div>
+  <div class="col-md-4">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Search username, email, or name">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+  <div class="col-md-2">
+    <a class="btn btn-outline-dark w-100" href="{% url 'admin_portal:login_lockout_list' %}">Reset</a>
+  </div>
+</form>
+
+<div class="alert alert-light border small">
+  Temporary login lockout works together with password complexity validation, forced password change, privacy consent, and single-device session enforcement.
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Portal</th>
+          <th>Linked User</th>
+          <th>Scope</th>
+          <th>Failures</th>
+          <th>Locked Until</th>
+          <th>Last Failed</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in page_obj %}
+        <tr>
+          <td>
+            <div class="fw-semibold">{{ row.username }}</div>
+            {% if row.last_ip %}
+            <div class="text-muted small">Last IP: {{ row.last_ip }}</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.portal_code == "ADMIN" %}
+            <span class="badge rounded-pill text-bg-primary">Admin Portal</span>
+            {% else %}
+            <span class="badge rounded-pill text-bg-success">Faculty Portal</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.user %}
+              <div>{{ row.user.full_name|default:row.user.username }}</div>
+              <div class="text-muted small">{{ row.user.email }}</div>
+            {% else %}
+              <span class="text-muted">No linked user</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.user %}
+              <div>{{ row.user.default_tenant.code|default:"-" }} / {{ row.user.default_campus.code|default:"-" }}</div>
+              <div class="text-muted small">{{ row.user.default_department.code|default:"-" }}</div>
+            {% else %}
+              <span class="text-muted">Unknown scope</span>
+            {% endif %}
+          </td>
+          <td>{{ row.failed_attempt_count }}</td>
+          <td>
+            {% if row.locked_until %}
+              {{ row.locked_until|date:"M d, Y h:i A" }}
+            {% else %}
+              <span class="text-muted">-</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.last_failed_at %}
+              {{ row.last_failed_at|date:"M d, Y h:i A" }}
+            {% else %}
+              <span class="text-muted">-</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.locked_until and row.locked_until > now %}
+            <span class="badge text-bg-danger">Locked</span>
+            {% else %}
+            <span class="badge text-bg-secondary">Cleared</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            {% if "users.update" in effective_permissions and row.locked_until and row.locked_until > now %}
+            <form method="post" action="{% url 'admin_portal:login_lockout_unlock' row.id %}" class="d-inline">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button class="btn btn-sm btn-outline-warning">Unlock</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="9" class="text-center text-muted py-4">No login lockout records found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

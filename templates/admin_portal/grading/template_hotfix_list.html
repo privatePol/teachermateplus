@@ -78,6 +78,9 @@
             {% else %}
               <span class="badge text-bg-secondary">{{ row.status }}</span>
             {% endif %}
+            {% if row.current_hotfix_step_label %}
+            <div class="small text-muted mt-1">Current Step: {{ row.current_hotfix_step_label }}</div>
+            {% endif %}
           </td>
           <td>
             {{ row.requested_by_user.full_name|default:row.requested_by_user.username }}
@@ -89,7 +92,7 @@
           <td>{{ row.recomputed_offering_count }}</td>
           <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
           <td class="text-end">
-            {% if "template_hotfixes.review" in effective_permissions and row.status == "PENDING" %}
+            {% if row.can_review_workflow %}
             <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_hotfix_review' row.id %}">Review</a>
             {% endif %}
           </td>

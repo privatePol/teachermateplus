@@ -17,6 +17,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from apps.academics.models import CourseOffering, FacultyAssignment
 from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
 from apps.attendance.models import AttendanceRecord, AttendanceSession
+from apps.auditlog.models import AuditLog
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
@@ -37,6 +38,7 @@ from apps.grading.models import (
     GradeCorrectionRequestItem,
     GradeSubmission,
     GradeActivity,
+    GradingPeriodLock,
     GradingTemplate,
     GradingTemplateComponent,
     GradingTemplateDetail,
@@ -55,6 +57,7 @@ from apps.predictions.services import (
     PredictionWhatIfService,
 )
 from apps.notifications.models import FacultyMemo, FacultyReminder
+from apps.notifications.services import FacultyReminderService
 from apps.students.models import Student
 
 
@@ -268,7 +271,36 @@ def _apply_assignment_response(*, request, assignment, response_status: str, suc
     messages.success(request, success_message)
 
 
-def _resolve_offering_period(request, offering_id: int, period_id: int):
+def _resolve_faculty_period_governance_state(offering, period, *, active_grading_period=None, submission=None):
+    if period is None:
+        return {
+            "has_active_period_setting": False,
+            "matched_term_period": None,
+            "is_active_period": False,
+            "is_closed_by_active_period": False,
+            "is_reopened_override": False,
+            "is_future_period": False,
+            "is_past_period": False,
+            "message": "",
+        }
+    if submission is None:
+        submission = GradingGovernanceService.get_submission(offering=offering, template_period=period)
+    return AcademicGovernanceService.faculty_period_governance_state(
+        tenant_id=offering.tenant_id,
+        campus_id=offering.campus_id,
+        term_id=offering.term_id,
+        template_period=period,
+        active_period_setting=active_grading_period,
+        submission_status=submission.status if submission else None,
+        is_correction_active=GradingGovernanceService.has_active_unlock_window(
+            offering=offering,
+            template_period=period,
+        ),
+        now=timezone.now(),
+    )
+
+
+def _resolve_offering_period(request, offering_id: int, period_id: int, *, allow_governance_closed: bool = False):
     assignment = _find_faculty_assignment(request.user, offering_id)
     if assignment and not assignment.is_accepted:
         messages.error(request, "Please accept this faculty assignment first before opening the class.")
@@ -282,6 +314,10 @@ def _resolve_offering_period(request, offering_id: int, period_id: int):
     period = template.periods.filter(id=period_id, is_active=True).first()
     if not period:
         messages.error(request, "Invalid grading period for this offering.")
+        return offering, template, None
+    governance_state = _resolve_faculty_period_governance_state(offering, period)
+    if governance_state["is_closed_by_active_period"] and not allow_governance_closed:
+        messages.error(request, governance_state["message"])
         return offering, template, None
     return offering, template, period
 
@@ -728,8 +764,6 @@ def dashboard_view(request):
     pending_correction_requests = 0
     classes_with_missing_grades = 0
     dashboard_now = timezone.now()
-    near_deadline_cutoff = dashboard_now + timezone.timedelta(hours=48)
-    upcoming_deadline_candidates = []
 
     if active_offering_ids:
         dropped_students = Enrollment.objects.filter(
@@ -798,24 +832,6 @@ def dashboard_view(request):
                     submitted_periods += 1
                 else:
                     has_unsubmitted_period = True
-                    lock = GradingGovernanceService.resolve_lock(offering=offering, template_period=period)
-                    if lock and lock.deadline_at:
-                        upcoming_deadline_candidates.append(
-                            {
-                                "deadline_at": lock.deadline_at,
-                                "period_name": period.name,
-                                "period_code": period.code,
-                                "offering_id": offering.id,
-                                "course_code": offering.course.code,
-                                "section_code": offering.section.code,
-                            }
-                        )
-                    if (
-                        lock
-                        and lock.deadline_at
-                        and dashboard_now <= lock.deadline_at <= near_deadline_cutoff
-                    ):
-                        periods_near_deadline += 1
 
                 for student_id in active_student_ids:
                     period_grade = grade_lookup.get((offering.id, period.id, student_id))
@@ -831,40 +847,11 @@ def dashboard_view(request):
             if offering_has_missing_grades:
                 classes_with_missing_grades += 1
 
-    deadline_reminder = {
-        "has_deadline": False,
-        "title": "No submission deadline is set yet",
-        "note": "Ask your academic or campus administrator to configure the current grading deadline so faculty can track submission timing clearly.",
-        "variant": "neutral",
-        "deadline_at": None,
-        "period_name": None,
-        "affected_classes": 0,
-    }
-    if upcoming_deadline_candidates:
-        upcoming_deadline_candidates.sort(key=lambda item: item["deadline_at"])
-        current_deadline = upcoming_deadline_candidates[0]
-        affected_classes = len(
-            {
-                item["offering_id"]
-                for item in upcoming_deadline_candidates
-                if item["deadline_at"] == current_deadline["deadline_at"]
-                and item["period_code"] == current_deadline["period_code"]
-            }
-        )
-        is_overdue = current_deadline["deadline_at"] < dashboard_now
-        deadline_reminder = {
-            "has_deadline": True,
-            "title": "Current grading period deadline reminder",
-            "note": (
-                "This deadline has already passed. Review your pending classes and contact the authorized approver if a governed correction or reopen process is needed."
-                if is_overdue
-                else "Keep this date in view while encoding, checking summaries, and finalizing submission."
-            ),
-            "variant": "danger" if is_overdue else "warning",
-            "deadline_at": current_deadline["deadline_at"],
-            "period_name": current_deadline["period_name"],
-            "affected_classes": affected_classes,
-        }
+    deadline_reminder, periods_near_deadline = _build_deadline_reminder_for_offerings(
+        active_offerings,
+        now=dashboard_now,
+    )
+    active_grading_period_rows = _build_active_grading_period_rows(active_offerings, now=dashboard_now)
 
     stats = {
         "assigned_courses": offerings_qs.count(),
@@ -883,6 +870,7 @@ def dashboard_view(request):
         "pending_correction_requests": pending_correction_requests,
         "classes_with_missing_grades": classes_with_missing_grades,
         "deadline_reminder": deadline_reminder,
+        "active_grading_period_rows": active_grading_period_rows,
     }
     return render(request, "faculty_portal/dashboard.html", {"stats": stats})
 
@@ -1075,6 +1063,312 @@ def _require_faculty_memo_or_404(request, memo_id: int):
         id=memo_id,
         faculty_user=request.user,
     )
+
+
+def _format_deadline_scope_list(scopes, *, limit=2):
+    scope_labels = []
+    for campus_code, academic_year_code, term_code in scopes:
+        label = " / ".join(
+            [
+                str(value).strip()
+                for value in (campus_code, academic_year_code, term_code)
+                if value
+            ]
+        )
+        if label:
+            scope_labels.append(label)
+    if not scope_labels:
+        return ""
+    if len(scope_labels) <= limit:
+        return ", ".join(scope_labels)
+    remaining = len(scope_labels) - limit
+    return f"{', '.join(scope_labels[:limit])} and {remaining} more"
+
+
+def _format_code_list(values, *, limit=4):
+    normalized = [str(value).strip() for value in values if str(value or "").strip()]
+    if not normalized:
+        return ""
+    if len(normalized) <= limit:
+        return ", ".join(normalized)
+    remaining = len(normalized) - limit
+    return f"{', '.join(normalized[:limit])} and {remaining} more"
+
+
+def _build_deadline_reminder_for_offerings(offerings, *, now=None):
+    now = now or timezone.now()
+    deadline_candidates = []
+    near_deadline_cutoff = now + timezone.timedelta(hours=48)
+    periods_near_deadline = 0
+    offering_period_codes = set()
+
+    for offering in offerings:
+        try:
+            template = FacultyGradingService.resolve_template_for_offering(offering)
+            periods = list(FacultyGradingService.get_template_periods(template))
+        except ValidationError:
+            continue
+
+        for period in periods:
+            if period.code:
+                offering_period_codes.add(period.code)
+            submission = GradingGovernanceService.get_submission(offering=offering, template_period=period)
+            if submission and submission.status == GradeSubmission.Status.SUBMITTED:
+                continue
+            lock = GradingGovernanceService.resolve_lock(offering=offering, template_period=period)
+            if lock and lock.deadline_at:
+                deadline_candidates.append(
+                    {
+                        "deadline_at": lock.deadline_at,
+                        "period_name": period.name,
+                        "period_code": period.code,
+                        "offering_id": offering.id,
+                        "course_code": offering.course.code,
+                        "section_code": offering.section.code,
+                    }
+                )
+                if now <= lock.deadline_at <= near_deadline_cutoff:
+                    periods_near_deadline += 1
+
+    reminder = {
+        "has_deadline": False,
+        "title": "No submission deadline is set yet",
+        "note": "Ask your academic or campus administrator to configure the current grading deadline so faculty can track submission timing clearly.",
+        "variant": "neutral",
+        "deadline_at": None,
+        "period_name": None,
+        "affected_classes": 0,
+        "next_url": None,
+        "helper": "No active unsubmitted period deadline is available for reminder display.",
+    }
+
+    if deadline_candidates:
+        deadline_candidates.sort(key=lambda item: item["deadline_at"])
+        current_deadline = deadline_candidates[0]
+        matching_candidates = [
+            item
+            for item in deadline_candidates
+            if item["deadline_at"] == current_deadline["deadline_at"]
+            and item["period_code"] == current_deadline["period_code"]
+        ]
+        affected_classes = len({item["offering_id"] for item in matching_candidates})
+        is_overdue = current_deadline["deadline_at"] < now
+        reminder = {
+            "has_deadline": True,
+            "title": "Grade submission deadline reminder",
+            "note": (
+                "This deadline already passed. Review your pending class periods and follow the governed reopen or correction process if further action is needed."
+                if is_overdue
+                else "Keep this deadline in view while encoding, checking summaries, and preparing final period submission."
+            ),
+            "variant": "danger" if is_overdue else "warning",
+            "deadline_at": current_deadline["deadline_at"],
+            "period_name": current_deadline["period_name"],
+            "affected_classes": affected_classes,
+            "next_url": reverse("faculty_portal:offering_periods", args=[current_deadline["offering_id"]]),
+            "helper": (
+                f"Next class to review: {current_deadline['course_code']} / {current_deadline['section_code']}"
+            ),
+        }
+
+    if not deadline_candidates and offerings:
+        offering_scopes = sorted(
+            {
+                (
+                    getattr(offering.campus, "code", None),
+                    getattr(offering.academic_year, "code", None),
+                    getattr(offering.term, "code", None),
+                )
+                for offering in offerings
+            }
+        )
+        tenant_ids = {offering.tenant_id for offering in offerings if offering.tenant_id}
+        academic_year_ids = {offering.academic_year_id for offering in offerings if offering.academic_year_id}
+        term_ids = {offering.term_id for offering in offerings if offering.term_id}
+        configured_lock_rows = list(
+            GradingPeriodLock.objects.filter(
+                tenant_id__in=tenant_ids,
+                academic_year_id__in=academic_year_ids,
+                term_id__in=term_ids,
+                is_active=True,
+                deadline_at__isnull=False,
+            )
+            .select_related("campus", "academic_year", "term")
+            .values_list("campus__code", "academic_year__code", "term__code", "period_code")
+            .distinct()
+        )
+        configured_scope_rows = sorted({row[:3] for row in configured_lock_rows})
+        matching_scope_rows = [row for row in configured_lock_rows if row[:3] in offering_scopes]
+        if matching_scope_rows:
+            configured_period_codes = sorted({row[3] for row in matching_scope_rows if row[3]})
+            reminder = {
+                "has_deadline": False,
+                "title": "No matching period deadline for your active classes yet",
+                "note": (
+                    "A deadline exists for your campus, academic year, and term, but its period code does not "
+                    "match the grading periods used by your accepted classes."
+                ),
+                "variant": "neutral",
+                "deadline_at": None,
+                "period_name": None,
+                "affected_classes": 0,
+                "next_url": None,
+                "helper": (
+                    f"Your active class scopes: {_format_deadline_scope_list(offering_scopes)}. "
+                    f"Your class period codes: {_format_code_list(sorted(offering_period_codes))}. "
+                    f"Configured deadline period codes in the same scope: {_format_code_list(configured_period_codes)}."
+                ),
+            }
+        elif configured_scope_rows:
+            reminder = {
+                "has_deadline": False,
+                "title": "No matching deadline for your active classes yet",
+                "note": (
+                    "A submission deadline exists in EduGradesPro, but it does not match the campus, academic year, "
+                    "or term of your accepted classes."
+                ),
+                "variant": "neutral",
+                "deadline_at": None,
+                "period_name": None,
+                "affected_classes": 0,
+                "next_url": None,
+                "helper": (
+                    f"Your active class scopes: {_format_deadline_scope_list(offering_scopes)}. "
+                    f"Configured deadline scopes found: {_format_deadline_scope_list(configured_scope_rows)}."
+                ),
+            }
+
+    return reminder, periods_near_deadline
+
+
+def _build_deadline_reminder_for_period_cards(offering, period_cards, *, now=None):
+    now = now or timezone.now()
+    candidates = [
+        {
+            "deadline_at": item["deadline_at"],
+            "period_name": item["period"].name,
+            "period_code": item["period"].code,
+        }
+        for item in period_cards
+        if item.get("deadline_at") and item.get("submission_status") != GradeSubmission.Status.SUBMITTED
+    ]
+    reminder = {
+        "has_deadline": False,
+        "title": "No submission deadline is set yet for this class",
+        "note": "Ask your admin to configure the period submission deadline for this class if you need a formal due-date reminder.",
+        "variant": "neutral",
+        "deadline_at": None,
+        "period_name": None,
+        "helper": f"{offering.course.code} | {offering.section.code}",
+    }
+    if candidates:
+        candidates.sort(key=lambda item: item["deadline_at"])
+        current_deadline = candidates[0]
+        is_overdue = current_deadline["deadline_at"] < now
+        reminder = {
+            "has_deadline": True,
+            "title": "Class period deadline reminder",
+            "note": (
+                "This class period deadline already passed. Use the governed reopen or correction flow if changes are still required."
+                if is_overdue
+                else "Finish score encoding and summary review before this class period deadline."
+            ),
+            "variant": "danger" if is_overdue else "warning",
+            "deadline_at": current_deadline["deadline_at"],
+            "period_name": current_deadline["period_name"],
+            "helper": f"{offering.course.code} | {offering.section.code}",
+        }
+    else:
+        same_scope_period_codes = sorted(
+            {
+                period_code
+                for period_code in GradingPeriodLock.objects.filter(
+                    tenant_id=offering.tenant_id,
+                    campus_id=offering.campus_id,
+                    academic_year_id=offering.academic_year_id,
+                    term_id=offering.term_id,
+                    is_active=True,
+                    deadline_at__isnull=False,
+                )
+                .values_list("period_code", flat=True)
+                .distinct()
+                if period_code
+            }
+        )
+        if same_scope_period_codes:
+            class_period_codes = sorted(
+                {
+                    item["period"].code
+                    for item in period_cards
+                    if getattr(item.get("period"), "code", None)
+                }
+            )
+            reminder["title"] = "No matching period deadline is set for this class yet"
+            reminder["note"] = (
+                "A deadline exists for this campus and term, but its period code does not match this class template."
+            )
+            reminder["helper"] = (
+                f"{offering.course.code} | {offering.section.code}. "
+                f"Class period codes: {_format_code_list(class_period_codes)}. "
+                f"Configured deadline period codes: {_format_code_list(same_scope_period_codes)}."
+            )
+            return reminder
+
+        other_scope_deadlines = list(
+            GradingPeriodLock.objects.filter(
+                tenant_id=offering.tenant_id,
+                academic_year_id=offering.academic_year_id,
+                term_id=offering.term_id,
+                is_active=True,
+                deadline_at__isnull=False,
+            )
+            .exclude(campus_id=offering.campus_id)
+            .select_related("campus")
+            .values_list("campus__code", flat=True)
+            .distinct()
+        )
+        if other_scope_deadlines:
+            reminder["title"] = "No matching deadline is set for this class yet"
+            reminder["note"] = (
+                "A deadline exists for another campus scope in the same academic term, but not for this class."
+            )
+            reminder["helper"] = (
+                f"{offering.course.code} | {offering.section.code}. "
+                f"Other deadline scopes found: {', '.join(other_scope_deadlines)}."
+            )
+    return reminder
+
+
+def _build_active_grading_period_rows(offerings, *, now=None):
+    now = now or timezone.now()
+    rows = []
+    seen_scopes = set()
+    for offering in offerings:
+        scope_key = (offering.tenant_id, offering.campus_id, offering.term_id)
+        if scope_key in seen_scopes:
+            continue
+        seen_scopes.add(scope_key)
+        active_setting = AcademicGovernanceService.resolve_active_grading_period(
+            tenant_id=offering.tenant_id,
+            campus_id=offering.campus_id,
+            term_id=offering.term_id,
+            now=now,
+        )
+        if not active_setting:
+            continue
+        rows.append(
+            {
+                "campus_code": offering.campus.code,
+                "campus_name": offering.campus.name,
+                "term_code": offering.term.code,
+                "term_name": offering.term.name,
+                "period_code": active_setting.period.code,
+                "period_name": active_setting.period.name,
+                "auto_advanced_from_deadline": active_setting.auto_advanced_from_deadline,
+            }
+        )
+    rows.sort(key=lambda row: (row["campus_code"], row["term_code"], row["period_code"]))
+    return rows
 
 
 @portal_required("FACULTY")
@@ -1756,6 +2050,9 @@ def my_courses_view(request):
             )
         grouped_offerings[-1]["offerings"].append(offering)
 
+    deadline_banner, _ = _build_deadline_reminder_for_offerings(active_offerings, now=timezone.now())
+    active_grading_period_rows = _build_active_grading_period_rows(active_offerings, now=timezone.now())
+
     context = {
         "grouped_offerings": grouped_offerings,
         "pending_assignments": pending_assignments if not show_archived else [],
@@ -1764,6 +2061,8 @@ def my_courses_view(request):
         "archived_count": len(archived_offerings),
         "pending_count": len(pending_assignments),
         "now": timezone.now(),
+        "deadline_banner": deadline_banner if not show_archived else None,
+        "active_grading_period_rows": active_grading_period_rows if not show_archived else [],
     }
     return render(request, "faculty_portal/my_courses.html", context)
 
@@ -1853,10 +2152,26 @@ def offering_periods_view(request, offering_id: int):
         periods = []
         messages.error(request, str(exc))
 
+    active_grading_period = AcademicGovernanceService.resolve_active_grading_period(
+        tenant_id=offering.tenant_id,
+        campus_id=offering.campus_id,
+        term_id=offering.term_id,
+        now=timezone.now(),
+    )
     period_cards = []
     for p in periods:
         lock = GradingGovernanceService.resolve_lock(offering=offering, template_period=p)
         submission = GradingGovernanceService.get_submission(offering=offering, template_period=p)
+        governance_state = _resolve_faculty_period_governance_state(
+            offering,
+            p,
+            active_grading_period=active_grading_period,
+            submission=submission,
+        )
+        can_access_corrections = bool(
+            submission
+            and submission.status in {GradeSubmission.Status.SUBMITTED, GradeSubmission.Status.REOPENED}
+        )
         period_cards.append(
             {
                 "period": p,
@@ -1868,6 +2183,15 @@ def offering_periods_view(request, offering_id: int):
                     template_period=p,
                 ),
                 "deadline_at": lock.deadline_at if lock else None,
+                "is_active_period": AcademicGovernanceService.template_period_matches_active_period(
+                    template_period=p,
+                    active_period_setting=active_grading_period,
+                ),
+                "is_closed_by_active_period": governance_state["is_closed_by_active_period"],
+                "is_future_period": governance_state["is_future_period"],
+                "is_past_period": governance_state["is_past_period"],
+                "closed_message": governance_state["message"],
+                "can_access_corrections": can_access_corrections,
             }
         )
 
@@ -1883,6 +2207,12 @@ def offering_periods_view(request, offering_id: int):
         "grade_prediction_enabled": FeatureSettingsService.can_user_access_grade_prediction(
             user=request.user,
             tenant_id=offering.tenant_id,
+        ),
+        "active_grading_period": active_grading_period,
+        "deadline_banner": _build_deadline_reminder_for_period_cards(
+            offering,
+            period_cards,
+            now=timezone.now(),
         ),
     }
     return render(request, "faculty_portal/offering_periods.html", context)
@@ -1915,6 +2245,63 @@ def offering_grading_template_view(request, offering_id: int):
         "final_formula": preview["final_formula"],
     }
     return render(request, "faculty_portal/offering_grading_template.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def period_view_history_view(request, offering_id: int, period_id: int):
+    assignment = _find_faculty_assignment(request.user, offering_id)
+    if assignment and not assignment.is_accepted:
+        messages.error(request, "Please accept this faculty assignment first before opening the class.")
+        return redirect("faculty_portal:my_courses")
+
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
+    if period is None:
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    view_logs = []
+    log_qs = (
+        AuditLog.objects.filter(
+            entity_type="FacultyGradebookMonitor",
+            metadata_json__faculty_user_id=request.user.id,
+            metadata_json__offering_id=offering.id,
+            metadata_json__period_id=period.id,
+        )
+        .select_related("actor_user")
+        .order_by("-created_at")
+    )
+    for log in log_qs:
+        actor = log.actor_user
+        role_labels = []
+        if actor is not None:
+            role_labels = list(
+                actor.user_roles.filter(is_active=True, role__is_active=True)
+                .values_list("role__name", flat=True)
+                .distinct()
+            )
+        full_name = actor.full_name.strip() if actor and getattr(actor, "full_name", "").strip() else ""
+        view_logs.append(
+            {
+                "log": log,
+                "actor_name": full_name or (actor.username if actor else "Unknown User"),
+                "actor_username": actor.username if actor else "",
+                "actor_roles": ", ".join(role_labels) if role_labels else "Role not available",
+                "masked_student_identity": bool((log.metadata_json or {}).get("masked_student_identity")),
+            }
+        )
+
+    context = {
+        "offering": offering,
+        "template": template,
+        "period": period,
+        "view_logs": view_logs,
+    }
+    return render(request, "faculty_portal/period_view_history.html", context)
 
 
 @portal_required("FACULTY")
@@ -2042,6 +2429,11 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
             except ValidationError as exc:
                 form.add_error(None, str(exc))
             else:
+                FacultyReminderService.sync_activity_reminder(
+                    activity=activity,
+                    faculty_user=request.user,
+                    created_by=request.user,
+                )
                 after_data = {
                     "offering_id": offering.id,
                     "period_id": period.id,
@@ -2158,6 +2550,10 @@ def period_activity_delete_view(request, offering_id: int, period_id: int, activ
     before = _activity_before_data(activity)
     score_count = activity.student_scores.filter(is_active=True).count()
     FacultyGradingService.archive_activity(user=request.user, activity=activity)
+    FacultyReminderService.cancel_activity_reminder(
+        activity=activity,
+        reason="Activity reminder cancelled because the activity was deleted.",
+    )
     AuditService.log_event(
         action="DELETE",
         portal="FACULTY",
@@ -2948,14 +3344,19 @@ def period_submit_view(request, offering_id: int, period_id: int):
         request=request,
     )
     messages.success(request, f"{period.code} grades submitted successfully.")
-    return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+    return redirect("faculty_portal:offering_periods", offering_id=offering.id)
 
 
 @portal_required("FACULTY")
 @permission_required("corrections.create")
 def period_corrections_view(request, offering_id: int, period_id: int):
     GradingGovernanceService.auto_lapse_expired_correction_windows()
-    offering, template, period = _resolve_offering_period(request, offering_id, period_id)
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering.id)
 
@@ -3061,7 +3462,10 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                         "Correction request submitted, but no approver email recipients matched the current feature settings. "
                         "Please review Configurable Features and the recipient role assignments.",
                     )
-                messages.success(request, "Correction request submitted for review.")
+                messages.success(
+                    request,
+                    "Correction request submitted for review. Once approved, EduGradesPro will post the corrected values automatically.",
+                )
                 return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
 
     requests_qs = (
@@ -3088,12 +3492,23 @@ def period_corrections_view(request, offering_id: int, period_id: int):
     official_report_enabled = FeatureSettingsService.is_correction_official_report_enabled(
         tenant_id=offering.tenant_id
     )
+    requests = list(requests_qs)
+    for req in requests:
+        action_codes = {
+            item.requested_action
+            for item in req.items.all()
+            if getattr(item, "requested_action", None)
+        }
+        req.is_direct_score_request = bool(action_codes) and action_codes == {
+            GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE
+        }
+        req.requires_manual_finalize = bool(action_codes) and not req.is_direct_score_request
     context = {
         "offering": offering,
         "template": template,
         "period": period,
         "form": form,
-        "requests": requests_qs,
+        "requests": requests,
         "is_locked": state["is_locked"],
         "is_submitted": state["is_submitted"],
         "submission_status": state["submission_status"],
@@ -3161,7 +3576,12 @@ def period_self_reopen_view(request, offering_id: int, period_id: int):
     if request.method != "POST":
         return redirect("faculty_portal:period_corrections", offering_id=offering_id, period_id=period_id)
 
-    offering, template, period = _resolve_offering_period(request, offering_id, period_id)
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering_id)
 
@@ -3219,7 +3639,12 @@ def period_correction_finalize_view(request, offering_id: int, period_id: int, r
     if request.method != "POST":
         return redirect("faculty_portal:period_corrections", offering_id=offering_id, period_id=period_id)
 
-    offering, template, period = _resolve_offering_period(request, offering_id, period_id)
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering_id)
 
@@ -3253,6 +3678,16 @@ def period_correction_finalize_view(request, offering_id: int, period_id: int, r
         messages.error(request, "No active correction window to finalize.")
         return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
 
+    if all(
+        item.requested_action == GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE
+        for item in correction.items.filter(is_active=True)
+    ):
+        messages.info(
+            request,
+            "This score correction petition is already applied and closed automatically after approval.",
+        )
+        return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
+
     try:
         FacultyGradingService.recompute_period_summary(
             user=request.user,
@@ -3281,7 +3716,12 @@ def period_correction_finalize_view(request, offering_id: int, period_id: int, r
 @portal_required("FACULTY")
 @permission_required("corrections.create")
 def period_correction_official_report_view(request, offering_id: int, period_id: int, request_id: int):
-    offering, template, period = _resolve_offering_period(request, offering_id, period_id)
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
     if period is None:
         raise PermissionDenied("Invalid period.")
 
@@ -3326,7 +3766,7 @@ def offering_enrollment_view(request, offering_id: int):
         faculty_assignments__is_active=True,
         faculty_assignments__accepted_at__isnull=False,
     )
-    mode = EnrollmentService.get_enrollment_mode(offering.tenant_id)
+    mode = EnrollmentService.get_enrollment_mode(offering.tenant_id, offering_id=offering.id)
     can_create_enrollment = EnrollmentService.can_create_or_update(
         user=request.user,
         offering=offering,
@@ -3347,6 +3787,44 @@ def offering_enrollment_view(request, offering_id: int):
     form = FacultyEnrollmentForm(student_queryset=student_qs)
     if request.method == "POST":
         action = (request.POST.get("action") or "upsert_student").strip().lower()
+        if action == "remove_from_class":
+            if not can_create_enrollment:
+                messages.error(
+                    request,
+                    "Student movement updates are admin-only for this tenant. Ask the academic office to update the class master list.",
+                )
+                return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
+            enrollment_id = request.POST.get("enrollment_id")
+            enrollment = offering.enrollments.filter(id=enrollment_id, is_active=True).select_related("student").first()
+            if not enrollment:
+                messages.error(request, "Active class-list row not found.")
+                return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
+            enrollment = EnrollmentService.update_enrollment(
+                user=request.user,
+                enrollment=enrollment,
+                enrollment_status=Enrollment.Status.ACTIVE,
+                is_active=False,
+                portal=Enrollment.SourcePortal.FACULTY,
+            )
+            AuditService.log_event(
+                action="UPDATE",
+                portal="FACULTY",
+                entity_type="Enrollment",
+                entity_id=enrollment.id,
+                actor=request.user,
+                after_data={
+                    "student_id": enrollment.student_id,
+                    "course_offering_id": enrollment.course_offering_id,
+                    "status": enrollment.enrollment_status,
+                    "is_active": enrollment.is_active,
+                    "source": enrollment.encoded_via_portal,
+                    "movement_action": "REMOVE_FROM_CLASS",
+                },
+                request=request,
+            )
+            messages.success(request, "Student removed from this class list. Use this when the student transferred to a different class schedule.")
+            return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
+
         if action == "update_status":
             if not can_update_status:
                 messages.error(request, "You are not allowed to update class list status for this offering.")
@@ -3427,8 +3905,13 @@ def offering_enrollment_view(request, offering_id: int):
 
     enrollments = (
         offering.enrollments.select_related("student")
-        .all()
+        .filter(is_active=True)
         .order_by("student__last_name", "student__first_name", "student__student_no")
+    )
+    removed_enrollments = (
+        offering.enrollments.select_related("student")
+        .filter(is_active=False)
+        .order_by("-updated_at", "student__last_name", "student__first_name", "student__student_no")
     )
     context = {
         "offering": offering,
@@ -3437,5 +3920,6 @@ def offering_enrollment_view(request, offering_id: int):
         "can_update_status": can_update_status,
         "form": form,
         "enrollments": enrollments,
+        "removed_enrollments": removed_enrollments,
     }
     return render(request, "faculty_portal/offering_enrollment.html", context)

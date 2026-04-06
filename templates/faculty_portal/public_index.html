@@ -97,6 +97,108 @@
     color: #456150;
     margin-bottom: 0;
   }
+  .fp-entry-grid,
+  .fp-support-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
+    margin-top: 1.15rem;
+  }
+  .fp-entry-card,
+  .fp-support-card {
+    border: 1px solid rgba(63, 104, 67, 0.14);
+    border-radius: 18px;
+    background: linear-gradient(145deg, rgba(255,255,255,0.94) 0%, rgba(246,251,242,0.96) 62%, rgba(239,247,228,0.96) 100%);
+    box-shadow: 0 14px 28px rgba(24, 56, 33, 0.08);
+    padding: 1rem 1.05rem;
+    height: 100%;
+  }
+  .fp-entry-card h3,
+  .fp-support-card h3 {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #1c4c30;
+    margin-bottom: 0.35rem;
+  }
+  .fp-entry-card p,
+  .fp-support-card p {
+    color: #456150;
+    margin-bottom: 0;
+  }
+  .fp-entry-number {
+    width: 2rem;
+    height: 2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #1b6a40 0%, #8fab30 100%);
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 800;
+    margin-bottom: 0.6rem;
+  }
+  .fp-governance-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 1rem;
+    margin-top: 1.25rem;
+    align-items: stretch;
+  }
+  .fp-governance-card {
+    border-radius: 20px;
+    padding: 1.15rem 1.15rem 1.05rem;
+    background: linear-gradient(135deg, rgba(18, 69, 36, 0.94) 0%, rgba(43, 111, 55, 0.96) 55%, rgba(144, 170, 56, 0.94) 100%);
+    color: #f7fff7;
+    box-shadow: 0 18px 32px rgba(16, 52, 30, 0.16);
+    height: 100%;
+  }
+  .fp-governance-card h3 {
+    font-size: 1.1rem;
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+  }
+  .fp-governance-card p,
+  .fp-governance-card li {
+    color: rgba(247, 255, 247, 0.92);
+  }
+  .fp-governance-card ul {
+    margin: 0;
+    padding-left: 1.15rem;
+  }
+  .fp-governance-card li + li {
+    margin-top: 0.4rem;
+  }
+  .fp-governance-note {
+    border: 1px solid rgba(63, 104, 67, 0.14);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 14px 28px rgba(24, 56, 33, 0.08);
+    padding: 1rem 1.05rem;
+    height: 100%;
+  }
+  .fp-governance-note h3 {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #1c4c30;
+    margin-bottom: 0.45rem;
+  }
+  .fp-governance-note p,
+  .fp-governance-note li {
+    color: #456150;
+  }
+  .fp-governance-note ul {
+    margin: 0;
+    padding-left: 1.15rem;
+  }
+  .fp-governance-note li + li {
+    margin-top: 0.35rem;
+  }
+  @media (max-width: 991.98px) {
+    .fp-governance-grid {
+      grid-template-columns: 1fr;
+    }
+  }
 </style>
 {% endblock %}
 
@@ -118,8 +220,10 @@
         <div class="collapse navbar-collapse" id="facultyPublicNav">
           <ul class="navbar-nav mx-auto mb-3 mb-lg-0 fp-links">
             <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
+            <li class="nav-item"><a class="nav-link" href="#entry-experience">Entry Experience</a></li>
             <li class="nav-item"><a class="nav-link" href="#workflow">Workflow</a></li>
             <li class="nav-item"><a class="nav-link" href="#features">Features</a></li>
+            <li class="nav-item"><a class="nav-link" href="#period-governance">Governance</a></li>
             <li class="nav-item"><a class="nav-link" href="#integration">Integration</a></li>
             <li class="nav-item"><a class="nav-link" href="#support">Support</a></li>
           </ul>
@@ -192,6 +296,41 @@
             {% comment %} <div class="fp-float-chip">Live Grading Status</div>
             <div class="fp-float-chip alt">Term Progress View</div> {% endcomment %}
           </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Faculty Portal Entry Experience -->
+  <section id="entry-experience" class="fp-section">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <div class="fp-eyebrow">FACULTY PORTAL ENTRY EXPERIENCE</div>
+      <h2 class="fp-section-title">What Faculty See When They Enter EduGradesPro</h2>
+      <p class="fp-section-text mw-xxl">
+        The Faculty Portal homepage is designed to orient the faculty member quickly. It introduces the
+        teaching workspace, gives immediate direction on where to start, and highlights the support tools
+        available before daily grading work begins.
+      </p>
+      <div class="fp-entry-grid">
+        <div class="fp-entry-card">
+          <div class="fp-entry-number">1</div>
+          <h3>Login and Open the Portal</h3>
+          <p>Faculty start with secure sign-in, password rules, privacy consent, and portal access control.</p>
+        </div>
+        <div class="fp-entry-card">
+          <div class="fp-entry-number">2</div>
+          <h3>See Assigned Classes First</h3>
+          <p>The portal directs faculty to their class load so they can confirm which classes are active and ready for work.</p>
+        </div>
+        <div class="fp-entry-card">
+          <div class="fp-entry-number">3</div>
+          <h3>Understand What Needs Attention</h3>
+          <p>Deadline reminders, assignment acceptance, at-risk monitoring, and help/manual access are surfaced early for better daily focus.</p>
+        </div>
+        <div class="fp-entry-card">
+          <div class="fp-entry-number">4</div>
+          <h3>Proceed Into the Class Workflow</h3>
+          <p>From there, faculty can open class periods, manage activities, encode scores, record attendance, and review summaries.</p>
         </div>
       </div>
     </div>
@@ -289,6 +428,64 @@
           <div class="fp-image-holder has-image">
             <img src="{% get_media_prefix %}imahe/facultygrades.jpg" alt="Faculty workflow and grading screenshot">
           </div>
+        </div>
+      </div>
+      <div class="fp-eyebrow mt-4">FACULTY SUPPORT FEATURES</div>
+      <div class="fp-support-grid">
+        <div class="fp-support-card">
+          <h3>Reminder Center</h3>
+          <p>Faculty can create reminders for future activities, deadlines, and follow-up tasks inside the portal.</p>
+        </div>
+        <div class="fp-support-card">
+          <h3>Private Notes / Memo</h3>
+          <p>EduGradesPro provides a private note area for class-linked and student-linked reminders that stay visible only to the faculty member.</p>
+        </div>
+        <div class="fp-support-card">
+          <h3>Students At-Risk Monitor</h3>
+          <p>The portal can group students by class and period to help faculty identify learners who may need early intervention.</p>
+        </div>
+        <div class="fp-support-card">
+          <h3>Grading Template Visibility</h3>
+          <p>Faculty can open the assigned grading template for a class to understand the structure, weighting, and grading logic being used.</p>
+        </div>
+        <div class="fp-support-card">
+          <h3>Deadline and Submission Visibility</h3>
+          <p>Banner reminders help faculty see whether a class period deadline is upcoming, overdue, or not yet configured.</p>
+        </div>
+        <div class="fp-support-card">
+          <h3>Help Center and Formal Manual</h3>
+          <p>Guided help and policy references are available inside the Faculty Portal for both practical use and governance understanding.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Active Grading Period Governance -->
+  <section id="period-governance" class="fp-section">
+    <div class="container-fluid fp-fluid px-3 px-xl-4">
+      <div class="fp-eyebrow">ACTIVE GRADING PERIOD GOVERNANCE</div>
+      <h2 class="fp-section-title">Faculty Work Follows the Current Active Grading Period</h2>
+      <p class="fp-section-text mw-xxl">
+        EduGradesPro can align faculty access with the institution's active grading timeline. This helps
+        keep class work focused on the correct academic period while still respecting approved exceptions.
+      </p>
+      <div class="fp-governance-grid">
+        <div class="fp-governance-card">
+          <h3>How It Works</h3>
+          <ul>
+            <li>The institution can define the current active grading period, such as Prelim, Midterm, Pre-Final, or Final.</li>
+            <li>The active period remains open for normal faculty work.</li>
+            <li>Non-active periods can be closed by policy so faculty do not accidentally work ahead or reopen older periods informally.</li>
+            <li>This keeps grading aligned with institutional deadlines and governance expectations.</li>
+          </ul>
+        </div>
+        <div class="fp-governance-note">
+          <h3>Important Exception Rules</h3>
+          <ul>
+            <li>A non-active period may still be opened when it is formally reopened by authorized governance actions.</li>
+            <li>Approved correction windows remain protected so legitimate correction processing is not blocked.</li>
+            <li>The goal is period discipline with controlled flexibility, not unnecessary faculty restriction.</li>
+          </ul>
         </div>
       </div>
     </div>

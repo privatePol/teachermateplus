@@ -3,9 +3,14 @@
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Grading Templates</h2>
-  {% if "grading_templates.create" in effective_permissions %}
-  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:grading_template_create' %}">Add Template</a>
-  {% endif %}
+  <div class="d-flex flex-wrap gap-2 justify-content-end">
+    {% if "system_settings.update" in effective_permissions %}
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_governance_settings' %}">Template Governance</a>
+    {% endif %}
+    {% if "grading_templates.create" in effective_permissions %}
+    <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:grading_template_create' %}">Add Template</a>
+    {% endif %}
+  </div>
 </div>
 <form class="row g-2 mb-3">
   <div class="col-md-3">
@@ -87,6 +92,9 @@
             {% else %}
               <span class="badge text-bg-secondary">Draft</span>
             {% endif %}
+            {% if row.current_approval_step_label %}
+            <div class="small text-muted mt-1">Current Step: {{ row.current_approval_step_label }}</div>
+            {% endif %}
           </td>
           <td class="text-end">
             {% if "grading_templates.read" in effective_permissions %}
@@ -99,19 +107,19 @@
             {% if "grading_templates.update" in effective_permissions %}
             <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grading_template_update' row.id %}">Edit</a>
             {% endif %}
-            {% if "grading_templates.submit_for_approval" in effective_permissions and not row.is_published and row.approval_status != "FOR_APPROVAL" %}
+            {% if row.can_submit %}
             <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grading_template_submit_for_approval' row.id %}">Submit</a>
             {% endif %}
-            {% if "grading_templates.approve" in effective_permissions and row.approval_status == "FOR_APPROVAL" %}
+            {% if row.can_review_approval %}
             <a class="btn btn-sm btn-outline-warning" href="{% url 'admin_portal:grading_template_review_approval' row.id %}">Review</a>
             {% endif %}
-            {% if "grading_templates.publish" in effective_permissions and not row.is_published and row.approval_status == "APPROVED" %}
+            {% if row.can_publish_workflow %}
             <form method="post" action="{% url 'admin_portal:grading_template_publish' row.id %}" class="d-inline">
               {% csrf_token %}
               <button type="submit" class="btn btn-sm btn-success">Publish</button>
             </form>
             {% endif %}
-            {% if "template_hotfixes.create" in effective_permissions and row.is_published %}
+            {% if row.can_hotfix_request %}
             <a class="btn btn-sm btn-outline-danger" href="{% url 'admin_portal:template_hotfix_create' row.id %}">Hotfix</a>
             {% endif %}
           </td>

@@ -84,3 +84,43 @@ class User(AbstractBaseUser, PermissionsMixin):
     def full_name(self):
         name = " ".join(part for part in [self.first_name, self.middle_name, self.last_name] if part)
         return name.strip() or self.username
+
+
+class PortalLoginLockoutState(models.Model):
+    class PortalCode(models.TextChoices):
+        ADMIN = "ADMIN", "Admin Portal"
+        FACULTY = "FACULTY", "Faculty Portal"
+
+    user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        related_name="login_lockout_states",
+        blank=True,
+        null=True,
+    )
+    username = models.CharField(max_length=150)
+    portal_code = models.CharField(max_length=20, choices=PortalCode.choices)
+    failed_attempt_count = models.PositiveIntegerField(default=0)
+    window_started_at = models.DateTimeField(blank=True, null=True)
+    last_failed_at = models.DateTimeField(blank=True, null=True)
+    locked_until = models.DateTimeField(blank=True, null=True)
+    last_ip = models.GenericIPAddressField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "portal_login_lockout_states"
+        ordering = ["portal_code", "username"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["username", "portal_code"],
+                name="uniq_portal_login_lockout_username_portal",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["portal_code", "username"]),
+            models.Index(fields=["portal_code", "locked_until"]),
+        ]
+
+    def __str__(self):
+        return f"{self.portal_code}:{self.username}"

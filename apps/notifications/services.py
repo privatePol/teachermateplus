@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
@@ -98,6 +98,7 @@ class ReminderService:
 
 class FacultyReminderService:
     REMINDER_REFERENCE_TYPE = "FACULTY_REMINDER_EMAIL"
+    DEFAULT_ACTIVITY_REMINDER_HOUR = 7
 
     @staticmethod
     def _portal_url(path_name: str) -> str:
@@ -124,6 +125,111 @@ class FacultyReminderService:
         text_body = render_to_string("faculty_portal/emails/reminder_notification.txt", context)
         html_body = render_to_string("faculty_portal/emails/reminder_notification.html", context)
         return subject, text_body, html_body
+
+    @classmethod
+    def _activity_reminder_notes(cls, activity) -> str:
+        course_code = getattr(getattr(activity, "offering", None), "course", None)
+        section_code = getattr(getattr(activity, "offering", None), "section", None)
+        course_label = getattr(course_code, "code", None) or "Course"
+        section_label = getattr(section_code, "code", None) or "Section"
+        activity_date = activity.activity_date.strftime("%B %d, %Y") if activity.activity_date else "scheduled date"
+        return (
+            f"Auto-created from future activity scheduling for {course_label} / {section_label}. "
+            f"Prepare materials and scoring setup before {activity_date}."
+        )
+
+    @classmethod
+    def _activity_reminder_datetimes(cls, activity_date):
+        current_tz = timezone.get_current_timezone()
+        remind_at = timezone.make_aware(
+            datetime.combine(activity_date, time(hour=cls.DEFAULT_ACTIVITY_REMINDER_HOUR, minute=0)),
+            current_tz,
+        )
+        due_at = timezone.make_aware(datetime.combine(activity_date, time(hour=23, minute=59)), current_tz)
+        return remind_at, due_at
+
+    @classmethod
+    def cancel_activity_reminder(cls, *, activity, reason: str | None = None, now=None):
+        now = now or timezone.now()
+        reminder = FacultyReminder.objects.filter(grade_activity=activity, is_active=True).first()
+        if reminder is None:
+            return None
+
+        reminder.is_active = False
+        reminder.cancelled_at = now
+        if reason:
+            reminder.notes = reason
+        reminder.save(update_fields=["is_active", "cancelled_at", "notes", "updated_at"])
+        FacultyReminderEmailQueue.objects.filter(
+            reminder=reminder,
+            status__in=[
+                FacultyReminderEmailQueue.Status.PENDING,
+                FacultyReminderEmailQueue.Status.FAILED,
+            ],
+        ).update(
+            status=FacultyReminderEmailQueue.Status.CANCELLED,
+            error_message="Activity reminder cancelled because the activity is no longer scheduled in the future.",
+            updated_at=now,
+        )
+        return reminder
+
+    @classmethod
+    def sync_activity_reminder(cls, *, activity, faculty_user, created_by=None, now=None):
+        now = now or timezone.now()
+        activity_date = getattr(activity, "activity_date", None)
+        tenant_id = getattr(activity, "tenant_id", None)
+        if not FeatureSettingsService.is_faculty_reminder_center_enabled(tenant_id=tenant_id, default=True):
+            cls.cancel_activity_reminder(
+                activity=activity,
+                reason="Activity reminder auto-creation is disabled by tenant configuration.",
+                now=now,
+            )
+            return None
+        if not getattr(activity, "is_active", True) or activity_date is None or activity_date <= timezone.localdate():
+            cls.cancel_activity_reminder(
+                activity=activity,
+                reason="Activity reminder cancelled because the activity date is not in the future.",
+                now=now,
+            )
+            return None
+        if faculty_user is None:
+            return None
+
+        remind_at, due_at = cls._activity_reminder_datetimes(activity_date)
+        send_email = FeatureSettingsService.is_faculty_reminder_email_enabled(tenant_id=tenant_id, default=False)
+        reminder, _ = FacultyReminder.objects.update_or_create(
+            grade_activity=activity,
+            defaults={
+                "tenant_id": activity.tenant_id,
+                "campus_id": activity.campus_id,
+                "faculty_user": faculty_user,
+                "offering_id": activity.offering_id,
+                "reminder_type": FacultyReminder.ReminderType.ACTIVITY_PREPARATION,
+                "title": f"Prepare Activity: {activity.title}",
+                "period_label": getattr(activity.template_period, "name", None) or getattr(activity.template_period, "code", None),
+                "notes": cls._activity_reminder_notes(activity),
+                "remind_at": remind_at,
+                "due_at": due_at,
+                "send_email": send_email,
+                "created_by": created_by or faculty_user,
+                "is_active": True,
+                "completed_at": None,
+                "cancelled_at": None,
+                "snoozed_until": None,
+            },
+        )
+        FacultyReminderEmailQueue.objects.filter(
+            reminder=reminder,
+            status__in=[
+                FacultyReminderEmailQueue.Status.PENDING,
+                FacultyReminderEmailQueue.Status.FAILED,
+            ],
+        ).exclude(scheduled_at=remind_at).update(
+            status=FacultyReminderEmailQueue.Status.CANCELLED,
+            error_message="Activity reminder was rescheduled to a different date.",
+            updated_at=now,
+        )
+        return reminder
 
     @classmethod
     def queue_due_email_notifications(cls, *, now=None, tenant_id: int | None = None, dry_run: bool = False):

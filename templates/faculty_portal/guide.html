@@ -412,7 +412,7 @@
             <a href="#guide-attendance-summary">Attendance and Summary</a>
             <a href="#guide-prediction">Grade Prediction</a>
             <a href="#guide-submission">Submission Rules</a>
-            <a href="#guide-corrections">Corrections and Reopen</a>
+            <a href="#guide-corrections">Grade Corrections and Reopen</a>
             <a href="#guide-classlist">Class List and Archives</a>
             <a href="#guide-archived">Archived Classes</a>
             <a href="#guide-notes">Private Memo</a>
@@ -652,6 +652,7 @@
             <li>Submitted or locked periods are view-only for normal attendance/summary edits.</li>
             <li>Submission is blocked if no encoded grade/attendance exists for active students.</li>
             <li>If some active students have no records, system shows warning before final submission.</li>
+            <li>The <strong>Who Viewed</strong> icon on the period card remains available even when the period is closed, so faculty can still review grade book monitor history for that class period.</li>
           </ul>
           <div class="guide-mini-note">
             If a value looks unexpected, review the activity setup, score entry method, total score, and class list status before submitting.
@@ -713,6 +714,9 @@
             <li>Submitted grading periods become view-only for normal editing.</li>
             <li>EduGradesPro blocks submission if there are no encoded grade or attendance records for active students.</li>
             <li>If some active students still have missing records, the system warns you before submission so you can review the class list carefully.</li>
+            <li>EduGradesPro now shows a visible <strong>Current Active Grading Period</strong> banner on the Faculty Dashboard, on <strong>My Classes</strong>, and inside the class period page so you can see which period the campus is currently focused on.</li>
+            <li>When an active grading period is configured, non-active period cards are closed by policy. They reopen only when that period becomes active, or when the class-period is actually <strong>reopened</strong> or inside an approved <strong>correction window</strong>.</li>
+            <li>EduGradesPro also shows a visible <strong>grade submission deadline banner</strong> on the Faculty Dashboard, on <strong>My Classes</strong>, and inside the class period page so you can track the active period deadline more easily. If a deadline exists but belongs to a different campus or term scope, or uses a period code that does not match your class template, the banner will say so directly.</li>
             <li>Always review the printed sheet or on-screen summary before finalizing.</li>
           </ul>
           <div class="guide-image-card mt-3">
@@ -724,7 +728,17 @@
     <div class="col-lg-6" id="guide-corrections">
       <div class="card guide-section-card">
         <div class="card-body">
-          <div class="guide-section-title">Corrections and Reopen Governance</div>
+          <div class="guide-section-title">Grade Corrections and Reopen Governance</div>
+          <div class="guide-policy-grid mb-3">
+            <div class="guide-policy-item">
+              <strong>System Request Mode</strong>
+              <p>Use the in-portal correction request if your school allows online filing and approval tracking for grade changes.</p>
+            </div>
+            <div class="guide-policy-item">
+              <strong>Manual Only Mode</strong>
+              <p>Use the paper route when the tenant policy requires manual approval and admin reopen processing outside the portal.</p>
+            </div>
+          </div>
           <h6 class="mb-2 fw-bold text-success">System Request Mode (SYSTEM_REQUEST)</h6>
           <ol class="guide-list">
             <li>Submit period first.</li>
@@ -734,6 +748,7 @@
             <li>File the request with justification.</li>
             <li>Wait for governance approval route (for example: Coordinator -> CAO).</li>
             <li>After final approval, EduGradesPro copies the approved corrected values directly into the gradebook and recomputes the submitted period automatically.</li>
+            <li>No additional faculty finalize step is required for this direct score-correction petition flow.</li>
             <li>If your school enables the official correction report feature, the approved request also provides an official PDF for registrar reference showing campus applicability, official grade original/corrected values, and approval summary (supporting files remain in-system). The PDF opens in a new browser tab for preview/print/download.</li>
             <li>If your school enables submission notifications, EduGradesPro also emails the configured approver roles, such as CAO and college dean, using an NCBA-branded card that includes petitioner and period name details.</li>
           </ol>
@@ -785,23 +800,32 @@
     <div class="col-lg-6">
       <div class="card guide-section-card">
         <div class="card-body">
-          <div class="guide-section-title">Class List Status: ACTIVE, DR, and W</div>
+          <div class="guide-section-title">Class List Rules: Movement, ACTIVE, DR, and W</div>
           <ul class="guide-list">
             <li><strong>ACTIVE</strong> means the student remains part of the grading coverage.</li>
-            <li><strong>DR</strong> means the student is dropped and should no longer be treated as an active graded student for the class.</li>
-            <li><strong>W</strong> means the student is withdrawn and is also excluded from normal active grading coverage.</li>
+            <li><strong>Remove from Class</strong> is for schedule movement. Use it when the student transferred to another class/section and should no longer appear in this class master list.</li>
+            <li><strong>DR</strong> means the student dropped this particular class and should no longer be treated as an active graded student for the class.</li>
+            <li><strong>W</strong> means the student withdrew from the term and is also excluded from normal active grading coverage.</li>
             <li>Use the class list carefully before submission because class list status affects readiness, summary interpretation, and final grade handling.</li>
           </ul>
-          <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Mark Student as DR or W</h6>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Handle Student Movement or DR/W</h6>
           <ol class="guide-list">
-            <li>Open class -> go to <strong>Enrollment</strong>.</li>
+            <li>Open class -> go to <strong>Class List</strong>.</li>
             <li>Find the student row.</li>
-            <li>Change status to <strong>DR</strong> or <strong>W</strong>.</li>
-            <li>Click <strong>Save</strong> on that student row.</li>
+            <li>Use the line number at the start of each row if you want a faster visual reference while checking the class list.</li>
+            <li>If the student only changed schedule, click the small <strong>x</strong> beside the student number, then type <strong>remove</strong> to confirm.</li>
+            <li>If the student truly dropped the class or withdrew from the term, use the status dropdown and choose <strong>DR</strong> or <strong>W</strong>.</li>
+            <li>Click <strong>Save Status</strong> when updating DR/W.</li>
             <li>Recheck Summary readiness after status update.</li>
           </ol>
           <div class="guide-mini-note">
-            Guardrail: DR/W students are excluded from normal active grading coverage and submission readiness counts.
+            Guardrail: removed, DR, and W students are excluded from normal active grading coverage and submission readiness counts.
+          </div>
+          <div class="guide-mini-note">
+            Faster lookup: when adding a student to the class list, type the student number or the student's last name and first name first so EduGradesPro narrows the student dropdown before you click <strong>Save</strong>.
+          </div>
+          <div class="guide-mini-note">
+            Readability: the class list now shows the <strong>last name in uppercase</strong> and the <strong>first name in proper case</strong> so faculty can scan names more comfortably.
           </div>
         </div>
       </div>
@@ -833,6 +857,7 @@
             <li>Enter your official faculty email address that is registered in EduGradesPro.</li>
             <li>Check your email inbox for the password reset message from the system.</li>
             <li>If the email does not arrive, check your spam or junk folder first.</li>
+            <li>If your account is temporarily locked after too many failed sign-in attempts, wait for the lockout period to end or use the reset option if needed.</li>
             <li>If you still cannot reset your password, contact your campus administrator, registrar support, or the assigned EduGradesPro operations team.</li>
           </ul>
           <div class="guide-mini-note">
@@ -844,15 +869,16 @@
     <div class="col-lg-6" id="guide-first-login">
       <div class="card guide-section-card">
         <div class="card-body">
-          <div class="guide-section-title">First Login Privacy Consent</div>
+          <div class="guide-section-title">User Account Security</div>
           <ol class="guide-list">
-            <li>On first login, review the privacy consent statement carefully.</li>
-            <li>Read what data is collected and how it is used for academic operations.</li>
-            <li>Confirm consent to proceed to the portal.</li>
-            <li>If consent is not accepted, portal access remains restricted.</li>
+            <li>Use a strong password that satisfies EduGradesPro password complexity rules.</li>
+            <li>On first login or after an issued password reset, complete the <strong>forced password change</strong> before portal access continues.</li>
+            <li>Review and accept the current <strong>EduGradesPro Privacy Consent</strong> before using the portal.</li>
+            <li>EduGradesPro enforces <strong>single-device session control</strong>, so signing in on a new device may close your older session automatically.</li>
+            <li>Repeated failed sign-in attempts may trigger a temporary <strong>login lockout</strong> for your protection.</li>
           </ol>
           <div class="guide-mini-note">
-            Consent is part of compliance and accountability. Use only your own account and keep credentials private.
+            These controls protect your account, student records, and the audit trail. Use only your own faculty account and keep credentials private.
           </div>
         </div>
       </div>
@@ -863,6 +889,7 @@
           <div class="guide-section-title">Privacy, Data Protection, and Accountability</div>
           <ul class="guide-list">
             <li>Use only your assigned faculty credentials. Do not share your password with anyone.</li>
+            <li>Password complexity validation, forced password change, privacy consent, single-device session enforcement, and temporary login lockout are part of the account security flow.</li>
             <li>Review student data only for officially assigned classes.</li>
             <li>Changes in scores, attendance, submissions, corrections, and reopen actions are monitored for governance and audit purposes.</li>
             <li>Respect institutional data privacy requirements when viewing, printing, or discussing student records.</li>
@@ -899,7 +926,7 @@
       </div>
       <div class="guide-management-item mt-3">
         <h3>Faculty Reminder Center</h3>
-        <p>Faculty can save future activity reminders, snooze them, mark them completed, and optionally queue reminder emails once the feature is enabled by tenant configuration.</p>
+        <p>Faculty can save future activity reminders, snooze them, mark them completed, and optionally queue reminder emails once the feature is enabled by tenant configuration. Future-dated activities can also auto-create preparation reminders so planned work does not get missed.</p>
       </div>
       <div class="guide-management-item mt-3" id="guide-notes">
         <h3>Faculty Notes / Private Memo</h3>

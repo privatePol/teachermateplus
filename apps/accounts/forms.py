@@ -1,9 +1,15 @@
 from django import forms
 from django.contrib.auth import authenticate
+from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import PasswordChangeForm, SetPasswordForm
+
+from apps.accounts.services import LoginLockoutService
+
+User = get_user_model()
 
 
 class PortalLoginForm(forms.Form):
+    portal_code = ""
     username = forms.CharField(max_length=150)
     password = forms.CharField(widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}))
 
@@ -24,8 +30,29 @@ class PortalLoginForm(forms.Form):
         username = cleaned_data.get("username")
         password = cleaned_data.get("password")
         if username and password:
-            self.user_cache = authenticate(self.request, username=username, password=password)
+            normalized_username = LoginLockoutService.normalize_username(username)
+            cleaned_data["username"] = normalized_username
+            lockout_status = LoginLockoutService.get_status(normalized_username, self.portal_code)
+            if lockout_status.is_locked:
+                LoginLockoutService.log_blocked_attempt(
+                    username=normalized_username,
+                    portal_code=self.portal_code,
+                    request=self.request,
+                )
+                raise forms.ValidationError(LoginLockoutService.build_lockout_message(lockout_status.locked_until))
+
+            matched_user = User.objects.filter(username__iexact=normalized_username).first()
+            self.user_cache = authenticate(self.request, username=normalized_username, password=password)
             if self.user_cache is None:
+                if matched_user and not matched_user.is_active:
+                    raise forms.ValidationError(self.error_messages["inactive"])
+                failure_status = LoginLockoutService.register_failure(
+                    username=normalized_username,
+                    portal_code=self.portal_code,
+                    request=self.request,
+                )
+                if failure_status.is_locked:
+                    raise forms.ValidationError(LoginLockoutService.build_lockout_message(failure_status.locked_until))
                 raise forms.ValidationError(self.error_messages["invalid_login"])
             if not self.user_cache.is_active:
                 raise forms.ValidationError(self.error_messages["inactive"])
@@ -36,11 +63,11 @@ class PortalLoginForm(forms.Form):
 
 
 class AdminLoginForm(PortalLoginForm):
-    pass
+    portal_code = "ADMIN"
 
 
 class FacultyLoginForm(PortalLoginForm):
-    pass
+    portal_code = "FACULTY"
 
 
 class FacultyForgotPasswordForm(forms.Form):
@@ -133,7 +160,7 @@ class AdminSelfChangePasswordForm(PasswordChangeForm):
 class PrivacyConsentForm(forms.Form):
     consent = forms.BooleanField(
         required=True,
-        label="I have read and agree to the EduGradesPro Data Privacy Policy.",
+        label="I have read and agree to the EduGradesPro Privacy Consent.",
     )
 
     def __init__(self, *args, **kwargs):

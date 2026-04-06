@@ -7,6 +7,13 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 
 ### Admin Portal
 - Security: users, roles, scoped permissions
+- User account security now includes:
+  - password complexity validation
+  - forced password change on issued/reset credentials
+  - privacy consent acceptance tracking
+  - single-device session enforcement
+  - temporary login lockout after repeated failed attempts, configurable from `Tools -> Configurable Features -> Login Security`
+  - a `Security -> Login Lockouts` monitor page where authorized admins can review active portal lockouts and clear them when operationally justified
 - Admin security now supports creating new roles directly in the UI, then assigning permissions and scoped user-role mappings afterward.
 - Role creation now supports optional permission-copying from an existing role before final permission fine-tuning.
 - Role management now also supports editing existing roles, including activation/deactivation from the Admin UI.
@@ -21,11 +28,26 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - a dedicated assignment dashboard with campus, department, and faculty rollups.
   - configurable default-primary behavior for newly created faculty assignments, with manual override still available from the assignments list.
 - Enrollment management
+- `Tools -> Configurable Features` now includes a more guided `Class Master List Ownership` area:
+  - class-level ownership overrides can be filtered by tenant, campus, term, and optional faculty
+  - class labels intentionally omit the already selected term/academic year to reduce repetition
+  - a custom multi-class picker and selected-class preview both emphasize faculty names for quicker admin verification
+  - the page now keeps focus on the same ownership card when term/faculty filter changes reload the view
+  - the configurable-features screen itself now uses collapsible cards with stronger spacing and medium shadow depth so large settings groups are easier to navigate
 - Grading management:
   - templates
+  - template governance workflow (tenant-scoped role matrix for draft, submit, review, publish, and hotfix stages)
+  - template governance Phase 2 workflow engine:
+    - approval workflows now store real step timelines
+    - hotfix workflows now store review/apply steps
+    - sequential review chains can be enabled per tenant
   - periods/components/subcomponents/details
   - grading-template testing calculator (read-only validation using sample raw score + total score)
   - template assignment
+  - active grading period governance now drives faculty period openness:
+    - only the configured active campus-term period stays open for normal faculty work
+    - non-active periods are closed by policy unless the period has been formally reopened or is inside an approved correction window
+    - correction filing pages for already submitted periods remain reachable so governance closure does not strand legitimate correction requests
   - period locks and deadlines
   - correction/reopen governance
   - correction route matrix by faculty department (tenant default + department overrides)
@@ -33,6 +55,7 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - bulk imports
   - diagnostics/utilities (growing area)
   - configurable features/settings page for optional workflow toggles
+  - template governance settings page for template lifecycle stage-role control
 - Audit views
 - Admin analytics now include:
   - failure breakdowns by period/component/detail
@@ -40,19 +63,93 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - same-course faculty comparison ranking (top 10)
   with threshold-aware pass/fail logic.
 - Admin guide (`/admin-portal/guide/`) includes section-based procedural steps and updated media assets under `media/portal-img`.
+- The Admin guide quick-link badge now uses the clearer label `Grading Template Governance` and points to the governance section inside the guide instead of jumping straight to the live tools page.
+- The Admin guide `Governance Settings` section now presents governance areas in a clearer table that tells admins exactly where each setting should be applied in the Tools menu.
+- The Admin guide `Configuration Setup` section now also presents setup work in a clearer table that tells admins where each setup area should be applied and in what order grading-template coverage should be checked.
+- The Admin guide `Tools and CSV Importing` section now also presents import work in a clearer table that tells admins where each import type should be applied and what the import is for.
+- Production operations now also have a dedicated incident-response reference:
+  - `docs/PRODUCTION_INCIDENT_RUNBOOK.md`
+  - the Admin guide includes a `Production Incident Response` section for first-response handling during live outages
+  - that section is now intentionally restricted to `SUPER_ADMIN` visibility in the Admin guide
+  - `docs/DEPLOYMENT_UBUNTU.md` now points to the incident runbook for emergency recovery workflow guidance.
+- Deployment documentation is now fuller and production-oriented:
+  - `docs/DEPLOYMENT_UBUNTU.md` now covers Ubuntu + MariaDB/MySQL deployment, GitHub pull workflow, pre-production preparation, first go-live sequence, backups, and release discipline
+  - the deployment guide now also begins with a stage-by-stage rollout checklist and explains the recommended multi-app Ubuntu layout using `/opt/<app-name>` for code, `/etc/<app-name>` for env files, and `/var/log/<app-name>` for logs
+  - `docs/STAGING_WORKFLOW.md` now explains staging in simpler operational terms and recommends a practical `local -> GitHub -> staging -> production` workflow
+  - `docs/PRODUCTION_DATA_PROMOTION.md` now documents how to promote approved local data into staging/production using reviewed fixture bundles instead of blindly copying a development database
+  - `docs/NCBA_GO_LIVE_CHECKLIST.md` now provides an NCBA-specific launch checklist and starts with the exact `.md` reading order before rollout work begins
+  - helper scripts now exist for that workflow:
+    - `ops/scripts/export_data_bundle.ps1`
+    - `ops/scripts/import_data_bundle.sh`
+  - deployment-ready examples now also exist for:
+    - `ops/env/edugradespro.production.env.example`
+    - `ops/env/edugradespro.staging.env.example`
+    - `ops/systemd/edugradespro-staging-gunicorn.service`
+    - `ops/nginx/edugradespro-staging.conf`
+  - `docs/DB_SCHEMA.md` is now available as a generated database dictionary sourced from the Django model registry, and `ops/scripts/generate_db_schema.py` can regenerate it when schema changes
+  - `manage.py` now defaults to `config.settings`, allowing `DJANGO_ENV` to correctly choose local vs production behavior for CLI commands
+  - `.env.example` now matches that environment-aware settings pattern with `DJANGO_SETTINGS_MODULE=config.settings`.
+- Presentation/support materials now also include `docs/EDUGRADESPRO_ACADEMIC_PRESENTATION.md`, a presentation-ready academic briefing outline focused on template-driven grading, faculty grading structure, correction governance, template lifecycle, governance settings, and platform value to academic leadership.
+- Security review/support materials now also include `docs/OWASP_GAP_ASSESSMENT.md`, which documents EduGradesPro's current OWASP-aligned controls, partial gaps, and production hardening needs without overstating full formal OWASP compliance.
+- The academic presentation guide now also includes optional add-on slides for:
+  - faculty support features
+  - active grading period governance
+  while keeping the original presentation flow unchanged.
 
 ### Faculty Portal
 - Public faculty index (`/faculty/`)
 - Faculty login/logout/password flows
+- Faculty login security now includes password complexity validation, forced password change, privacy consent flow, single-device session enforcement, and configurable temporary login lockout for repeated failed attempts.
 - My Classes and Archived Classes
 - Faculty Portal sidebar keeps only the dedicated `Classes` block for the class list; the duplicate top-level `My Classes` nav entry was removed to avoid confusion.
+- Faculty Portal sidebar now organizes the main operational links as:
+  - `Classes`
+    - `My Classes`
+    - `Students At-Risk Monitor`
+    - `Archived Classes`
+  - `Reminders and Notes`
+    - `Reminders`
+    - `Notes`
 - Newly assigned classes now require explicit faculty acceptance before the class can be opened for grading or class-list work.
 - Pending faculty assignments can now carry admin instructions, and faculty can respond with `accept`, `request clarification`, or `decline` plus a note.
 - Pending faculty assignments now show a response deadline and reminder history, while expired assignments stay blocked until admin refreshes the response window.
 - Faculty public homepage and admin dashboard now surface visible reminder/help cards for the assignment-acceptance rule so users encounter it even before opening the full guide pages.
+- Faculty Portal now also surfaces a reusable grade submission deadline banner on:
+  - Faculty Dashboard
+  - My Classes
+  - class period page
+  so faculty can see the nearest active unsubmitted period deadline more clearly.
+- Faculty Portal public homepage (`/faculty/`) now also includes additive explanatory sections for:
+  - faculty portal entry experience
+  - faculty support features
+  - active grading period governance
+  so academic presentations and faculty orientation can point to concrete homepage content without changing the underlying operational workflow.
 - Faculty Portal now includes a Reminder Center where faculty can save future activity reminders, snooze or complete them, and optionally queue email notifications to their profile email address.
+- Future-dated faculty-created activities can now auto-create linked `Activity Preparation` reminders so planned activities appear in the reminder workflow without a second manual step.
+- Activity-linked reminders remain queue-based for email delivery:
+  - `send_email` is turned on only if the tenant enables Faculty Reminder Email
+  - actual email queue creation still happens in the background when the reminder becomes due
+  - if the activity is deleted or no longer future-dated, the linked reminder is cancelled automatically
 - The Reminder Center page has been visually polished into clearer sections with summary cards, a guided create form, and easier-to-scan reminder cards.
 - Faculty Portal now also includes a Student At-Risk Monitor that groups prediction-based risk rows by class and period so faculty can prioritize intervention before periods close.
+- Faculty Portal now also includes a class-period `Who Viewed` history page that lets faculty review admin-side read-only grade book monitor openings already recorded in the audit trail.
+- Faculty Portal class-list handling now distinguishes:
+  - `Remove from Class` for student schedule movement to another class
+  - `DR` for true drop from the class
+  - `W` for true withdrawal from the term
+- Faculty class-list UX now also includes:
+  - typed confirmation (`remove`) before a faculty-triggered `Remove from Class` action proceeds
+  - typed student lookup that narrows the `Add Student to This Class` dropdown by student number or by the student's last name and first name before save
+  - clearer status badge colors where `DR` uses a danger badge and `W` uses a warning badge
+  - a line number before each student number for easier manual cross-checking
+  - a compact `x` remove icon with tooltip beside the student number instead of a full-width remove button
+  - easier-to-scan class-list typography with names shown as `LAST NAME, First Name`
+- Admin tools now expose `Class Master List Ownership` so tenant admins can choose whether class-list maintenance remains admin-only or is temporarily delegated to assigned faculty.
+- `Class Master List Ownership` in Configurable Features now supports both:
+  - a tenant-wide default ownership mode
+  - an optional class-level override chosen from a multi-select class dropdown filtered by the selected tenant, campus, and term
+  - an optional faculty-name filter that narrows the class dropdown only when a faculty member is selected
+  - class labels that include the assigned faculty name in parentheses for easier admin identification
 - Period actions:
   - create activities
   - encode scores
@@ -61,6 +158,7 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - correction request
 - Gradebook print view
 - Faculty guide/help center page
+- Faculty privacy-consent page now uses the revised shared `EduGradesPro Privacy Consent` statement for system data-processing acknowledgment.
 - Faculty guide/help center now uses section-specific `media/portal-img` visuals for workflow, activities/encoding, and submission guidance.
 - Workflow visual in faculty guide is embedded directly inside the "Recommended Daily Faculty Workflow" step container for clearer instructional flow.
 - Score correction request filing now supports:
@@ -99,6 +197,24 @@ All business operations should respect these dimensions and permissions.
 
 ## 5. Governance Rules in Focus
 - Submission lock/reopen and deadlines are governance-critical.
+- Account-security governance now includes configurable temporary login lockout for failed sign-in attempts, alongside password, consent, and single-session controls.
+- Template lifecycle governance is now configurable by tenant:
+  - allowed roles can be assigned per stage for draft, submit for approval, approval review, publish, hotfix request, and hotfix review/apply
+  - optional Phase 2 sequence can be enabled for:
+    - `Template Review -> Final Approval`
+    - `Hotfix Review -> Hotfix Final Apply`
+  - the governance page now separates these visually as:
+    - `Phase 1 - Role Matrix`
+    - `Phase 2 - Sequential Steps`
+    to reduce admin confusion between base role permissions and the optional step chain
+  - the governance page now also includes step-by-step recommended setup cards for:
+    - new grading template issuance
+    - hotfix governance
+    so admins can follow the intended NCBA configuration more directly.
+  - review screens now expose workflow timelines so admins can see which step is pending and who already acted
+  - same-user separation can be enforced between submit/review, review/publish, and hotfix request/apply
+  - same-user separation can also be enforced between review/final approval and hotfix review/final apply
+  - publish can be forced to require prior approval or relaxed for direct steward publishing when policy allows.
 - Correction behavior may be policy-driven (request vs self-reopen before deadline).
 - Tenant-level correction process mode is now configurable:
   - `SYSTEM_REQUEST`: faculty can file in-portal correction requests (subject to route/policy)
@@ -109,6 +225,12 @@ All business operations should respect these dimensions and permissions.
   - final approver can be configured as CAO role
   - step-level reviewer checks use scoped role assignment and optional same-department match.
 - Final approval of score correction requests now applies the approved corrected values directly into the faculty gradebook and triggers recomputation automatically.
+- The faculty-facing correction workflow is now explicitly documented as a direct petition model for score corrections:
+  - faculty enters exact corrected values in the request
+  - approver approves the exact values
+  - EduGradesPro applies the approved values, recomputes the period, and closes the request without a separate faculty finalize step
+  - manual correction-window/finalize behavior remains only as a legacy or exceptional governed path.
+- Successful faculty period submission now redirects back to the class-period overview instead of the just-submitted period summary so active-period governance does not surface a false closure error immediately after submission.
 - When enabled, approved correction requests can generate an official PDF artifact for registrar/AIMS reference without making registrar a required in-system approver.
 - Registrar-facing official correction PDF now emphasizes approval and posting workflow by placing `Approval Summary` above `Registrar Reference`, and it no longer prints a `Supporting Attachments` section (supporting files remain available inside EduGradesPro).
 - Registrar-facing official correction PDF presentation now includes:
@@ -217,6 +339,17 @@ All business operations should respect these dimensions and permissions.
 - The faculty prediction guide now includes the dedicated `grades_prediction.png` screenshot and a shorter “quick reading order” explanation to support non-technical faculty users.
 - Admin Portal course-template assignment now supports bulk multi-course assignment with prior-assignment checking in the same term scope, making template rollout faster while avoiding conflicting assignment rows.
 - Admin Portal course-template assignment list now also acts as a coverage monitor by surfacing metric cards and a direct filter for courses that still have no active grading template assignment.
+- Admin guide section `7. Submission and Reopen Control` now mirrors the improved guide presentation style and explicitly maps locks, submission monitoring, reopen governance, and faculty re-submission follow-through to the correct Admin Portal pages.
+- Admin guide section `7. Submission and Reopen Control` now also uses a dedicated visible-border table style so policy tables are easier to scan and read during operations briefings.
+- Admin guide section `8. Grade Correction Process (System vs Manual)` now uses the same table-first presentation style and makes the system request path, official PDF artifact, approval notifications, and manual-only handling easier to distinguish.
+- Faculty guide and formal manual now use the clearer label `Grade Corrections and Reopen Governance` and begin that section with a short system/manual mode summary to reduce confusion for faculty readers.
+- Faculty deadline reminder banners now distinguish between `no deadline configured` and `deadline configured for a different campus/term scope`, so faculty users get a clearer explanation when admin settings do not apply to their accepted classes.
+- The `Period Lock` admin form now uses actual grading-template period choices and validation, reducing deadline mismatches caused by manually typed term codes instead of real period codes.
+- EduGradesPro now has an `Active Grading Period` governance model separate from grading-template period codes:
+  - canonical periods are defined per tenant and term
+  - one active period is selected per tenant/campus/term
+  - the setting is visible in both Admin and Faculty portals
+  - optional auto-advance moves to the next configured period after the current period deadline passes.
 
 ## 10. Open Design/Governance Topics
 - Tenant-specific grading methodology options (engine profiles/switches).

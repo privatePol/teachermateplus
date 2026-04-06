@@ -1,5 +1,212 @@
 {% extends "admin_portal/base.html" %}
 
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .feature-settings-form .settings-card {
+    overflow: hidden;
+    border-radius: 1rem;
+    margin-bottom: 1.6rem !important;
+    box-shadow: 0 0.75rem 1.8rem rgba(28, 49, 38, 0.14) !important;
+  }
+
+  .feature-settings-form .settings-card .card-header,
+  .feature-settings-form .settings-card .settings-card-toggle {
+    border: 0;
+    color: #fff !important;
+    background-color: transparent !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+    font-size: 0.79rem;
+    padding: 0.9rem 1.1rem;
+  }
+
+  .feature-settings-form .settings-card .settings-card-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .feature-settings-form .settings-card .settings-card-toggle:focus {
+    outline: none;
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.28);
+  }
+
+  .feature-settings-form .settings-card .card-header strong {
+    font-weight: 500;
+  }
+
+  .feature-settings-form .settings-card .toggle-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.8rem;
+    height: 1.8rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    font-size: 1rem;
+    transform: rotate(-180deg);
+    transition: transform 0.18s ease, background 0.18s ease;
+  }
+
+  .feature-settings-form .settings-card .settings-card-toggle.collapsed .toggle-indicator {
+    transform: rotate(0deg);
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .feature-settings-form .settings-card .card-body {
+    padding: 1.2rem;
+  }
+
+  .feature-settings-form .settings-card:nth-of-type(1) .card-header { background: linear-gradient(135deg, #3d6b35, #68a357) !important; }
+  .feature-settings-form .settings-card:nth-of-type(2) .card-header { background: linear-gradient(135deg, #1b6c72, #4aa39d) !important; }
+  .feature-settings-form .settings-card:nth-of-type(3) .card-header { background: linear-gradient(135deg, #7a4c2f, #d08c60) !important; }
+  .feature-settings-form .settings-card:nth-of-type(4) .card-header { background: linear-gradient(135deg, #315c8d, #6ca6d9) !important; }
+  .feature-settings-form .settings-card:nth-of-type(5) .card-header { background: linear-gradient(135deg, #5f3f8f, #9575cd) !important; }
+  .feature-settings-form .settings-card:nth-of-type(6) .card-header { background: linear-gradient(135deg, #7b5c13, #d4b24c) !important; }
+  .feature-settings-form .settings-card:nth-of-type(7) .card-header { background: linear-gradient(135deg, #1f6f5f, #58b19f) !important; }
+  .feature-settings-form .settings-card:nth-of-type(8) .card-header { background: linear-gradient(135deg, #8a3b4f, #d17a8f) !important; }
+  .feature-settings-form .settings-card:nth-of-type(9) .card-header { background: linear-gradient(135deg, #2c5e52, #6c9a8b) !important; }
+  .feature-settings-form .settings-card:nth-of-type(10) .card-header { background: linear-gradient(135deg, #5d4e8c, #8e83c9) !important; }
+  .feature-settings-form .settings-card:nth-of-type(11) .card-header { background: linear-gradient(135deg, #6a4b1f, #c78b42) !important; }
+
+  .feature-settings-form .settings-card .card-header .text-muted,
+  .feature-settings-form .settings-card .card-header .small {
+    color: rgba(255, 255, 255, 0.82) !important;
+  }
+
+  .feature-settings-form .form-check.form-switch {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 0.8rem;
+    row-gap: 0.2rem;
+    align-items: start;
+    padding: 0.9rem 1rem;
+    border: 1px solid #dce7df;
+    border-radius: 0.9rem;
+    background: linear-gradient(180deg, #ffffff, #f7fbf8);
+  }
+
+  .feature-settings-form .form-check.form-switch .form-check-input {
+    margin-left: 0;
+    margin-top: 0.15rem;
+    float: none;
+  }
+
+  .feature-settings-form .form-check.form-switch .form-check-label {
+    font-weight: 600;
+    color: #214a33;
+  }
+
+  .feature-settings-form .form-check.form-switch .form-text,
+  .feature-settings-form .form-check.form-switch .text-danger {
+    grid-column: 2;
+    margin-bottom: 0;
+  }
+
+  .feature-settings-form .settings-anchor-card {
+    scroll-margin-top: 6rem;
+  }
+
+  .feature-settings-form .selected-class-preview {
+    background: #fbfcfa;
+    border: 1px solid #d7e3da;
+    border-radius: 0.9rem;
+    padding: 0.85rem 1rem;
+  }
+
+  .feature-settings-form .selected-class-preview ul {
+    margin: 0.45rem 0 0;
+    padding-left: 1rem;
+  }
+
+  .feature-settings-form .selected-class-preview li + li {
+    margin-top: 0.35rem;
+  }
+
+  .feature-settings-form .class-offering-picker {
+    border: 1px solid #d7e3da;
+    border-radius: 0.95rem;
+    background: linear-gradient(180deg, #ffffff, #f7fbf8);
+    max-height: 18rem;
+    overflow: auto;
+    padding: 0.35rem;
+  }
+
+  .feature-settings-form .class-offering-picker .empty-state {
+    padding: 1rem 0.9rem;
+    color: #607565;
+    font-size: 0.94rem;
+  }
+
+  .feature-settings-form .class-offering-option {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.7rem;
+    align-items: start;
+    padding: 0.7rem 0.8rem;
+    border-radius: 0.8rem;
+  }
+
+  .feature-settings-form .class-offering-option:hover {
+    background: #eef6ef;
+  }
+
+  .feature-settings-form .class-offering-option input[type="checkbox"] {
+    margin-top: 0.28rem;
+  }
+
+  .feature-settings-form .class-offering-title {
+    color: #1f3d29;
+    font-weight: 600;
+  }
+
+  .feature-settings-form .class-offering-meta {
+    color: #5f7364;
+    font-size: 0.88rem;
+  }
+
+  .feature-settings-form .class-offering-meta strong {
+    font-weight: 700;
+    color: #24422b;
+  }
+
+  .feature-settings-form .prediction-controls {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .feature-settings-form .prediction-primary-grid,
+  .feature-settings-form .prediction-toggle-grid {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .feature-settings-form .prediction-primary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .feature-settings-form .prediction-toggle-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (min-width: 992px) {
+    .feature-settings-form .prediction-primary-grid {
+      grid-template-columns: minmax(0, 0.95fr) minmax(16rem, 1fr);
+      align-items: start;
+    }
+
+    .feature-settings-form .prediction-toggle-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+</style>
+{% endblock %}
+
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">{{ title }}</h2>
@@ -10,14 +217,18 @@
   Configure optional workflows here instead of hard-enabling them in code. Use this page for global feature toggles and, where needed, role-based control.
 </div>
 
-<form method="post" novalidate>
+<form method="post" novalidate class="feature-settings-form">
   {% csrf_token %}
   {% if form.non_field_errors %}
   <div class="alert alert-danger">{{ form.non_field_errors }}</div>
   {% endif %}
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Correction Official Report</strong></div>
+  <div class="card border-0 shadow-sm mb-3 settings-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-official-report" aria-expanded="true" aria-controls="feature-card-correction-official-report">
+      <strong>Correction Official Report</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-correction-official-report" class="collapse show">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.correction_official_report_enabled }}
@@ -33,10 +244,15 @@
         This governs the planned printable/exportable correction artifact that will serve as registrar reference for AIMS.
       </div>
     </div>
+    </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Correction Approval Notification Email</strong></div>
+  <div class="card border-0 shadow-sm mb-3 settings-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-approval-email" aria-expanded="true" aria-controls="feature-card-correction-approval-email">
+      <strong>Correction Approval Notification Email</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-correction-approval-email" class="collapse show">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.correction_submission_approval_email_enabled }}
@@ -60,10 +276,15 @@
         {% for error in form.correction_submission_approval_email_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
     </div>
+    </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Registrar Auto Email</strong></div>
+  <div class="card border-0 shadow-sm mb-3 settings-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-registrar-auto-email" aria-expanded="true" aria-controls="feature-card-registrar-auto-email">
+      <strong>Registrar Auto Email</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-registrar-auto-email" class="collapse show">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.correction_registrar_auto_email_enabled }}
@@ -98,10 +319,15 @@
         {% for error in form.correction_registrar_default_recipients.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
     </div>
+    </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Faculty Assignment Acceptance Workflow</strong></div>
+  <div class="card border-0 shadow-sm mb-3 settings-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-assignment" aria-expanded="true" aria-controls="feature-card-faculty-assignment">
+      <strong>Faculty Assignment Acceptance Workflow</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-faculty-assignment" class="collapse show">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.faculty_assignment_reminders_enabled }}
@@ -161,10 +387,15 @@
         These settings control how long faculty have to acknowledge a load, when reminders start, and how often repeat reminders are queued while the load is still pending.
       </div>
     </div>
+    </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Faculty Reminder Center</strong></div>
+  <div class="card border-0 shadow-sm mb-3 settings-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-reminder" aria-expanded="true" aria-controls="feature-card-faculty-reminder">
+      <strong>Faculty Reminder Center</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-faculty-reminder" class="collapse show">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.faculty_reminder_center_enabled }}
@@ -190,10 +421,15 @@
         Faculty reminders are stored in the portal first and can optionally queue background email notifications for the faculty's registered email address.
       </div>
     </div>
+    </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Faculty Memo Center</strong></div>
+  <div class="card border-0 shadow-sm mb-3 settings-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-memo" aria-expanded="true" aria-controls="feature-card-faculty-memo">
+      <strong>Faculty Memo Center</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-faculty-memo" class="collapse show">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.faculty_memo_center_enabled }}
@@ -209,10 +445,195 @@
         Faculty memos are private to the faculty owner and can optionally be linked to a class or a student for quick follow-up notes.
       </div>
     </div>
+    </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Grade Prediction</strong></div>
+  <div class="card border-0 shadow-sm mb-3 settings-card settings-anchor-card" id="class-master-list-ownership-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-class-master-list" aria-expanded="true" aria-controls="feature-card-class-master-list">
+      <strong>Class Master List Ownership</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-class-master-list" class="collapse show">
+    <div class="card-body">
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.enrollment_ownership_mode.id_for_label }}">{{ form.enrollment_ownership_mode.label }}</label>
+        {{ form.enrollment_ownership_mode }}
+        {% if form.enrollment_ownership_mode.help_text %}
+        <div class="form-text">{{ form.enrollment_ownership_mode.help_text }}</div>
+        {% endif %}
+        {% for error in form.enrollment_ownership_mode.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.class_master_list_term.id_for_label }}">{{ form.class_master_list_term.label }}</label>
+          {{ form.class_master_list_term }}
+          {% for error in form.class_master_list_term.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.class_master_list_faculty.id_for_label }}">{{ form.class_master_list_faculty.label }}</label>
+          {{ form.class_master_list_faculty }}
+          {% if form.class_master_list_faculty.help_text %}
+          <div class="form-text">{{ form.class_master_list_faculty.help_text }}</div>
+          {% endif %}
+          {% for error in form.class_master_list_faculty.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.class_master_list_override_mode.id_for_label }}">{{ form.class_master_list_override_mode.label }}</label>
+          {{ form.class_master_list_override_mode }}
+          {% if form.class_master_list_override_mode.help_text %}
+          <div class="form-text">{{ form.class_master_list_override_mode.help_text }}</div>
+          {% endif %}
+          {% for error in form.class_master_list_override_mode.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+      <div class="row g-3 mt-0">
+        <div class="col-md-12">
+          <label class="form-label" for="{{ form.class_master_list_offering.id_for_label }}">{{ form.class_master_list_offering.label }}</label>
+          <div class="class-offering-picker" role="listbox" aria-label="{{ form.class_master_list_offering.label }}">
+            {% if class_master_list_offerings %}
+              {% for offering in class_master_list_offerings %}
+              <label class="class-offering-option">
+                <input
+                  type="checkbox"
+                  name="class_master_list_offering"
+                  value="{{ offering.id }}"
+                  {% if offering.id in selected_offering_ids %}checked{% endif %}
+                >
+                <span>
+                  <span class="class-offering-title">
+                    {{ offering.course.title }} ({{ offering.course.code }}) | {{ offering.section.name }} ({{ offering.section.code }})
+                  </span>
+                  {% with assignments=offering.faculty_assignments.all %}
+                  <span class="class-offering-meta d-block">
+                    {% if assignments %}
+                      (
+                      {% for assignment in assignments %}
+                        {% if assignment.faculty_user %}
+                          <strong>{{ assignment.faculty_user.full_name|default:assignment.faculty_user.username }}</strong>{% if not forloop.last %}, {% endif %}
+                        {% endif %}
+                      {% endfor %}
+                      )
+                    {% else %}
+                      (No active faculty assignment)
+                    {% endif %}
+                  </span>
+                  {% endwith %}
+                </span>
+              </label>
+              {% endfor %}
+            {% else %}
+              <div class="empty-state">
+                No classes match the current tenant, campus, term, and optional faculty filter yet.
+              </div>
+            {% endif %}
+          </div>
+          {% if form.class_master_list_offering.help_text %}
+          <div class="form-text">{{ form.class_master_list_offering.help_text }}</div>
+          {% endif %}
+          {% for error in form.class_master_list_offering.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+      {% if selected_offerings %}
+      <div class="selected-class-preview small mt-3">
+        <div><strong>Selected class preview</strong></div>
+        <ul>
+          {% for offering in selected_offerings %}
+          <li>
+            {{ offering.course.title }} ({{ offering.course.code }}) |
+            {{ offering.section.name }} ({{ offering.section.code }})
+            {% with assignments=offering.faculty_assignments.all %}
+              {% if assignments %}
+                (
+                {% for assignment in assignments %}
+                  {% if assignment.faculty_user %}
+                    <strong>{{ assignment.faculty_user.full_name|default:assignment.faculty_user.username }}</strong>{% if not forloop.last %}, {% endif %}
+                  {% endif %}
+                {% endfor %}
+                )
+              {% endif %}
+            {% endwith %}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+      <div class="alert alert-light border small mt-3 mb-3">
+        {% if selected_offerings %}
+          {% if selected_faculty %}
+          Filtered faculty:
+          <strong>{{ selected_faculty.full_name|default:selected_faculty.username }}</strong>.
+          {% endif %}
+          Selected class count:
+          <strong>{{ selected_offerings|length }}</strong>.
+          Current selected rule:
+          <strong>{% if selected_offering_override_mode == "INHERIT_DEFAULT" %}Use tenant default{% elif selected_offering_override_mode == "ADMIN_ONLY" %}Admin Only{% else %}Faculty Allowed{% endif %}</strong>.
+        {% elif selected_faculty and selected_term %}
+          Filtered faculty:
+          <strong>{{ selected_faculty.full_name|default:selected_faculty.username }}</strong>.
+          Select one or more classes under <strong>{{ selected_term.code }}</strong> if you want to store a class-level override.
+        {% elif selected_term %}
+          Select one or more classes under <strong>{{ selected_term.code }}</strong> if you want to store a class-level override in addition to the tenant default.
+        {% else %}
+          Select the term first so EduGradesPro can narrow the class list to the current tenant, campus, and term scope. Then optionally choose a faculty name to filter the class list even further.
+        {% endif %}
+      </div>
+      <div class="alert alert-light border small mb-0">
+        Use <strong>Faculty Allowed</strong> during adjustment or late-enrollment periods when assigned faculty should add students to the correct class and remove students from the old class after schedule movement. Use <strong>Admin Only</strong> when roster maintenance should stay centralized. Tenant default and class-specific override now work together, the class selector is filtered by the selected tenant, campus, and term, faculty filtering is optional, and each class label now includes the assigned faculty name in parentheses without repeating the already-selected term and academic year.
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3 settings-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-login-security" aria-expanded="true" aria-controls="feature-card-login-security">
+      <strong>Login Security</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-login-security" class="collapse show">
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.login_lockout_enabled }}
+        <label class="form-check-label" for="{{ form.login_lockout_enabled.id_for_label }}">
+          {{ form.login_lockout_enabled.label }}
+        </label>
+        {% if form.login_lockout_enabled.help_text %}
+        <div class="form-text">{{ form.login_lockout_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.login_lockout_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.login_lockout_max_attempts.id_for_label }}">{{ form.login_lockout_max_attempts.label }}</label>
+          {{ form.login_lockout_max_attempts }}
+          {% if form.login_lockout_max_attempts.help_text %}<div class="form-text">{{ form.login_lockout_max_attempts.help_text }}</div>{% endif %}
+          {% for error in form.login_lockout_max_attempts.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.login_lockout_window_minutes.id_for_label }}">{{ form.login_lockout_window_minutes.label }}</label>
+          {{ form.login_lockout_window_minutes }}
+          {% if form.login_lockout_window_minutes.help_text %}<div class="form-text">{{ form.login_lockout_window_minutes.help_text }}</div>{% endif %}
+          {% for error in form.login_lockout_window_minutes.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.login_lockout_duration_minutes.id_for_label }}">{{ form.login_lockout_duration_minutes.label }}</label>
+          {{ form.login_lockout_duration_minutes }}
+          {% if form.login_lockout_duration_minutes.help_text %}<div class="form-text">{{ form.login_lockout_duration_minutes.help_text }}</div>{% endif %}
+          {% for error in form.login_lockout_duration_minutes.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+      <div class="alert alert-light border small mt-3 mb-0">
+        Password complexity validation, forced password change, privacy consent, single-device session enforcement, and temporary login lockout work together to protect both Admin Portal and Faculty Portal accounts.
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3 settings-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-prediction" aria-expanded="true" aria-controls="feature-card-grade-prediction">
+      <strong>Grade Prediction</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-grade-prediction" class="collapse show">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.grade_prediction_enabled }}
@@ -250,40 +671,44 @@
         {% for error in form.grade_prediction_what_if_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
 
-      <div class="row g-3">
-        <div class="col-md-6">
-          <div class="form-check form-switch">
-            {{ form.grade_prediction_at_risk_enabled }}
-            <label class="form-check-label" for="{{ form.grade_prediction_at_risk_enabled.id_for_label }}">{{ form.grade_prediction_at_risk_enabled.label }}</label>
+      <div class="prediction-controls">
+        <div class="prediction-primary-grid">
+          <div>
+            <div class="form-check form-switch mb-0">
+              {{ form.grade_prediction_at_risk_enabled }}
+              <label class="form-check-label" for="{{ form.grade_prediction_at_risk_enabled.id_for_label }}">{{ form.grade_prediction_at_risk_enabled.label }}</label>
+            </div>
+            {% for error in form.grade_prediction_at_risk_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
           </div>
-          {% for error in form.grade_prediction_at_risk_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.grade_prediction_default_assumption.id_for_label }}">{{ form.grade_prediction_default_assumption.label }}</label>
-          {{ form.grade_prediction_default_assumption }}
-          {% if form.grade_prediction_default_assumption.help_text %}<div class="form-text">{{ form.grade_prediction_default_assumption.help_text }}</div>{% endif %}
-          {% for error in form.grade_prediction_default_assumption.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-4">
-          <div class="form-check form-switch">
-            {{ form.grade_prediction_show_best_case }}
-            <label class="form-check-label" for="{{ form.grade_prediction_show_best_case.id_for_label }}">{{ form.grade_prediction_show_best_case.label }}</label>
+          <div>
+            <label class="form-label" for="{{ form.grade_prediction_default_assumption.id_for_label }}">{{ form.grade_prediction_default_assumption.label }}</label>
+            {{ form.grade_prediction_default_assumption }}
+            {% if form.grade_prediction_default_assumption.help_text %}<div class="form-text">{{ form.grade_prediction_default_assumption.help_text }}</div>{% endif %}
+            {% for error in form.grade_prediction_default_assumption.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
           </div>
-          {% for error in form.grade_prediction_show_best_case.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
         </div>
-        <div class="col-md-4">
-          <div class="form-check form-switch">
-            {{ form.grade_prediction_show_worst_case }}
-            <label class="form-check-label" for="{{ form.grade_prediction_show_worst_case.id_for_label }}">{{ form.grade_prediction_show_worst_case.label }}</label>
+        <div class="prediction-toggle-grid">
+          <div>
+            <div class="form-check form-switch mb-0">
+              {{ form.grade_prediction_show_best_case }}
+              <label class="form-check-label" for="{{ form.grade_prediction_show_best_case.id_for_label }}">{{ form.grade_prediction_show_best_case.label }}</label>
+            </div>
+            {% for error in form.grade_prediction_show_best_case.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
           </div>
-          {% for error in form.grade_prediction_show_worst_case.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-4">
-          <div class="form-check form-switch">
-            {{ form.grade_prediction_show_target_needed }}
-            <label class="form-check-label" for="{{ form.grade_prediction_show_target_needed.id_for_label }}">{{ form.grade_prediction_show_target_needed.label }}</label>
+          <div>
+            <div class="form-check form-switch mb-0">
+              {{ form.grade_prediction_show_worst_case }}
+              <label class="form-check-label" for="{{ form.grade_prediction_show_worst_case.id_for_label }}">{{ form.grade_prediction_show_worst_case.label }}</label>
+            </div>
+            {% for error in form.grade_prediction_show_worst_case.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
           </div>
-          {% for error in form.grade_prediction_show_target_needed.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          <div>
+            <div class="form-check form-switch mb-0">
+              {{ form.grade_prediction_show_target_needed }}
+              <label class="form-check-label" for="{{ form.grade_prediction_show_target_needed.id_for_label }}">{{ form.grade_prediction_show_target_needed.label }}</label>
+            </div>
+            {% for error in form.grade_prediction_show_target_needed.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
         </div>
       </div>
 
@@ -291,30 +716,85 @@
         Prediction is unofficial and read-only. It uses the same grading template structure and formula path as the official grade engine, but never writes to the gradebook.
       </div>
     </div>
+    </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center">
-      <strong>Campus / Branch Recipient Emails</strong>
-      <span class="text-muted small">{{ campus_count }} campus{% if campus_count != 1 %}es{% endif %}</span>
-    </div>
+  <div class="card border-0 shadow-sm mb-3 settings-card">
+    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-campus-recipients" aria-expanded="true" aria-controls="feature-card-campus-recipients">
+      <span>
+        <strong>Campus / Branch Recipient Emails</strong>
+        <span class="text-muted small ms-2">{{ campus_count }} campus{% if campus_count != 1 %}es{% endif %}</span>
+      </span>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <div id="feature-card-campus-recipients" class="collapse show">
     <div class="card-body">
       <div class="alert alert-light border small">
         Use campus-specific recipient emails when each branch has a different registrar destination. Leave a campus blank to fall back to the default recipient list above.
       </div>
-      <div class="row g-3">
-        {% for row in campus_field_rows %}
-        <div class="col-lg-6">
-          <label class="form-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
-          {{ row.field }}
+        <div class="row g-3">
+          {% for row in campus_field_rows %}
+          <div class="col-lg-6">
+            <label class="form-label" for="{{ row.field.id_for_label }}">{{ row.field.label }}</label>
+            {{ row.field }}
           {% if row.field.help_text %}<div class="form-text">{{ row.field.help_text }}</div>{% endif %}
           {% for error in row.field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
         </div>
         {% endfor %}
+        </div>
       </div>
     </div>
   </div>
 
   <button class="btn btn-primary" type="submit">Save Feature Settings</button>
 </form>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  (function () {
+    const ownershipCardId = "class-master-list-ownership-card";
+    const termField = document.getElementById("id_class_master_list_term");
+    const facultyField = document.getElementById("id_class_master_list_faculty");
+    const anchorOwnershipCard = function () {
+      const url = new URL(window.location.href);
+      url.hash = ownershipCardId;
+      return url;
+    };
+    if (termField) {
+      termField.addEventListener("change", function () {
+        const url = anchorOwnershipCard();
+        const selectedTerm = termField.value;
+        if (selectedTerm) {
+          url.searchParams.set("term_id", selectedTerm);
+        } else {
+          url.searchParams.delete("term_id");
+        }
+        if (facultyField && facultyField.value) {
+          url.searchParams.set("faculty_user_id", facultyField.value);
+        } else {
+          url.searchParams.delete("faculty_user_id");
+        }
+        url.searchParams.delete("offering_id");
+        window.location.href = url.toString();
+      });
+    }
+    if (facultyField) {
+      facultyField.addEventListener("change", function () {
+        const url = anchorOwnershipCard();
+        if (termField && termField.value) {
+          url.searchParams.set("term_id", termField.value);
+        }
+        if (facultyField.value) {
+          url.searchParams.set("faculty_user_id", facultyField.value);
+        } else {
+          url.searchParams.delete("faculty_user_id");
+        }
+        url.searchParams.delete("offering_id");
+        window.location.href = url.toString();
+      });
+    }
+  })();
+</script>
 {% endblock %}

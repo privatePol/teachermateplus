@@ -5,15 +5,29 @@ from datetime import timedelta
 from django.db.models import Q
 from django.utils import timezone
 
-from apps.academics.models import AcademicYear, FacultyAssignment, Term
+from apps.academics.models import (
+    AcademicYear,
+    ActiveGradingPeriodSetting,
+    FacultyAssignment,
+    TenantTermGradingPeriod,
+    Term,
+)
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
+from apps.grading.models import GradeSubmission, GradingPeriodLock
 from apps.notifications.models import NotificationQueue
 
 
 class AcademicGovernanceService:
     ACTIVE_AY_KEY = "ACTIVE_ACADEMIC_YEAR_CODE"
     ACTIVE_TERM_KEY = "ACTIVE_TERM_CODE"
+    ACTIVE_GRADING_PERIOD_AUTO_ADVANCE_KEY = "ACTIVE_GRADING_PERIOD_AUTO_ADVANCE_ENABLED"
+    STANDARD_PERIODS = (
+        ("PRELIM", "Prelim", 1),
+        ("MIDTERM", "Midterm", 2),
+        ("PREFINAL", "Pre-Final", 3),
+        ("FINAL", "Final", 4),
+    )
 
     @classmethod
     def get_active_codes(cls, *, tenant_id: int):
@@ -107,6 +121,289 @@ class AcademicGovernanceService:
             value_type="STRING",
             is_active=True,
         )
+
+    @staticmethod
+    def normalize_period_key(value: str | None) -> str:
+        raw = (value or "").strip().upper().replace("-", "").replace("_", "").replace(" ", "")
+        if "PREFINAL" in raw or "PREFI" in raw:
+            return "PREFINAL"
+        if "MIDTERM" in raw:
+            return "MIDTERM"
+        if raw == "FINAL" or raw.endswith("FINAL") or "FINALEXAM" in raw:
+            return "FINAL"
+        if "PRELIM" in raw:
+            return "PRELIM"
+        return raw
+
+    @classmethod
+    def is_active_grading_period_auto_advance_enabled(cls, *, tenant_id: int | None, default=True):
+        value = SystemSettingService.get(
+            cls.ACTIVE_GRADING_PERIOD_AUTO_ADVANCE_KEY,
+            tenant_id=tenant_id,
+            default=default,
+        )
+        return bool(value)
+
+    @classmethod
+    def set_active_grading_period_auto_advance_enabled(cls, *, tenant_id: int, enabled: bool):
+        SystemSettingService.set(
+            cls.ACTIVE_GRADING_PERIOD_AUTO_ADVANCE_KEY,
+            "1" if enabled else "0",
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+            description="Automatically advance the active grading period when the current period deadline passes.",
+        )
+
+    @classmethod
+    def get_term_grading_periods(cls, *, tenant_id: int, term_id: int | None):
+        queryset = TenantTermGradingPeriod.objects.filter(tenant_id=tenant_id, is_active=True)
+        if term_id:
+            queryset = queryset.filter(term_id=term_id)
+        return queryset.order_by("sequence_no", "name", "id")
+
+    @classmethod
+    def seed_standard_term_periods(cls, *, tenant_id: int, term: Term):
+        created = []
+        for code, name, sequence_no in cls.STANDARD_PERIODS:
+            row, was_created = TenantTermGradingPeriod.objects.get_or_create(
+                tenant_id=tenant_id,
+                term=term,
+                code=code,
+                defaults={
+                    "name": name,
+                    "sequence_no": sequence_no,
+                    "is_active": True,
+                },
+            )
+            if not was_created and not row.is_active:
+                row.is_active = True
+                row.save(update_fields=["is_active", "updated_at"])
+            if was_created:
+                created.append(row)
+        return created
+
+    @classmethod
+    def resolve_term_period(cls, *, tenant_id: int, term: Term, code_or_name: str | None):
+        normalized = cls.normalize_period_key(code_or_name)
+        if not normalized:
+            return None
+        for row in cls.get_term_grading_periods(tenant_id=tenant_id, term_id=term.id):
+            if (
+                cls.normalize_period_key(row.code) == normalized
+                or cls.normalize_period_key(row.name) == normalized
+            ):
+                return row
+        return None
+
+    @classmethod
+    def resolve_term_period_for_template_period(cls, *, tenant_id: int, term_id: int | None, template_period):
+        if not template_period or not term_id:
+            return None
+        candidates = {
+            cls.normalize_period_key(getattr(template_period, "code", None)),
+            cls.normalize_period_key(getattr(template_period, "name", None)),
+        }
+        candidates.discard("")
+        for row in cls.get_term_grading_periods(tenant_id=tenant_id, term_id=term_id):
+            row_keys = {
+                cls.normalize_period_key(row.code),
+                cls.normalize_period_key(row.name),
+            }
+            if candidates & row_keys:
+                return row
+        return None
+
+    @classmethod
+    def _resolve_deadline_for_period_setting(cls, *, setting: ActiveGradingPeriodSetting):
+        normalized_code = cls.normalize_period_key(setting.period.code or setting.period.name)
+        lock_queryset = (
+            GradingPeriodLock.objects.filter(
+                tenant_id=setting.tenant_id,
+                campus_id=setting.campus_id,
+                academic_year_id=setting.term.academic_year_id,
+                term_id=setting.term_id,
+                is_active=True,
+                deadline_at__isnull=False,
+                scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+                course_offering__isnull=True,
+            )
+            .order_by("-updated_at", "-id")
+        )
+        for lock in lock_queryset:
+            if cls.normalize_period_key(lock.period_code) == normalized_code:
+                return lock
+        return None
+
+    @classmethod
+    def _auto_advance_setting_if_due(cls, setting: ActiveGradingPeriodSetting, *, now=None):
+        if not setting or not setting.period_id:
+            return setting
+        if not cls.is_active_grading_period_auto_advance_enabled(tenant_id=setting.tenant_id, default=True):
+            return setting
+        now = now or timezone.now()
+        deadline_lock = cls._resolve_deadline_for_period_setting(setting=setting)
+        if not deadline_lock or not deadline_lock.deadline_at or now <= deadline_lock.deadline_at:
+            return setting
+        next_period = (
+            TenantTermGradingPeriod.objects.filter(
+                tenant_id=setting.tenant_id,
+                term_id=setting.term_id,
+                is_active=True,
+                sequence_no__gt=setting.period.sequence_no,
+            )
+            .order_by("sequence_no", "id")
+            .first()
+        )
+        if not next_period:
+            return setting
+        setting.period = next_period
+        setting.set_at = now
+        setting.auto_advanced_from_deadline = True
+        existing_remarks = (setting.remarks or "").strip()
+        auto_note = (
+            f"Auto-advanced from {deadline_lock.period_code} after deadline {deadline_lock.deadline_at:%Y-%m-%d %H:%M}."
+        )
+        setting.remarks = f"{existing_remarks}\n{auto_note}".strip() if existing_remarks else auto_note
+        setting.save(
+            update_fields=[
+                "period",
+                "set_at",
+                "auto_advanced_from_deadline",
+                "remarks",
+                "updated_at",
+            ]
+        )
+        return setting
+
+    @classmethod
+    def resolve_active_grading_period(cls, *, tenant_id: int, campus_id: int | None, term_id: int | None, now=None):
+        if not tenant_id or not campus_id or not term_id:
+            return None
+        setting = (
+            ActiveGradingPeriodSetting.objects.select_related("period", "term", "campus", "set_by_user")
+            .filter(
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                term_id=term_id,
+                is_active=True,
+            )
+            .first()
+        )
+        if not setting:
+            return None
+        return cls._auto_advance_setting_if_due(setting, now=now)
+
+    @classmethod
+    def set_active_grading_period(
+        cls,
+        *,
+        tenant_id: int,
+        campus,
+        term: Term,
+        period: TenantTermGradingPeriod | None,
+        actor=None,
+        remarks: str | None = None,
+        auto_advanced_from_deadline: bool = False,
+    ):
+        if period and period.term_id != term.id:
+            raise ValueError("Selected grading period does not belong to the selected term.")
+        if period is None:
+            ActiveGradingPeriodSetting.objects.filter(
+                tenant_id=tenant_id,
+                campus_id=campus.id,
+                term_id=term.id,
+            ).delete()
+            return None
+        setting, _created = ActiveGradingPeriodSetting.objects.update_or_create(
+            tenant_id=tenant_id,
+            campus=campus,
+            term=term,
+            defaults={
+                "period": period,
+                "set_by_user": actor,
+                "remarks": (remarks or "").strip() or None,
+                "auto_advanced_from_deadline": auto_advanced_from_deadline,
+                "is_active": True,
+            },
+        )
+        return setting
+
+    @classmethod
+    def template_period_matches_active_period(cls, *, template_period, active_period_setting: ActiveGradingPeriodSetting | None):
+        if not active_period_setting or not active_period_setting.period_id or not template_period:
+            return False
+        active_key = cls.normalize_period_key(active_period_setting.period.code or active_period_setting.period.name)
+        template_key = cls.normalize_period_key(
+            getattr(template_period, "code", None) or getattr(template_period, "name", None)
+        )
+        return bool(active_key and template_key and active_key == template_key)
+
+    @classmethod
+    def faculty_period_governance_state(
+        cls,
+        *,
+        tenant_id: int,
+        campus_id: int | None,
+        term_id: int | None,
+        template_period,
+        active_period_setting: ActiveGradingPeriodSetting | None = None,
+        submission_status: str | None = None,
+        is_correction_active: bool = False,
+        now=None,
+    ):
+        state = {
+            "has_active_period_setting": False,
+            "matched_term_period": None,
+            "is_active_period": False,
+            "is_closed_by_active_period": False,
+            "is_reopened_override": False,
+            "is_future_period": False,
+            "is_past_period": False,
+            "message": "",
+        }
+        if not template_period or not tenant_id or not campus_id or not term_id:
+            return state
+
+        active_setting = active_period_setting or cls.resolve_active_grading_period(
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+            term_id=term_id,
+            now=now,
+        )
+        if not active_setting or not active_setting.period_id:
+            return state
+
+        state["has_active_period_setting"] = True
+        matched_term_period = cls.resolve_term_period_for_template_period(
+            tenant_id=tenant_id,
+            term_id=term_id,
+            template_period=template_period,
+        )
+        state["matched_term_period"] = matched_term_period
+        if not matched_term_period:
+            return state
+
+        state["is_active_period"] = matched_term_period.id == active_setting.period_id
+        state["is_reopened_override"] = bool(
+            is_correction_active or submission_status == GradeSubmission.Status.REOPENED
+        )
+        if state["is_active_period"] or state["is_reopened_override"]:
+            return state
+
+        if matched_term_period.sequence_no > active_setting.period.sequence_no:
+            state["is_future_period"] = True
+            state["message"] = (
+                f"This period is closed until {matched_term_period.name} becomes the active grading period."
+            )
+        else:
+            state["is_past_period"] = True
+            state["message"] = (
+                "This earlier period is closed under the active grading period policy. "
+                "Use reopen or correction if changes are still required."
+            )
+        state["is_closed_by_active_period"] = True
+        return state
         SystemSettingService.set(
             cls.ACTIVE_TERM_KEY,
             term.code,

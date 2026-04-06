@@ -10,8 +10,17 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
 
-from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.academics.models import (
+    AcademicYear,
+    Course,
+    CourseOffering,
+    FacultyAssignment,
+    Section,
+    TenantTermGradingPeriod,
+    Term,
+)
 from apps.core.services.settings import SystemSettingService
+from apps.enrollment.services import EnrollmentService
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
@@ -82,6 +91,14 @@ def _term_label(obj):
     if ay_name:
         return f"{primary} - {ay_name}"
     return primary
+
+
+def _period_label(obj):
+    name = (getattr(obj, "name", "") or "").strip()
+    code = (getattr(obj, "code", "") or "").strip()
+    if name and code and name != code:
+        return f"{name} ({code})"
+    return name or code or str(obj)
 
 
 def _academic_year_label(obj):
@@ -1195,6 +1212,46 @@ class GradingPeriodLockForm(forms.ModelForm):
             self.fields["term"].queryset = term_queryset
         if offering_queryset is not None:
             self.fields["course_offering"].queryset = offering_queryset
+
+        self._valid_period_codes = set()
+        period_field = self.fields["period_code"]
+        period_field.widget = forms.Select()
+
+        period_queryset = GradingTemplatePeriod.objects.filter(is_active=True)
+        if offering_queryset is not None:
+            course_ids = list(offering_queryset.values_list("course_id", flat=True).distinct())
+            if course_ids:
+                template_ids = CourseTemplateAssignment.objects.filter(
+                    course_id__in=course_ids,
+                    is_active=True,
+                ).values_list("grading_template_id", flat=True)
+                filtered_period_queryset = period_queryset.filter(template_id__in=template_ids)
+                if filtered_period_queryset.exists():
+                    period_queryset = filtered_period_queryset
+                elif tenant_queryset is not None:
+                    period_queryset = period_queryset.filter(template__tenant__in=tenant_queryset)
+            elif tenant_queryset is not None:
+                period_queryset = period_queryset.filter(template__tenant__in=tenant_queryset)
+        elif tenant_queryset is not None:
+            period_queryset = period_queryset.filter(template__tenant__in=tenant_queryset)
+
+        period_options = []
+        seen_codes = set()
+        for period in period_queryset.select_related("template").order_by("sequence_no", "name", "code"):
+            code = (period.code or "").strip().upper()
+            if not code or code in seen_codes:
+                continue
+            seen_codes.add(code)
+            period_options.append((code, _period_label(period)))
+
+        instance_period_code = (getattr(self.instance, "period_code", "") or "").strip().upper()
+        if instance_period_code and instance_period_code not in seen_codes:
+            period_options.insert(0, (instance_period_code, f"{instance_period_code} (current saved value)"))
+
+        period_field.choices = [("", "---------"), *period_options]
+        period_field.widget.choices = period_field.choices
+        self._valid_period_codes = {value for value, _label in period_options if value}
+
         _set_choice_label(self.fields.get("academic_year"), _academic_year_label)
         _set_choice_label(self.fields.get("term"), _term_label)
         _set_choice_label(self.fields.get("course_offering"), _offering_label)
@@ -1203,6 +1260,10 @@ class GradingPeriodLockForm(forms.ModelForm):
         self.fields["deadline_at"].help_text = (
             "Submission deadline for this period scope. "
             "Admin submission revert is allowed only before this timestamp."
+        )
+        self.fields["period_code"].help_text = (
+            "Choose the actual grading period code used by the grading template, such as PRELIM or GENED_PRELIM. "
+            "Do not enter term codes like 2526_2NDSEM."
         )
 
     def clean(self):
@@ -1215,6 +1276,12 @@ class GradingPeriodLockForm(forms.ModelForm):
         academic_year = cleaned.get("academic_year")
         term = cleaned.get("term")
         cleaned["period_code"] = period_code
+
+        if period_code and self._valid_period_codes and period_code not in self._valid_period_codes:
+            self.add_error(
+                "period_code",
+                "Select a valid grading period code from the template periods used by your scoped offerings.",
+            )
 
         if scope_type == GradingPeriodLock.ScopeType.CAMPUS and offering:
             raise forms.ValidationError("Campus-wide lock must not have a course offering.")
@@ -1430,6 +1497,65 @@ class ActiveAcademicTermSettingForm(forms.Form):
         return cleaned
 
 
+class TenantTermGradingPeriodForm(forms.ModelForm):
+    class Meta:
+        model = TenantTermGradingPeriod
+        fields = ["code", "name", "sequence_no", "is_active"]
+
+    def clean_code(self):
+        return (self.cleaned_data.get("code") or "").strip().upper()
+
+
+class ActiveGradingPeriodSettingForm(forms.Form):
+    campus = forms.ModelChoiceField(
+        queryset=Campus.objects.none(),
+        required=True,
+        label="Campus",
+    )
+    term = forms.ModelChoiceField(
+        queryset=Term.objects.none(),
+        required=True,
+        label="Term",
+    )
+    period = forms.ModelChoiceField(
+        queryset=TenantTermGradingPeriod.objects.none(),
+        required=False,
+        label="Active Grading Period",
+        help_text="Choose the current grading period for the selected campus and term. Leave blank to clear it.",
+    )
+    remarks = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Optional note for why this active period was set or changed.",
+    )
+    auto_advance_enabled = forms.BooleanField(
+        required=False,
+        label="Auto-advance after deadline",
+        help_text="When enabled, EduGradesPro will move to the next configured period after the current period deadline passes.",
+    )
+
+    def __init__(self, *args, campus_queryset=None, term_queryset=None, period_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if campus_queryset is not None:
+            self.fields["campus"].queryset = campus_queryset
+        if term_queryset is not None:
+            self.fields["term"].queryset = term_queryset
+        if period_queryset is not None:
+            self.fields["period"].queryset = period_queryset
+        _set_choice_label(self.fields.get("campus"), lambda obj: getattr(obj, "name", None) or getattr(obj, "code", str(obj)))
+        _set_choice_label(self.fields.get("term"), _term_label)
+        _set_choice_label(self.fields.get("period"), _period_label)
+        _enforce_active_reference_choices(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        term = cleaned.get("term")
+        period = cleaned.get("period")
+        if period and term and period.term_id != term.id:
+            self.add_error("period", "Selected grading period does not belong to the selected term.")
+        return cleaned
+
+
 class CorrectionGovernanceSettingForm(forms.Form):
     CORRECTION_MODE_CHOICES = [
         ("MANUAL_ONLY", "Manual Only (paper form + admin reopen)"),
@@ -1593,6 +1719,66 @@ class ConfigurableFeatureSettingForm(forms.Form):
         label="Enable faculty memo center",
         help_text="Shows a private notes/memo area for faculty to keep class and student reminders inside the portal.",
     )
+    enrollment_ownership_mode = forms.ChoiceField(
+        required=True,
+        label="Class master list ownership mode",
+        choices=[
+            (EnrollmentService.ADMIN_ONLY, "Admin Only"),
+            (EnrollmentService.FACULTY_ALLOWED, "Faculty Allowed"),
+        ],
+        help_text="Controls whether faculty may maintain the class master list for their own assigned classes or whether roster maintenance stays admin-only.",
+    )
+    class_master_list_term = forms.ModelChoiceField(
+        queryset=Term.objects.none(),
+        required=False,
+        label="Term for class override",
+        help_text="Choose the term first so EduGradesPro can list only the classes under the selected tenant, campus, and term.",
+    )
+    class_master_list_faculty = forms.ModelChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        label="Faculty filter",
+        help_text="Optional. Select a faculty member first if you want to show only classes currently assigned to that faculty. Leave blank for no faculty filtering.",
+    )
+    class_master_list_offering = forms.ModelMultipleChoiceField(
+        queryset=CourseOffering.objects.none(),
+        required=False,
+        label="Class override target",
+        help_text="Optional. Select one or more classes if you want to override the tenant default only for those selected offerings.",
+    )
+    class_master_list_override_mode = forms.ChoiceField(
+        required=False,
+        label="Selected class override mode",
+        choices=[
+            ("", "Use tenant default"),
+            (EnrollmentService.ADMIN_ONLY, "Admin Only"),
+            (EnrollmentService.FACULTY_ALLOWED, "Faculty Allowed"),
+        ],
+        help_text="Use this only when one class needs a different class master list rule from the tenant-wide default above.",
+    )
+    login_lockout_enabled = forms.BooleanField(
+        required=False,
+        label="Enable login lockout after repeated failed attempts",
+        help_text="Temporarily blocks Admin Portal and Faculty Portal sign-in after too many failed password attempts.",
+    )
+    login_lockout_max_attempts = forms.IntegerField(
+        required=True,
+        min_value=1,
+        label="Maximum failed login attempts",
+        help_text="How many failed sign-in attempts are allowed before the account is temporarily locked for that portal.",
+    )
+    login_lockout_window_minutes = forms.IntegerField(
+        required=True,
+        min_value=1,
+        label="Failure counting window (minutes)",
+        help_text="Only failed attempts inside this rolling window are counted toward lockout.",
+    )
+    login_lockout_duration_minutes = forms.IntegerField(
+        required=True,
+        min_value=1,
+        label="Lockout duration (minutes)",
+        help_text="How long the temporary lockout stays active before the user can try again.",
+    )
     faculty_assignment_response_window_days = forms.IntegerField(
         required=True,
         min_value=1,
@@ -1661,7 +1847,17 @@ class ConfigurableFeatureSettingForm(forms.Form):
         help_text="Controls the primary projected grade shown on prediction tables.",
     )
 
-    def __init__(self, *args, role_queryset=None, campus_queryset=None, campus_initial_map=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        role_queryset=None,
+        campus_queryset=None,
+        campus_initial_map=None,
+        term_queryset=None,
+        faculty_queryset=None,
+        offering_queryset=None,
+        **kwargs,
+    ):
         self.campus_fields = []
         self.campus_queryset = campus_queryset
         campus_initial_map = campus_initial_map or {}
@@ -1671,7 +1867,17 @@ class ConfigurableFeatureSettingForm(forms.Form):
             self.fields["correction_registrar_auto_email_roles"].queryset = role_queryset
             self.fields["grade_prediction_roles"].queryset = role_queryset
             self.fields["grade_prediction_what_if_roles"].queryset = role_queryset
+        if term_queryset is not None:
+            self.fields["class_master_list_term"].queryset = term_queryset
+        if faculty_queryset is not None:
+            self.fields["class_master_list_faculty"].queryset = faculty_queryset
+        if offering_queryset is not None:
+            self.fields["class_master_list_offering"].queryset = offering_queryset
         _enforce_active_reference_choices(self)
+        _set_choice_label(self.fields.get("class_master_list_term"), _term_label)
+        _set_choice_label(self.fields.get("class_master_list_faculty"), _faculty_label)
+        _set_choice_label(self.fields.get("class_master_list_offering"), _offering_label)
+        self.fields["class_master_list_offering"].widget.attrs["size"] = 8
 
         for campus in campus_queryset or []:
             field_name = f"campus_recipient_{campus.id}"
@@ -1769,6 +1975,236 @@ class ConfigurableFeatureSettingForm(forms.Form):
             cleaned["faculty_reminder_email_enabled"] = False
         if not cleaned.get("faculty_memo_center_enabled"):
             cleaned["faculty_memo_center_enabled"] = False
+        if not cleaned.get("enrollment_ownership_mode"):
+            cleaned["enrollment_ownership_mode"] = EnrollmentService.ADMIN_ONLY
+        if not cleaned.get("class_master_list_override_mode"):
+            cleaned["class_master_list_override_mode"] = ""
+        if not cleaned.get("login_lockout_enabled"):
+            cleaned["login_lockout_enabled"] = False
+
+        selected_term = cleaned.get("class_master_list_term")
+        selected_offerings = cleaned.get("class_master_list_offering")
+        selected_faculty = cleaned.get("class_master_list_faculty")
+        if selected_offerings and not selected_term:
+            self.add_error(
+                "class_master_list_term",
+                "Select the term first before choosing a class override target.",
+            )
+        if selected_offerings and selected_term:
+            invalid_offering = next(
+                (offering for offering in selected_offerings if offering.term_id != selected_term.id),
+                None,
+            )
+            if invalid_offering:
+                self.add_error(
+                    "class_master_list_offering",
+                    "One or more selected classes do not belong to the selected term.",
+                )
+        if selected_faculty and selected_offerings:
+            invalid_faculty_offering = next(
+                (
+                    offering
+                    for offering in selected_offerings
+                    if not offering.faculty_assignments.filter(
+                        faculty_user_id=selected_faculty.id,
+                        is_active=True,
+                    ).exists()
+                ),
+                None,
+            )
+            if invalid_faculty_offering:
+                self.add_error(
+                    "class_master_list_offering",
+                    "One or more selected classes do not belong to the selected faculty filter.",
+                )
+        if cleaned.get("class_master_list_override_mode") and not selected_offerings:
+            self.add_error(
+                "class_master_list_offering",
+                "Select at least one class before applying a class-level ownership override.",
+            )
+
+        if (
+            cleaned.get("login_lockout_enabled")
+            and cleaned.get("login_lockout_max_attempts") is not None
+            and cleaned.get("login_lockout_max_attempts") < 2
+        ):
+            self.add_error(
+                "login_lockout_max_attempts",
+                "Use at least 2 failed attempts so a single typo does not lock a user immediately.",
+            )
 
         cleaned["correction_registrar_campus_recipient_map"] = campus_recipient_map
+        return cleaned
+
+
+class TemplateGovernanceSettingForm(forms.Form):
+    draft_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed to create and edit draft templates",
+        help_text="These roles may prepare draft templates and adjust draft structure before submission.",
+    )
+    submit_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed to submit templates for approval",
+        help_text="These roles may move a draft template into the approval queue.",
+    )
+    approval_review_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed to review template approval",
+        help_text="These roles may approve or reject a submitted template in Phase 1.",
+    )
+    publish_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed to publish approved templates",
+        help_text="Publishing activates the template for use by course offerings.",
+    )
+    hotfix_request_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed to request a template hotfix",
+        help_text="These roles may open a hotfix request on a published template.",
+    )
+    hotfix_review_apply_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed to review and apply a hotfix",
+        help_text="In Phase 1, this role performs the approve/apply step for hotfixes.",
+    )
+    sequential_approval_enabled = forms.BooleanField(
+        required=False,
+        label="Use a sequential template approval chain",
+        help_text="When enabled, EduGradesPro will require Template Review first, then Final Approval.",
+    )
+    approval_review_step_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed for Template Review",
+        help_text="Step 1 of the Phase 2 approval chain. These roles can review and endorse the template forward.",
+    )
+    approval_final_step_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed for Final Approval",
+        help_text="Step 2 of the Phase 2 approval chain. These roles issue the final approval or rejection.",
+    )
+    sequential_hotfix_enabled = forms.BooleanField(
+        required=False,
+        label="Use a sequential hotfix workflow",
+        help_text="When enabled, EduGradesPro will require Hotfix Review first, then Hotfix Final Apply.",
+    )
+    hotfix_review_step_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed for Hotfix Review",
+        help_text="Step 1 of the hotfix chain. These roles review the requested change before final application.",
+    )
+    hotfix_apply_step_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Roles allowed for Hotfix Final Apply",
+        help_text="Step 2 of the hotfix chain. These roles perform the final approve/apply or rejection step.",
+    )
+    require_approval_before_publish = forms.BooleanField(
+        required=False,
+        label="Require approval before publish",
+        help_text="When disabled, authorized publishers may publish a valid template directly without a prior approval step.",
+    )
+    allow_same_user_submit_review = forms.BooleanField(
+        required=False,
+        label="Allow the same user to submit and review",
+        help_text="Turn on only if the same governance role is allowed to both submit a template and approve/reject it.",
+    )
+    allow_same_user_review_approve = forms.BooleanField(
+        required=False,
+        label="Allow the same user to review and final-approve",
+        help_text="When sequential approval is enabled, this lets the same user complete both review and final approval.",
+    )
+    allow_same_user_review_publish = forms.BooleanField(
+        required=False,
+        label="Allow the same user to review and publish",
+        help_text="Turn on only if the same role is trusted to approve a template and then publish it immediately.",
+    )
+    allow_same_user_hotfix_request_apply = forms.BooleanField(
+        required=False,
+        label="Allow the same user to request and apply a hotfix",
+        help_text="Turn on only if hotfix requestors may also perform the review/apply step themselves.",
+    )
+    allow_same_user_hotfix_review_apply = forms.BooleanField(
+        required=False,
+        label="Allow the same user to review and final-apply a hotfix",
+        help_text="When sequential hotfix is enabled, this lets the same user complete both the hotfix review and final apply steps.",
+    )
+
+    STAGE_FIELDS = (
+        "draft_roles",
+        "submit_roles",
+        "approval_review_roles",
+        "publish_roles",
+        "hotfix_request_roles",
+        "hotfix_review_apply_roles",
+    )
+
+    def __init__(self, *args, role_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if role_queryset is not None:
+            for field_name in self.STAGE_FIELDS:
+                self.fields[field_name].queryset = role_queryset
+            for field_name in (
+                "approval_review_step_roles",
+                "approval_final_step_roles",
+                "hotfix_review_step_roles",
+                "hotfix_apply_step_roles",
+            ):
+                self.fields[field_name].queryset = role_queryset
+        _enforce_active_reference_choices(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        for field_name in self.STAGE_FIELDS:
+            if not cleaned.get(field_name):
+                self.add_error(field_name, "Select at least one role for this workflow stage.")
+
+        if (
+            cleaned.get("require_approval_before_publish")
+            and not cleaned.get("approval_review_roles")
+        ):
+            self.add_error(
+                "approval_review_roles",
+                "Select at least one approval-review role when publish requires approval first.",
+            )
+
+        if not cleaned.get("require_approval_before_publish") and not cleaned.get("publish_roles"):
+            self.add_error(
+                "publish_roles",
+                "Select at least one publish role when direct publishing is allowed.",
+            )
+
+        if cleaned.get("sequential_approval_enabled"):
+            if not cleaned.get("approval_review_step_roles"):
+                self.add_error(
+                    "approval_review_step_roles",
+                    "Select at least one role for the Template Review step.",
+                )
+            if not cleaned.get("approval_final_step_roles"):
+                self.add_error(
+                    "approval_final_step_roles",
+                    "Select at least one role for the Final Approval step.",
+                )
+
+        if cleaned.get("sequential_hotfix_enabled"):
+            if not cleaned.get("hotfix_review_step_roles"):
+                self.add_error(
+                    "hotfix_review_step_roles",
+                    "Select at least one role for the Hotfix Review step.",
+                )
+            if not cleaned.get("hotfix_apply_step_roles"):
+                self.add_error(
+                    "hotfix_apply_step_roles",
+                    "Select at least one role for the Hotfix Final Apply step.",
+                )
+
         return cleaned

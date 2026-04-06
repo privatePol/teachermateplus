@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 
 from apps.core.models import TimeStampedModel
 
@@ -33,6 +34,13 @@ class FacultyReminder(TimeStampedModel):
         blank=True,
         null=True,
     )
+    grade_activity = models.ForeignKey(
+        "grading.GradeActivity",
+        on_delete=models.SET_NULL,
+        related_name="faculty_reminders",
+        blank=True,
+        null=True,
+    )
     reminder_type = models.CharField(
         max_length=40,
         choices=ReminderType.choices,
@@ -62,6 +70,13 @@ class FacultyReminder(TimeStampedModel):
     class Meta:
         db_table = "faculty_reminders"
         ordering = ["completed_at", "snoozed_until", "remind_at", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["grade_activity"],
+                condition=Q(grade_activity__isnull=False),
+                name="uq_faculty_reminder_grade_activity",
+            ),
+        ]
         indexes = [
             models.Index(fields=["tenant", "faculty_user", "remind_at"], name="idx_faculty_reminder_scope"),
             models.Index(fields=["tenant", "faculty_user", "completed_at"], name="idx_faculty_reminder_done"),

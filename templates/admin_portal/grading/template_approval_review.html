@@ -34,8 +34,51 @@
   </div>
 </div>
 
+{% if approval_steps %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><strong>Workflow Timeline</strong></div>
+  <div class="card-body">
+    <div class="row g-3">
+      {% for step in approval_steps %}
+      <div class="col-md-6">
+        <div class="border rounded-3 p-3 h-100 {% if current_step and current_step.id == step.id %}border-warning-subtle bg-warning-subtle{% endif %}">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <div>
+              <div class="fw-semibold">Step {{ step.step_no }}: {{ step.step_label }}</div>
+              <div class="small text-muted">Allowed Roles: {{ step.role_codes_json|join:", " }}</div>
+            </div>
+            <span class="badge text-bg-{% if step.status == 'APPROVED' %}success{% elif step.status == 'REJECTED' %}danger{% elif step.status == 'PENDING' %}warning{% elif step.status == 'SKIPPED' %}secondary{% else %}light text-dark{% endif %}">
+              {{ step.get_status_display }}
+            </span>
+          </div>
+          {% if step.acted_by_user %}
+          <div class="small mt-2">
+            {{ step.acted_by_user.full_name|default:step.acted_by_user.username }}
+            {% if step.acted_by_user.full_name != step.acted_by_user.username %}
+              <span class="text-muted">({{ step.acted_by_user.username }})</span>
+            {% endif %}
+            {% if step.acted_at %}<span class="text-muted"> on {{ step.acted_at|date:"Y-m-d H:i" }}</span>{% endif %}
+          </div>
+          {% endif %}
+          {% if step.remarks %}
+          <div class="small text-muted mt-1"><strong>Notes:</strong> {{ step.remarks }}</div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card border-0 shadow-sm">
   <div class="card-body">
+    {% if current_step %}
+    <div class="alert alert-warning border mb-3">
+      <strong>Current Step:</strong> {{ current_step.step_label }}.
+      Allowed roles: {{ current_step.role_codes_json|join:", " }}.
+    </div>
+    {% endif %}
     <form method="post" novalidate>
       {% csrf_token %}
       {% if form.non_field_errors %}

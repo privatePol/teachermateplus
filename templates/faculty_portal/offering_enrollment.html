@@ -1,29 +1,108 @@
 {% extends "faculty_portal/base.html" %}
 
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .class-list-page {
+    font-family: "Trebuchet MS", "Gill Sans", sans-serif;
+    color: #23412e;
+  }
+  .class-list-table th,
+  .class-list-table td {
+    vertical-align: middle;
+  }
+  .class-list-table thead th {
+    font-size: 0.95rem;
+    letter-spacing: 0.01em;
+  }
+  .class-list-line-no {
+    width: 72px;
+    text-align: center;
+    font-weight: 700;
+    color: #5e7463;
+  }
+  .class-list-student-no {
+    white-space: nowrap;
+  }
+  .class-list-remove-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: #8ea293;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    box-shadow: none;
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+  .class-list-remove-btn:hover {
+    background: #ffe8e8;
+    color: #a52828;
+  }
+  .class-list-remove-btn:focus,
+  .class-list-remove-btn:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+  .class-list-name-last {
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .class-list-name-first {
+    font-weight: 500;
+  }
+  .class-list-search-note {
+    font-size: 0.86rem;
+    color: #617565;
+  }
+  .class-list-search-note strong {
+    color: #23412e;
+  }
+</style>
+{% endblock %}
+
 {% block faculty_content %}
+<div class="class-list-page">
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">
-    Enrollment: {{ offering.course.code }} | {{ offering.section.code }} | {{ offering.term.code }}
+    Class Master List: {{ offering.course.code }} | {{ offering.section.code }} | {{ offering.term.code }}
   </h2>
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:my_courses' %}">Back</a>
 </div>
 <div class="alert {% if mode == 'FACULTY_ALLOWED' %}alert-success{% else %}alert-warning{% endif %}">
-  Enrollment Mode: <strong>{{ mode }}</strong>
+  Class Master List Mode: <strong>{{ mode }}</strong>
   {% if mode != 'FACULTY_ALLOWED' %}
-    - New enrollment creation is admin-only, but faculty may still update class list status to <strong>DR</strong> or <strong>W</strong>.
+    - Adding or removing students from this class list is admin-only, but faculty may still update true <strong>DR</strong> or <strong>W</strong> status on existing class-list rows.
   {% else %}
-    - Use the status dropdown in the class list below to mark students as <strong>ACTIVE</strong>, <strong>DR</strong>, or <strong>W</strong>.
+    - Use <strong>Remove from Class</strong> for schedule movement. Use <strong>DR</strong> only when the student dropped this class, and <strong>W</strong> only when the student withdrew from the term.
   {% endif %}
 </div>
 
 {% if can_manage %}
 <div class="card border-0 shadow-sm mb-3">
-  <div class="card-header bg-white"><strong>Add or Update Enrollment</strong></div>
+  <div class="card-header bg-white"><strong>Add Student to This Class</strong></div>
   <div class="card-body">
     <form method="post" class="row g-2">
       {% csrf_token %}
       <input type="hidden" name="action" value="upsert_student">
       <div class="col-md-6">
+        <label class="form-label">Search Student</label>
+        <input
+          type="text"
+          id="student-search-input"
+          class="form-control mb-2"
+          placeholder="Type student number or last name, first name"
+          autocomplete="off">
+        <div class="class-list-search-note mb-2">
+          Start typing to show only students whose <strong>student number</strong> or <strong>last name, first name</strong> matches your search.
+        </div>
         <label class="form-label">Student</label>
         {{ form.student }}
         {% for e in form.student.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
@@ -43,36 +122,163 @@
 
 <div class="card border-0 shadow-sm">
   <div class="table-responsive">
-    <table class="table table-hover mb-0">
-      <thead><tr><th>Student No</th><th>Name</th><th>Status</th><th>Source</th>{% if can_update_status %}<th class="text-end">Action</th>{% endif %}</tr></thead>
+    <table class="table table-hover mb-0 class-list-table">
+      <thead><tr><th class="class-list-line-no">No.</th><th>Student No</th><th>Name</th><th>Status</th><th>Source</th>{% if can_update_status %}<th class="text-end">Action</th>{% endif %}</tr></thead>
       <tbody>
       {% for row in enrollments %}
         <tr>
-          <td>{{ row.student.student_no }}</td>
-          <td>{{ row.student.last_name }}, {{ row.student.first_name }}</td>
-          <td><span class="badge text-bg-info">{{ row.enrollment_status }}</span></td>
+          <td class="class-list-line-no">
+            {% if can_manage %}
+            <form method="post" class="d-inline js-remove-from-class-form me-2">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="remove_from_class">
+              <input type="hidden" name="enrollment_id" value="{{ row.id }}">
+              <button
+                class="class-list-remove-btn"
+                type="submit"
+                data-bs-toggle="tooltip"
+                data-bs-title="Remove from Class"
+                aria-label="Remove from Class">
+                &times;
+              </button>
+            </form>
+            {% endif %}
+            {{ forloop.counter }}
+          </td>
+          <td class="class-list-student-no">
+            {{ row.student.student_no }}
+          </td>
+          <td>
+            <span class="class-list-name-last">{{ row.student.last_name|upper }}</span>,
+            <span class="class-list-name-first">{{ row.student.first_name|title }}</span>
+          </td>
+          <td>
+            <span class="badge {% if row.enrollment_status == 'DR' %}text-bg-danger{% elif row.enrollment_status == 'W' %}text-bg-warning text-dark{% elif row.enrollment_status == 'ACTIVE' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+              {{ row.enrollment_status }}
+            </span>
+          </td>
           <td>{{ row.encoded_via_portal }}</td>
           {% if can_update_status %}
           <td class="text-end">
-            <form method="post" class="d-inline-flex align-items-center gap-2">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="update_status">
-              <input type="hidden" name="enrollment_id" value="{{ row.id }}">
-              <select name="enrollment_status" class="form-select form-select-sm" style="min-width: 120px;">
-                <option value="ACTIVE" {% if row.enrollment_status == "ACTIVE" %}selected{% endif %}>ACTIVE</option>
-                <option value="DR" {% if row.enrollment_status == "DR" %}selected{% endif %}>DR</option>
-                <option value="W" {% if row.enrollment_status == "W" %}selected{% endif %}>W</option>
-              </select>
-              <button class="btn btn-sm btn-outline-primary" type="submit">Save</button>
-            </form>
+            <div class="d-inline-flex align-items-center gap-2 flex-wrap justify-content-end">
+              <form method="post" class="d-inline-flex align-items-center gap-2">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="update_status">
+                <input type="hidden" name="enrollment_id" value="{{ row.id }}">
+                <select name="enrollment_status" class="form-select form-select-sm" style="min-width: 120px;">
+                  <option value="ACTIVE" {% if row.enrollment_status == "ACTIVE" %}selected{% endif %}>ACTIVE</option>
+                  <option value="DR" {% if row.enrollment_status == "DR" %}selected{% endif %}>DR</option>
+                  <option value="W" {% if row.enrollment_status == "W" %}selected{% endif %}>W</option>
+                </select>
+                <button class="btn btn-sm btn-outline-primary" type="submit">Save Status</button>
+              </form>
+            </div>
           </td>
           {% endif %}
         </tr>
       {% empty %}
-        <tr><td colspan="{% if can_update_status %}5{% else %}4{% endif %}" class="text-center text-muted py-4">No enrollment records yet.</td></tr>
+        <tr><td colspan="{% if can_update_status %}6{% else %}5{% endif %}" class="text-center text-muted py-4">No active class-list rows yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
+{% if removed_enrollments %}
+<div class="card border-0 shadow-sm mt-3">
+  <div class="card-header bg-white"><strong>Removed from This Class</strong></div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0 class-list-table">
+      <thead><tr><th class="class-list-line-no">No.</th><th>Student No</th><th>Name</th><th>Last Status</th><th>Source</th></tr></thead>
+      <tbody>
+      {% for row in removed_enrollments %}
+        <tr>
+          <td class="class-list-line-no">{{ forloop.counter }}</td>
+          <td class="class-list-student-no">{{ row.student.student_no }}</td>
+          <td>
+            <span class="class-list-name-last">{{ row.student.last_name|upper }}</span>,
+            <span class="class-list-name-first">{{ row.student.first_name|title }}</span>
+          </td>
+          <td>
+            <span class="badge {% if row.enrollment_status == 'DR' %}text-bg-danger{% elif row.enrollment_status == 'W' %}text-bg-warning text-dark{% elif row.enrollment_status == 'ACTIVE' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+              {{ row.enrollment_status }}
+            </span>
+          </td>
+          <td>{{ row.encoded_via_portal }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  (function () {
+    const searchInput = document.getElementById("student-search-input");
+    const studentSelect = document.getElementById("id_student");
+    if (searchInput && studentSelect) {
+      const allOptions = Array.from(studentSelect.options).map(function (option) {
+        return {
+          value: option.value,
+          text: option.text,
+          selected: option.selected,
+        };
+      });
+
+      const renderOptions = function (term) {
+        const normalized = (term || "").trim().toLowerCase();
+        const selectedValue = studentSelect.value;
+        studentSelect.innerHTML = "";
+
+        allOptions.forEach(function (item) {
+          const matches = !normalized || !item.value || item.text.toLowerCase().includes(normalized);
+          if (!matches) {
+            return;
+          }
+          const option = document.createElement("option");
+          option.value = item.value;
+          option.textContent = item.text;
+          if (item.value === selectedValue || (!selectedValue && item.selected)) {
+            option.selected = true;
+          }
+          studentSelect.appendChild(option);
+        });
+
+        if (!studentSelect.options.length) {
+          const emptyOption = document.createElement("option");
+          emptyOption.value = "";
+          emptyOption.textContent = "No matching student found";
+          studentSelect.appendChild(emptyOption);
+        }
+      };
+
+      searchInput.addEventListener("input", function (event) {
+        renderOptions(event.target.value);
+      });
+    }
+
+    document.querySelectorAll(".js-remove-from-class-form").forEach(function (form) {
+      form.addEventListener("submit", function (event) {
+        const typed = window.prompt("Type 'remove' to confirm removing this student from this class.");
+        if (typed !== "remove") {
+          event.preventDefault();
+          if (typed !== null) {
+            window.alert("Removal cancelled. Type 'remove' exactly to continue.");
+          }
+        }
+      });
+    });
+
+    if (window.bootstrap && window.bootstrap.Tooltip) {
+      document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (element) {
+        new window.bootstrap.Tooltip(element);
+      });
+    }
+  })();
+</script>
 {% endblock %}

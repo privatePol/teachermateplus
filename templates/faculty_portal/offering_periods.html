@@ -19,6 +19,13 @@
     background: #fff;
     height: 100%;
   }
+  .period-card-closed {
+    background: #f8fbf8;
+    border-color: #d8e0d7;
+  }
+  .period-card-closed .period-card-body {
+    opacity: 0.88;
+  }
   .period-card-header {
     padding: 0.9rem 1rem 0.8rem;
     color: #fff;
@@ -85,6 +92,40 @@
   .period-guidance .text {
     color: #5b7465;
   }
+  .period-active-banner {
+    border: 1px solid #dbe5d6;
+    border-radius: 0.9rem;
+    background: linear-gradient(135deg, #f7fbf6 0%, #eef7ee 54%, #f7f0ce 100%);
+    padding: 0.85rem 0.95rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 12px 22px rgba(18, 52, 31, 0.08);
+  }
+  .period-active-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.22rem 0.58rem;
+    background: rgba(255,255,255,0.18);
+    border: 1px solid rgba(255,255,255,0.45);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    margin-top: 0.45rem;
+  }
+  .period-closed-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.22rem 0.58rem;
+    background: rgba(255,255,255,0.18);
+    border: 1px solid rgba(255,255,255,0.45);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 800;
+    margin-top: 0.45rem;
+  }
   .period-actions .btn {
     width: 40px;
     height: 36px;
@@ -121,10 +162,87 @@
   .period-actions .btn-outline-warning {
     color: #c08a1a;
   }
+  .period-actions .btn-outline-secondary {
+    color: #6b7280;
+  }
   .period-actions .btn:hover,
   .period-actions .btn:focus {
     background: #eef4ef;
     box-shadow: none;
+  }
+  .period-actions .btn-disabled {
+    color: #a0aea4 !important;
+    background: transparent !important;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .period-closed-note {
+    border: 1px solid #e3e7df;
+    border-radius: 0.65rem;
+    background: #f5f8f5;
+    padding: 0.7rem 0.8rem;
+    margin-bottom: 0.85rem;
+    color: #536958;
+    font-size: 0.84rem;
+  }
+  .period-closed-note strong {
+    color: #23452f;
+  }
+  .faculty-deadline-banner {
+    border-radius: 1.05rem;
+    padding: 0.95rem 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 12px 22px rgba(18, 52, 31, 0.08);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: center;
+    border: 1px solid #dae5d8;
+  }
+  .faculty-deadline-banner-warning {
+    background: linear-gradient(135deg, #fffef6 0%, #fbf2cf 100%);
+  }
+  .faculty-deadline-banner-danger {
+    background: linear-gradient(135deg, #fffdfb 0%, #f8e1da 100%);
+  }
+  .faculty-deadline-banner-neutral {
+    background: linear-gradient(135deg, #ffffff 0%, #f5f8f6 100%);
+  }
+  .faculty-deadline-banner-eyebrow {
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6d8374;
+    margin-bottom: 0.25rem;
+  }
+  .faculty-deadline-banner-title {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-bottom: 0.25rem;
+  }
+  .faculty-deadline-banner-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem 1rem;
+    color: #375240;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+  }
+  .faculty-deadline-banner-note {
+    color: #5a7263;
+  }
+  .faculty-deadline-banner-helper {
+    margin-top: 0.35rem;
+    font-size: 0.84rem;
+    color: #466050;
+    font-weight: 600;
+  }
+  @media (max-width: 767.98px) {
+    .faculty-deadline-banner {
+      flex-direction: column;
+      align-items: flex-start;
+    }
   }
 </style>
 
@@ -144,11 +262,23 @@
 </div>
 {% endif %}
 
+{% if active_grading_period %}
+<div class="period-active-banner">
+  <div class="small text-uppercase text-muted fw-semibold mb-1">Current Active Grading Period</div>
+  <div class="fw-bold text-success mb-1">{{ active_grading_period.period.name }} ({{ active_grading_period.period.code }})</div>
+  <div class="text-muted small">This campus and term are currently focused on this period. Other periods stay closed unless they are reopened or inside an approved correction window.</div>
+</div>
+{% endif %}
+
+{% if deadline_banner %}
+{% include "faculty_portal/partials/deadline_banner.html" with reminder=deadline_banner %}
+{% endif %}
+
 <div class="row g-3">
   {% for item in period_cards %}
     {% with code=item.period.code|upper %}
     <div class="col-md-6 col-xl-4">
-      <article class="period-card">
+      <article class="period-card {% if item.is_closed_by_active_period %}period-card-closed{% endif %}">
         <header class="period-card-header
           {% if 'PREFINAL' in code %}period-head-prefinal
           {% elif 'MIDTERM' in code %}period-head-midterm
@@ -166,6 +296,11 @@
             {% endif %}
           </div>
           <div class="period-head-code">Code: {{ item.period.code }}</div>
+          {% if item.is_active_period %}
+          <div class="period-active-badge">Active Period</div>
+          {% elif item.is_closed_by_active_period %}
+          <div class="period-closed-badge">Closed</div>
+          {% endif %}
           <span class="period-gear" title="Period setup and workflow">&#9881;</span>
         </header>
 
@@ -175,6 +310,8 @@
               <span class="badge text-bg-warning">Correction Window Open</span>
             {% elif item.submission_status == "REOPENED" %}
               <span class="badge text-bg-primary">Reopened</span>
+            {% elif item.is_closed_by_active_period %}
+              <span class="badge text-bg-secondary">Closed by Active Period Policy</span>
             {% elif item.is_submitted %}
               <span class="badge text-bg-info">Submitted</span>
             {% elif item.is_locked %}
@@ -183,6 +320,11 @@
               <span class="badge text-bg-success">Open</span>
             {% endif %}
           </div>
+          {% if item.is_closed_by_active_period %}
+          <div class="period-closed-note">
+            <strong>Why this is closed:</strong> {{ item.closed_message }}
+          </div>
+          {% endif %}
           <div class="small text-muted mb-2">
             Submission deadline:
             {% if item.deadline_at %}
@@ -209,41 +351,90 @@
           </div>
 
           <div class="period-actions">
-            <a
-              class="btn btn-sm btn-outline-success"
-              href="{% url 'faculty_portal:period_activities' offering.id item.period.id %}"
-              title="Grade Activities"
-              aria-label="Grade Activities"
-            >
-              &#9881;
-            </a>
-            <a
-              class="btn btn-sm btn-outline-primary"
-              href="{% url 'faculty_portal:period_attendance' offering.id item.period.id %}"
-              title="Attendance"
-              aria-label="Attendance"
-            >
-              &#128338;
-            </a>
-            <a
-              class="btn btn-sm btn-outline-dark"
-              href="{% url 'faculty_portal:period_summary' offering.id item.period.id %}"
-              title="Summary"
-              aria-label="Summary"
-            >
-              &#128202;
-            </a>
-            {% if grade_prediction_enabled %}
+            {% if item.is_closed_by_active_period %}
+              <span
+                class="btn btn-sm btn-outline-success btn-disabled"
+                title="This period is closed until it becomes active or is reopened for correction."
+                aria-label="Grade Activities Closed"
+              >
+                &#9881;
+              </span>
+              <span
+                class="btn btn-sm btn-outline-primary btn-disabled"
+                title="This period is closed until it becomes active or is reopened for correction."
+                aria-label="Attendance Closed"
+              >
+                &#128338;
+              </span>
+              <span
+                class="btn btn-sm btn-outline-dark btn-disabled"
+                title="This period is closed until it becomes active or is reopened for correction."
+                aria-label="Summary Closed"
+              >
+                &#128202;
+              </span>
+              {% if grade_prediction_enabled %}
+                <span
+                  class="btn btn-sm btn-outline-primary btn-disabled"
+                  title="This period is closed until it becomes active or is reopened for correction."
+                  aria-label="Prediction Closed"
+                >
+                  &#10024;
+                </span>
+              {% endif %}
+              <a
+                class="btn btn-sm btn-outline-secondary"
+                href="{% url 'faculty_portal:period_view_history' offering.id item.period.id %}"
+                title="Who Viewed"
+                aria-label="Who Viewed"
+              >
+                &#128065;
+              </a>
+            {% else %}
+              <a
+                class="btn btn-sm btn-outline-success"
+                href="{% url 'faculty_portal:period_activities' offering.id item.period.id %}"
+                title="Grade Activities"
+                aria-label="Grade Activities"
+              >
+                &#9881;
+              </a>
               <a
                 class="btn btn-sm btn-outline-primary"
-                href="{% url 'faculty_portal:period_prediction' offering.id item.period.id %}"
-                title="Prediction"
-                aria-label="Prediction"
+                href="{% url 'faculty_portal:period_attendance' offering.id item.period.id %}"
+                title="Attendance"
+                aria-label="Attendance"
               >
-                &#10024;
+                &#128338;
+              </a>
+              <a
+                class="btn btn-sm btn-outline-dark"
+                href="{% url 'faculty_portal:period_summary' offering.id item.period.id %}"
+                title="Summary"
+                aria-label="Summary"
+              >
+                &#128202;
+              </a>
+              {% if grade_prediction_enabled %}
+                <a
+                  class="btn btn-sm btn-outline-primary"
+                  href="{% url 'faculty_portal:period_prediction' offering.id item.period.id %}"
+                  title="Prediction"
+                  aria-label="Prediction"
+                >
+                  &#10024;
+                </a>
+              {% endif %}
+              <a
+                class="btn btn-sm btn-outline-secondary"
+                href="{% url 'faculty_portal:period_view_history' offering.id item.period.id %}"
+                title="Who Viewed"
+                aria-label="Who Viewed"
+              >
+                &#128065;
               </a>
             {% endif %}
-            {% if "corrections.create" in effective_permissions and system_correction_enabled %}
+            {% if "corrections.create" in effective_permissions and system_correction_enabled and item.can_access_corrections %}
               <a
                 class="btn btn-sm btn-outline-warning"
                 href="{% url 'faculty_portal:period_corrections' offering.id item.period.id %}"

@@ -1,0 +1,61 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="h4 mb-1">Who Viewed This Grade Book</h2>
+    <div class="text-muted small">
+      {{ offering.course.code }} | {{ offering.section.code }} | {{ offering.term.code }} | {{ period.name }}
+    </div>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+</div>
+
+<div class="alert alert-light border mb-3">
+  This history shows admin-side read-only grade book monitor openings recorded in the audit trail for this class period.
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    {% if view_logs %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Viewed At</th>
+              <th>Viewed By</th>
+              <th>Role</th>
+              <th>Portal</th>
+              <th>Masked Identity</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in view_logs %}
+              <tr>
+                <td>{{ row.log.created_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                  <div class="fw-semibold">{{ row.actor_name }}</div>
+                  {% if row.actor_username %}
+                    <div class="text-muted small">{{ row.actor_username }}</div>
+                  {% endif %}
+                </td>
+                <td>{{ row.actor_roles }}</td>
+                <td>{{ row.log.portal }}</td>
+                <td>
+                  {% if row.masked_student_identity %}
+                    <span class="badge text-bg-secondary">Masked</span>
+                  {% else %}
+                    <span class="badge text-bg-success">Full View</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-muted">No grade book monitor history has been recorded for this class period yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

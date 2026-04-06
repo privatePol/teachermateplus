@@ -27,6 +27,7 @@ from apps.accounts.forms import (
     FacultySelfChangePasswordForm,
     PrivacyConsentForm,
 )
+from apps.accounts.services import LoginLockoutService
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
 from apps.core.services.permissions import PermissionService
@@ -134,6 +135,10 @@ class _BasePortalLoginView(FormView):
             form.add_error(None, "You do not have access to this portal.")
             return self.form_invalid(form)
 
+        LoginLockoutService.register_success(
+            username=form.cleaned_data.get("username", ""),
+            portal_code=self.portal_code,
+        )
         login(self.request, user)
         _enforce_single_device_session(self.request, user, self.portal_code)
         AuditService.log_login_success(self.request, user=user, portal=self.portal_code)

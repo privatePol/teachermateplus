@@ -167,6 +167,27 @@
   .policy-table td {
     color: #2f5341;
   }
+  .guide-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.35rem;
+    border: 2px solid #b7c4b3;
+  }
+  .guide-table th,
+  .guide-table td {
+    border: 1px solid #b7c4b3;
+    padding: 0.55rem 0.6rem;
+    vertical-align: top;
+  }
+  .guide-table th {
+    background: #edf4e9;
+    color: #1e4630;
+    font-weight: 700;
+  }
+  .guide-table td {
+    color: #2f5341;
+    background: #ffffff;
+  }
   @media (max-width: 991.98px) {
     .admin-guide-toc ul {
       columns: 1;
@@ -189,8 +210,11 @@
     <div class="quick-links">
       <a href="{% url 'admin_portal:dashboard' %}">Dashboard</a>
       <a href="{% url 'admin_portal:user_list' %}">Users</a>
+      <a href="{% url 'admin_portal:login_lockout_list' %}">Login Lockouts</a>
       <a href="{% url 'admin_portal:import_batch_list' %}">Tools / Imports</a>
       <a href="{% url 'admin_portal:active_academic_term_settings' %}">Active AY/Term</a>
+      <a href="{% url 'admin_portal:active_grading_period_settings' %}">Active Grading Period</a>
+      <a href="#settings">Grading Template Governance</a>
       <a href="{% url 'admin_portal:grading_period_lock_list' %}">Period Locks</a>
       <a href="{% url 'admin_portal:grade_submission_list' %}">Grade Submissions</a>
       <a href="{% url 'admin_portal:grade_correction_request_list' %}">Correction Requests</a>
@@ -211,12 +235,15 @@
       <li><a href="#settings">5. Governance Settings</a></li>
       <li><a href="#imports">6. Tools and CSV Importing</a></li>
       <li><a href="#submission">7. Submission and Reopen Control</a></li>
-      <li><a href="#corrections">8. Correction Workflow (System vs Manual)</a></li>
+      <li><a href="#corrections">8. Grade Correction Process (System vs Manual)</a></li>
       <li><a href="#security">9. Security and User Administration</a></li>
       <li><a href="#assignment-acceptance">10. Faculty Assignment Acceptance and Monitoring</a></li>
       <li><a href="#audit">11. Audit and Monitoring</a></li>
       <li><a href="#ops">12. End-of-Term Checklist</a></li>
       <li><a href="#policies">13. Policy and Governance Reference</a></li>
+      {% if show_production_incident_response %}
+      <li><a href="#incident-response">14. Production Incident Response</a></li>
+      {% endif %}
     </ul>
   </div>
 
@@ -281,23 +308,80 @@
     <div class="guide-section-body">
       <div class="guide-grid">
         <div>
-          <ul class="guide-list">
-            <li>Create Tenant and Campuses.</li>
-            <li>Create Departments and Programs.</li>
-            <li>Create Academic Years and Terms.</li>
-            <li>Create Courses and Sections.</li>
-            <li>Create Course Offerings and Faculty Assignments.</li>
-            <li>Course Template Assignments can now bulk-assign one grading template to multiple courses in one action.</li>
-            <li>Use the metric cards and the <strong>Courses with no grading template</strong> filter to identify course masters that still need template coverage.</li>
-            <li>Proceed to Enrollment and grading setup.</li>
-          </ul>
+          <div class="guide-subhead">What To Set Up</div>
+          <table class="policy-table">
+            <thead>
+              <tr>
+                <th>Setup Area</th>
+                <th>Where To Apply</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Tenants and Campuses</td>
+                <td><strong>Admin Portal -> Organization -> Tenants / Campuses</strong></td>
+                <td>Create the institutional scope first so all later academic and governance records attach to the correct tenant and campus.</td>
+              </tr>
+              <tr>
+                <td>Departments and Programs</td>
+                <td><strong>Admin Portal -> Organization -> Departments / Programs</strong></td>
+                <td>Set the academic structure that will be used for courses, sections, faculty scoping, and approval routing.</td>
+              </tr>
+              <tr>
+                <td>Academic Years and Terms</td>
+                <td><strong>Admin Portal -> Academics -> Academic Years / Terms</strong></td>
+                <td>Define the academic calendar used by offerings, enrollment, grading, and submission governance.</td>
+              </tr>
+              <tr>
+                <td>Courses and Sections</td>
+                <td><strong>Admin Portal -> Academics -> Courses / Sections</strong></td>
+                <td>Create the academic masters that will later be paired into actual class offerings.</td>
+              </tr>
+              <tr>
+                <td>Course Offerings</td>
+                <td><strong>Admin Portal -> Academics -> Course Offerings</strong></td>
+                <td>Open the actual class records for the selected Academic Year, Term, Course, and Section.</td>
+              </tr>
+              <tr>
+                <td>Faculty Assignments</td>
+                <td><strong>Admin Portal -> Academics -> Faculty Assignments</strong></td>
+                <td>Assign the faculty members who will handle each offering in the Faculty Portal.</td>
+              </tr>
+              <tr>
+                <td>Course Template Assignment</td>
+                <td><strong>Admin Portal -> Grading -> Course Template Assignments</strong></td>
+                <td>Assign the correct grading template to course masters. Bulk assignment can now be used when many courses share the same template.</td>
+              </tr>
+              <tr>
+                <td>Template Coverage Check</td>
+                <td><strong>Admin Portal -> Grading -> Course Template Assignments</strong></td>
+                <td>Use the metric cards and the <strong>Courses with no grading template</strong> filter to identify courses that still need template coverage.</td>
+              </tr>
+              <tr>
+                <td>Enrollment and Grading Readiness</td>
+                <td><strong>Admin Portal -> Enrollment</strong> and <strong>Admin Portal -> Grading</strong></td>
+                <td>Proceed only after the setup chain above is complete and the needed grading template coverage is already in place.</td>
+              </tr>
+            </tbody>
+          </table>
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
-            <li>Follow strict order: Tenant -> Campus -> Department/Program -> AY/Term.</li>
-            <li>Create course/section masters, then offerings and faculty assignments.</li>
-            <li>When assigning a grading template to many courses, use the bulk assignment screen and let EduGradesPro skip courses that already have a prior assignment in the same term scope.</li>
-            <li>Verify all references are active before import/operations.</li>
+            <li>Follow the setup order strictly: <strong>Tenant -> Campus -> Department/Program -> Academic Year/Term</strong>.</li>
+            <li>Create course and section masters first, then create the actual course offerings.</li>
+            <li>Assign faculty only after the offering is already complete and properly scoped.</li>
+            <li>Go to <strong>Course Template Assignments</strong> after offerings are ready so every course has grading-template coverage before operations begin.</li>
+            <li>When many courses share one template, use the bulk assignment screen and let EduGradesPro skip courses that already have a prior assignment in the same term scope.</li>
+            <li>Before moving to enrollment, imports, or grading operations, verify that all referenced setup records are active and that no needed course is left without a grading template.</li>
           </ol>
+          <div class="guide-note">
+            Recommended build order:
+            complete organization and academic masters first,
+            then open offerings,
+            then assign faculty,
+            then verify grading-template coverage,
+            and only after that proceed to enrollment and live grading operations.
+          </div>
         </div>
         <div class="guide-image">
           <img src="{% get_media_prefix %}portal-img/1.png" alt="Configuration workflow screenshot">
@@ -370,22 +454,70 @@
     <div class="guide-section-body">
       <div class="guide-grid">
         <div>
-          <ul class="guide-list">
-            <li>Set Active AY/Term for academic scope governance.</li>
-            <li>Set Correction Governance Mode:
-              <strong>SYSTEM_REQUEST</strong> or <strong>MANUAL_ONLY</strong>.
-            </li>
-            <li>Set pre-deadline behavior (when SYSTEM_REQUEST is used).</li>
-            <li>Set route matrix by requesting faculty department.</li>
-            <li>Set document print header values.</li>
-            <li>Use Configurable Features for optional workflow toggles such as correction official report generation, registrar auto-email settings, and the default primary assignment rule.</li>
-          </ul>
+          <div class="guide-subhead">What To Configure</div>
+          <table class="policy-table">
+            <thead>
+              <tr>
+                <th>Governance Area</th>
+                <th>Where To Apply</th>
+                <th>What To Set</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Active Academic Scope</td>
+                <td><strong>Admin Portal -> Tools -> Active Academic Scope</strong></td>
+                <td>Set the active Academic Year and Term so faculty classes route correctly between active and archived views.</td>
+              </tr>
+              <tr>
+                <td>Active Grading Period</td>
+                <td><strong>Admin Portal -> Tools -> Active Grading Period</strong></td>
+                <td>Define the canonical period catalog for the selected term, choose the active period per campus, decide whether EduGradesPro should auto-advance after deadline, and control which faculty period card stays open for normal work.</td>
+              </tr>
+              <tr>
+                <td>Correction Governance</td>
+                <td><strong>Admin Portal -> Tools -> Correction Governance</strong></td>
+                <td>Choose <strong>SYSTEM_REQUEST</strong> or <strong>MANUAL_ONLY</strong>, then set pre-deadline behavior and approval routing by faculty department.</td>
+              </tr>
+              <tr>
+                <td>Grading Template Governance</td>
+                <td><strong>Admin Portal -> Tools -> Template Governance</strong></td>
+                <td>Assign who can draft, submit, review, approve, publish, request hotfix, and apply hotfix for grading templates.</td>
+              </tr>
+              <tr>
+                <td>Sequential Template/Hotfix Chain</td>
+                <td><strong>Admin Portal -> Tools -> Template Governance</strong></td>
+                <td>Turn on the Phase 2 workflow if you want step-by-step review such as <strong>Template Review -> Final Approval</strong> and <strong>Hotfix Review -> Hotfix Final Apply</strong>.</td>
+              </tr>
+              <tr>
+                <td>Document Print Settings</td>
+                <td><strong>Admin Portal -> Tools -> Document Print Settings</strong></td>
+                <td>Set official print header values and document identity details for reports and exported forms.</td>
+              </tr>
+              <tr>
+                <td>Optional Workflow Features</td>
+                <td><strong>Admin Portal -> Tools -> Configurable Features</strong></td>
+                <td>Turn optional features on/off such as official correction PDF, registrar auto-email, assignment-primary default behavior, and class master list ownership mode for faculty roster maintenance, including optional class-level overrides filtered by tenant, campus, term, and optional faculty name, with a clearer multi-class picker that no longer repeats the already selected term/academic year, visually emphasizes faculty names, and sits inside collapsible setting cards for easier navigation.</td>
+              </tr>
+            </tbody>
+          </table>
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
-            <li>Go to Tools and open each settings screen by scope.</li>
-            <li>Save mode/settings then verify behavior in Faculty summary and corrections screens.</li>
-            <li>Limit update permissions to authorized governance roles only.</li>
+            <li>Select the correct <strong>Tenant</strong> and <strong>Campus</strong> first from the top scope selectors.</li>
+            <li>Open the matching settings page under <strong>Tools</strong> based on the governance area you are adjusting.</li>
+            <li>Before configuring deadline auto-locks, make sure the selected term already has the correct canonical grading periods and an active period set for the campus.</li>
+            <li>For grading templates, start with <strong>Template Governance</strong> and assign the allowed roles before delegating any template work.</li>
+            <li>If you need stricter control, enable the sequential workflow chain and separate review roles from final approval/apply roles.</li>
+            <li>Save the settings, then verify the affected behavior in template screens, correction screens, and faculty flows.</li>
+            <li>Limit update permissions to only the governance roles that should manage policy.</li>
           </ol>
+          <div class="guide-note">
+            Recommended NCBA starting point:
+            keep template drafting, submission, and hotfix request under the steward role;
+            turn on sequential workflow;
+            use Dean/AC for the review step;
+            and keep final approval, publishing, and hotfix final apply under CAO governance.
+          </div>
         </div>
         <div class="guide-image">
           <img src="{% get_media_prefix %}portal-img/settings_guide.png" alt="Admin settings screenshot">
@@ -399,22 +531,67 @@
     <div class="guide-section-body">
       <div class="guide-grid">
         <div>
-          <ul class="guide-list">
-            <li>Use only system-generated templates.</li>
-            <li>Upload and validate first; no insert should occur yet.</li>
-            <li>Review row-level errors and duplicates.</li>
-            <li>Confirm import only after all validation issues are resolved.</li>
-          </ul>
+          <div class="guide-subhead">Import Areas</div>
+          <table class="policy-table">
+            <thead>
+              <tr>
+                <th>Import Type</th>
+                <th>Where To Apply</th>
+                <th>Use Case</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Sections</td>
+                <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
+                <td>Load section masters in bulk when many section records need to be prepared at once.</td>
+              </tr>
+              <tr>
+                <td>Courses</td>
+                <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
+                <td>Load course masters in bulk using the required EduGradesPro template structure.</td>
+              </tr>
+              <tr>
+                <td>Course Offerings</td>
+                <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
+                <td>Create the actual offered classes for a term by importing prepared offering rows.</td>
+              </tr>
+              <tr>
+                <td>Faculty Assignments</td>
+                <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
+                <td>Assign faculty to offerings in bulk after offerings are already in place.</td>
+              </tr>
+              <tr>
+                <td>Enrollment</td>
+                <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
+                <td>Load students into offerings in bulk after academic setup and class offerings are ready.</td>
+              </tr>
+              <tr>
+                <td>Import Monitoring</td>
+                <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
+                <td>Review validation results, row-level errors, duplicate checks, and the final confirmation state before inserting data.</td>
+              </tr>
+            </tbody>
+          </table>
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
-            <li>Download template for specific import type.</li>
-            <li>Populate required fields with valid business keys.</li>
-            <li>Upload CSV -> review validation result.</li>
-            <li>Fix source data and re-upload until valid.</li>
-            <li>Confirm import and verify list pages.</li>
+            <li>Open <strong>Admin Portal -> Tools -> Bulk Imports</strong> and choose the import type you need.</li>
+            <li>Download and use only the system-generated CSV template for that import type.</li>
+            <li>Populate the CSV using valid business keys such as codes, usernames, and tenant/campus values expected by EduGradesPro.</li>
+            <li>Upload the CSV and review the validation result first. No insert should happen yet during this stage.</li>
+            <li>Review row-level errors, duplicate warnings, and unresolved references before confirming.</li>
+            <li>Fix the source file, re-upload if needed, then confirm only when the preview is clean.</li>
+            <li>After confirmation, verify the target list page so the imported records appear in the correct scope.</li>
           </ol>
           <div class="guide-note">
             Strict headers are required by design; custom formats are rejected.
+          </div>
+          <div class="guide-note">
+            Recommended import order:
+            sections and courses first,
+            then course offerings,
+            then faculty assignments,
+            and only after those are ready should enrollment imports be processed.
           </div>
         </div>
         <div class="guide-image">
@@ -429,18 +606,48 @@
     <div class="guide-section-body">
       <div class="guide-grid">
         <div>
-          <ul class="guide-list">
-            <li>Configure deadlines and locks in Grading Period Locks.</li>
-            <li>Monitor submission status in Grade Submissions.</li>
-            <li>Use reopen controls only with approved governance and role permissions.</li>
-            <li>Deadline-driven locks should be backed by scheduled auto-lock job.</li>
-          </ul>
+          <table class="guide-table">
+            <thead>
+              <tr>
+                <th>Control Area</th>
+                <th>Where To Apply</th>
+                <th>What To Monitor / Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Grading Period Locks</td>
+                <td><strong>Admin Portal -> Grading -> Period Locks</strong></td>
+                <td>Set the submission deadline, open/close behavior, and lock coverage per campus, term, and period scope.</td>
+              </tr>
+              <tr>
+                <td>Grade Submission Status</td>
+                <td><strong>Admin Portal -> Grading -> Grade Submissions</strong></td>
+                <td>Track which class-period rows are still open, already submitted, reopened, or still waiting for faculty action.</td>
+              </tr>
+              <tr>
+                <td>Reopen Governance</td>
+                <td><strong>Admin Portal -> Grading -> Grade Submissions</strong> plus <strong>Admin Portal -> Tools -> Correction Governance</strong></td>
+                <td>Use reopen controls only when the required governance basis already exists, such as approved system workflow or an authorized manual approval.</td>
+              </tr>
+              <tr>
+                <td>Deadline Automation</td>
+                <td><strong>Admin Portal -> Grading -> Period Locks</strong> and scheduled operations</td>
+                <td>Back deadline-based controls with the scheduled auto-lock process so the open window closes consistently even if staff do not manually revisit the page.</td>
+              </tr>
+              <tr>
+                <td>Faculty Re-Submission</td>
+                <td><strong>Faculty Portal -> My Classes</strong> after admin reopen</td>
+                <td>After a class-period is reopened, faculty must finish the approved correction and submit the class again before the allowed closing time.</td>
+              </tr>
+            </tbody>
+          </table>
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
-            <li>Create period lock rule and deadline by scope.</li>
-            <li>Track pending submissions near deadlines.</li>
-            <li>For approved reopen, process from Grade Submissions (authorized user only).</li>
-            <li>Ensure faculty re-submits after correction.</li>
+            <li>Create the needed <strong>Period Lock</strong> row first, with the correct campus, term, and the actual <strong>grading period code used by the template</strong> plus the intended deadline.</li>
+            <li>Use <strong>Grade Submissions</strong> to monitor open classes as the deadline approaches and follow up on rows that are still pending.</li>
+            <li>For a reopen, confirm the approved basis first, then process the exact class-period from <strong>Grade Submissions</strong> using an authorized account only.</li>
+            <li>After reopen, inform the faculty member of the approved action window and verify that the class is submitted again before the lock closes.</li>
           </ol>
           <div class="guide-subhead">Reopening a Submitted Class (Admin Procedure)</div>
           <ol class="guide-steps">
@@ -451,7 +658,7 @@
             <li>Inform faculty to apply corrections and re-submit before deadline.</li>
           </ol>
           <div class="guide-note">
-            Reopen always applies to the class-period submission record, so admins must verify the exact course-section-period before clicking.
+            Reopen always applies to the exact class-period submission record. Verify the campus, term, course, section, and period carefully before clicking so you do not reopen the wrong teaching load.
           </div>
         </div>
         <div class="guide-image">
@@ -462,35 +669,67 @@
   </section>
 
   <section class="guide-section" id="corrections">
-    <div class="guide-section-head"><h3>8. Correction Workflow (System vs Manual)</h3></div>
+    <div class="guide-section-head"><h3>8. Grade Correction Process (System vs Manual)</h3></div>
     <div class="guide-section-body">
       <div class="guide-grid">
         <div>
-          <div class="guide-subhead">SYSTEM_REQUEST Mode</div>
+          <table class="guide-table">
+            <thead>
+              <tr>
+                <th>Correction Path</th>
+                <th>Where To Apply</th>
+                <th>What To Do</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>System Request Mode</td>
+                <td><strong>Faculty Portal -> Grade Correction</strong> and the configured approval route</td>
+                <td>Faculty files the request online, approvers review by route matrix, and final approval posts the corrected values directly into the gradebook.</td>
+              </tr>
+              <tr>
+                <td>Official PDF Artifact</td>
+                <td><strong>Admin Portal -> Grade Correction Requests</strong> after approval</td>
+                <td>Open the approved request as an official PDF for registrar/AIMS reference, print/download, and evidence retention when the feature is enabled.</td>
+              </tr>
+              <tr>
+                <td>Approval Notifications</td>
+                <td><strong>Correction Governance</strong> and notification settings</td>
+                <td>Send NCBA-branded notification cards to approver roles such as CAO and Dean when request submission notifications are enabled.</td>
+              </tr>
+              <tr>
+                <td>Manual Only Mode</td>
+                <td><strong>Paper form + Admin Portal reopen path</strong></td>
+                <td>Use the paper route when policy requires it; after approval, authorized admin reopens the exact class-period so faculty can apply the correction and re-submit.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="guide-subhead">System Request Mode</div>
           <ol class="guide-steps">
-            <li>Faculty files correction request in portal.</li>
-            <li>Approvers review based on route matrix and permissions.</li>
+            <li>Faculty files the correction request in the portal.</li>
+            <li>Approvers review it based on the configured route matrix and permissions.</li>
             <li>Faculty may include multiple students or the entire class plus multiple grading items in one request.</li>
-            <li>Original values are shown in the request, and faculty enters only corrected values.</li>
+            <li>Original values are shown in the request, and faculty enters only the corrected values.</li>
             <li>Final approval applies the corrected values directly into the gradebook and recomputes the submitted period automatically.</li>
-            <li>If the configurable feature is enabled, approved requests can also be opened as an official PDF artifact in a new browser tab for registrar/AIMS reference and immediate print/download, including campus applicability, before/after official grade values, and approval summary directly above registrar reference.</li>
+            <li>No additional faculty finalize step is required for this direct score-correction petition flow.</li>
+            <li>If the configurable feature is enabled, approved requests can also open as an official PDF artifact in a new browser tab for registrar/AIMS reference and immediate print/download, including campus applicability, before/after official grade values, and approval summary directly above registrar reference.</li>
             <li>If the configurable feature is enabled, submission of a correction request can immediately email the selected approver roles such as CAO and college dean, using the NCBA-branded notification card with petitioner and period name details.</li>
           </ol>
 
-          <div class="guide-subhead">MANUAL_ONLY Mode</div>
+          <div class="guide-subhead">Manual Only Mode</div>
           <ol class="guide-steps">
-            <li>Faculty files paper correction form.</li>
-            <li>Manual approvals are completed outside system.</li>
-            <li>After final paper approval, authorized admin reopens class-period in EduGradesPro.</li>
-            <li>Faculty applies approved correction and re-submits grades.</li>
+            <li>Faculty files the paper correction form.</li>
+            <li>Manual approvals are completed outside the system.</li>
+            <li>After final paper approval, authorized admin reopens the class-period in EduGradesPro.</li>
+            <li>Faculty applies the approved correction and re-submits grades.</li>
           </ol>
 
           <div class="guide-subhead">Important Guardrails</div>
           <ul class="guide-list">
-            <li>Route matrix is based on requesting faculty department.</li>
-            <li>CAO/dean/coordinator users must have correct scoped roles.</li>
-            <li>Use remarks/reference number for traceability, especially in manual mode.</li>
-            <li>All correction/reopen decisions are auditable.</li>
+            <li>The route matrix is based on the requesting faculty department.</li>
+            <li>CAO, dean, and coordinator users must have the correct scoped roles.</li>
+            <li>Use remarks and reference numbers for traceability, especially in manual mode.</li>
+            <li>All correction and reopen decisions are auditable.</li>
             <li>Approved score correction values should be reviewed carefully because the final approval posts them directly into the gradebook.</li>
           </ul>
           <div class="guide-note">
@@ -509,11 +748,49 @@
     <div class="guide-section-body">
       <div class="guide-grid single">
         <div>
+          <div class="guide-subhead">User Account Security</div>
+          <table class="guide-table">
+            <thead>
+              <tr>
+                <th>Security Control</th>
+                <th>What It Does</th>
+                <th>Where To Apply / Review</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Password Complexity Validation</td>
+                <td>Prevents weak passwords during account setup and password reset/change flows.</td>
+                <td><strong>Admin Portal -> Security -> Users</strong> and account password-change flows.</td>
+              </tr>
+              <tr>
+                <td>Forced Password Change</td>
+                <td>Requires users to replace the issued password before entering the portal after first sign-in or reset.</td>
+                <td>Applied automatically by the account security flow after user creation and password reset.</td>
+              </tr>
+              <tr>
+                <td>Privacy Consent Flow</td>
+                <td>Requires users to review and accept the current EduGradesPro Privacy Consent before using the portal.</td>
+                <td>Shown automatically at login when consent has not yet been recorded for the current version.</td>
+              </tr>
+              <tr>
+                <td>Single-Device Session Enforcement</td>
+                <td>Revokes older active sessions for the same user when they sign in on a new device or browser.</td>
+                <td>Applied automatically on successful sign-in for protected portals.</td>
+              </tr>
+              <tr>
+                <td>Temporary Login Lockout</td>
+                <td>Temporarily blocks repeated failed login attempts to reduce password-guessing and brute-force abuse.</td>
+                <td><strong>Admin Portal -> Tools -> Configurable Features -> Login Security</strong> for policy, and <strong>Admin Portal -> Security -> Login Lockouts</strong> for monitoring and manual unlock.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="guide-subhead">Admin Rules</div>
           <ul class="guide-list">
-            <li>Enforce domain policy, password complexity, first-login password change, and privacy consent.</li>
-            <li>Assign default tenant/campus/department correctly per user.</li>
+            <li>Assign default tenant, campus, and department correctly per user before giving portal access.</li>
             <li>Grant least privilege and role scopes carefully. Role assignments can now be scoped by tenant, campus, and department for AC/Dean governance boundaries.</li>
             <li>For dual-role users (admin + faculty), ensure both portal permissions are assigned.</li>
+            <li>Recommended login lockout baseline: <strong>5 failed attempts</strong> within <strong>15 minutes</strong>, with a <strong>15-minute</strong> lockout.</li>
           </ul>
         </div>
       </div>
@@ -667,5 +944,68 @@
       </div>
     </div>
   </section>
+
+  {% if show_production_incident_response %}
+  <section class="guide-section" id="incident-response">
+    <div class="guide-section-head"><h3>14. Production Incident Response</h3></div>
+    <div class="guide-section-body">
+      <div class="guide-grid single">
+        <div>
+          <table class="guide-table">
+            <thead>
+              <tr>
+                <th>Incident Step</th>
+                <th>What To Do</th>
+                <th>Where To Apply / Check</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1. Capture Evidence</td>
+                <td>Get the exact URL, timestamp, screenshot, affected role, and the last successful action before the error.</td>
+                <td>Browser error page, user report, and server timestamp reference.</td>
+              </tr>
+              <tr>
+                <td>2. Confirm Scope</td>
+                <td>Check whether the issue affects Admin Portal, Faculty Portal, one campus, one tenant, or only a single page.</td>
+                <td>Admin and Faculty login pages, dashboard pages, and one affected workflow page.</td>
+              </tr>
+              <tr>
+                <td>3. Freeze Risky Changes</td>
+                <td>Avoid random redeploys, direct database edits, or repeated retries while the root cause is still unknown.</td>
+                <td>Operational response discipline during live incident handling.</td>
+              </tr>
+              <tr>
+                <td>4. Check Server Health</td>
+                <td>Review gunicorn, nginx, EduGradesPro logs, disk space, and recent release state first.</td>
+                <td>Production server logs and the Ubuntu deployment environment.</td>
+              </tr>
+              <tr>
+                <td>5. Decide Recovery Path</td>
+                <td>Choose rollback if the outage came from a fresh deploy and the previous release was stable. Choose a hotfix if the root cause is clear and isolated.</td>
+                <td>Release history, recent deployment notes, and current impact scope.</td>
+              </tr>
+              <tr>
+                <td>6. Escalate with Evidence</td>
+                <td>Send traceback, screenshot, URL, affected user/role, and recent change context so a safe patch can be prepared quickly.</td>
+                <td><code>docs/PRODUCTION_INCIDENT_RUNBOOK.md</code> and incident support coordination.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="guide-subhead">Where To Apply</div>
+          <ol class="guide-steps">
+            <li>Use the detailed production response guide in <code>docs/PRODUCTION_INCIDENT_RUNBOOK.md</code> for command-level triage and rollback/hotfix decisions.</li>
+            <li>Use <strong>Admin Portal -> Security -> Login Lockouts</strong> if login failures or account lockouts are part of the incident.</li>
+            <li>Use <strong>Admin Portal -> Audit Logs</strong> and governance pages when the incident involves template, correction, reopen, or scope-setting changes.</li>
+            <li>Use the production deployment guide in <code>docs/DEPLOYMENT_UBUNTU.md</code> for service restart and release-update procedures.</li>
+          </ol>
+          <div class="guide-note">
+            Practical rule: during a production incident, preserve evidence first, stabilize second, and only then deploy a rollback or hotfix. Do not guess directly in the live database.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
 </div>
 {% endblock %}

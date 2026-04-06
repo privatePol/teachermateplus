@@ -15,6 +15,9 @@ env/
 db.sqlite3
 staticfiles/
 media/uploads/
+*_bundle.json
+*.sqlite3.backup.*
+*.sql
 
 # Environment / secrets
 .env

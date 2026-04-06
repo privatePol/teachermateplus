@@ -130,6 +130,109 @@
     color: #5a7263;
     margin-bottom: 0;
   }
+  .faculty-deadline-banner {
+    border-radius: 1.2rem;
+    padding: 1rem 1.1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 16px 30px rgba(18, 52, 31, 0.08);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: center;
+    border: 1px solid #dae5d8;
+  }
+  .faculty-deadline-banner-warning {
+    background: linear-gradient(135deg, #fffef6 0%, #fbf2cf 100%);
+  }
+  .faculty-deadline-banner-danger {
+    background: linear-gradient(135deg, #fffdfb 0%, #f8e1da 100%);
+  }
+  .faculty-deadline-banner-neutral {
+    background: linear-gradient(135deg, #ffffff 0%, #f5f8f6 100%);
+  }
+  .faculty-deadline-banner-eyebrow {
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6d8374;
+    margin-bottom: 0.25rem;
+  }
+  .faculty-deadline-banner-title {
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-bottom: 0.25rem;
+  }
+  .faculty-deadline-banner-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem 1rem;
+    color: #375240;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+  }
+  .faculty-deadline-banner-note {
+    color: #5a7263;
+  }
+  .faculty-deadline-banner-helper {
+    margin-top: 0.35rem;
+    font-size: 0.84rem;
+    color: #466050;
+    font-weight: 600;
+  }
+  .faculty-active-period-banner {
+    border-radius: 1.15rem;
+    padding: 1rem 1.1rem;
+    margin-bottom: 1rem;
+    border: 1px solid #d8e4d3;
+    background: linear-gradient(135deg, #f7fbf6 0%, #eef7ee 54%, #f7f0ce 100%);
+    box-shadow: 0 14px 26px rgba(19, 52, 31, 0.08);
+  }
+  .faculty-active-period-eyebrow {
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6d8374;
+    margin-bottom: 0.25rem;
+  }
+  .faculty-active-period-title {
+    font-size: 1.12rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-bottom: 0.2rem;
+  }
+  .faculty-active-period-note {
+    color: #5a7263;
+    margin-bottom: 0.75rem;
+  }
+  .faculty-active-period-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+  }
+  .faculty-active-period-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem;
+    background: #fff;
+    border: 1px solid #dbe4d5;
+    color: #1f452e;
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+  .faculty-active-period-chip-meta {
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: #8b6f14;
+  }
+  @media (max-width: 767.98px) {
+    .faculty-deadline-banner {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  }
 </style>
 {% endblock %}
 
@@ -144,20 +247,8 @@
   {% endif %}
 </div>
 
-<div class="card faculty-deadline-card reminder-{{ stats.deadline_reminder.variant }}">
-  <div class="card-body">
-    <div class="faculty-deadline-eyebrow">Submission Reminder</div>
-    <div class="faculty-deadline-title">{{ stats.deadline_reminder.title }}</div>
-    {% if stats.deadline_reminder.has_deadline %}
-      <div class="faculty-deadline-meta">
-        <span>Period: {{ stats.deadline_reminder.period_name }}</span>
-        <span>Deadline: {{ stats.deadline_reminder.deadline_at|date:"F j, Y g:i A" }}</span>
-        <span>Classes Affected: {{ stats.deadline_reminder.affected_classes }}</span>
-      </div>
-    {% endif %}
-    <p class="faculty-deadline-note">{{ stats.deadline_reminder.note }}</p>
-  </div>
-</div>
+{% include "faculty_portal/partials/active_period_banner.html" with rows=stats.active_grading_period_rows %}
+{% include "faculty_portal/partials/deadline_banner.html" with reminder=stats.deadline_reminder %}
 
 <div class="row g-3">
   <div class="col-lg-3 col-md-6">

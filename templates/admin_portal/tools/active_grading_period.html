@@ -1,0 +1,284 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .agp-card {
+    border: 1px solid #dbe6d8;
+    border-radius: 1rem;
+    box-shadow: 0 10px 22px rgba(23, 58, 36, 0.06);
+    background: #fff;
+  }
+  .agp-card .card-body {
+    padding: 1.1rem 1.15rem;
+  }
+  .agp-kicker {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #67806f;
+    margin-bottom: 0.3rem;
+  }
+  .agp-value {
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: #163d26;
+  }
+  .agp-note {
+    color: #5b7565;
+    font-size: 0.92rem;
+  }
+  .agp-flow {
+    border: 1px solid #dfe8dc;
+    border-radius: 0.95rem;
+    background: linear-gradient(135deg, #fbfdfb 0%, #f4f8f1 100%);
+    padding: 1rem 1.05rem;
+  }
+  .agp-period-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.28rem 0.72rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    border: 1px solid #d6e2d4;
+    background: #f8fbf7;
+    color: #284a34;
+  }
+  .agp-period-chip.active {
+    background: linear-gradient(90deg, #dff1d8 0%, #ebf2d0 55%, #f3e3aa 100%);
+    border-color: #c9d8b8;
+  }
+  .agp-table th,
+  .agp-table td {
+    vertical-align: middle;
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h2 class="h5 mb-1">Active Grading Period</h2>
+    <div class="text-muted">Set the current grading period per campus and term, then let EduGradesPro reflect it across Admin and Faculty portals.</div>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
+</div>
+
+<div class="agp-flow mb-3">
+  <div class="fw-semibold mb-1">How this works</div>
+  <div class="agp-note mb-0">
+    Step 1: choose the campus and term. Step 2: define the grading periods for that term. Step 3: select which one is active now.
+    When auto-advance is enabled, EduGradesPro moves to the next configured period after the current period deadline passes.
+  </div>
+</div>
+
+<div class="card agp-card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label">Campus</label>
+        <select name="campus_id" class="form-select">
+          <option value="">---------</option>
+          {% for campus in campus_options %}
+          <option value="{{ campus.id }}" {% if selected_campus and campus.id == selected_campus.id %}selected{% endif %}>
+            {{ campus.name }} ({{ campus.code }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-5">
+        <label class="form-label">Term</label>
+        <select name="term_id" class="form-select">
+          <option value="">---------</option>
+          {% for term in term_options %}
+          <option value="{{ term.id }}" {% if selected_term and term.id == selected_term.id %}selected{% endif %}>
+            {{ term.name|default:term.code }} - {{ term.academic_year.name|default:term.academic_year.code }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 d-flex gap-2">
+        <button class="btn btn-success flex-fill" type="submit">Load Scope</button>
+        <a class="btn btn-outline-secondary" href="{% url 'admin_portal:active_grading_period_settings' %}">Reset</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="card agp-card h-100">
+      <div class="card-body">
+        <div class="agp-kicker">Campus Scope</div>
+        <div class="agp-value">{{ selected_campus.code|default:"Not selected" }}</div>
+        <div class="agp-note mt-2">{{ selected_campus.name|default:"Choose a campus first." }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card agp-card h-100">
+      <div class="card-body">
+        <div class="agp-kicker">Term Scope</div>
+        <div class="agp-value">{% if selected_term %}{{ selected_term.code }}{% else %}Not selected{% endif %}</div>
+        <div class="agp-note mt-2">
+          {% if selected_term %}
+          {{ selected_term.name }} | {{ selected_term.academic_year.name|default:selected_term.academic_year.code }}
+          {% else %}
+          Choose a term first.
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card agp-card h-100">
+      <div class="card-body">
+        <div class="agp-kicker">Current Active Period</div>
+        <div class="agp-value">
+          {% if active_setting %}
+          {{ active_setting.period.name }}
+          {% else %}
+          Not set
+          {% endif %}
+        </div>
+        <div class="agp-note mt-2">
+          {% if active_setting %}
+          {{ active_setting.period.code }}{% if active_setting.auto_advanced_from_deadline %} | Auto-advanced{% endif %}
+          {% else %}
+          Select the current grading period for this campus and term.
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card agp-card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+          <div>
+            <h3 class="h6 mb-1">Set Active Period</h3>
+            <div class="agp-note">This controls which grading period is treated as the current working period for the selected campus and term.</div>
+          </div>
+          {% if next_period %}
+          <span class="agp-period-chip">Next: {{ next_period.name }} ({{ next_period.code }})</span>
+          {% endif %}
+        </div>
+
+        <form method="post" novalidate>
+          {% csrf_token %}
+          <input type="hidden" name="form_action" value="save_active_period">
+          {% for field in active_form %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+            {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          {% endfor %}
+          <div class="d-flex gap-2">
+            <button class="btn btn-success" type="submit">Save Active Period</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card agp-card mb-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
+          <div>
+            <h3 class="h6 mb-1">Term Period Catalog</h3>
+            <div class="agp-note">These are the canonical grading periods for the selected term. EduGradesPro uses them for active-period governance and deadline auto-advance.</div>
+          </div>
+          <form method="post" class="m-0">
+            {% csrf_token %}
+            <input type="hidden" name="form_action" value="seed_standard_periods">
+            <input type="hidden" name="selected_term_id" value="{{ selected_term.id|default:'' }}">
+            <input type="hidden" name="selected_campus_id" value="{{ selected_campus.id|default:'' }}">
+            <button class="btn btn-outline-success btn-sm" type="submit" {% if not selected_term %}disabled{% endif %}>Load Standard 4-Period Set</button>
+          </form>
+        </div>
+
+        {% if active_period_rows %}
+        <div class="table-responsive">
+          <table class="table table-sm agp-table">
+            <thead>
+              <tr>
+                <th>Sequence</th>
+                <th>Code</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th class="text-end">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in active_period_rows %}
+              <tr>
+                <td>{{ row.sequence_no }}</td>
+                <td><strong>{{ row.code }}</strong></td>
+                <td>{{ row.name }}</td>
+                <td>
+                  {% if active_setting and row.id == active_setting.period_id %}
+                  <span class="agp-period-chip active">Active Now</span>
+                  {% elif row.is_active %}
+                  <span class="agp-period-chip">Available</span>
+                  {% else %}
+                  <span class="badge text-bg-secondary">Inactive</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="form_action" value="toggle_period">
+                    <input type="hidden" name="period_id" value="{{ row.id }}">
+                    <input type="hidden" name="selected_term_id" value="{{ selected_term.id|default:'' }}">
+                    <input type="hidden" name="selected_campus_id" value="{{ selected_campus.id|default:'' }}">
+                    <button class="btn btn-sm btn-outline-secondary" type="submit">
+                      {% if row.is_active %}Deactivate{% else %}Activate{% endif %}
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="alert alert-light border mb-0">
+          No grading periods are defined yet for this term. Add them below, or use the standard 4-period setup button.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card agp-card">
+      <div class="card-body">
+        <h3 class="h6 mb-2">Add Term Period</h3>
+        <div class="agp-note mb-3">Use this for tenants with custom 3-period or non-standard term structures.</div>
+        <form method="post" novalidate>
+          {% csrf_token %}
+          <input type="hidden" name="form_action" value="add_period">
+          <input type="hidden" name="selected_term_id" value="{{ selected_term.id|default:'' }}">
+          <input type="hidden" name="selected_campus_id" value="{{ selected_campus.id|default:'' }}">
+          <div class="row g-3">
+            {% for field in period_form %}
+            <div class="col-md-6">
+              <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+              {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+          <div class="mt-3">
+            <button class="btn btn-primary" type="submit" {% if not selected_term %}disabled{% endif %}>Add Period</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

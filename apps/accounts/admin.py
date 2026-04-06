@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import User
+from .models import PortalLoginLockoutState, User
 
 
 @admin.register(User)
@@ -35,3 +35,18 @@ class UserAdmin(DjangoUserAdmin):
             },
         ),
     )
+
+
+@admin.register(PortalLoginLockoutState)
+class PortalLoginLockoutStateAdmin(admin.ModelAdmin):
+    list_display = (
+        "username",
+        "portal_code",
+        "failed_attempt_count",
+        "locked_until",
+        "last_failed_at",
+        "user",
+    )
+    list_filter = ("portal_code",)
+    search_fields = ("username", "user__username", "user__email")
+    autocomplete_fields = ("user",)

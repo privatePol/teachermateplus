@@ -369,6 +369,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "LOGIN_LOCKOUTS",
+                groups["SECURITY"],
+                "Login Lockouts",
+                "admin_portal:login_lockout_list",
+                25,
+                "users.read",
+            ),
+            (
+                "ADMIN",
                 "ROLES",
                 groups["SECURITY"],
                 "Roles",
@@ -504,6 +513,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "ACTIVE_GRADING_PERIOD",
+                groups["IMPORTS"],
+                "Active Grading Period",
+                "admin_portal:active_grading_period_settings",
+                25,
+                "system_settings.update",
+            ),
+            (
+                "ADMIN",
                 "CORRECTION_GOVERNANCE",
                 groups["IMPORTS"],
                 "Correction Governance",
@@ -527,6 +545,15 @@ class Command(BaseCommand):
                 "Configurable Features",
                 "admin_portal:configurable_features_settings",
                 50,
+                "system_settings.update",
+            ),
+            (
+                "ADMIN",
+                "TEMPLATE_GOVERNANCE",
+                groups["IMPORTS"],
+                "Template Governance",
+                "admin_portal:template_governance_settings",
+                55,
                 "system_settings.update",
             ),
             (
