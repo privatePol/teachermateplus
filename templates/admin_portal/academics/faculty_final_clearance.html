@@ -1,0 +1,239 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+  <div>
+    <h2 class="h4 mb-0">Faculty Final Clearance</h2>
+    <div class="text-muted">Preview faculty clearance status by campus and term, then verify previously generated official clearance reports.</div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-lg-4">
+        <label class="form-label">Term</label>
+        <select class="form-select" name="term_id">
+          <option value="">Select term</option>
+          {% for term in term_options %}
+          <option value="{{ term.id }}" {% if selected_term and selected_term.id == term.id %}selected{% endif %}>
+            {{ term.name }} - {{ term.academic_year.code }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-5">
+        <label class="form-label">Faculty</label>
+        <select class="form-select" name="faculty_user_id">
+          <option value="">Select faculty</option>
+          {% for user in faculty_options %}
+          <option value="{{ user.id }}" {% if selected_faculty and selected_faculty.id == user.id %}selected{% endif %}>
+            {{ user.full_name|default:user.username }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-3 d-flex gap-2">
+        <button class="btn btn-outline-primary flex-fill" type="submit">Preview</button>
+        <a class="btn btn-outline-secondary flex-fill" href="{% url 'admin_portal:faculty_final_clearance' %}">Reset</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white">
+    <strong>Verify Printed Clearance</strong>
+  </div>
+  <div class="card-body">
+    <div class="text-muted mb-3">
+      Use the printed <strong>Reference No.</strong> and <strong>Verification Code</strong> from the faculty clearance report. This lets authorized personnel confirm whether the paper copy matches an official NCBA clearance record for the current campus scope.
+    </div>
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-lg-4">
+        <label class="form-label">Reference No.</label>
+        <input type="text" class="form-control" name="lookup_reference_no" value="{{ lookup_reference_no }}" placeholder="FCR-...">
+      </div>
+      <div class="col-lg-4">
+        <label class="form-label">Verification Code</label>
+        <input type="text" class="form-control" name="lookup_verification_code" value="{{ lookup_verification_code }}" placeholder="Uppercase code">
+      </div>
+      <div class="col-lg-4 d-flex gap-2">
+        <button class="btn btn-outline-success flex-fill" type="submit">Verify Report</button>
+        <a class="btn btn-outline-secondary flex-fill" href="{% url 'admin_portal:faculty_final_clearance' %}">Clear</a>
+      </div>
+    </form>
+
+    {% if lookup_error %}
+    <div class="alert alert-danger mt-3 mb-0">{{ lookup_error }}</div>
+    {% endif %}
+
+    {% if lookup_report %}
+    <div class="row g-3 mt-1">
+      <div class="col-lg-3">
+        <div class="card border-success-subtle bg-success-subtle h-100">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase">Verification Result</div>
+            <div class="fw-semibold text-success">Official NCBA report found</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-3">
+        <div class="card border-0 bg-light h-100">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase">Faculty</div>
+            <div class="fw-semibold">{{ lookup_report.faculty_user.full_name|default:lookup_report.faculty_user.username }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-3">
+        <div class="card border-0 bg-light h-100">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase">Term</div>
+            <div class="fw-semibold">{{ lookup_report.term.name }}</div>
+            <div class="small text-muted">{{ lookup_report.academic_year.code }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-3">
+        <div class="card border-0 bg-light h-100">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase">Action</div>
+            <a class="btn btn-success btn-sm mt-1" href="{% url 'admin_portal:faculty_final_clearance_verify' lookup_report.id %}">Open Verified Report</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if preview %}
+<div class="row g-3 mb-3">
+  <div class="col-lg-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">Faculty</div>
+        <div class="fw-semibold">{{ preview.faculty_user.full_name|default:preview.faculty_user.username }}</div>
+        <div class="text-muted small">{{ preview.campus.name }} | {{ preview.term.name }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">Assigned Courses</div>
+        <div class="display-6">{{ preview.total_assigned_courses }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">Complete</div>
+        <div class="display-6 text-success">{{ preview.complete_courses }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">Overall Status</div>
+        <div class="fw-semibold {% if preview.clearance_status == 'CLEARED' %}text-success{% else %}text-danger{% endif %}">
+          {{ preview.clearance_status|cut:"_" }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div class="text-muted">
+      Official generation is handled in the Faculty Portal. Admin uses this page to preview clearance status and verify generated reports for payroll, dean's office, or records review.
+    </div>
+    <div class="small fw-semibold text-success">Faculty Portal generation only</div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Course</th>
+            <th>Section</th>
+            <th>Eligible Students</th>
+            <th>Final Submission</th>
+            <th>Status</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview.rows %}
+          <tr>
+            <td>
+              <div class="fw-semibold">{{ row.course_code }}</div>
+              <div class="text-muted small">{{ row.course_title }}</div>
+            </td>
+            <td>{{ row.section_code }}</td>
+            <td>{{ row.eligible_student_count }}</td>
+            <td>{{ row.final_submission_status }}</td>
+            <td>
+              <span class="badge {% if row.encoding_status == 'COMPLETE' %}text-bg-success{% else %}text-bg-danger{% endif %}">
+                {{ row.encoding_status }}
+              </span>
+            </td>
+            <td>
+              {% if row.notes %}
+                {{ row.notes|join:"; " }}
+              {% else %}
+                <span class="text-muted">All clearance checks passed.</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="text-center text-muted py-4">No course assignments found for the selected faculty and term.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white"><strong>Recent Generated Reports</strong></div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Generated At</th>
+            <th>Faculty</th>
+            <th>Term</th>
+            <th>Reference No</th>
+            <th>Status</th>
+            <th>Verify</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for report in recent_reports %}
+          <tr>
+            <td>{{ report.created_at|date:"Y-m-d H:i" }}</td>
+            <td>{{ report.faculty_user.full_name|default:report.faculty_user.username }}</td>
+            <td>{{ report.term.name }}</td>
+            <td><code>{{ report.reference_no }}</code></td>
+            <td>{{ report.get_clearance_status_display }}</td>
+            <td><a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:faculty_final_clearance_verify' report.id %}">Open</a></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="text-center text-muted py-4">No clearance reports generated yet for this campus scope.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

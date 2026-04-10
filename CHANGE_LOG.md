@@ -7,11 +7,52 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Documentation refinement:
+  - `EDUGRADESPRO_CONTEXT.md` now explicitly documents how attendance participates in grading: it is template-driven through `is_attendance_component`, inherits normal weight roll-up, contributes to class standing only when placed under a non-exam component, and uses the internal status-to-score mapping for attendance records
+  - `EDUGRADESPRO_CONTEXT.md` now also includes a worked attendance computation example showing status conversion, averaging, and weighted roll-up into class standing / period grade
+- Tenant grading profile formula governance:
+  - `Tenant Grading Profile` now supports a configurable final-grade formula mode per scope
+  - default mode keeps the current NCBA-style behavior by averaging all active grading periods of the matched template
+  - weighted mode lets other tenants define specific period weights such as `PRELIM=20`, `MIDTERM=20`, `PREFINAL=20`, `FINAL=40`
+  - the Tenant Grading Profile form now explains each scope field and formula field directly in the UI so admins can understand what each textbox or selector controls before saving
+- Template-level threshold governance:
+  - `Grading Template` now supports its own optional `passing_grade_threshold`
+  - passing-threshold resolution now follows `Tenant Grading Profile -> Grading Template -> tenant PASSING_GRADE_THRESHOLD -> 75.00`
+  - grading analytics and faculty-facing threshold guidance now reflect that layered threshold order
+  - faculty analytics failed-row counts and pass-rate calculations now also follow the resolved threshold per class instead of assuming a hardcoded `75`
+- Template hotfix request UX:
+  - the hotfix-create page now uses a dedicated workflow layout instead of the generic shared form
+  - `Selected Offerings` are now sorted by course title and rendered as searchable selection cards so admins can review and pick live-scope classes more easily
+- Faculty final-clearance entry point:
+  - the faculty `Final Clearance` action has been relocated from the Final period card to a single dedicated area on the `My Classes` page so faculty can print the clearance with fewer clicks and less repetition
+  - admin-side Faculty Final Clearance is now preview-and-verify only; official PDF generation is reserved for the Faculty Portal
+  - the page-level clearance action now also includes a print icon and stronger visual treatment so faculty recognize it faster as a printable end-of-term document
 - Production operations support:
   - added `docs/PRODUCTION_INCIDENT_RUNBOOK.md` with EduGradesPro-specific outage triage, evidence capture, server-check, rollback-vs-hotfix, and remote Codex support guidance
   - Admin guide now includes a `Production Incident Response` section so operations staff can quickly see the first-response flow during a live issue
   - the `Production Incident Response` section in the Admin guide is now visible only to `SUPER_ADMIN`
   - Ubuntu deployment documentation now points to the production incident runbook for emergency recovery guidance.
+
+### Fixed
+- Faculty summary UX:
+  - the Summary page submission-readiness line is now presented as colored explanation cards
+  - readiness cards now include counts for `DRP`, `W`, and `INC`
+  - the Summary page now also shows the active passing threshold note and conditionally shows `Passed` / `Failed` cards only when official period-grade release is allowed
+  - the Summary page snapshot cards now remain visible even when the page is already read-only, so faculty can still review readiness, status counts, and released pass/fail totals after submission, lock, or active-period closure
+  - the overall `FINAL GRADE` column is now shown only on the Final-period Summary page, not on Prelim, Midterm, or Pre-Final
+  - the Final-period Summary page now also shows prior official period-grade columns (`PRELIM GRADE`, `MIDTERM GRADE`, `PRE-FINAL GRADE`) before the Final Exam column for easier faculty review
+  - final-grade computation now uses the full configured active-period denominator, so missing later periods do not disappear from the average just because only earlier period grades already exist
+  - the Final-period Summary page now also refreshes stored final-grade rows from existing official period grades before rendering, so read-only Final review pages no longer keep showing stale pre-fix final averages
+- Final-grade computation governance:
+  - official final-grade computation now resolves through the matched `Tenant Grading Profile` when a weighted-period formula is configured
+  - offerings without a special formula remain backward-compatible and continue to average all active grading periods of the assigned template
+  - prediction final-grade projection and the `average needed to pass final` calculation are now also tenant-formula aware, so weighted-profile tenants no longer see NCBA-style average-only projection behavior
+  - the faculty grading-template page and the admin template-testing calculator no longer claim that every live final grade is always a simple average; both now clearly distinguish tenant-profile formulas from template-only preview behavior
+- Faculty submission governance:
+  - period submission now blocks when any `ACTIVE` student still has blank required grade or attendance records for the visible period work, instead of only warning after at least one encoded record exists
+  - the Faculty Summary readiness card now shows `With complete records` and disables the submit button until all required visible records are filled or the student status is updated to `DRP`, `W`, or `INC`
+- Admin dashboard session visibility:
+  - the `Currently Logged-in Users` widget now applies the current session-timeout policy when deciding whether a user is still effectively logged in, so stale session rows created before a timeout change no longer appear as active just because their old stored Django session expiry is still far in the future
 - Deployment documentation expansion:
   - `docs/DEPLOYMENT_UBUNTU.md` is now a fuller production deployment guide covering Ubuntu, MariaDB/MySQL recommendation, GitHub-based deployment, pre-production preparation, staging strategy, first go-live workflow, backups, and release discipline
   - the deployment guide now starts with a stage-by-stage rollout sequence and explicitly documents the multi-Django-app server pattern plus why EduGradesPro should live under `/opt/edugradespro` instead of `/var/www/html/edugradespro`
@@ -38,42 +79,79 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Faculty Portal public homepage content expansion:
   - added a new `Faculty Portal Entry Experience` section that explains what faculty sees first when entering the portal
   - added a dedicated `Faculty Support Features` section highlighting reminders, private notes, at-risk monitor, template visibility, deadline banners, and help/manual access
-- Admin configurable-features UX improvements:
+- Admin configuration-management UX improvements:
   - `Class Master List Ownership` now keeps the page anchored on that card when term or faculty filters reload the class list
   - class override labels no longer repeat the already selected term and academic year
   - the class override selector is now a clearer multi-class picker where faculty names are visually emphasized instead of being buried in a plain browser list
   - selected-class preview now shows faculty names with stronger emphasis for faster review
   - configurable-feature cards now use varied gradient headers, uppercase lighter header text, cleaner switch/toggle tiles, wider spacing, medium shadows, and collapsible/expandable bodies for easier scanning
+  - when settings cards are collapsed, they now fall into a responsive summary-card grid with a short description in the card body; expanding any card opens its full settings form across the full available width
+  - the page now opens with cards collapsed by default, includes `Expand All` / `Collapse All` controls, and gives the save button more top spacing so the footer reads more comfortably
   - added a dedicated `Active Grading Period Governance` section explaining that normal faculty work follows the currently active grading period while still honoring approved reopen/correction exceptions
   - these homepage additions were implemented as isolated additive sections so they remain easy to revise or remove if the presentation direction changes.
+- Admin faculty oversight:
+  - added a new `Faculty Activity Monitor` for AC and CAO
+  - the monitor supports campus, department, term, faculty, and monitoring-window filtering
+  - Phase 1 surfaces login frequency, activity creation, score-save counts, submissions, classes with no activity, classes with no scores, and recent auditable faculty-side actions
+  - Phase 2 now adds automatic row-level monitoring flags, a four-slice activity trend view for the selected window, a selected-faculty trend breakdown, and a print-friendly report output for AC/CAO follow-up meetings
+  - the selected faculty drilldown now also includes a six-week week-over-week comparison view so AC/CAO can compare one faculty member's logins, activity creation, score encoding, and gradebook work across consecutive weeks
+  - the Admin dashboard and Faculty Assignments page now provide direct entry points to the new monitor
 - Faculty reminder automation:
   - future-dated faculty-created activities now auto-create a linked `Activity Preparation` reminder in the Faculty Reminder Center
   - these auto-reminders are tied directly to the grade activity so activity edits update the same reminder instead of creating duplicates
+- Prediction transparency:
+  - the faculty `How Prediction Works` page now includes a dedicated methodology section that explains the actual prediction flow step by step
+  - each prediction column now also documents the factors and source values used to derive it, including how assumption mode, template weights, passing threshold, coverage, and remaining items affect the displayed values
+  - the same guide now also explains Base 50 score transmutation, periodic grade roll-up, and final-grade computation so faculty can trace how prediction relates to the official grading engine
+- Official computed grade release control:
+  - Admin Portal `Configuration Management` now includes tenant-level switches for delaying official computed period grades and official final grades until after the relevant deadline has passed
+  - official period/final grades are now visible to faculty by default, and are delayed only when the admin explicitly turns on the post-deadline release restriction
+  - Faculty period summary now hides or shows official computed period/final grades based on that release restriction, including the print layout, so faculty cannot see those official values early just by opening or printing the grade book when the restriction is enabled
   - when the activity is no longer future-dated or is deleted, the linked reminder is cancelled automatically
   - reminder email behavior remains optional: the reminder itself is created regardless, but `send_email` is enabled only when the tenant's Faculty Reminder Email feature is on, and actual email delivery stays queue-based in the background
+- Faculty end-of-term clearance reporting:
+  - Admin Portal now includes a `Faculty Final Clearance` page for previewing and generating a compact end-of-term clearance report per faculty member, campus, and term
+  - each assigned class is evaluated as `COMPLETE` or `INCOMPLETE` based on required active-student grade encoding, required period submissions, and official final-grade availability
+  - generated reports now store a unique reference number, verification code, UUID-backed snapshot, and printable PDF so the clearance artifact can be verified later without reprinting full grade sheets
+  - `DRP`, `W`, and `INC` enrollment rows are excluded from the required active-student encoding count during final-clearance evaluation.
+  - the same final-clearance workflow is now available from the Faculty Portal through the Final-period card, so faculty can preview their own campus-term completion status and generate the official PDF themselves
+  - final-clearance completion rules are now stricter:
+    - classes with zero `ACTIVE` students no longer auto-pass as `COMPLETE`
+    - `0` no longer counts as a valid official period or final grade for clearance readiness.
 - Faculty grade book transparency:
   - added a faculty-side `Who Viewed` period-card action that opens a class-period view-history page
   - the history page reads existing `FacultyGradebookMonitor` audit entries and shows who opened the read-only grade book monitor, when it was opened, and whether student identity was masked
   - the `Who Viewed` icon remains available even when a period is closed by active grading period governance
+- Faculty review access after active-period closure:
+  - when a period is closed by active grading period governance, the faculty period card now keeps `Attendance` and `Summary` clickable for review
+  - both pages now open in read-only mode under that policy, so teachers can still inspect stored attendance and grades after deadline without regaining edit access.
+- Admin Portal navigation ordering:
+  - the `Tools` group menu is now positioned after `Navigation` in the left sidebar order
+  - the live menu-group sort order was also updated so the new placement appears immediately in the current environment.
 - Class master list governance and faculty movement handling:
-  - added `Class Master List Ownership` to `Admin Portal -> Tools -> Configurable Features` so roster maintenance can be switched between `Admin Only` and `Faculty Allowed`
+  - added `Class Master List Ownership` to `Admin Portal -> Tools -> Configuration Management` so roster maintenance can be switched between `Admin Only` and `Faculty Allowed`
   - the `Class Master List Ownership` card now also supports a term-based class selector filtered by the selected tenant, campus, and term
   - admins can now store a class-level ownership override for one selected offering without losing the tenant-wide default
   - the class-level override area now also supports an optional faculty-name filter before listing classes
   - the class override selector now supports multiple class selection in one save action
   - each class option now includes the assigned faculty name in parentheses for faster identification
   - faculty class cards now use the clearer `Class List` label instead of `Class List / DR-W`
-  - faculty class-list pages now distinguish schedule movement from true `DR/W` cases
+  - faculty class-list pages now distinguish schedule movement from true `DRP/W/INC` cases
   - added a dedicated `Remove from Class` action for student schedule movement, which removes the student from the active class list without incorrectly tagging the record as dropped or withdrawn
   - the class-list page now separates active rows from `Removed from This Class` rows for clearer roster maintenance during adjustment periods
   - `Remove from Class` now asks faculty to type `remove` before the student is removed from the active class list
   - the `Add Student to This Class` flow now lets faculty type a student number or a `last name, first name` match first so the student dropdown narrows before saving
   - faculty class-list badges now use clearer risk colors:
-    - `DR` uses a danger badge
+    - `DRP` uses a danger badge
     - `W` uses a warning badge
+    - `INC` uses an info badge
   - the faculty class list now shows a line number before the student number for faster manual checking
   - the `Remove from Class` action is now a small `x` icon beside the student number, with a tooltip for quicker scanning and less button clutter
   - class-list rows now use a more readable font and display names as `LAST NAME, First Name`
+  - class-list status options now include `INC` for incomplete, and the stored drop code now uses `DRP` instead of `DR` to match the academic grading convention
+  - the faculty class-list page now also includes a visible status legend so faculty can understand `ACTIVE`, `DRP`, `W`, and `INC` at a glance before updating a row
+  - the faculty dashboard now also includes an `Incomplete Students` KPI that counts active-class rows marked `INC`
+  - the admin enrollment list now includes scoped status summary cards for `ACTIVE`, `DRP`, `W`, and `INC`
 - Faculty active-period governance closure:
   - when a campus-term `Active Grading Period` is configured, only the matching period stays open for normal faculty work in the class period cards
   - non-active period cards now show a closed state and block direct access to standard period work until that period becomes active
@@ -90,9 +168,12 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - successful period submission now returns faculty to the class-period overview instead of reloading the just-submitted period summary
   - this prevents a false post-submit closure error when active-period governance would immediately treat the just-submitted earlier period as closed.
 - Login security controls:
+  - portal session timeout is now explicitly configured to 1 hour
+  - active use now refreshes the session window, while inactive users must sign in again after the 1-hour timeout
+  - `.env.example` plus staging/production env templates now include explicit session-timeout settings for deployment consistency
   - EduGradesPro now supports temporary portal-specific login lockout after repeated failed sign-in attempts
   - lockout state is tracked separately for Admin Portal and Faculty Portal usernames
-  - lockout settings are configurable from `Admin Portal -> Tools -> Configurable Features -> Login Security`
+  - lockout settings are configurable from `Admin Portal -> Tools -> Configuration Management -> Login Security`
   - Admin Portal now also includes a `Security -> Login Lockouts` monitor page where authorized admins can review active lockouts and clear them without direct database access
   - default recommended baseline is now supported in-system through:
     - maximum failed attempts
@@ -458,3 +539,9 @@ For every merged change:
 1. Add a bullet under `[Unreleased]`.
 2. Move `[Unreleased]` items into a version heading when releasing.
 3. Include impact in plain language (what changed for admins/faculty).
+- Faculty Portal: added quick-jump navigation between Activities, Attendance, Summary, and Who Viewed on period work pages, and added an unsaved-score warning before leaving the Encode Scores page without saving.
+- Admin Portal: Faculty Final Clearance now includes a direct verification lookup using printed Reference No. and Verification Code, so authorized personnel can validate a paper clearance without first browsing the recent-report list.
+- Faculty Final Clearance PDF now uses the heading `FACULTY CLEARANCE OVERVIEW`, wraps long course/section/notes cells more cleanly, uses NCBA-only wording in the control and verification section, and keeps Reference No. and Verification Code inside the control section instead of the top header line.
+- Faculty Final Clearance PDF typography is now lighter and more consistent: section headings use a softer weight, Section C body text matches Section B sizing, and section spacing is more open for better print readability.
+- Faculty Final Clearance PDF tables now use a softer slate header tint and lighter grid lines so the printed report reads more like a formal clearance document and less like a spreadsheet export.
+- Faculty Final Clearance PDF now includes a QR code in the control section. When `SITE_URL` is configured, the QR opens the Admin Portal verification lookup with the printed reference and verification codes prefilled; otherwise it stores a manual verification payload.

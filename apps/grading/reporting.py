@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
+import hashlib
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlencode
 
+from django.conf import settings
+from django.db import models
+from django.urls import reverse
 from django.utils import timezone
+from reportlab.graphics.barcode.qr import QrCodeWidget
+from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -14,7 +21,14 @@ from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Tabl
 
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
-from apps.grading.models import GradeActivity, StudentActivityScore, StudentPeriodGrade
+from apps.grading.models import (
+    FacultyFinalClearanceReport,
+    GradeActivity,
+    GradeSubmission,
+    StudentActivityScore,
+    StudentFinalGrade,
+    StudentPeriodGrade,
+)
 from apps.grading.services import FacultyGradingService
 
 
@@ -122,7 +136,7 @@ class CorrectionOfficialReportService:
         results = {}
         for enrollment in enrollments:
             student_id = enrollment.student_id
-            if enrollment.enrollment_status in {Enrollment.Status.DR, Enrollment.Status.W}:
+            if enrollment.enrollment_status in Enrollment.NON_ACTIVE_GRADING_STATUSES:
                 results[student_id] = {
                     "class_standing_grade": None,
                     "exam_grade": None,
@@ -330,13 +344,13 @@ class CorrectionOfficialReportService:
         table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9f2ff")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#102a43")),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#243b53")),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                     ("FONTSIZE", (0, 0), (-1, -1), 8),
-                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+                    ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d9e2ec")),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#fafbfc")]),
                     ("LEFTPADDING", (0, 0), (-1, -1), 5),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 5),
                     ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -459,6 +473,439 @@ class CorrectionOfficialReportService:
                 ),
             ]
         )
+
+        doc.build(story)
+        return buffer.getvalue()
+
+
+class FacultyFinalClearanceReportService:
+    LOGO_PATH = CorrectionOfficialReportService.LOGO_PATH
+
+    @staticmethod
+    def _safe_text(value):
+        return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    @classmethod
+    def _official_period_label(cls, period_name: str, period_code: str) -> str:
+        joined = f"{period_name} {period_code}".upper()
+        if "PRE-FINAL" in joined or "PREFINAL" in joined or "PRE FINAL" in joined:
+            return "PFG"
+        if "PRELIM" in joined:
+            return "PG"
+        if "MIDTERM" in joined:
+            return "MG"
+        if "FINAL" in joined:
+            return "FG"
+        return (period_code or period_name or "GRADE").upper()
+
+    @classmethod
+    def evaluate_faculty_clearance(cls, *, faculty_user, term, campus=None):
+        assignments = (
+            faculty_user.faculty_assignments.filter(
+                is_active=True,
+                offering__term_id=term.id,
+                offering__tenant_id=term.tenant_id,
+                offering__is_active=True,
+            )
+            .select_related(
+                "offering",
+                "offering__tenant",
+                "offering__campus",
+                "offering__academic_year",
+                "offering__term",
+                "offering__course",
+                "offering__section",
+            )
+            .order_by("offering__campus__code", "offering__course__code", "offering__section__code")
+        )
+        if campus is not None:
+            assignments = assignments.filter(offering__campus_id=campus.id)
+
+        offerings = []
+        seen_offering_ids = set()
+        for assignment in assignments:
+            if assignment.offering_id in seen_offering_ids:
+                continue
+            seen_offering_ids.add(assignment.offering_id)
+            offerings.append(assignment.offering)
+
+        rows = []
+        complete_courses = 0
+        incomplete_courses = 0
+
+        for offering in offerings:
+            notes = []
+            eligible_student_ids = list(
+                Enrollment.objects.filter(
+                    course_offering_id=offering.id,
+                    is_active=True,
+                    enrollment_status=Enrollment.Status.ACTIVE,
+                ).values_list("student_id", flat=True)
+            )
+
+            try:
+                template = FacultyGradingService.resolve_template_for_offering(offering)
+                template_periods = list(FacultyGradingService.get_template_periods(template))
+            except Exception:
+                template_periods = []
+                notes.append("No active grading template assignment.")
+
+            submission_map = {
+                row.template_period_id: row
+                for row in GradeSubmission.objects.filter(
+                    offering_id=offering.id,
+                    template_period_id__in=[period.id for period in template_periods],
+                )
+            }
+            period_grade_counts = {
+                row["template_period_id"]: row["graded_count"]
+                for row in StudentPeriodGrade.objects.filter(
+                    offering_id=offering.id,
+                    template_period_id__in=[period.id for period in template_periods],
+                    student_id__in=eligible_student_ids or [-1],
+                    period_grade__gt=0,
+                )
+                .values("template_period_id")
+                .annotate(graded_count=models.Count("id"))
+            }
+            final_grade_count = (
+                StudentFinalGrade.objects.filter(
+                    offering_id=offering.id,
+                    student_id__in=eligible_student_ids or [-1],
+                    final_grade__gt=0,
+                ).count()
+                if eligible_student_ids
+                else 0
+            )
+
+            status = "COMPLETE"
+            period_labels = []
+            unsubmitted_labels = []
+            missing_grade_labels = []
+            final_grade_missing_count = 0
+            final_submission_status = "-"
+
+            if not eligible_student_ids:
+                status = "INCOMPLETE"
+                notes.append(
+                    "No ACTIVE students are currently eligible for final-clearance completion. "
+                    "Review the class master list and final submission status first."
+                )
+
+            for period in template_periods:
+                period_label = cls._official_period_label(period.name or "", period.code or "")
+                period_labels.append(period_label)
+                submission = submission_map.get(period.id)
+                if eligible_student_ids and (not submission or submission.status != GradeSubmission.Status.SUBMITTED):
+                    unsubmitted_labels.append(period_label)
+                if eligible_student_ids and period_grade_counts.get(period.id, 0) < len(eligible_student_ids):
+                    missing_grade_labels.append(period_label)
+
+            if template_periods:
+                final_period = template_periods[-1]
+                final_submission = submission_map.get(final_period.id)
+                if final_submission and final_submission.status == GradeSubmission.Status.SUBMITTED:
+                    final_submission_status = "Submitted"
+                else:
+                    final_submission_status = "Not Submitted"
+                    if eligible_student_ids:
+                        status = "INCOMPLETE"
+                        notes.append("Final grading period is not yet submitted.")
+
+            if eligible_student_ids and unsubmitted_labels:
+                status = "INCOMPLETE"
+                notes.append(f"Unsubmitted periods: {', '.join(unsubmitted_labels)}.")
+            if eligible_student_ids and missing_grade_labels:
+                status = "INCOMPLETE"
+                notes.append(f"Missing official period grades in: {', '.join(missing_grade_labels)}.")
+            if eligible_student_ids:
+                final_grade_missing_count = max(len(eligible_student_ids) - final_grade_count, 0)
+                if final_grade_missing_count > 0:
+                    status = "INCOMPLETE"
+                    notes.append(f"{final_grade_missing_count} active student(s) still have no official final grade.")
+
+            if notes and status != "INCOMPLETE" and eligible_student_ids:
+                status = "INCOMPLETE"
+
+            if status == "COMPLETE":
+                complete_courses += 1
+            else:
+                incomplete_courses += 1
+
+            rows.append(
+                {
+                    "offering_id": offering.id,
+                    "course_code": offering.course.code,
+                    "course_title": offering.course.title,
+                    "section_code": offering.section.code,
+                    "campus_code": offering.campus.code,
+                    "eligible_student_count": len(eligible_student_ids),
+                    "period_labels": period_labels,
+                    "final_submission_status": final_submission_status,
+                    "encoding_status": status,
+                    "final_grade_missing_count": final_grade_missing_count,
+                    "notes": notes,
+                }
+            )
+
+        overall_status = (
+            FacultyFinalClearanceReport.ClearanceStatus.CLEARED
+            if rows and incomplete_courses == 0
+            else FacultyFinalClearanceReport.ClearanceStatus.NOT_CLEARED
+        )
+        if not rows:
+            overall_status = FacultyFinalClearanceReport.ClearanceStatus.NOT_CLEARED
+
+        return {
+            "faculty_user": faculty_user,
+            "term": term,
+            "academic_year": term.academic_year,
+            "campus": campus,
+            "rows": rows,
+            "total_assigned_courses": len(rows),
+            "complete_courses": complete_courses,
+            "incomplete_courses": incomplete_courses,
+            "clearance_status": overall_status,
+        }
+
+    @classmethod
+    def _reference_no(cls, *, faculty_user, term):
+        return f"FCR-{term.code}-{faculty_user.id}-{timezone.localtime().strftime('%Y%m%d%H%M%S')}"
+
+    @classmethod
+    def _verification_code(cls, *, reference_no, faculty_user_id, term_id):
+        raw = f"{reference_no}|{faculty_user_id}|{term_id}|{settings.SECRET_KEY}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16].upper()
+
+    @classmethod
+    def verification_lookup_value(cls, *, report_obj):
+        base_url = (getattr(settings, "SITE_URL", "") or "").strip().rstrip("/")
+        query_string = urlencode(
+            {
+                "lookup_reference_no": report_obj.reference_no,
+                "lookup_verification_code": report_obj.verification_code,
+            }
+        )
+        path = f"{reverse('admin_portal:faculty_final_clearance')}?{query_string}"
+        if base_url:
+            return f"{base_url}{path}"
+        return (
+            "NCBA Faculty Final Clearance Verification\n"
+            f"Reference No: {report_obj.reference_no}\n"
+            f"Verification Code: {report_obj.verification_code}\n"
+            f"Report UUID: {report_obj.report_uuid}"
+        )
+
+    @classmethod
+    def verification_qr_drawing(cls, *, report_obj, size_mm=28):
+        qr = QrCodeWidget(cls.verification_lookup_value(report_obj=report_obj))
+        bounds = qr.getBounds()
+        width = bounds[2] - bounds[0]
+        height = bounds[3] - bounds[1]
+        size_points = size_mm * mm
+        drawing = Drawing(
+            size_points,
+            size_points,
+            transform=[size_points / width, 0, 0, size_points / height, 0, 0],
+        )
+        drawing.add(qr)
+        return drawing
+
+    @classmethod
+    def generate_report_record(cls, *, faculty_user, term, campus, generated_by_user):
+        snapshot = cls.evaluate_faculty_clearance(faculty_user=faculty_user, term=term, campus=campus)
+        reference_no = cls._reference_no(faculty_user=faculty_user, term=term)
+        verification_code = cls._verification_code(
+            reference_no=reference_no,
+            faculty_user_id=faculty_user.id,
+            term_id=term.id,
+        )
+        return FacultyFinalClearanceReport.objects.create(
+            tenant_id=term.tenant_id,
+            campus=campus,
+            academic_year=term.academic_year,
+            term=term,
+            faculty_user=faculty_user,
+            generated_by_user=generated_by_user,
+            reference_no=reference_no,
+            verification_code=verification_code,
+            clearance_status=snapshot["clearance_status"],
+            total_assigned_courses=snapshot["total_assigned_courses"],
+            complete_courses=snapshot["complete_courses"],
+            incomplete_courses=snapshot["incomplete_courses"],
+            snapshot_json={
+                "rows": snapshot["rows"],
+                "clearance_status": snapshot["clearance_status"],
+            },
+        )
+
+    @classmethod
+    def build_report_data(cls, *, report_obj):
+        print_header_name = SystemSettingService.get(
+            "PRINT_HEADER_SCHOOL_NAME",
+            tenant_id=report_obj.tenant_id,
+            default=report_obj.tenant.name,
+        )
+        print_header_address = SystemSettingService.get(
+            "PRINT_HEADER_SCHOOL_ADDRESS",
+            tenant_id=report_obj.tenant_id,
+            default=getattr(report_obj.campus, "address", "") or "",
+        )
+        return {
+            "report_obj": report_obj,
+            "print_header_name": print_header_name,
+            "print_header_address": print_header_address,
+            "generated_at": timezone.localtime(report_obj.created_at),
+            "reference_no": report_obj.reference_no,
+            "verification_code": report_obj.verification_code,
+            "rows": (report_obj.snapshot_json or {}).get("rows", []),
+            "verification_lookup_value": cls.verification_lookup_value(report_obj=report_obj),
+        }
+
+    @classmethod
+    def build_pdf_bytes(cls, *, report_obj):
+        report = cls.build_report_data(report_obj=report_obj)
+        report_obj = report["report_obj"]
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=15 * mm,
+            rightMargin=15 * mm,
+            topMargin=15 * mm,
+            bottomMargin=15 * mm,
+            title=f"Faculty Final Clearance {report['reference_no']}",
+        )
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name="SmallBody", fontSize=8, leading=10))
+        styles.add(
+            ParagraphStyle(
+                name="SectionTitle",
+                fontSize=10.5,
+                leading=13,
+                fontName="Helvetica",
+                spaceBefore=4,
+                spaceAfter=10,
+            )
+        )
+        styles.add(ParagraphStyle(name="ReportHeader", fontSize=14, leading=17, alignment=1))
+        styles.add(ParagraphStyle(name="CenteredBody", parent=styles["BodyText"], alignment=1))
+        styles.add(ParagraphStyle(name="TableWrap", fontSize=7.5, leading=9))
+
+        story = []
+        if cls.LOGO_PATH.exists():
+            logo = Image(str(cls.LOGO_PATH), width=22 * mm, height=22 * mm)
+            logo.hAlign = "CENTER"
+            story.extend([logo, Spacer(1, 6)])
+        story.append(Paragraph(cls._safe_text(report["print_header_name"]), styles["ReportHeader"]))
+        if report["print_header_address"]:
+            story.append(Paragraph(cls._safe_text(report["print_header_address"]), styles["CenteredBody"]))
+        story.extend(
+            [
+                Spacer(1, 4),
+                Paragraph("Faculty Final Clearance Report", styles["Title"]),
+                Paragraph(
+                    f"Generated: {report['generated_at'].strftime('%Y-%m-%d %H:%M')}",
+                    styles["SmallBody"],
+                ),
+                Spacer(1, 16),
+                Paragraph("A. FACULTY CLEARANCE OVERVIEW", styles["SectionTitle"]),
+            ]
+        )
+
+        metadata_rows = [
+            ["Faculty", report_obj.faculty_user.full_name or report_obj.faculty_user.username, "Campus", report_obj.campus.name],
+            ["Academic Year", report_obj.academic_year.code, "Term", report_obj.term.name or report_obj.term.code],
+            ["Overall Status", report_obj.get_clearance_status_display().upper(), "Generated By", report_obj.generated_by_user.full_name if report_obj.generated_by_user_id else "-"],
+            ["Assigned Courses", str(report_obj.total_assigned_courses), "Complete / Incomplete", f"{report_obj.complete_courses} / {report_obj.incomplete_courses}"],
+        ]
+        story.append(CorrectionOfficialReportService._table([["Field", "Value", "Field", "Value"]] + metadata_rows, col_widths=[36*mm, 54*mm, 36*mm, 54*mm]))
+        story.extend(
+            [
+                Spacer(1, 16),
+                Paragraph("B. COURSE CLEARANCE STATUS", styles["SectionTitle"]),
+                Paragraph(
+                    "A course is marked COMPLETE only when required active-student grades are already encoded, official period grades are positive and available, required period submissions are already submitted, and official final grades are already computed with positive values.",
+                    styles["SmallBody"],
+                ),
+                Spacer(1, 6),
+            ]
+        )
+        course_rows = [["Course", "Section", "Eligible", "Final Submission", "Status", "Notes"]]
+        for row in report["rows"]:
+            course_rows.append(
+                [
+                    Paragraph(f"{cls._safe_text(row['course_code'])} - {cls._safe_text(row['course_title'])}", styles["TableWrap"]),
+                    Paragraph(cls._safe_text(row["section_code"]), styles["TableWrap"]),
+                    str(row["eligible_student_count"]),
+                    Paragraph(cls._safe_text(row["final_submission_status"]), styles["TableWrap"]),
+                    Paragraph(cls._safe_text(row["encoding_status"]), styles["TableWrap"]),
+                    Paragraph(cls._safe_text("; ".join(row["notes"]) or "-"), styles["TableWrap"]),
+                ]
+            )
+        if len(course_rows) == 1:
+            course_rows.append(["-", "-", "-", "-", "NOT_CLEARED", "No active faculty course assignments found for the selected scope."])
+        story.append(CorrectionOfficialReportService._table(course_rows, col_widths=[49*mm, 23*mm, 14*mm, 24*mm, 18*mm, 52*mm]))
+        story.extend(
+            [
+                Spacer(1, 16),
+                Paragraph("C. CONTROL AND VERIFICATION", styles["SectionTitle"]),
+                Paragraph(
+                    "This document is the official NCBA faculty clearance record for the selected scope and serves as the compact replacement for bulk printed final grade sheets. Authorized personnel should validate authenticity using the Reference No. and Verification Code against NCBA's stored clearance verification record.",
+                    styles["SmallBody"],
+                ),
+                Spacer(1, 6),
+            ]
+        )
+        control_table = CorrectionOfficialReportService._table(
+            [
+                ["Control", "Value"],
+                ["Reference No", report["reference_no"]],
+                ["Verification Code", report["verification_code"]],
+                ["Report UUID", str(report_obj.report_uuid)],
+            ],
+            col_widths=[36 * mm, 82 * mm],
+        )
+        qr_caption = Paragraph(
+            "Scan to open NCBA clearance verification. If no site URL is configured, the QR stores the Reference No., Verification Code, and UUID for manual verification.",
+            styles["SmallBody"],
+        )
+        qr_block = Table(
+            [
+                [cls.verification_qr_drawing(report_obj=report_obj)],
+                [qr_caption],
+            ],
+            colWidths=[48 * mm],
+        )
+        qr_block.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+        verification_layout = Table(
+            [[control_table, qr_block]],
+            colWidths=[122 * mm, 48 * mm],
+        )
+        verification_layout.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+        story.append(verification_layout)
 
         doc.build(story)
         return buffer.getvalue()

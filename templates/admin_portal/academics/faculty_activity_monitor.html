@@ -1,0 +1,586 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .activity-shell {
+    display: grid;
+    gap: 1rem;
+  }
+  .activity-card {
+    border: 0;
+    border-radius: 1rem;
+    box-shadow: 0 0.75rem 1.35rem rgba(19, 61, 38, 0.08);
+  }
+  .activity-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.9rem;
+  }
+  .activity-summary-card {
+    border-radius: 1rem;
+    padding: 1rem 1.05rem;
+    background:
+      radial-gradient(circle at top right, rgba(244, 202, 70, 0.35) 0%, rgba(244, 202, 70, 0) 42%),
+      linear-gradient(145deg, #0f6c3c 0%, #2f8c4f 54%, #d6b23d 100%);
+    color: #fffef4;
+    box-shadow: 0 0.8rem 1.4rem rgba(20, 69, 42, 0.14);
+  }
+  .activity-summary-label {
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(251, 248, 231, 0.92);
+  }
+  .activity-summary-value {
+    margin-top: 0.3rem;
+    font-size: 1.55rem;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+  .activity-summary-meta {
+    margin-top: 0.4rem;
+    font-size: 0.84rem;
+    color: rgba(249, 248, 236, 0.92);
+  }
+  .activity-status-note {
+    font-size: 0.85rem;
+    color: #5b6c60;
+  }
+  .activity-table th {
+    white-space: nowrap;
+    font-size: 0.84rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #647667;
+  }
+  .activity-table td {
+    vertical-align: middle;
+  }
+  .activity-name {
+    font-weight: 700;
+    color: #163522;
+  }
+  .activity-subtle {
+    font-size: 0.84rem;
+    color: #6a7d6d;
+  }
+  .activity-badge-soft {
+    border-radius: 999px;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.8rem;
+  }
+  .activity-flag-stack {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .activity-detail-grid {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 1rem;
+  }
+  .activity-timeline {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.75rem;
+  }
+  .activity-timeline-item {
+    border: 1px solid #dfe8df;
+    border-radius: 0.9rem;
+    padding: 0.8rem 0.95rem;
+    background: linear-gradient(180deg, #fdfefd 0%, #f6faf5 100%);
+  }
+  .activity-window-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 999px;
+    background: #eff7ef;
+    border: 1px solid #d8e7d8;
+    color: #215135;
+    padding: 0.45rem 0.8rem;
+    font-size: 0.84rem;
+    font-weight: 600;
+  }
+  .trend-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.85rem;
+  }
+  .trend-card {
+    border: 1px solid #dce6dc;
+    border-radius: 1rem;
+    padding: 0.9rem 0.95rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f7fbf6 100%);
+  }
+  .trend-card-title {
+    font-weight: 700;
+    color: #183a25;
+    margin-bottom: 0.15rem;
+  }
+  .trend-card-sub {
+    font-size: 0.82rem;
+    color: #6d7d71;
+    margin-bottom: 0.7rem;
+  }
+  .trend-line {
+    margin-bottom: 0.55rem;
+  }
+  .trend-line:last-child {
+    margin-bottom: 0;
+  }
+  .trend-line-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    color: #597063;
+    margin-bottom: 0.22rem;
+  }
+  .trend-track {
+    height: 0.42rem;
+    border-radius: 999px;
+    background: #e6eee6;
+    overflow: hidden;
+  }
+  .trend-fill {
+    height: 100%;
+    border-radius: 999px;
+  }
+  .trend-fill.login { background: linear-gradient(90deg, #3a7ad8, #7db5ff); }
+  .trend-fill.activity { background: linear-gradient(90deg, #148f50, #7fd0a1); }
+  .trend-fill.score { background: linear-gradient(90deg, #c58718, #f2c768); }
+  .trend-fill.gradebook { background: linear-gradient(90deg, #7b4fd2, #b69af4); }
+  .weekly-comparison-shell {
+    border: 1px solid #dce6dc;
+    border-radius: 1rem;
+    padding: 0.95rem 1rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbf7 100%);
+    margin-bottom: 1rem;
+  }
+  .print-summary-list {
+    margin: 0.35rem 0 0;
+    padding-left: 1rem;
+    color: #5d6d60;
+    font-size: 0.9rem;
+  }
+  @media print {
+    .admin-sidebar,
+    .admin-topbar,
+    .admin-help-fab,
+    .activity-nonprint {
+      display: none !important;
+    }
+    .admin-main,
+    .container-fluid,
+    .row,
+    .col-12,
+    .col-md-9,
+    .col-lg-10,
+    section.p-4 {
+      width: 100% !important;
+      max-width: 100% !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+    .activity-card {
+      box-shadow: none !important;
+      border: 1px solid #d7ded7 !important;
+    }
+    a[href]:after {
+      content: none !important;
+    }
+  }
+  @media (max-width: 991.98px) {
+    .activity-detail-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 activity-nonprint">
+  <div>
+    <h2 class="h5 mb-1">Faculty Activity Monitor</h2>
+    <div class="text-muted">Weekly and term-based monitoring for faculty logins, activity maintenance, grade encoding, and class readiness.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-primary" href="?term_id={{ selected_term_id }}{% if selected_campus_id %}&campus_id={{ selected_campus_id }}{% endif %}{% if selected_department_id %}&department_id={{ selected_department_id }}{% endif %}{% if selected_faculty_id %}&faculty_user_id={{ selected_faculty_id }}{% endif %}{% if faculty_q %}&faculty_q={{ faculty_q|urlencode }}{% endif %}&window={{ selected_window_code }}&print=1">Print Report</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:faculty_assignment_list' %}">Back to Faculty Assignments</a>
+  </div>
+</div>
+
+<div class="activity-shell">
+  {% if is_print_mode %}
+  <div class="card activity-card">
+    <div class="card-body">
+      <div class="small text-muted text-uppercase fw-semibold">Printable Monitoring Snapshot</div>
+      <div class="h5 mb-1">Faculty Activity Monitoring Report</div>
+      <div class="text-muted">Window: {{ monitor_window.label }}{% if selected_term %} | Term: {{ selected_term.academic_year.code }} / {{ selected_term.code }}{% endif %}</div>
+      <div class="text-muted">
+        {% if selected_campus_id %}Campus filter applied.{% else %}All scoped campuses.{% endif %}
+        {% if selected_department_id %} Department filter applied.{% endif %}
+        {% if selected_faculty %} Focused faculty: {% if selected_faculty.full_name and selected_faculty.full_name != selected_faculty.username %}{{ selected_faculty.full_name }} ({{ selected_faculty.username }}){% else %}{{ selected_faculty.username }}{% endif %}.{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card activity-card activity-nonprint">
+    <div class="card-body">
+      <form class="row g-3 align-items-end">
+        <div class="col-lg-3">
+          <label class="form-label">Campus</label>
+          <select class="form-select" name="campus_id">
+            <option value="">All Campuses</option>
+            {% for campus in campus_options %}
+            <option value="{{ campus.id }}" {% if selected_campus_id == campus.id %}selected{% endif %}>{{ campus.code }} - {{ campus.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-3">
+          <label class="form-label">Department</label>
+          <select class="form-select" name="department_id">
+            <option value="">All Departments</option>
+            {% for department in department_options %}
+            <option value="{{ department.id }}" {% if selected_department_id == department.id %}selected{% endif %}>{{ department.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-3">
+          <label class="form-label">Term</label>
+          <select class="form-select" name="term_id">
+            {% for term in term_options %}
+            <option value="{{ term.id }}" {% if selected_term_id == term.id %}selected{% endif %}>{{ term.academic_year.code }} / {{ term.code }} - {{ term.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-3">
+          <label class="form-label">Monitoring Window</label>
+          <select class="form-select" name="window">
+            {% for option in window_options %}
+            <option value="{{ option.code }}" {% if selected_window_code == option.code %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-5">
+          <label class="form-label">Search Faculty</label>
+          <input class="form-control" name="faculty_q" value="{{ faculty_q }}" placeholder="Type faculty username, name, or email">
+        </div>
+        <div class="col-lg-5">
+          <label class="form-label">Faculty Drilldown</label>
+          <select class="form-select" name="faculty_user_id">
+            <option value="">-- Optional: open one faculty detail --</option>
+            {% for user in faculty_candidates %}
+            <option value="{{ user.id }}" {% if selected_faculty_id == user.id %}selected{% endif %}>
+              {% if user.full_name and user.full_name != user.username %}
+                {{ user.full_name }} ({{ user.username }})
+              {% else %}
+                {{ user.username }}
+              {% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-2 d-flex gap-2">
+          <button class="btn btn-primary flex-fill" type="submit">Apply</button>
+          <a class="btn btn-outline-dark flex-fill" href="{% url 'admin_portal:faculty_activity_monitor' %}">Reset</a>
+        </div>
+      </form>
+      <div class="mt-3 d-flex flex-wrap gap-2 align-items-center">
+        <span class="activity-window-chip">{{ monitor_window.label }}</span>
+        <span class="text-muted small">{{ monitor_window.note }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="activity-summary-grid">
+    {% for card in summary_cards %}
+    <div class="activity-summary-card">
+      <div class="activity-summary-label">{{ card.label }}</div>
+      <div class="activity-summary-value">{{ card.value }}</div>
+      <div class="activity-summary-meta">{{ card.meta }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="card activity-card">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+          <div class="small text-muted text-uppercase fw-semibold">Window Activity Trend</div>
+          <div class="text-muted">This four-part view helps AC and CAO see whether faculty logins, activity setup, score encoding, and gradebook work are sustained across the selected monitoring window.</div>
+        </div>
+        {% if is_print_mode %}
+        <div class="activity-window-chip">{{ monitor_window.label }}</div>
+        {% endif %}
+      </div>
+      <div class="trend-grid">
+        {% for bucket in overall_trend_buckets %}
+        <div class="trend-card">
+          <div class="trend-card-title">{{ bucket.range_label }}</div>
+          <div class="trend-card-sub">Snapshot of faculty-side engagement for this slice of the selected monitoring window.</div>
+          <div class="trend-line">
+            <div class="trend-line-label"><span>Login Activity</span><strong>{{ bucket.login_count }}</strong></div>
+            <div class="trend-track"><div class="trend-fill login" style="width: {{ bucket.login_width }}%"></div></div>
+          </div>
+          <div class="trend-line">
+            <div class="trend-line-label"><span>Activities Created/Updated</span><strong>{{ bucket.activity_count }}</strong></div>
+            <div class="trend-track"><div class="trend-fill activity" style="width: {{ bucket.activity_width }}%"></div></div>
+          </div>
+          <div class="trend-line">
+            <div class="trend-line-label"><span>Scores Saved</span><strong>{{ bucket.score_count }}</strong></div>
+            <div class="trend-track"><div class="trend-fill score" style="width: {{ bucket.score_width }}%"></div></div>
+          </div>
+          <div class="trend-line">
+            <div class="trend-line-label"><span>Gradebook Events</span><strong>{{ bucket.gradebook_events }}</strong></div>
+            <div class="trend-track"><div class="trend-fill gradebook" style="width: {{ bucket.gradebook_width }}%"></div></div>
+          </div>
+        </div>
+        {% empty %}
+        <div class="trend-card">
+          <div class="trend-card-title">No trend data yet</div>
+          <div class="trend-card-sub">The selected scope has not recorded enough monitor activity in this window to build a trend view yet.</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% if is_print_mode %}
+      <ul class="print-summary-list">
+        <li>Use this section to spot drop-off in faculty activity from early-week to late-week or from early-period to late-period.</li>
+        <li>Combine this with the row flags below to identify faculty who may need follow-up before deadline pressure increases.</li>
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card activity-card">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+          <div class="small text-muted text-uppercase fw-semibold">Faculty Snapshot</div>
+          <div class="text-muted">This table highlights who is logging in, updating the gradebook, and which classes still have no activity or no scores.</div>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle activity-table mb-0">
+          <thead>
+            <tr>
+              <th>Faculty</th>
+              <th>Classes</th>
+              <th>Last Login</th>
+              <th>Logins</th>
+              <th>Activities</th>
+              <th>Scores Saved</th>
+              <th>Submissions</th>
+              <th>No Activity</th>
+              <th>No Scores</th>
+              <th>Last Gradebook Update</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in monitor_rows %}
+            <tr>
+              <td>
+                <div class="activity-name">
+                  <a href="{% url 'admin_portal:faculty_activity_monitor' %}?term_id={{ selected_term_id }}{% if selected_campus_id %}&campus_id={{ selected_campus_id }}{% endif %}{% if selected_department_id %}&department_id={{ selected_department_id }}{% endif %}&window={{ selected_window_code }}&faculty_user_id={{ row.faculty.id }}{% if faculty_q %}&faculty_q={{ faculty_q|urlencode }}{% endif %}">
+                    {% if row.faculty.full_name and row.faculty.full_name != row.faculty.username %}
+                      {{ row.faculty.full_name }}
+                    {% else %}
+                      {{ row.faculty.username }}
+                    {% endif %}
+                  </a>
+                </div>
+                <div class="activity-subtle">{{ row.faculty.username }}{% if row.faculty.email %} | {{ row.faculty.email }}{% endif %}</div>
+              </td>
+              <td>{{ row.assigned_classes }}</td>
+              <td>{{ row.last_login_at|date:"Y-m-d H:i"|default:"-" }}</td>
+              <td>{{ row.login_count }}</td>
+              <td>
+                <div>{{ row.activities_created }} created</div>
+                <div class="activity-subtle">{{ row.activity_updates }} other updates</div>
+              </td>
+              <td>
+                <div>{{ row.scores_saved }}</div>
+                <div class="activity-subtle">{{ row.score_update_events }} save event{{ row.score_update_events|pluralize }}</div>
+              </td>
+              <td>
+                <div>{{ row.submissions }}</div>
+                <div class="activity-subtle">{{ row.reopens }} reopen{{ row.reopens|pluralize }}</div>
+              </td>
+              <td>{{ row.classes_with_no_activity }}</td>
+              <td>{{ row.classes_with_no_scores }}</td>
+              <td>{{ row.last_gradebook_update_at|date:"Y-m-d H:i"|default:"-" }}</td>
+              <td>
+                <span class="badge activity-badge-soft text-bg-{{ row.status.variant }}">{{ row.status.label }}</span>
+                <div class="activity-status-note mt-2">{{ row.status.note }}</div>
+                {% if row.flags %}
+                <div class="activity-flag-stack mt-2">
+                  {% for flag in row.flags %}
+                  <span class="badge text-bg-{{ flag.variant }}">{{ flag.label }}</span>
+                  {% endfor %}
+                </div>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="11" class="text-center text-muted py-4">No faculty activity rows are available for the selected scope yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% if selected_faculty_detail %}
+  <div class="activity-detail-grid">
+    <div class="card activity-card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+          <div>
+            <div class="small text-muted text-uppercase fw-semibold">Selected Faculty Detail</div>
+            <div class="h5 mb-1">
+              {% if selected_faculty.full_name and selected_faculty.full_name != selected_faculty.username %}
+                {{ selected_faculty.full_name }} ({{ selected_faculty.username }})
+              {% else %}
+                {{ selected_faculty.username }}
+              {% endif %}
+            </div>
+            <div class="text-muted">Focused view of assigned classes, score activity, and recent system work for the selected monitoring window.</div>
+          </div>
+          <div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:faculty_gradebook_monitor' %}?faculty_user_id={{ selected_faculty.id }}">Open Grade Book</a>
+            {% if grade_prediction_enabled %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grade_prediction_monitor' %}?faculty_user_id={{ selected_faculty.id }}">Open Prediction</a>
+            {% endif %}
+          </div>
+        </div>
+        <div class="weekly-comparison-shell">
+          <div class="small text-muted text-uppercase fw-semibold">Week-over-Week Comparison</div>
+          <div class="text-muted mb-3">Use this six-week comparison to see whether this faculty member is consistently logging in, building activities, encoding scores, and touching the gradebook each week.</div>
+          <div class="trend-grid">
+            {% for bucket in selected_faculty_detail.weekly_comparison_buckets %}
+            <div class="trend-card">
+              <div class="trend-card-title">{{ bucket.range_label }}</div>
+              <div class="trend-card-sub">Weekly comparison slice for the selected faculty member.</div>
+              <div class="trend-line">
+                <div class="trend-line-label"><span>Login Activity</span><strong>{{ bucket.login_count }}</strong></div>
+                <div class="trend-track"><div class="trend-fill login" style="width: {{ bucket.login_width }}%"></div></div>
+              </div>
+              <div class="trend-line">
+                <div class="trend-line-label"><span>Activities</span><strong>{{ bucket.activity_count }}</strong></div>
+                <div class="trend-track"><div class="trend-fill activity" style="width: {{ bucket.activity_width }}%"></div></div>
+              </div>
+              <div class="trend-line">
+                <div class="trend-line-label"><span>Scores Saved</span><strong>{{ bucket.score_count }}</strong></div>
+                <div class="trend-track"><div class="trend-fill score" style="width: {{ bucket.score_width }}%"></div></div>
+              </div>
+              <div class="trend-line">
+                <div class="trend-line-label"><span>Gradebook Events</span><strong>{{ bucket.gradebook_events }}</strong></div>
+                <div class="trend-track"><div class="trend-fill gradebook" style="width: {{ bucket.gradebook_width }}%"></div></div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="trend-grid mb-3">
+          {% for bucket in selected_faculty_detail.trend_buckets %}
+          <div class="trend-card">
+            <div class="trend-card-title">{{ bucket.range_label }}</div>
+            <div class="trend-card-sub">Focused trend for this selected faculty member.</div>
+            <div class="trend-line">
+              <div class="trend-line-label"><span>Login Activity</span><strong>{{ bucket.login_count }}</strong></div>
+              <div class="trend-track"><div class="trend-fill login" style="width: {{ bucket.login_width }}%"></div></div>
+            </div>
+            <div class="trend-line">
+              <div class="trend-line-label"><span>Activities</span><strong>{{ bucket.activity_count }}</strong></div>
+              <div class="trend-track"><div class="trend-fill activity" style="width: {{ bucket.activity_width }}%"></div></div>
+            </div>
+            <div class="trend-line">
+              <div class="trend-line-label"><span>Scores Saved</span><strong>{{ bucket.score_count }}</strong></div>
+              <div class="trend-track"><div class="trend-fill score" style="width: {{ bucket.score_width }}%"></div></div>
+            </div>
+            <div class="trend-line">
+              <div class="trend-line-label"><span>Gradebook Events</span><strong>{{ bucket.gradebook_events }}</strong></div>
+              <div class="trend-track"><div class="trend-fill gradebook" style="width: {{ bucket.gradebook_width }}%"></div></div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Class</th>
+                <th>Activities</th>
+                <th>Scores</th>
+                <th>Submitted</th>
+                <th>Last Activity</th>
+                <th>Last Score Save</th>
+                <th>Flag</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in selected_faculty_detail.class_rows %}
+              <tr>
+                <td>
+                  <div class="activity-name">{{ row.label }}</div>
+                  <div class="activity-subtle">{{ row.offering.term.code }} / {{ row.offering.academic_year.code }}</div>
+                </td>
+                <td>{{ row.activities }}</td>
+                <td>{{ row.scores }}</td>
+                <td>{{ row.submitted_periods }}</td>
+                <td>{{ row.last_activity_at|date:"Y-m-d H:i"|default:"-" }}</td>
+                <td>{{ row.last_score_at|date:"Y-m-d H:i"|default:"-" }}</td>
+                <td>
+                  {% if row.no_activity %}
+                    <span class="badge text-bg-danger">No Activity Yet</span>
+                  {% elif row.no_scores %}
+                    <span class="badge text-bg-warning text-dark">No Scores Yet</span>
+                  {% else %}
+                    <span class="badge text-bg-success">Updating</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="7" class="text-center text-muted py-4">No accepted classes found for this faculty in the selected scope.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card activity-card">
+      <div class="card-body">
+        <div class="small text-muted text-uppercase fw-semibold mb-1">Recent Faculty Actions</div>
+        <div class="text-muted mb-3">Most recent auditable faculty-side actions within the selected monitoring window.</div>
+        <ul class="activity-timeline">
+          {% for item in selected_faculty_detail.recent_actions %}
+          <li class="activity-timeline-item">
+            <div class="d-flex justify-content-between gap-2 flex-wrap">
+              <strong>{{ item.action }}</strong>
+              <span class="text-muted small">{{ item.when|date:"Y-m-d H:i" }}</span>
+            </div>
+            <div class="activity-subtle mt-1">{{ item.entity_type }} | {{ item.offering_label }}</div>
+          </li>
+          {% empty %}
+          <li class="activity-timeline-item text-muted">No auditable faculty action was recorded during the selected monitoring window.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% if is_print_mode %}
+<script>
+  window.addEventListener("load", function () {
+    window.print();
+  });
+</script>
+{% endif %}
+{% endblock %}

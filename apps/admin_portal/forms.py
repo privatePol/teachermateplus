@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django import forms
 from django.db import models
@@ -867,13 +867,35 @@ class StudentForm(forms.ModelForm):
 class GradingTemplateForm(forms.ModelForm):
     class Meta:
         model = GradingTemplate
-        fields = ["tenant", "code", "name", "description", "default_base_value", "is_active"]
+        fields = ["tenant", "code", "name", "description", "default_base_value", "passing_grade_threshold", "is_active"]
 
     def __init__(self, *args, tenant_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if tenant_queryset is not None:
             self.fields["tenant"].queryset = tenant_queryset
+        self.fields["tenant"].help_text = "Choose the tenant that owns this grading template."
+        self.fields["code"].help_text = "Short unique template code used as the admin/system identifier."
+        self.fields["name"].help_text = "Readable template name shown to admins and faculty."
+        self.fields["description"].help_text = "Optional notes that explain when or where this template should be used."
+        self.fields["default_base_value"].help_text = (
+            "Default base value used when EduGradesPro transmutes raw scores under this template."
+        )
+        self.fields["passing_grade_threshold"].help_text = (
+            "Optional template-level passing threshold. Use this when the passing rule belongs to the template itself. "
+            "Tenant Grading Profile threshold still overrides this when a more specific scoped profile exists."
+        )
+        self.fields["is_active"].help_text = "Only active templates can be assigned and used in grading resolution."
         _enforce_active_reference_choices(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        passing_threshold = cleaned.get("passing_grade_threshold")
+        if passing_threshold is not None and (passing_threshold <= 0 or passing_threshold > 100):
+            self.add_error(
+                "passing_grade_threshold",
+                "Passing threshold must be greater than 0 and not greater than 100.",
+            )
+        return cleaned
 
 
 class GradingTemplateApprovalSubmitForm(forms.Form):
@@ -906,7 +928,24 @@ class TemplateHotfixRequestForm(forms.Form):
     def __init__(self, *args, offering_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if offering_queryset is not None:
-            self.fields["selected_offerings"].queryset = offering_queryset
+            self.fields["selected_offerings"].queryset = offering_queryset.order_by(
+                "course__title",
+                "course__code",
+                "section__code",
+                "academic_year__code",
+                "term__sequence_no",
+                "id",
+            )
+        self.fields["apply_mode"].help_text = (
+            "Choose how far the published-template hotfix should reach. "
+            "Use Selected Offerings when you need a tightly controlled live patch."
+        )
+        self.fields["justification"].help_text = (
+            "Explain the academic or governance reason for the hotfix so reviewers can assess impact quickly."
+        )
+        self.fields["selected_offerings"].help_text = (
+            "Required only for Selected Offerings mode. Offerings are sorted by course title for easier scanning."
+        )
         _set_choice_label(self.fields.get("selected_offerings"), _offering_label)
         _enforce_active_reference_choices(self)
 
@@ -1355,6 +1394,21 @@ class GradeCorrectionReviewForm(forms.Form):
 
 
 class TenantGradingProfileForm(forms.ModelForm):
+    final_grade_period_weights_text = forms.CharField(
+        required=False,
+        widget=forms.Textarea(
+            attrs={
+                "rows": 5,
+                "placeholder": "PRELIM=25\nMIDTERM=25\nPREFINAL=25\nFINAL=25",
+            }
+        ),
+        label="Final Grade Period Weights",
+        help_text=(
+            "Required only when using Weighted Selected Periods. Enter one period code and weight per line "
+            "using PERIOD_CODE=WEIGHT. Example: PRELIM=25"
+        ),
+    )
+
     class Meta:
         model = TenantGradingProfile
         fields = [
@@ -1369,6 +1423,8 @@ class TenantGradingProfileForm(forms.ModelForm):
             "grading_template",
             "default_base_value",
             "passing_grade_threshold",
+            "final_grade_formula_mode",
+            "final_grade_period_weights_text",
             "priority",
             "effective_from_term",
             "is_default",
@@ -1403,14 +1459,55 @@ class TenantGradingProfileForm(forms.ModelForm):
         if term_queryset is not None:
             self.fields["effective_from_term"].queryset = term_queryset
 
-        self.fields["campus"].help_text = "Leave blank for tenant-wide profile."
-        self.fields["department"].help_text = "Optional narrower scope."
-        self.fields["program"].help_text = "Optional narrower scope."
-        self.fields["course"].help_text = "Optional course-specific override."
-        self.fields["course_type"].help_text = "Optional fallback by course type."
+        self.fields["tenant"].help_text = (
+            "Choose the tenant that owns this grading policy. All other scope fields and templates must belong to this tenant."
+        )
+        self.fields["campus"].help_text = (
+            "Optional campus scope. Leave blank if this profile should apply across the whole tenant."
+        )
+        self.fields["department"].help_text = (
+            "Optional narrower scope under the selected campus. Use this when one department follows a different grading policy."
+        )
+        self.fields["program"].help_text = (
+            "Optional narrower scope under the selected department. Use this when one program needs its own grading rule."
+        )
+        self.fields["course"].help_text = (
+            "Optional course-specific override. Use this only when one exact course should follow a different grading profile."
+        )
+        self.fields["course_type"].help_text = (
+            "Optional fallback by course type. Use this when several courses share the same course-type rule instead of selecting one exact course."
+        )
+        self.fields["profile_code"].help_text = (
+            "Short unique code for this grading profile, used as the admin reference identifier."
+        )
+        self.fields["profile_name"].help_text = (
+            "Readable profile name that explains the purpose of this grading rule, such as 'NCBA Gen Ed Standard'."
+        )
+        self.fields["grading_template"].help_text = (
+            "Select the grading template that will drive period, component, subcomponent, attendance, and activity computation for this profile scope."
+        )
+        self.fields["default_base_value"].help_text = (
+            "Optional profile-level base value for raw-score transmutation. Leave blank to let EduGradesPro fall back to course or template defaults."
+        )
         self.fields["passing_grade_threshold"].help_text = (
             "Optional passing threshold for analytics and governance at this profile scope "
             "(example: 75.00). Leave blank to use tenant default."
+        )
+        self.fields["final_grade_formula_mode"].help_text = (
+            "Choose how EduGradesPro computes the official final grade for offerings matched by this profile. "
+            "Use the default average mode for NCBA-style equal-period averaging, or choose weighted mode when a tenant uses specific period weights."
+        )
+        self.fields["priority"].help_text = (
+            "Lower numbers are matched first. Use priority when multiple profiles may fit the same offering scope."
+        )
+        self.fields["effective_from_term"].help_text = (
+            "Optional starting term for this profile. Leave blank if the rule should be available for any term in the selected scope."
+        )
+        self.fields["is_default"].help_text = (
+            "Mark as default when this should act as the normal fallback profile after more specific matches have already been checked."
+        )
+        self.fields["is_active"].help_text = (
+            "Only active profiles are considered during grading resolution."
         )
         _set_choice_label(self.fields.get("course"), _course_label)
         _set_choice_label(
@@ -1419,6 +1516,37 @@ class TenantGradingProfileForm(forms.ModelForm):
         )
         _set_choice_label(self.fields.get("effective_from_term"), _term_label)
         _enforce_active_reference_choices(self)
+
+        selected_template = self.instance.grading_template if getattr(self.instance, "grading_template_id", None) else None
+        if self.is_bound:
+            template_raw = self.data.get(self.add_prefix("grading_template"))
+            if template_raw:
+                try:
+                    selected_template = GradingTemplate.objects.filter(id=int(template_raw)).first()
+                except (TypeError, ValueError):
+                    selected_template = selected_template
+
+        available_period_codes = []
+        if selected_template:
+            available_period_codes = list(
+                selected_template.periods.filter(is_active=True)
+                .order_by("sequence_no", "id")
+                .values_list("code", flat=True)
+            )
+        if available_period_codes:
+            self.fields["final_grade_period_weights_text"].help_text += (
+                " Active template periods for this profile: " + ", ".join(available_period_codes) + "."
+            )
+        else:
+            self.fields["final_grade_period_weights_text"].help_text += (
+                " Select the grading template first so EduGradesPro can show the valid period codes for this formula."
+            )
+
+        if not self.is_bound and getattr(self.instance, "final_grade_formula_json", None):
+            weights = (self.instance.final_grade_formula_json or {}).get("period_weights") or []
+            self.initial["final_grade_period_weights_text"] = "\n".join(
+                f"{item.get('period_code')}={item.get('weight')}" for item in weights if item.get("period_code")
+            )
 
     def clean(self):
         cleaned = super().clean()
@@ -1459,7 +1587,91 @@ class TenantGradingProfileForm(forms.ModelForm):
                 "passing_grade_threshold",
                 "Passing threshold must be greater than 0 and not greater than 100.",
             )
+        formula_mode = cleaned.get("final_grade_formula_mode") or TenantGradingProfile.FinalGradeFormulaMode.AVERAGE_ACTIVE_PERIODS
+        weights_text = (cleaned.get("final_grade_period_weights_text") or "").strip()
+        final_formula_json = None
+        if formula_mode == TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS:
+            if not grading_template:
+                self.add_error("grading_template", "Select a grading template before configuring weighted final-grade periods.")
+            active_period_codes = {
+                (code or "").strip().upper()
+                for code in (grading_template.periods.filter(is_active=True).values_list("code", flat=True) if grading_template else [])
+            }
+            if not weights_text:
+                self.add_error("final_grade_period_weights_text", "Enter at least one weighted period line.")
+            else:
+                parsed_weights = []
+                seen_codes = set()
+                total_weight = Decimal("0")
+                for line_no, raw_line in enumerate(weights_text.splitlines(), start=1):
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    if "=" not in line:
+                        self.add_error(
+                            "final_grade_period_weights_text",
+                            f"Line {line_no} must follow PERIOD_CODE=WEIGHT.",
+                        )
+                        continue
+                    period_code_raw, weight_raw = line.split("=", 1)
+                    period_code = period_code_raw.strip().upper()
+                    if not period_code:
+                        self.add_error("final_grade_period_weights_text", f"Line {line_no} is missing a period code.")
+                        continue
+                    if period_code in seen_codes:
+                        self.add_error(
+                            "final_grade_period_weights_text",
+                            f"Period code {period_code} is listed more than once.",
+                        )
+                        continue
+                    if active_period_codes and period_code not in active_period_codes:
+                        self.add_error(
+                            "final_grade_period_weights_text",
+                            f"Period code {period_code} does not belong to the selected active grading template.",
+                        )
+                        continue
+                    try:
+                        weight = Decimal(weight_raw.strip())
+                    except (InvalidOperation, ValueError):
+                        self.add_error(
+                            "final_grade_period_weights_text",
+                            f"Line {line_no} has an invalid weight value.",
+                        )
+                        continue
+                    if weight <= 0 or weight > 100:
+                        self.add_error(
+                            "final_grade_period_weights_text",
+                            f"Weight for {period_code} must be greater than 0 and not greater than 100.",
+                        )
+                        continue
+                    seen_codes.add(period_code)
+                    total_weight += weight
+                    parsed_weights.append(
+                        {
+                            "period_code": period_code,
+                            "weight": f"{weight.quantize(Decimal('0.01'))}",
+                        }
+                    )
+                if not self.errors.get("final_grade_period_weights_text"):
+                    if parsed_weights and total_weight != Decimal("100"):
+                        self.add_error(
+                            "final_grade_period_weights_text",
+                            f"Weighted periods must total exactly 100.00. Current total: {total_weight.quantize(Decimal('0.01'))}.",
+                        )
+                    elif not parsed_weights:
+                        self.add_error("final_grade_period_weights_text", "Enter at least one valid weighted period line.")
+                    else:
+                        final_formula_json = {"period_weights": parsed_weights}
+        cleaned["_final_grade_formula_json"] = final_formula_json
         return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.final_grade_formula_json = self.cleaned_data.get("_final_grade_formula_json")
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
 
 
 class ActiveAcademicTermSettingForm(forms.Form):
@@ -1845,6 +2057,16 @@ class ConfigurableFeatureSettingForm(forms.Form):
             ("FULL_SCORE", "Assume Full Score"),
         ],
         help_text="Controls the primary projected grade shown on prediction tables.",
+    )
+    faculty_official_period_grades_after_deadline = forms.BooleanField(
+        required=False,
+        label="Restrict official periodic grades until period deadline",
+        help_text="When turned on, official computed period grades such as PG, MG, and PFG stay hidden from faculty until the deadline of that specific period has already passed. When turned off, they remain visible by default.",
+    )
+    faculty_official_final_grades_after_deadline = forms.BooleanField(
+        required=False,
+        label="Restrict official final grade until final deadline",
+        help_text="When turned on, the official computed final grade stays hidden from faculty until the final grading-period deadline has already passed. When turned off, it remains visible by default.",
     )
 
     def __init__(

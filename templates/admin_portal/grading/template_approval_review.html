@@ -13,6 +13,7 @@
       <div class="col-md-3"><strong>Name:</strong> {{ template_obj.name }}</div>
       <div class="col-md-3"><strong>Tenant:</strong> {{ template_obj.tenant.code }}</div>
       <div class="col-md-3"><strong>Base Value:</strong> {{ template_obj.default_base_value }}</div>
+      <div class="col-md-3"><strong>Passing Threshold:</strong> {{ template_obj.passing_grade_threshold|default:"Tenant/Profile Default" }}</div>
     </div>
     <hr>
     <div class="small text-muted">Requested by {{ template_obj.approval_requested_by|default:"N/A" }} at {{ template_obj.approval_requested_at|date:"Y-m-d H:i"|default:"N/A" }}</div>

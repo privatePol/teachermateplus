@@ -129,6 +129,25 @@
     margin: 0;
     color: #5b7262;
   }
+  .prediction-guide-method-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .prediction-guide-method-table th,
+  .prediction-guide-method-table td {
+    border: 1px solid #dbe7de;
+    padding: 0.72rem 0.8rem;
+    vertical-align: top;
+  }
+  .prediction-guide-method-table th {
+    background: #f3f8f4;
+    color: #1c452d;
+    font-weight: 800;
+  }
+  .prediction-guide-factor-title {
+    font-weight: 800;
+    color: #183f28;
+  }
   @media (max-width: 991.98px) {
     .prediction-guide-grid {
       grid-template-columns: 1fr;
@@ -219,13 +238,133 @@
 
   <div class="card prediction-guide-card mb-4">
     <div class="card-body">
+      <div class="prediction-guide-section-title">Prediction Methodology</div>
+      <div class="prediction-guide-walkthrough">
+        {% for item in methodology_steps %}
+        <div class="prediction-guide-step">
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.body }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="prediction-guide-note">
+        <strong>Transparency note:</strong> EduGradesPro does not guess outside the assigned template. It only works from
+        active class records, active grading setup, the current assumption mode, and the official passing threshold used by the class.
+      </div>
+    </div>
+  </div>
+
+  <div class="prediction-guide-grid mb-4">
+    <div class="card prediction-guide-card">
+      <div class="card-body">
+        <div class="prediction-guide-section-title">Main Factors Used by the Prediction Engine</div>
+        <div class="table-responsive">
+          <table class="prediction-guide-method-table">
+            <thead>
+              <tr>
+                <th style="width: 32%;">Factor</th>
+                <th>How It Affects the Values</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in methodology_factors %}
+              <tr>
+                <td><span class="prediction-guide-factor-title">{{ item.factor }}</span></td>
+                <td>{{ item.impact }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="card prediction-guide-card">
+      <div class="card-body">
+        <div class="prediction-guide-section-title">When a Value Can Change or Show as Unavailable</div>
+        <ul class="prediction-guide-list">
+          {% for item in methodology_notes %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="card prediction-guide-card mb-4">
+    <div class="card-body">
+      <div class="prediction-guide-section-title">How EduGradesPro Transmutes Scores with Base 50</div>
+      <div class="prediction-guide-walkthrough">
+        {% for item in transmutation_guides %}
+        <div class="prediction-guide-step">
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.body }}</p>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="prediction-guide-note mt-3">
+        <strong>Base 50 formula:</strong>
+        <code>Computed Score = ((Raw Score / Total Score) × Base Value) + (100 − Base Value)</code>
+      </div>
+      <div class="table-responsive mt-3">
+        <table class="prediction-guide-method-table">
+          <thead>
+            <tr>
+              <th style="width: 42%;">Example</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in transmutation_examples %}
+            <tr>
+              <td><span class="prediction-guide-factor-title">{{ item.example }}</span></td>
+              <td>{{ item.result }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="prediction-guide-grid mb-4">
+    <div class="card prediction-guide-card">
+      <div class="card-body">
+        <div class="prediction-guide-section-title">How Periodic Grades Are Computed</div>
+        <div class="prediction-guide-note mb-3">
+          <strong>Period formula:</strong> {{ period_grade_formula }}
+        </div>
+        <ol class="prediction-guide-list">
+          {% for item in period_grade_steps %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ol>
+      </div>
+    </div>
+    <div class="card prediction-guide-card">
+      <div class="card-body">
+        <div class="prediction-guide-section-title">How Final Grades Are Computed</div>
+        <div class="prediction-guide-note mb-3">
+          <strong>Final-grade formula:</strong> {{ final_grade_formula }}
+        </div>
+        <ol class="prediction-guide-list">
+          {% for item in final_grade_steps %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="card prediction-guide-card mb-4">
+    <div class="card-body">
       <div class="prediction-guide-section-title">What Each Column Means</div>
       <div class="table-responsive">
         <table class="prediction-guide-table">
           <thead>
             <tr>
               <th style="width: 18%;">Column</th>
-              <th style="width: 42%;">Simple Meaning</th>
+              <th style="width: 30%;">Simple Meaning</th>
+              <th style="width: 27%;">Computed From / Factors</th>
               <th>How You Should Read It</th>
             </tr>
           </thead>
@@ -234,6 +373,7 @@
             <tr>
               <td><strong>{{ item.column }}</strong></td>
               <td>{{ item.meaning }}</td>
+              <td>{{ item.factors }}</td>
               <td>{{ item.note }}</td>
             </tr>
             {% endfor %}

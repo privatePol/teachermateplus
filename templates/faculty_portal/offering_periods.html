@@ -162,6 +162,9 @@
   .period-actions .btn-outline-warning {
     color: #c08a1a;
   }
+  .period-actions .btn-outline-danger {
+    color: #cf3858;
+  }
   .period-actions .btn-outline-secondary {
     color: #6b7280;
   }
@@ -359,20 +362,22 @@
               >
                 &#9881;
               </span>
-              <span
-                class="btn btn-sm btn-outline-primary btn-disabled"
-                title="This period is closed until it becomes active or is reopened for correction."
-                aria-label="Attendance Closed"
+              <a
+                class="btn btn-sm btn-outline-primary"
+                href="{% url 'faculty_portal:period_attendance' offering.id item.period.id %}"
+                title="Attendance (Read-only)"
+                aria-label="Attendance Read-only"
               >
                 &#128338;
-              </span>
-              <span
-                class="btn btn-sm btn-outline-dark btn-disabled"
-                title="This period is closed until it becomes active or is reopened for correction."
-                aria-label="Summary Closed"
+              </a>
+              <a
+                class="btn btn-sm btn-outline-dark"
+                href="{% url 'faculty_portal:period_summary' offering.id item.period.id %}"
+                title="Summary (Read-only)"
+                aria-label="Summary Read-only"
               >
                 &#128202;
-              </span>
+              </a>
               {% if grade_prediction_enabled %}
                 <span
                   class="btn btn-sm btn-outline-primary btn-disabled"

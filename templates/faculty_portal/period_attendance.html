@@ -8,12 +8,19 @@
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
 </div>
 
+{% include "faculty_portal/partials/period_quick_nav.html" with nav_current="attendance" %}
+
 {% if is_correction_active %}
 <div class="alert alert-warning">
   A governed manual correction window is active. Only scoped students can be updated here.
   {% if "corrections.create" in effective_permissions and system_correction_enabled %}
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">View request</a>
   {% endif %}
+</div>
+{% elif is_governance_closed %}
+<div class="alert alert-secondary">
+  This period is currently read-only under active grading period governance. You may still review attendance records, but editing is disabled.
+  {% if governance_message %}<div class="small mt-1">{{ governance_message }}</div>{% endif %}
 </div>
 {% elif is_submitted %}
 <div class="alert alert-info">This period is already submitted. Attendance editing is disabled.</div>
@@ -42,7 +49,7 @@
       </form>
     {% else %}
       <div class="alert alert-light border mb-3">
-        Session creation is disabled while period is submitted/locked. Select an existing session for scoped correction updates.
+        Session creation is disabled while this period is read-only. Select an existing session to review stored attendance records.
       </div>
     {% endif %}
     <div class="mt-3">
@@ -89,7 +96,7 @@
             <td>{{ row.enrollment.student.student_no }}</td>
             <td>{{ row.enrollment.student.last_name }}, {{ row.enrollment.student.first_name }}</td>
             <td>
-              <select class="form-select form-select-sm" name="status_{{ row.enrollment.student_id }}">
+              <select class="form-select form-select-sm" name="status_{{ row.enrollment.student_id }}" {% if not is_editable %}disabled{% endif %}>
                 {% for value,label in status_choices %}
                   <option value="{{ value }}" {% if row.record and row.record.status_code == value %}selected{% elif not row.record and value == "P" %}selected{% endif %}>
                     {{ value }} - {{ label }}
@@ -103,6 +110,7 @@
                 type="text"
                 name="remarks_{{ row.enrollment.student_id }}"
                 value="{% if row.record %}{{ row.record.remarks|default:'' }}{% endif %}"
+                {% if not is_editable %}disabled{% endif %}
               >
             </td>
           </tr>

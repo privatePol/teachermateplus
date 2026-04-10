@@ -1,0 +1,31 @@
+<div class="card border-0 shadow-sm mb-3 no-print">
+  <div class="card-body py-2">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <span class="small text-muted fw-semibold me-1">Quick Jump:</span>
+      <a
+        class="btn btn-sm {% if nav_current == 'activities' %}btn-success{% else %}btn-outline-success{% endif %}"
+        href="{% url 'faculty_portal:period_activities' offering.id period.id %}"
+      >
+        Grade Activities
+      </a>
+      <a
+        class="btn btn-sm {% if nav_current == 'attendance' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+        href="{% url 'faculty_portal:period_attendance' offering.id period.id %}"
+      >
+        Attendance
+      </a>
+      <a
+        class="btn btn-sm {% if nav_current == 'summary' %}btn-dark{% else %}btn-outline-dark{% endif %}"
+        href="{% url 'faculty_portal:period_summary' offering.id period.id %}"
+      >
+        Summary
+      </a>
+      <a
+        class="btn btn-sm {% if nav_current == 'who_viewed' %}btn-secondary{% else %}btn-outline-secondary{% endif %}"
+        href="{% url 'faculty_portal:period_view_history' offering.id period.id %}"
+      >
+        Who Viewed
+      </a>
+    </div>
+  </div>
+</div>

@@ -165,7 +165,7 @@ class GradingTemplateCalculatorViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Grading Template Testing Calculator")
         self.assertContains(response, "Testing Template")
-        self.assertContains(response, "Computed Final Grade")
+        self.assertContains(response, "Template Final Preview")
         self.assertContains(response, "85.00")
 
     def test_post_calculator_computes_periods_and_final_grade(self):

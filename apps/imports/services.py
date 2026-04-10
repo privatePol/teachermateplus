@@ -212,7 +212,7 @@ class ImportTemplateService:
                 "student handling depends on ENROLLMENT_STUDENT_MODE (STRICT_EXISTING or AUTO_CREATE)",
             ],
             "code_rules": [
-                "enrollment_status: ENROLLED/ACTIVE/DR/W (mapped by system rules)",
+                "enrollment_status: ENROLLED/ACTIVE/DRP/DR/W/INC (mapped by system rules)",
                 "academic_year_code and term_code must exist first",
                 "If ENROLLMENT_STUDENT_MODE=AUTO_CREATE and student is missing, student_last_name and student_first_name are required",
             ],
@@ -1123,7 +1123,10 @@ class BulkImportService:
                         errors.append("student_first_name is required when student is missing and AUTO_CREATE is enabled.")
 
         raw_status = cls._normalize_value(row["enrollment_status"]).upper() or Enrollment.Status.ACTIVE
-        status_map = {"ENROLLED": Enrollment.Status.ACTIVE}
+        status_map = {
+            "ENROLLED": Enrollment.Status.ACTIVE,
+            "DR": Enrollment.Status.DRP,
+        }
         normalized_status = status_map.get(raw_status, raw_status)
         allowed_statuses = {choice for choice, _ in Enrollment.Status.choices}
         if normalized_status not in allowed_statuses:

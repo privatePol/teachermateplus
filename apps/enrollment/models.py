@@ -6,8 +6,15 @@ from apps.core.models import ActivatableModel, TimeStampedModel
 class Enrollment(TimeStampedModel, ActivatableModel):
     class Status(models.TextChoices):
         ACTIVE = "ACTIVE", "Active"
-        DR = "DR", "Dropped"
+        DRP = "DRP", "Dropped"
         W = "W", "Withdrawn"
+        INC = "INC", "Incomplete"
+
+    NON_ACTIVE_GRADING_STATUSES = {
+        Status.DRP,
+        Status.W,
+        Status.INC,
+    }
 
     class SourcePortal(models.TextChoices):
         ADMIN = "ADMIN", "Admin Portal"

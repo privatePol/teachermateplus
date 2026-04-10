@@ -27,6 +27,62 @@
   .summary-toolbar .summary-search-form .form-control {
     min-width: 220px;
   }
+  .readiness-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 0.9rem;
+  }
+  .readiness-card {
+    border: 0;
+    border-radius: 1rem;
+    box-shadow: 0 10px 24px rgba(15, 44, 24, 0.08);
+    overflow: hidden;
+  }
+  .readiness-card .card-body {
+    padding: 1rem 1rem 0.95rem;
+  }
+  .readiness-card .eyebrow {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    opacity: 0.88;
+  }
+  .readiness-card .metric {
+    font-size: 1.65rem;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-top: 0.35rem;
+  }
+  .readiness-card .copy {
+    margin-top: 0.45rem;
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+  .readiness-card.tone-success {
+    background: linear-gradient(135deg, #eff9f0 0%, #d8f0dc 100%);
+    color: #184f2b;
+  }
+  .readiness-card.tone-primary {
+    background: linear-gradient(135deg, #eef4ff 0%, #dfe9ff 100%);
+    color: #1d4270;
+  }
+  .readiness-card.tone-danger {
+    background: linear-gradient(135deg, #fff0f1 0%, #ffdede 100%);
+    color: #7b1f28;
+  }
+  .readiness-card.tone-warning {
+    background: linear-gradient(135deg, #fff8e7 0%, #ffe7b5 100%);
+    color: #74520b;
+  }
+  .readiness-card.tone-info {
+    background: linear-gradient(135deg, #edf9ff 0%, #d7f0ff 100%);
+    color: #0f546b;
+  }
+  .readiness-card.tone-secondary {
+    background: linear-gradient(135deg, #f3f4f7 0%, #e0e3ea 100%);
+    color: #475467;
+  }
   .gradebook-print-header {
     display: none;
   }
@@ -352,6 +408,8 @@
   </div>
 </div>
 
+{% include "faculty_portal/partials/period_quick_nav.html" with nav_current="summary" %}
+
 {% if is_correction_active %}
 <div class="alert alert-warning no-print">
   A governed manual correction window is active.
@@ -359,6 +417,11 @@
     This applies only to correction requests that still require controlled post-approval edits. You can review it in
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Corrections</a>.
   {% endif %}
+</div>
+{% elif is_governance_closed %}
+<div class="alert alert-secondary no-print">
+  This period is currently read-only under active grading period governance. You may still review the summary and print the grade book, but encoding and submission actions are disabled.
+  {% if governance_message %}<div class="small mt-1">{{ governance_message }}</div>{% endif %}
 </div>
 {% elif can_self_reopen_before_deadline %}
 <div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-3 no-print">
@@ -375,6 +438,14 @@
 <div class="alert alert-info no-print">This period has been submitted. Summary is view-only.</div>
 {% elif is_locked %}
 <div class="alert alert-danger no-print">This period is locked by admin. Summary is view-only.</div>
+{% endif %}
+
+{% if official_grade_release_notes %}
+<div class="alert alert-light border no-print">
+  {% for item in official_grade_release_notes %}
+  <div>{{ item }}</div>
+  {% endfor %}
+</div>
 {% endif %}
 
 <div class="alert alert-light border d-flex justify-content-between align-items-center flex-wrap summary-toolbar no-print">
@@ -394,32 +465,45 @@
   </div>
 </div>
 
-{% if not is_locked and not is_submitted %}
 <div class="card border-0 shadow-sm mb-3 no-print">
   <div class="card-body">
     <div class="mb-3">
-      <div class="small text-muted text-uppercase fw-semibold mb-1">Submission Readiness Check</div>
-      <div class="small">
-        ACTIVE students: <strong>{{ submit_readiness.eligible_student_count }}</strong> |
-        With at least 1 encoded grade/attendance: <strong>{{ submit_readiness.students_with_any_grade }}</strong> |
-        Missing records: <strong>{{ submit_readiness.students_missing_any_grade }}</strong> |
-        Coverage: <strong>{{ submit_readiness.coverage_percent }}%</strong>
+      <div class="small text-muted text-uppercase fw-semibold mb-1">Period Snapshot</div>
+      <div class="readiness-card-grid mt-3">
+        {% for card in readiness_cards %}
+        <div class="card readiness-card tone-{{ card.tone }}">
+          <div class="card-body">
+            <div class="eyebrow">{{ card.label }}</div>
+            <div class="metric">{{ card.value }}</div>
+            <div class="copy">{{ card.description }}</div>
+          </div>
+        </div>
+        {% endfor %}
       </div>
+      <div class="small text-muted mt-2">
+        Passing threshold used for pass/fail interpretation: <strong>{{ passing_threshold }}</strong>.
+        {% if not show_official_period_grade %}
+        Pass/Fail cards appear only after the official {{ period.name }} grade is allowed to be shown by the current release policy.
+        {% endif %}
+      </div>
+      {% if not is_locked and not is_submitted and not is_governance_closed %}
       {% if submit_readiness.students_with_any_grade == 0 %}
       <div class="alert alert-danger py-2 mt-2 mb-0">
         No encoded records found for ACTIVE students. Submission is blocked.
-        Encode at least one record, or mark applicable students as DR/W in
+        Encode at least one record, or mark applicable students as DRP/W/INC in
         <a href="{% url 'faculty_portal:offering_enrollment' offering.id %}">Enrollment</a>.
       </div>
       {% elif submit_readiness.students_missing_any_grade > 0 %}
-      <div class="alert alert-warning py-2 mt-2 mb-0">
-        Some ACTIVE students still have no encoded records.
-        You can proceed after confirmation, or update statuses to DR/W in
+      <div class="alert alert-danger py-2 mt-2 mb-0">
+        Submission is blocked because some ACTIVE students still have blank required grade or attendance records.
+        Complete all visible records first, or update statuses to DRP/W/INC in
         <a href="{% url 'faculty_portal:offering_enrollment' offering.id %}">Enrollment</a>.
       </div>
       {% endif %}
+      {% endif %}
     </div>
 
+    {% if not is_locked and not is_submitted and not is_governance_closed %}
     <form id="period-submit-form" method="post" action="{% url 'faculty_portal:period_submit' offering.id period.id %}">
       {% csrf_token %}
       <input type="hidden" name="confirm_submit" id="confirm-submit-input" value="0">
@@ -430,14 +514,16 @@
         type="button"
         data-bs-toggle="modal"
         data-bs-target="#submitConfirmModal"
-        {% if submit_readiness.students_with_any_grade == 0 %}disabled{% endif %}
+        {% if submit_readiness.students_with_any_grade == 0 or submit_readiness.students_missing_any_grade > 0 %}disabled{% endif %}
       >
         Finalize and Submit {{ period.name }} Grades
       </button>
     </form>
+    {% endif %}
   </div>
 </div>
 
+{% if not is_locked and not is_submitted and not is_governance_closed %}
 <div class="modal fade" id="submitConfirmModal" tabindex="-1" aria-labelledby="submitConfirmModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -452,8 +538,9 @@
         </p>
         <ul class="small mb-0">
           <li>ACTIVE students: <strong>{{ submit_readiness.eligible_student_count }}</strong></li>
-          <li>With at least 1 encoded record: <strong>{{ submit_readiness.students_with_any_grade }}</strong></li>
+          <li>With complete records: <strong>{{ submit_readiness.students_with_complete_records }}</strong></li>
           <li>Missing encoded records: <strong>{{ submit_readiness.students_missing_any_grade }}</strong></li>
+          <li>Passing threshold: <strong>{{ passing_threshold }}</strong></li>
         </ul>
       </div>
       <div class="modal-footer">
@@ -502,8 +589,10 @@
         <th class="print-row-no">No.</th>
         <th class="print-student-no">Student No</th>
         <th>Student Name</th>
-        <th class="print-grade">Periodic Grade</th>
-        <th class="print-grade-status">Grade Status</th>
+        {% for prior in prior_period_headers %}<th class="print-grade">{{ prior.label }}</th>{% endfor %}
+        {% if show_official_period_grade %}<th class="print-grade">Periodic Grade</th>{% endif %}
+        {% if show_official_final_grade %}<th class="print-grade">Final Grade</th>{% endif %}
+        {% if show_official_period_grade %}<th class="print-grade-status">Grade Status</th>{% endif %}
       </tr>
     </thead>
     <tbody>
@@ -512,12 +601,14 @@
         <td class="print-row-no">{{ forloop.counter }}</td>
         <td class="print-student-no">{{ row.student.student_no }}</td>
         <td>{{ row.student.last_name }}, {{ row.student.first_name }}</td>
-        <td class="print-grade">{{ row.period_grade|default:"" }}</td>
-        <td class="print-grade-status">{{ row.print_grade_status }}</td>
+        {% for value in row.prior_period_grades %}<td class="print-grade">{{ value|default:"" }}</td>{% endfor %}
+        {% if show_official_period_grade %}<td class="print-grade">{{ row.period_grade|default:"" }}</td>{% endif %}
+        {% if show_official_final_grade %}<td class="print-grade">{{ row.final_grade|default:"" }}</td>{% endif %}
+        {% if show_official_period_grade %}<td class="print-grade-status">{{ row.print_grade_status }}</td>{% endif %}
       </tr>
       {% empty %}
       <tr>
-        <td colspan="5" class="text-center">No summary rows available.</td>
+        <td colspan="{{ print_sheet_colspan }}" class="text-center">No summary rows available.</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -550,10 +641,18 @@
           {% for block in summary_layout.class_standing_blocks %}
             <th colspan="{{ block.colspan }}" class="band-class-standing">{{ block.label }}</th>
           {% endfor %}
+          {% for prior in prior_period_headers %}
+            <th rowspan="4" class="metric-col metric-final">{{ prior.label }}</th>
+          {% endfor %}
           {% for exam in summary_layout.exam_components %}
             <th rowspan="4" class="band-exam metric-col metric-final">{{ exam.label }}</th>
           {% endfor %}
+          {% if show_official_period_grade %}
           <th rowspan="4" class="metric-col metric-final">{{ period.name|upper }} Grade</th>
+          {% endif %}
+          {% if show_official_final_grade %}
+          <th rowspan="4" class="metric-col metric-final">FINAL GRADE</th>
+          {% endif %}
         </tr>
         <tr>
           {% for block in summary_layout.class_standing_blocks %}
@@ -622,6 +721,9 @@
           {% endfor %}
           <td class="metric-col"></td>
         {% endfor %}
+        {% for prior in prior_period_headers %}
+        <td class="metric-col metric-final"></td>
+        {% endfor %}
         {% for exam in summary_layout.exam_components %}
           <td class="metric-col metric-final">
             {% if exam.sections and exam.sections.0.activity_columns %}
@@ -629,7 +731,12 @@
             {% endif %}
           </td>
         {% endfor %}
+        {% if show_official_period_grade %}
         <td class="metric-col metric-final"></td>
+        {% endif %}
+        {% if show_official_final_grade %}
+        <td class="metric-col metric-final"></td>
+        {% endif %}
       </tr>
       {% for row in rows %}
         <tr>
@@ -661,13 +768,21 @@
             {% endfor %}
             <td class="metric-col"><strong>{{ block.total|default:"" }}</strong></td>
           {% endfor %}
+          {% for value in row.prior_period_grades %}
+          <td class="metric-col metric-final"><strong>{{ value|default:"" }}</strong></td>
+          {% endfor %}
           {% for value in row.exam_values %}
             <td class="metric-col metric-final">{{ value|default:"" }}</td>
           {% endfor %}
+          {% if show_official_period_grade %}
           <td class="metric-col metric-final"><strong>{{ row.period_grade|default:"" }}</strong></td>
+          {% endif %}
+          {% if show_official_final_grade %}
+          <td class="metric-col metric-final"><strong>{{ row.final_grade|default:"" }}</strong></td>
+          {% endif %}
         </tr>
       {% empty %}
-        <tr><td colspan="24" class="text-center text-muted py-4">No summary rows available.</td></tr>
+        <tr><td colspan="{{ summary_table_colspan }}" class="text-center text-muted py-4">No summary rows available.</td></tr>
       {% endfor %}
       </tbody>
     </table>

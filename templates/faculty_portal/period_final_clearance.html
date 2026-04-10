@@ -1,0 +1,148 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+  <div>
+    <h2 class="h4 mb-1">Final Clearance</h2>
+    <div class="text-muted">
+      Review your campus-term completion status and generate the official final clearance PDF for payroll or end-of-term clearance processing.
+    </div>
+  </div>
+  <a class="btn btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">Faculty</div>
+        <div class="fw-semibold">{{ preview.faculty_user.full_name|default:preview.faculty_user.username }}</div>
+        <div class="text-muted small">{{ preview.campus.name }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">School Year / Term</div>
+        <div class="fw-semibold">{{ preview.academic_year.code }}</div>
+        <div class="text-muted small">{{ preview.term.name }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-2">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">Assigned Courses</div>
+        <div class="display-6">{{ preview.total_assigned_courses }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-2">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">Complete</div>
+        <div class="display-6 text-success">{{ preview.complete_courses }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-2">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small text-uppercase">Status</div>
+        <div class="fw-semibold {% if preview.clearance_status == 'CLEARED' %}text-success{% else %}text-danger{% endif %}">
+          {{ preview.clearance_status|cut:"_" }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div class="text-muted">
+      A class becomes <strong>COMPLETE</strong> only when required ACTIVE-student grades are encoded with positive official values, required submissions are already submitted, and final grades are already computed.
+    </div>
+    <form method="post">
+      {% csrf_token %}
+      <button class="btn btn-success" type="submit">Generate Official Clearance PDF</button>
+    </form>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Course</th>
+            <th>Section</th>
+            <th>Eligible Students</th>
+            <th>Final Submission</th>
+            <th>Status</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview.rows %}
+          <tr>
+            <td>
+              <div class="fw-semibold">{{ row.course_code }}</div>
+              <div class="text-muted small">{{ row.course_title }}</div>
+            </td>
+            <td>{{ row.section_code }}</td>
+            <td>{{ row.eligible_student_count }}</td>
+            <td>{{ row.final_submission_status }}</td>
+            <td>
+              <span class="badge {% if row.encoding_status == 'COMPLETE' %}text-bg-success{% else %}text-bg-danger{% endif %}">
+                {{ row.encoding_status }}
+              </span>
+            </td>
+            <td>
+              {% if row.notes %}
+                {{ row.notes|join:"; " }}
+              {% else %}
+                <span class="text-muted">All final-clearance checks passed.</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="6" class="text-center text-muted py-4">No assigned courses found for this campus-term scope.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white"><strong>Recent Generated Reports</strong></div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Generated At</th>
+            <th>Reference No</th>
+            <th>Verification Code</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for report in recent_reports %}
+          <tr>
+            <td>{{ report.created_at|date:"Y-m-d H:i" }}</td>
+            <td><code>{{ report.reference_no }}</code></td>
+            <td><code>{{ report.verification_code }}</code></td>
+            <td>{{ report.get_clearance_status_display }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="text-center text-muted py-4">No clearance PDFs generated yet for this campus and term.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

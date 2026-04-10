@@ -61,6 +61,7 @@
           <th>Code</th>
           <th>Name</th>
           <th>Base Value</th>
+          <th>Passing Threshold</th>
           <th>Periods</th>
           <th>Publish</th>
           <th>Approval</th>
@@ -74,6 +75,7 @@
           <td>{{ row.code }}</td>
           <td>{{ row.name }}</td>
           <td>{{ row.default_base_value }}</td>
+          <td>{{ row.passing_grade_threshold|default:"Tenant/Profile Default" }}</td>
           <td>{{ row.period_count }}</td>
           <td>
             {% if row.is_published %}
@@ -125,7 +127,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="8" class="text-center text-muted py-4">No grading templates found.</td></tr>
+        <tr><td colspan="9" class="text-center text-muted py-4">No grading templates found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

@@ -1,5 +1,6 @@
 from django.db import models
 from django.core.validators import MinValueValidator
+from uuid import uuid4
 
 from apps.core.models import ActivatableModel, TimeStampedModel
 
@@ -27,6 +28,7 @@ class GradingTemplate(TimeStampedModel, ActivatableModel):
     name = models.CharField(max_length=150)
     description = models.TextField(blank=True, null=True)
     default_base_value = models.DecimalField(max_digits=6, decimal_places=2, default=50)
+    passing_grade_threshold = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
     approval_status = models.CharField(
         max_length=20,
         choices=ApprovalStatus.choices,
@@ -358,6 +360,10 @@ class GradingTemplateDetail(TimeStampedModel, ActivatableModel):
 
 
 class TenantGradingProfile(TimeStampedModel, ActivatableModel):
+    class FinalGradeFormulaMode(models.TextChoices):
+        AVERAGE_ACTIVE_PERIODS = "AVERAGE_ACTIVE_PERIODS", "Average All Active Template Periods"
+        WEIGHTED_PERIODS = "WEIGHTED_PERIODS", "Weighted Selected Periods"
+
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="grading_profiles")
     campus = models.ForeignKey(
         "tenants.Campus",
@@ -397,6 +403,12 @@ class TenantGradingProfile(TimeStampedModel, ActivatableModel):
     )
     default_base_value = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
     passing_grade_threshold = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+    final_grade_formula_mode = models.CharField(
+        max_length=40,
+        choices=FinalGradeFormulaMode.choices,
+        default=FinalGradeFormulaMode.AVERAGE_ACTIVE_PERIODS,
+    )
+    final_grade_formula_json = models.JSONField(blank=True, null=True)
     priority = models.PositiveIntegerField(default=100)
     effective_from_term = models.ForeignKey(
         "academics.Term",
@@ -638,6 +650,56 @@ class StudentFinalGrade(TimeStampedModel):
 
     def __str__(self):
         return f"{self.offering_id}:{self.student_id}"
+
+
+class FacultyFinalClearanceReport(TimeStampedModel):
+    class ClearanceStatus(models.TextChoices):
+        CLEARED = "CLEARED", "Cleared"
+        NOT_CLEARED = "NOT_CLEARED", "Not Cleared"
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="faculty_final_clearance_reports")
+    campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT, related_name="faculty_final_clearance_reports")
+    academic_year = models.ForeignKey(
+        "academics.AcademicYear",
+        on_delete=models.PROTECT,
+        related_name="faculty_final_clearance_reports",
+    )
+    term = models.ForeignKey(
+        "academics.Term",
+        on_delete=models.PROTECT,
+        related_name="faculty_final_clearance_reports",
+    )
+    faculty_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="faculty_final_clearance_reports",
+    )
+    generated_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="generated_faculty_final_clearance_reports",
+    )
+    report_uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+    reference_no = models.CharField(max_length=64, unique=True)
+    verification_code = models.CharField(max_length=32, unique=True)
+    clearance_status = models.CharField(max_length=16, choices=ClearanceStatus.choices)
+    total_assigned_courses = models.PositiveIntegerField(default=0)
+    complete_courses = models.PositiveIntegerField(default=0)
+    incomplete_courses = models.PositiveIntegerField(default=0)
+    snapshot_json = models.JSONField(blank=True, null=True)
+
+    class Meta:
+        db_table = "faculty_final_clearance_reports"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "term", "faculty_user"], name="idx_fac_clear_scope"),
+            models.Index(fields=["reference_no"], name="idx_fac_clear_ref"),
+        ]
+
+    def __str__(self):
+        return self.reference_no
 
 
 class GradingPeriodLock(TimeStampedModel, ActivatableModel):

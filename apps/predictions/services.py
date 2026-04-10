@@ -407,15 +407,24 @@ class PredictionComputationService:
     @classmethod
     def _final_projection(cls, *, offering, template_period, student_id: int, period_grade: Decimal | None):
         template = FacultyGradingService.resolve_template_for_offering(offering)
-        other_rows = StudentPeriodGrade.objects.filter(
-            offering_id=offering.id,
-            student_id=student_id,
-            template_period_id__in=template.periods.filter(is_active=True).values_list("id", flat=True),
-        ).exclude(template_period_id=template_period.id)
-        values = [Decimal(row.period_grade) for row in other_rows if row.period_grade is not None]
+        period_values = {
+            row.template_period_id: Decimal(row.period_grade)
+            for row in StudentPeriodGrade.objects.filter(
+                offering_id=offering.id,
+                student_id=student_id,
+                template_period_id__in=template.periods.filter(is_active=True).values_list("id", flat=True),
+            )
+            if row.period_grade is not None
+        }
         if period_grade is not None:
-            values.append(Decimal(period_grade))
-        return cls._average(values)
+            period_values[template_period.id] = Decimal(period_grade)
+        else:
+            period_values.pop(template_period.id, None)
+        return FacultyGradingService.compute_final_grade_from_period_values(
+            offering=offering,
+            template=template,
+            period_values_by_period_id=period_values,
+        )
 
     @classmethod
     def _target_needed_percent(cls, *, target_grade: Decimal, worst_case: Decimal | None, best_case: Decimal | None):
@@ -441,8 +450,13 @@ class PredictionComputationService:
     ) -> dict:
         template = FacultyGradingService.resolve_template_for_offering(offering)
         ordered_periods = list(template.periods.filter(is_active=True).order_by("sequence_no", "id"))
-        total_period_count = len(ordered_periods)
-        if total_period_count <= 0:
+        period_order_map = {period.id: index for index, period in enumerate(ordered_periods)}
+        final_strategy = FacultyGradingService.resolve_final_grade_strategy(offering, template=template)
+        strategy_entries = sorted(
+            final_strategy["entries"],
+            key=lambda entry: period_order_map.get(entry["period_id"], 9999),
+        )
+        if not strategy_entries:
             return {
                 "status": "UNAVAILABLE",
                 "label": "Unavailable",
@@ -457,12 +471,18 @@ class PredictionComputationService:
             if row.period_grade is not None
         }
 
+        current_order = period_order_map.get(template_period.id, 9999)
         known_total = Decimal("0")
         remaining_period_names: list[str] = []
-        reached_current = False
-        for period in ordered_periods:
-            if period.id == template_period.id:
-                reached_current = True
+        remaining_weight = Decimal("0")
+
+        for entry in strategy_entries:
+            period_id = entry["period_id"]
+            period_name = entry["period_name"] or entry["period_code"]
+            period_weight = Decimal(entry["weight"] or "0")
+            entry_order = period_order_map.get(period_id, 9999)
+
+            if period_id == template_period.id:
                 if current_period_grade is None:
                     return {
                         "status": "UNAVAILABLE",
@@ -470,22 +490,38 @@ class PredictionComputationService:
                         "required_average": None,
                         "remaining_period_names": [],
                     }
-                known_total += Decimal(current_period_grade)
+                if final_strategy["mode"] == "WEIGHTED_PERIODS":
+                    known_total += Decimal(current_period_grade) * (period_weight / Decimal("100"))
+                else:
+                    known_total += Decimal(current_period_grade)
                 continue
-            if not reached_current:
-                if period.id not in period_rows:
+
+            if entry_order < current_order:
+                if period_id not in period_rows:
                     return {
                         "status": "UNAVAILABLE",
                         "label": "Cannot compute yet because an earlier period grade is still missing",
                         "required_average": None,
                         "remaining_period_names": [],
                     }
-                known_total += period_rows[period.id]
-            else:
-                remaining_period_names.append(period.name or period.code)
+                if final_strategy["mode"] == "WEIGHTED_PERIODS":
+                    known_total += Decimal(period_rows[period_id]) * (period_weight / Decimal("100"))
+                else:
+                    known_total += Decimal(period_rows[period_id])
+            elif entry_order > current_order:
+                remaining_period_names.append(period_name)
+                if final_strategy["mode"] == "WEIGHTED_PERIODS":
+                    remaining_weight += period_weight
 
         remaining_period_count = len(remaining_period_names)
-        if remaining_period_count <= 0:
+        if remaining_period_count <= 0 and final_strategy["mode"] != "WEIGHTED_PERIODS":
+            return {
+                "status": "NO_REMAINING",
+                "label": "No remaining future periods to compute",
+                "required_average": None,
+                "remaining_period_names": [],
+            }
+        if final_strategy["mode"] == "WEIGHTED_PERIODS" and remaining_weight <= 0:
             return {
                 "status": "NO_REMAINING",
                 "label": "No remaining future periods to compute",
@@ -493,8 +529,13 @@ class PredictionComputationService:
                 "remaining_period_names": [],
             }
 
-        required_total = Decimal(passing_threshold) * Decimal(total_period_count)
-        required_average = cls._round((required_total - known_total) / Decimal(remaining_period_count))
+        if final_strategy["mode"] == "WEIGHTED_PERIODS":
+            target_total = Decimal(passing_threshold)
+            required_average = cls._round((target_total - known_total) / (remaining_weight / Decimal("100")))
+        else:
+            total_period_count = len(strategy_entries)
+            required_total = Decimal(passing_threshold) * Decimal(total_period_count)
+            required_average = cls._round((required_total - known_total) / Decimal(remaining_period_count))
         if required_average is None:
             return {
                 "status": "UNAVAILABLE",
@@ -547,7 +588,7 @@ class PredictionComputationService:
         active_enrollments = [
             enrollment
             for enrollment in FacultyGradingService.get_active_enrollments(offering)
-            if enrollment.enrollment_status not in {Enrollment.Status.DR, Enrollment.Status.W}
+            if enrollment.enrollment_status not in Enrollment.NON_ACTIVE_GRADING_STATUSES
         ]
         official_period_lookup = {
             row.student_id: row

@@ -231,7 +231,7 @@
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
   <div>
     <h2 class="h5 mb-1">Grading Template Testing Calculator</h2>
-    <div class="text-muted small">Use sample raw scores and totals to validate how EduGradesPro computes each period grade and the final grade from the selected grading template.</div>
+    <div class="text-muted small">Use sample raw scores and totals to validate how EduGradesPro computes each period grade from the selected grading template. Final-grade output here is a template-only preview and may differ from the live tenant profile formula.</div>
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:grading_template_list' %}">Back to Grading Templates</a>
@@ -304,15 +304,15 @@
       </div>
       {% endfor %}
       <div class="period-summary-card final-card">
-        <div class="period-summary-label">Final Grade</div>
+        <div class="period-summary-label">Template Final Preview</div>
         <div class="period-summary-value">{{ calculation.final_grade|default:"-" }}</div>
-        <div class="small text-muted mt-2">Current EduGradesPro final-grade averaging result.</div>
+        <div class="small text-muted mt-2">Template-only average preview. Live class final grade may follow a tenant grading profile formula.</div>
       </div>
     </div>
 
     <div class="formula-box mb-4">
       <div class="fw-semibold mb-1">Final Grade Formula Used</div>
-      <div class="small text-muted mb-1">EduGradesPro currently computes the final grade by averaging the active period grades produced by this template.</div>
+      <div class="small text-muted mb-1">This calculator previews the selected template only. Live class final grade may instead follow the matched tenant grading profile formula.</div>
       <div class="calc-walkthrough mt-3">
         <div class="calc-step-card">
           <div class="calc-step-title">Step 1: Gather active period grades</div>
@@ -324,7 +324,7 @@
           {% endfor %}
         </div>
         <div class="calc-step-card">
-          <div class="calc-step-title">Step 2: Average the active period grades</div>
+          <div class="calc-step-title">Step 2: Template-only average preview</div>
           <div class="calc-eq">{{ calculation.final_formula }}</div>
         </div>
       </div>

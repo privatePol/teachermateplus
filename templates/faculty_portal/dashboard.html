@@ -277,7 +277,7 @@
         <div class="faculty-kpi-eyebrow">Classlist Status</div>
         <div class="faculty-kpi-value">{{ stats.dropped_students }}</div>
         <div class="faculty-kpi-label">Dropped Students</div>
-        <div class="faculty-kpi-note">Students currently marked as DR across your active classes.</div>
+        <div class="faculty-kpi-note">Students currently marked as DRP across your active classes.</div>
       </div>
     </div>
   </div>
@@ -297,7 +297,7 @@
   <div class="section-title">Deadline and Status Snapshot</div>
   <div class="section-note">These cards help you spot submission urgency and student movement before they turn into end-of-term issues.</div>
   <div class="row g-3">
-    <div class="col-lg-4 col-md-6">
+    <div class="col-lg-3 col-md-6">
       <div class="card faculty-kpi-card kpi-gold">
         <div class="card-body">
           <div class="faculty-kpi-eyebrow">Deadline Watch</div>
@@ -307,7 +307,7 @@
         </div>
       </div>
     </div>
-    <div class="col-lg-4 col-md-6">
+    <div class="col-lg-3 col-md-6">
       <div class="card faculty-kpi-card kpi-green">
         <div class="card-body">
           <div class="faculty-kpi-eyebrow">Completion Progress</div>
@@ -317,13 +317,23 @@
         </div>
       </div>
     </div>
-    <div class="col-lg-4 col-md-6">
+    <div class="col-lg-3 col-md-6">
       <div class="card faculty-kpi-card kpi-blue">
         <div class="card-body">
           <div class="faculty-kpi-eyebrow">Classlist Movement</div>
           <div class="faculty-kpi-value">{{ stats.withdrawn_students }}</div>
           <div class="faculty-kpi-label">Withdrawn Students</div>
           <div class="faculty-kpi-note">Students currently marked as <strong>W</strong> across your active classes.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+      <div class="card faculty-kpi-card kpi-blue">
+        <div class="card-body">
+          <div class="faculty-kpi-eyebrow">Classlist Status</div>
+          <div class="faculty-kpi-value">{{ stats.incomplete_students }}</div>
+          <div class="faculty-kpi-label">Incomplete Students</div>
+          <div class="faculty-kpi-note">Students currently marked as <strong>INC</strong> across your active classes.</div>
         </div>
       </div>
     </div>

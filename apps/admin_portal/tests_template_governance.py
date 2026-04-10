@@ -440,6 +440,66 @@ class TemplateGovernanceWorkflowTests(TestCase):
         self.assertEqual(hotfix.status, TemplateHotfixRequest.Status.PENDING)
         self.assertIsNone(hotfix.reviewed_by_user)
 
+    def test_hotfix_create_page_sorts_selected_offerings_by_course_title(self):
+        template = self._make_template(
+            code="TMP-HOTFIX-UI",
+            published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        course_a = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="ENG201",
+            title="Business Writing",
+        )
+        course_b = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="FIL101",
+            title="Panitikan",
+        )
+        section_b = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIT-2A",
+            name="BSIT 2A",
+        )
+        CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=course_b,
+            section=section_b,
+        )
+        CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=course_a,
+            section=self.section,
+        )
+
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+        response = self.client.get(reverse("admin_portal:template_hotfix_create", kwargs={"template_id": template.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "admin_portal/grading/template_hotfix_create.html")
+        self.assertContains(response, "Search by title, course code, section, or term")
+        content = response.content.decode("utf-8")
+        self.assertLess(content.index("Business Writing"), content.index("IT Application Tools"))
+        self.assertLess(content.index("IT Application Tools"), content.index("Panitikan"))
+
     def test_sequential_template_workflow_advances_then_final_approves(self):
         template = self._make_template(code="TMP-SEQUENTIAL")
         SystemSettingService.set(

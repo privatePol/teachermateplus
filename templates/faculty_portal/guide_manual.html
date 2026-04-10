@@ -247,7 +247,7 @@
           </tr>
           <tr>
             <td>Score Encoding</td>
-            <td>Faculty encodes only available scores and leaves missing items blank until ready.</td>
+            <td>Faculty encodes only available scores and leaves missing items blank until ready. If unsaved score entries exist and the faculty tries to leave the score page, EduGradesPro warns that the unsaved encoded data will be lost.</td>
             <td>Distinguishes unencoded records from zero or actual performance values.</td>
           </tr>
           <tr>
@@ -260,14 +260,14 @@
             <td>Faculty finalizes only when records are sufficiently complete for the period.</td>
             <td>Submission is treated as a governance checkpoint, not merely a save action.</td>
           </tr>
-          <tr>
-            <td>Active Period Control</td>
-            <td>When the campus-term active grading period is set, faculty performs normal grading work only in that active period. Other periods remain closed unless they are formally reopened or inside an approved correction window.</td>
-            <td>Prevents premature encoding in future periods while still preserving approved correction access for earlier periods.</td>
-          </tr>
+            <tr>
+              <td>Active Period Control</td>
+              <td>When the campus-term active grading period is set, faculty performs normal grading work only in that active period. Other periods remain closed for editing unless they are formally reopened or inside an approved correction window, but Attendance and Summary stay available in read-only mode for review.</td>
+              <td>Prevents premature encoding in future periods while still preserving approved correction access for earlier periods.</td>
+            </tr>
           <tr>
             <td>Grade Book View History</td>
-            <td>Faculty may open the period-card <strong>Who Viewed</strong> action to review admin-side read-only grade book monitor openings recorded for that class period.</td>
+            <td>Faculty may open the period-card <strong>Who Viewed</strong> action to review admin-side read-only grade book monitor openings recorded for that class period. The related grading pages also provide a Quick Jump strip so Activities, Attendance, Summary, and Who Viewed remain reachable with fewer clicks.</td>
             <td>Improves transparency by letting faculty see when authorized academic monitors opened the grade book.</td>
           </tr>
         </tbody>
@@ -317,16 +317,36 @@
         <div class="manual-rule-grid">
           <div class="manual-rule">
             <strong>Submission Readiness</strong>
-            <p>Faculty should review active students, missing records, and summary outputs before submission. EduGradesPro surfaces readiness indicators to support this review.</p>
+            <p>Faculty should review active students, missing records, and summary outputs before submission. EduGradesPro surfaces readiness indicators to support this review, and it blocks submission when ACTIVE students still have blank required grade or attendance records.</p>
           </div>
           <div class="manual-rule">
-            <strong>Deadline Enforcement</strong>
-            <p>Submission windows are governed by period lock rules and may be auto-locked based on configured deadlines.</p>
+            <strong>Readiness Cards and Threshold</strong>
+            <p>The Summary page now presents submission readiness through colored cards for ACTIVE, complete records, missing records, coverage, DRP, W, and INC. Pass/Fail counts follow the configured passing threshold and normally appear together with the official period grade. EduGradesPro resolves that threshold in this order: Tenant Grading Profile override, assigned grading-template threshold, tenant default setting, then fallback 75.00. Admin may still restrict official-grade release until the configured deadline.</p>
           </div>
           <div class="manual-rule">
-            <strong>Deadline Reminder Banner</strong>
-            <p>EduGradesPro surfaces the current active grading period and the current grade submission deadline on the Faculty Dashboard, My Classes page, and the class period page so faculty can see both the official working period and its due date before final submission. If a configured deadline belongs to a different campus or term scope, or uses a period code that does not match the class template, the banner now explains that it does not match the faculty member's accepted classes.</p>
+            <strong>Final Period Grade Trail</strong>
+            <p>The overall <strong>FINAL GRADE</strong> is shown only on the <strong>Final</strong> period Summary page. That Final page also displays <strong>PRELIM GRADE</strong>, <strong>MIDTERM GRADE</strong>, and <strong>PRE-FINAL GRADE</strong> columns before the Final Exam so faculty can review the earlier official period results alongside the final-period output.</p>
           </div>
+          <div class="manual-rule">
+            <strong>Final Grade Averaging Rule</strong>
+            <p>EduGradesPro computes the overall <strong>FINAL GRADE</strong> using the matched tenant grading profile formula for the class. If no special tenant formula is configured, EduGradesPro uses the full configured number of grading periods, so later blank periods still count in the divisor instead of being excluded from the average.</p>
+          </div>
+            <div class="manual-rule">
+              <strong>Deadline Enforcement</strong>
+              <p>Submission windows are governed by period lock rules and may be auto-locked based on configured deadlines.</p>
+            </div>
+            <div class="manual-rule">
+              <strong>Read-Only Review After Deadline</strong>
+              <p>When a period is no longer open for normal encoding under active-period governance, faculty may still open Attendance and Summary to review stored records, but editing and submission actions stay disabled unless the period is formally reopened or covered by an approved correction window.</p>
+            </div>
+            <div class="manual-rule">
+              <strong>Final Clearance</strong>
+              <p>The My Classes page now includes a dedicated Final Clearance action area that lets the faculty member preview campus-term completion status and generate the official final clearance PDF once all clearance conditions are satisfied. Each generated report prints a QR code, Reference No., and Verification Code for NCBA-side validation.</p>
+            </div>
+            <div class="manual-rule">
+              <strong>Deadline Reminder Banner</strong>
+              <p>EduGradesPro surfaces the current active grading period and the current grade submission deadline on the Faculty Dashboard, My Classes page, and the class period page so faculty can see both the official working period and its due date before final submission. If a configured deadline belongs to a different campus or term scope, or uses a period code that does not match the class template, the banner now explains that it does not match the faculty member's accepted classes.</p>
+            </div>
           <div class="manual-rule">
             <strong>Print Record</strong>
             <p>The print sheet serves as a formal companion document for review, sign-off, and institutional filing.</p>
@@ -391,15 +411,19 @@
         </div>
         <div class="manual-rule">
           <strong>Feature-Governed Access</strong>
-          <p>Access to prediction pages and what-if simulation must be enabled through Configurable Features and can be limited by role.</p>
+          <p>Access to prediction pages and what-if simulation must be enabled through Configuration Management and can be limited by role.</p>
         </div>
         <div class="manual-rule">
           <strong>Interpretation Guidance</strong>
-          <p>The prediction screen should provide a direct link to a separate explanation page that defines each displayed column, gives examples, and reminds faculty that simulated values are planning guides only.</p>
+          <p>The prediction screen should provide a direct link to a separate explanation page that defines each displayed column, explains the methodology and factor set behind each value, documents Base 50 transmutation and the period/final-grade formulas, gives examples, and reminds faculty that simulated values are planning guides only.</p>
         </div>
         <div class="manual-rule">
           <strong>Passing-Final Requirement</strong>
           <p>For students who remain at risk, the prediction screen may also show the average grade still needed across the remaining final periods so faculty can identify the level required to finish with a passing final grade.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Official Grade Release Control</strong>
+          <p>The Faculty Portal may hide official computed period grades and the official final grade until the configured deadline has passed. This release behavior is governed by admin settings and is separate from the unofficial prediction module.</p>
         </div>
       </div>
     </div>
@@ -450,10 +474,10 @@
             <tr>
               <td>Removed from Class</td>
               <td>Student changed schedule and should be removed from this specific class master list without being marked dropped or withdrawn.</td>
-              <td>Excluded from active grading coverage for this class while preserving cleaner distinction from DR/W governance. Faculty uses the small remove icon beside the student number and must type <strong>remove</strong> to confirm the action.</td>
+              <td>Excluded from active grading coverage for this class while preserving cleaner distinction from DRP/W/INC governance. Faculty uses the small remove icon beside the student number and must type <strong>remove</strong> to confirm the action.</td>
             </tr>
             <tr>
-              <td>DR</td>
+              <td>DRP</td>
               <td>Student is dropped from this particular class.</td>
               <td>Excluded from active grading coverage and readiness calculations.</td>
             </tr>
@@ -462,11 +486,19 @@
               <td>Student is withdrawn from the term.</td>
               <td>Excluded from active grading coverage and tracked separately from dropped students.</td>
             </tr>
+            <tr>
+              <td>INC</td>
+              <td>Student has an incomplete class record.</td>
+              <td>Excluded from active grading coverage and readiness calculations until the record is resolved.</td>
+            </tr>
           </tbody>
-        </table>
-        <div class="manual-note">
-          When faculty adds a student to the class, EduGradesPro now supports typed lookup by student number or by the student's last name and first name before the faculty clicks <strong>Save</strong>.
-        </div>
+          </table>
+          <div class="manual-note">
+            The class-list page now also shows a visible <strong>Status Legend</strong> so faculty can confirm the meaning of <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>W</strong>, and <strong>INC</strong> at a glance before changing any row.
+          </div>
+          <div class="manual-note">
+            When faculty adds a student to the class, EduGradesPro now supports typed lookup by student number or by the student's last name and first name before the faculty clicks <strong>Save</strong>.
+          </div>
         <div class="manual-note">
           For easier visual checking, the class list also shows a line number before the student number and formats names as <strong>LAST NAME</strong>, <strong>First Name</strong>.
         </div>
@@ -477,7 +509,7 @@
         <div class="manual-section-title">10. Privacy, Security, and Audit Controls</div>
         <ul class="manual-policy-list">
           <li>Faculty access is limited to assigned offerings and authorized portal functions.</li>
-          <li>Password complexity validation, forced password change, privacy consent, single-device session enforcement, and temporary login lockout are governed centrally.</li>
+          <li>Password complexity validation, forced password change, privacy consent, single-device session enforcement, a 1-hour session timeout, and temporary login lockout are governed centrally.</li>
           <li>Operational actions may be audited, including submission, reopen, correction, and related record changes.</li>
           <li>Printed or exported records should be handled according to institutional data privacy requirements.</li>
           <li>The institutional privacy statement remains the authoritative privacy reference.</li>

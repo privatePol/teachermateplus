@@ -1,0 +1,322 @@
+{% extends "admin_portal/base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .hotfix-shell {
+    display: grid;
+    gap: 1.25rem;
+  }
+  .hotfix-hero,
+  .hotfix-card {
+    border: 0;
+    border-radius: 1.1rem;
+    box-shadow: 0 14px 28px rgba(21, 58, 37, 0.10);
+    overflow: hidden;
+    background: #fff;
+  }
+  .hotfix-hero {
+    background: linear-gradient(135deg, #1f6a40 0%, #31774b 52%, #b6b54e 100%);
+    color: #fff;
+    padding: 1.35rem 1.45rem;
+  }
+  .hotfix-hero h2 {
+    margin: 0 0 0.35rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+  }
+  .hotfix-hero p {
+    margin: 0;
+    max-width: 70rem;
+    color: rgba(255, 255, 255, 0.92);
+  }
+  .hotfix-hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin-top: 0.95rem;
+  }
+  .hotfix-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.38rem 0.72rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+  .hotfix-card-body {
+    padding: 1.35rem 1.45rem;
+  }
+  .hotfix-section-title {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #163d27;
+    margin-bottom: 0.85rem;
+  }
+  .hotfix-field {
+    margin-bottom: 1rem;
+  }
+  .hotfix-field label {
+    font-weight: 700;
+    color: #214a31;
+    margin-bottom: 0.35rem;
+  }
+  .hotfix-offering-panel {
+    border: 1px solid #dbe8dd;
+    border-radius: 1rem;
+    background: linear-gradient(180deg, #fdfefd 0%, #f6faf7 100%);
+    padding: 1rem;
+  }
+  .hotfix-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.9rem;
+  }
+  .hotfix-toolbar .form-control {
+    min-width: 18rem;
+    max-width: 24rem;
+  }
+  .hotfix-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.86rem;
+    color: #41614d;
+    font-weight: 700;
+  }
+  .hotfix-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.85rem;
+  }
+  .hotfix-offering-card {
+    position: relative;
+    border: 1px solid #dce8de;
+    border-radius: 1rem;
+    background: #fff;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  }
+  .hotfix-offering-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 20px rgba(21, 58, 37, 0.08);
+    border-color: #b9d0bd;
+  }
+  .hotfix-offering-card.is-selected {
+    border-color: #2f7c4b;
+    box-shadow: 0 0 0 2px rgba(47, 124, 75, 0.10);
+    background: linear-gradient(180deg, #ffffff 0%, #f2faf4 100%);
+  }
+  .hotfix-offering-label {
+    display: block;
+    padding: 0.95rem 1rem;
+    cursor: pointer;
+  }
+  .hotfix-offering-label input {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+  }
+  .hotfix-offering-title {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-right: 2rem;
+    margin-bottom: 0.18rem;
+  }
+  .hotfix-offering-code {
+    color: #587261;
+    font-size: 0.84rem;
+    font-weight: 700;
+    margin-bottom: 0.45rem;
+  }
+  .hotfix-offering-meta {
+    display: grid;
+    gap: 0.2rem;
+    color: #40614d;
+    font-size: 0.86rem;
+  }
+  .hotfix-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 1.15rem;
+  }
+  .hotfix-footer-note {
+    color: #5d7565;
+    font-size: 0.88rem;
+    max-width: 48rem;
+  }
+  @media (max-width: 767.98px) {
+    .hotfix-hero,
+    .hotfix-card-body {
+      padding: 1rem;
+    }
+    .hotfix-toolbar .form-control {
+      min-width: 100%;
+      max-width: 100%;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block admin_content %}
+<div class="hotfix-shell">
+  <div class="hotfix-hero">
+    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+      <div>
+        <h2>Create Template Hotfix Request</h2>
+        <p>Use this governed workflow when a published grading template needs a controlled live adjustment. Reviewers will use your selected scope, apply mode, and justification to decide whether the hotfix can proceed.</p>
+      </div>
+      <a href="javascript:history.back()" class="btn btn-sm btn-outline-light">Back</a>
+    </div>
+    <div class="hotfix-hero-meta">
+      <span class="hotfix-chip">Template {{ template_obj.code }}</span>
+      <span class="hotfix-chip">{{ template_obj.name }}</span>
+      <span class="hotfix-chip">Tenant {{ template_obj.tenant.code }}</span>
+      <span class="hotfix-chip">{{ offering_cards|length }} open offering{{ offering_cards|length|pluralize }} in scope</span>
+    </div>
+  </div>
+
+  <div class="hotfix-card">
+    <div class="hotfix-card-body">
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% if request.GET.next or request.POST.next %}
+        <input type="hidden" name="next" value="{{ request.POST.next|default:request.GET.next }}">
+        {% endif %}
+        {% if form.non_field_errors %}
+        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <div class="hotfix-section-title">Hotfix Scope and Rationale</div>
+
+        <div class="hotfix-field">
+          <label class="form-label" for="{{ form.apply_mode.id_for_label }}">{{ form.apply_mode.label }}</label>
+          {{ form.apply_mode }}
+          {% if form.apply_mode.help_text %}<div class="form-text">{{ form.apply_mode.help_text }}</div>{% endif %}
+          {% for error in form.apply_mode.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+
+        <div class="hotfix-field">
+          <label class="form-label" for="{{ form.justification.id_for_label }}">{{ form.justification.label }}</label>
+          {{ form.justification }}
+          {% if form.justification.help_text %}<div class="form-text">{{ form.justification.help_text }}</div>{% endif %}
+          {% for error in form.justification.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+
+        <div class="hotfix-offering-panel" id="selected-offerings-panel">
+          <div class="hotfix-section-title mb-2">Selected Offerings</div>
+          <div class="hotfix-toolbar">
+            <div class="hotfix-count">
+              <span id="offering-selection-count">0</span>
+              <span>selected</span>
+            </div>
+            <input type="search" class="form-control" id="offering-search" placeholder="Search by title, course code, section, or term">
+          </div>
+          {% if form.selected_offerings.help_text %}<div class="form-text mb-2">{{ form.selected_offerings.help_text }}</div>{% endif %}
+          {% for error in form.selected_offerings.errors %}<div class="text-danger small mb-2">{{ error }}</div>{% endfor %}
+
+          <div class="hotfix-grid" id="offering-grid">
+            {% for row in offering_cards %}
+            <div class="hotfix-offering-card {% if row.checked %}is-selected{% endif %}" data-offering-search="{{ row.title|lower }} {{ row.course_code|lower }} {{ row.section_code|lower }} {{ row.academic_year_code|lower }} {{ row.term_code|lower }} {{ row.campus_code|lower }}">
+              <label class="hotfix-offering-label">
+                <input
+                  type="checkbox"
+                  name="selected_offerings"
+                  value="{{ row.id }}"
+                  class="form-check-input hotfix-offering-checkbox"
+                  {% if row.checked %}checked{% endif %}
+                >
+                <div class="hotfix-offering-title">{{ row.title }}</div>
+                <div class="hotfix-offering-code">{{ row.course_code }}</div>
+                <div class="hotfix-offering-meta">
+                  <div><strong>Section:</strong> {{ row.section_code }}</div>
+                  <div><strong>AY / Term:</strong> {{ row.academic_year_code }} / {{ row.term_code }}</div>
+                  <div><strong>Campus:</strong> {{ row.campus_code }}</div>
+                </div>
+              </label>
+            </div>
+            {% empty %}
+            <div class="text-muted">No open offerings are currently available in scope for this published template.</div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="hotfix-footer">
+          <div class="hotfix-footer-note">
+            Recommended: use <strong>Selected Offerings</strong> only when the published-template fix should reach a limited live class set. Choose the smallest safe scope that solves the academic issue.
+          </div>
+          <button class="btn btn-primary" type="submit">Create Hotfix Request</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const applyModeField = document.getElementById("id_apply_mode");
+    const offeringsPanel = document.getElementById("selected-offerings-panel");
+    const searchField = document.getElementById("offering-search");
+    const offeringCards = Array.from(document.querySelectorAll(".hotfix-offering-card"));
+    const offeringCheckboxes = Array.from(document.querySelectorAll(".hotfix-offering-checkbox"));
+    const selectionCount = document.getElementById("offering-selection-count");
+    const selectedMode = "SELECTED_OFFERINGS";
+
+    function syncPanelVisibility() {
+      if (!applyModeField || !offeringsPanel) {
+        return;
+      }
+      offeringsPanel.style.display = applyModeField.value === selectedMode ? "" : "none";
+    }
+
+    function syncSelectionState() {
+      let checkedCount = 0;
+      offeringCheckboxes.forEach(function (checkbox) {
+        const card = checkbox.closest(".hotfix-offering-card");
+        if (!card) {
+          return;
+        }
+        if (checkbox.checked) {
+          checkedCount += 1;
+          card.classList.add("is-selected");
+        } else {
+          card.classList.remove("is-selected");
+        }
+      });
+      if (selectionCount) {
+        selectionCount.textContent = String(checkedCount);
+      }
+    }
+
+    function applySearchFilter() {
+      const query = (searchField && searchField.value ? searchField.value : "").trim().toLowerCase();
+      offeringCards.forEach(function (card) {
+        const haystack = card.dataset.offeringSearch || "";
+        card.style.display = !query || haystack.indexOf(query) !== -1 ? "" : "none";
+      });
+    }
+
+    if (applyModeField) {
+      applyModeField.addEventListener("change", syncPanelVisibility);
+      syncPanelVisibility();
+    }
+    offeringCheckboxes.forEach(function (checkbox) {
+      checkbox.addEventListener("change", syncSelectionState);
+    });
+    if (searchField) {
+      searchField.addEventListener("input", applySearchFilter);
+    }
+    syncSelectionState();
+    applySearchFilter();
+  });
+</script>
+{% endblock %}

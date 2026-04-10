@@ -14,7 +14,7 @@ from django import forms as django_forms
 from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Avg, Count, Prefetch, Q, Sum
+from django.db.models import Avg, Count, Max, Prefetch, Q, Sum
 from io import BytesIO
 
 from django.http import FileResponse, HttpResponseForbidden
@@ -98,6 +98,7 @@ from apps.grading.models import (
     CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
+    FacultyFinalClearanceReport,
     GradeActivity,
     GradeCorrectionApprovalStep,
     GradeCorrectionRequest,
@@ -115,7 +116,7 @@ from apps.grading.models import (
     TenantGradingProfile,
 )
 from apps.grading.notifications import CorrectionNotificationService
-from apps.grading.reporting import CorrectionOfficialReportService
+from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
 from apps.grading.services import (
     FacultyGradingService,
     GradingGovernanceService,
@@ -139,6 +140,13 @@ def _official_correction_report_filename(correction_request: GradeCorrectionRequ
     course_code = correction_request.offering.course.code or "COURSE"
     section_code = correction_request.offering.section.code or "SECTION"
     return f"official-correction-{correction_request.id}-{course_code}-{section_code}-{period_code}.pdf"
+
+
+def _faculty_final_clearance_report_filename(report_obj: FacultyFinalClearanceReport) -> str:
+    faculty_code = report_obj.faculty_user.username or f"faculty-{report_obj.faculty_user_id}"
+    campus_code = report_obj.campus.code or "campus"
+    term_code = report_obj.term.code or "term"
+    return f"faculty-final-clearance-{campus_code}-{term_code}-{faculty_code}-{report_obj.id}.pdf"
 
 
 def _scope_context(request):
@@ -375,6 +383,227 @@ def _assignment_counts(queryset, *, now=None):
     }
 
 
+def _resolve_monitor_window(*, window_code: str, selected_term: Term | None, now=None):
+    now = now or timezone.now()
+    code = (window_code or "7d").strip().lower()
+    start = now - timedelta(days=7)
+    label = "Last 7 Days"
+    note = "Weekly monitoring view."
+    if code == "30d":
+        start = now - timedelta(days=30)
+        label = "Last 30 Days"
+        note = "Monthly monitoring view."
+    elif code == "term" and selected_term:
+        if selected_term.start_date:
+            start = timezone.make_aware(
+                timezone.datetime.combine(selected_term.start_date, timezone.datetime.min.time()),
+                timezone.get_current_timezone(),
+            )
+        label = f"Current Term: {selected_term.code}"
+        note = "Term-to-date monitoring view."
+        if selected_term.end_date:
+            term_end = timezone.make_aware(
+                timezone.datetime.combine(selected_term.end_date, timezone.datetime.max.time()),
+                timezone.get_current_timezone(),
+            )
+            now = min(now, term_end)
+    return {
+        "code": code if code in {"7d", "30d", "term"} else "7d",
+        "start": start,
+        "end": now,
+        "label": label,
+        "note": note,
+    }
+
+
+def _faculty_activity_status(row, *, window_start):
+    if row["assigned_classes"] <= 0:
+        return {
+            "label": "No Accepted Classes",
+            "variant": "secondary",
+            "note": "This faculty member has no accepted class in the selected scope.",
+        }
+    if not row["last_login_at"] or row["last_login_at"] < window_start:
+        return {
+            "label": "No Login",
+            "variant": "danger",
+            "note": "No faculty login was recorded during the selected monitoring window.",
+        }
+    if row["gradebook_update_events"] <= 0:
+        return {
+            "label": "No Gradebook Update",
+            "variant": "danger",
+            "note": "The faculty logged in but did not create activities, encode grades, or update the gradebook.",
+        }
+    if row["classes_with_no_activity"] > 0 or row["classes_with_no_scores"] > 0:
+        return {
+            "label": "Needs Follow-up",
+            "variant": "warning",
+            "note": "One or more assigned classes still have no activity or no encoded scores.",
+        }
+    if row["activities_created"] <= 0 and row["scores_saved"] <= 0:
+        return {
+            "label": "Low Activity",
+            "variant": "secondary",
+            "note": "The faculty has some system movement, but no new activity or score work in this window.",
+        }
+    return {
+        "label": "Active",
+        "variant": "success",
+        "note": "Faculty is logging in and updating the gradebook in the selected monitoring window.",
+    }
+
+
+def _faculty_activity_flags(row, *, window_start):
+    flags = []
+    if row["assigned_classes"] <= 0:
+        flags.append({"label": "No Accepted Classes", "variant": "secondary"})
+        return flags
+    if not row["last_login_at"] or row["last_login_at"] < window_start:
+        flags.append({"label": "No Login", "variant": "danger"})
+    if row["activities_created"] <= 0:
+        flags.append({"label": "No Activity Created", "variant": "warning"})
+    if row["scores_saved"] <= 0:
+        flags.append({"label": "No Grade Encoding", "variant": "warning"})
+    if row["gradebook_update_events"] <= 0:
+        flags.append({"label": "No Gradebook Update", "variant": "danger"})
+    if row.get("classes_with_no_activity", 0) > 0:
+        flags.append({"label": "Classes Without Activity", "variant": "danger"})
+    if row.get("classes_with_no_scores", 0) > 0:
+        flags.append({"label": "Classes Without Scores", "variant": "warning"})
+    return flags
+
+
+def _build_activity_trend_buckets(*, logs, start, end, actor_user_id=None):
+    bucket_count = 4
+    total_seconds = max((end - start).total_seconds(), 1)
+    bucket_seconds = total_seconds / bucket_count
+    buckets = []
+    for index in range(bucket_count):
+        bucket_start = start + timedelta(seconds=bucket_seconds * index)
+        bucket_end = end if index == bucket_count - 1 else start + timedelta(seconds=bucket_seconds * (index + 1))
+        buckets.append(
+            {
+                "label": bucket_start.strftime("%b %d"),
+                "range_label": f"{bucket_start.strftime('%b %d')} - {(bucket_end - timedelta(seconds=1)).strftime('%b %d')}",
+                "login_count": 0,
+                "activity_count": 0,
+                "score_count": 0,
+                "gradebook_events": 0,
+            }
+        )
+    for log in logs:
+        if actor_user_id and log.actor_user_id != actor_user_id:
+            continue
+        try:
+            offset = int(((log.created_at - start).total_seconds()) / bucket_seconds)
+        except ZeroDivisionError:
+            offset = 0
+        offset = max(0, min(bucket_count - 1, offset))
+        bucket = buckets[offset]
+        if log.action == "LOGIN_SUCCESS" and log.entity_type == "User":
+            bucket["login_count"] += 1
+            continue
+        if log.entity_type == "GradeActivity":
+            bucket["activity_count"] += 1
+            bucket["gradebook_events"] += 1
+        elif log.entity_type == "StudentActivityScore":
+            saved_count = 1
+            if isinstance(log.metadata_json, dict):
+                try:
+                    saved_count = int(log.metadata_json.get("saved_count") or 1)
+                except (TypeError, ValueError):
+                    saved_count = 1
+            bucket["score_count"] += saved_count
+            bucket["gradebook_events"] += 1
+        elif log.entity_type in {"AttendanceSession", "AttendanceRecord", "GradeSubmission", "GradeCorrectionRequest", "Enrollment"}:
+            bucket["gradebook_events"] += 1
+    max_total = max(
+        [
+            max(bucket["login_count"], bucket["activity_count"], bucket["score_count"], bucket["gradebook_events"])
+            for bucket in buckets
+        ],
+        default=0,
+    )
+    for bucket in buckets:
+        bucket["login_width"] = round((bucket["login_count"] / max_total) * 100, 1) if max_total else 0
+        bucket["activity_width"] = round((bucket["activity_count"] / max_total) * 100, 1) if max_total else 0
+        bucket["score_width"] = round((bucket["score_count"] / max_total) * 100, 1) if max_total else 0
+        bucket["gradebook_width"] = round((bucket["gradebook_events"] / max_total) * 100, 1) if max_total else 0
+    return buckets
+
+
+def _build_week_over_week_buckets(*, logs, end, actor_user_id=None, week_count=6):
+    end = end or timezone.now()
+    local_end = timezone.localtime(end)
+    current_week_start_date = local_end.date() - timedelta(days=local_end.weekday())
+    current_week_start = timezone.make_aware(
+        timezone.datetime.combine(current_week_start_date, timezone.datetime.min.time()),
+        timezone.get_current_timezone(),
+    )
+    series_start = current_week_start - timedelta(weeks=max(week_count - 1, 0))
+    series_end = current_week_start + timedelta(weeks=1)
+
+    buckets = []
+    for index in range(week_count):
+        bucket_start = series_start + timedelta(weeks=index)
+        bucket_end = bucket_start + timedelta(weeks=1)
+        buckets.append(
+            {
+                "label": bucket_start.strftime("%b %d"),
+                "range_label": f"{bucket_start.strftime('%b %d')} - {(bucket_end - timedelta(seconds=1)).strftime('%b %d')}",
+                "login_count": 0,
+                "activity_count": 0,
+                "score_count": 0,
+                "gradebook_events": 0,
+            }
+        )
+
+    for log in logs:
+        if actor_user_id and log.actor_user_id != actor_user_id:
+            continue
+        if log.created_at < series_start or log.created_at >= series_end:
+            continue
+        offset = int((log.created_at - series_start).total_seconds() // (7 * 24 * 60 * 60))
+        offset = max(0, min(week_count - 1, offset))
+        bucket = buckets[offset]
+        if log.action == "LOGIN_SUCCESS" and log.entity_type == "User":
+            bucket["login_count"] += 1
+            continue
+        if log.entity_type == "GradeActivity":
+            bucket["activity_count"] += 1
+            bucket["gradebook_events"] += 1
+        elif log.entity_type == "StudentActivityScore":
+            saved_count = 1
+            if isinstance(log.metadata_json, dict):
+                try:
+                    saved_count = int(log.metadata_json.get("saved_count") or 1)
+                except (TypeError, ValueError):
+                    saved_count = 1
+            bucket["score_count"] += saved_count
+            bucket["gradebook_events"] += 1
+        elif log.entity_type in {"AttendanceSession", "AttendanceRecord", "GradeSubmission", "GradeCorrectionRequest", "Enrollment"}:
+            bucket["gradebook_events"] += 1
+
+    max_total = max(
+        [
+            max(bucket["login_count"], bucket["activity_count"], bucket["score_count"], bucket["gradebook_events"])
+            for bucket in buckets
+        ],
+        default=0,
+    )
+    for bucket in buckets:
+        bucket["login_width"] = round((bucket["login_count"] / max_total) * 100, 1) if max_total else 0
+        bucket["activity_width"] = round((bucket["activity_count"] / max_total) * 100, 1) if max_total else 0
+        bucket["score_width"] = round((bucket["score_count"] / max_total) * 100, 1) if max_total else 0
+        bucket["gradebook_width"] = round((bucket["gradebook_events"] / max_total) * 100, 1) if max_total else 0
+    return buckets
+
+
+def _offering_monitor_label(offering):
+    return f"{offering.course.code} | {offering.section.name or offering.section.code}"
+
+
 def _scoped_login_lockout_queryset(request):
     scope_tenant_ids = getattr(request, "scope", {}).get("tenant_ids", [])
     scope_campus_ids = getattr(request, "scope", {}).get("campus_ids", [])
@@ -592,6 +821,403 @@ def dashboard_view(request):
 
 
 @portal_required("ADMIN")
+@permission_required("faculty_assignments.read")
+def faculty_activity_monitor_view(request):
+    now = timezone.now()
+    is_print_mode = request.GET.get("print") == "1"
+    term_options = AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
+    campus_options = AdminScopeService.scoped_campuses(request).order_by("code")
+    department_options = AdminScopeService.scoped_departments(request).order_by("name")
+
+    selected_term_id = _safe_int(request.GET.get("term_id"))
+    selected_campus_id = _safe_int(request.GET.get("campus_id"))
+    selected_department_id = _safe_int(request.GET.get("department_id"))
+    selected_faculty_id = _safe_int(request.GET.get("faculty_user_id"))
+    faculty_q = (request.GET.get("faculty_q") or "").strip()
+    window_code = (request.GET.get("window") or "7d").strip().lower()
+
+    selected_term = term_options.filter(id=selected_term_id).first() if selected_term_id else None
+    if selected_term is None:
+        current_tenant_id = getattr(request, "scope", {}).get("tenant_id")
+        active_term = None
+        if current_tenant_id:
+            _active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=current_tenant_id)
+        selected_term = active_term if active_term and term_options.filter(id=active_term.id).exists() else term_options.first()
+        selected_term_id = getattr(selected_term, "id", None)
+
+    monitor_window = _resolve_monitor_window(window_code=window_code, selected_term=selected_term, now=now)
+
+    assignments_qs = AdminScopeService.scoped_faculty_assignments(request).filter(
+        is_active=True,
+        response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+    )
+    if selected_term_id:
+        assignments_qs = assignments_qs.filter(offering__term_id=selected_term_id)
+    if selected_campus_id:
+        assignments_qs = assignments_qs.filter(offering__campus_id=selected_campus_id)
+    if selected_department_id:
+        assignments_qs = assignments_qs.filter(offering__department_id=selected_department_id)
+
+    faculty_ids = list(assignments_qs.values_list("faculty_user_id", flat=True).distinct())
+    faculty_qs = User.objects.filter(id__in=faculty_ids, is_active=True).order_by("last_name", "first_name", "username")
+    faculty_candidates = faculty_qs
+    if faculty_q:
+        faculty_candidates = faculty_candidates.filter(
+            Q(username__icontains=faculty_q)
+            | Q(email__icontains=faculty_q)
+            | Q(first_name__icontains=faculty_q)
+            | Q(last_name__icontains=faculty_q)
+        )
+    selected_faculty = faculty_qs.filter(id=selected_faculty_id).first() if selected_faculty_id else None
+
+    assignments = list(
+        assignments_qs.select_related(
+            "faculty_user",
+            "offering",
+            "offering__course",
+            "offering__section",
+            "offering__term",
+            "offering__academic_year",
+            "offering__campus",
+            "offering__department",
+        ).order_by(
+            "faculty_user__last_name",
+            "faculty_user__first_name",
+            "offering__course__code",
+            "offering__section__code",
+        )
+    )
+    offering_map = {assignment.offering_id: assignment.offering for assignment in assignments}
+    faculty_assignment_map = defaultdict(list)
+    for assignment in assignments:
+        faculty_assignment_map[assignment.faculty_user_id].append(assignment)
+
+    offering_ids = list(offering_map.keys())
+    activity_counts = {}
+    score_counts = {}
+    submission_counts = {}
+    activity_to_offering = {}
+    if offering_ids:
+        activity_counts = {
+            row["offering_id"]: row
+            for row in GradeActivity.objects.filter(offering_id__in=offering_ids, is_active=True)
+            .values("offering_id")
+            .annotate(total=Count("id"), last_activity_at=Max("updated_at"))
+        }
+        score_counts = {
+            row["activity__offering_id"]: row
+            for row in StudentActivityScore.objects.filter(
+                activity__offering_id__in=offering_ids,
+                activity__is_active=True,
+                is_active=True,
+            )
+            .values("activity__offering_id")
+            .annotate(total=Count("id"), last_score_at=Max("updated_at"))
+        }
+        submission_counts = {
+            row["offering_id"]: row
+            for row in GradeSubmission.objects.filter(offering_id__in=offering_ids)
+            .values("offering_id")
+            .annotate(
+                submitted=Count("id", filter=Q(status=GradeSubmission.Status.SUBMITTED)),
+                reopened=Count("id", filter=Q(status=GradeSubmission.Status.REOPENED)),
+                last_submission_at=Max("updated_at"),
+            )
+        }
+        activity_to_offering = {
+            row["id"]: row["offering_id"]
+            for row in GradeActivity.objects.filter(offering_id__in=offering_ids).values("id", "offering_id")
+        }
+
+    relevant_logs = list(
+        AuditLog.objects.filter(
+            actor_user_id__in=faculty_ids,
+            portal=AuditLog.Portal.FACULTY,
+            created_at__gte=monitor_window["start"],
+            created_at__lte=monitor_window["end"],
+        )
+        .filter(
+            Q(action="LOGIN_SUCCESS", entity_type="User")
+            | Q(entity_type__in=[
+                "GradeActivity",
+                "StudentActivityScore",
+                "AttendanceSession",
+                "AttendanceRecord",
+                "GradeSubmission",
+                "GradeCorrectionRequest",
+                "Enrollment",
+            ])
+        )
+        .order_by("-created_at")
+    )
+
+    faculty_list = list(faculty_qs)
+    visible_faculty_list = list(faculty_candidates)
+
+    metrics_by_faculty = {}
+    for faculty in faculty_list:
+        metrics_by_faculty[faculty.id] = {
+            "faculty": faculty,
+            "assigned_classes": len(faculty_assignment_map.get(faculty.id, [])),
+            "last_login_at": faculty.last_login,
+            "login_count": 0,
+            "activities_created": 0,
+            "activity_updates": 0,
+            "scores_saved": 0,
+            "score_update_events": 0,
+            "attendance_updates": 0,
+            "submissions": 0,
+            "reopens": 0,
+            "corrections_filed": 0,
+            "classlist_updates": 0,
+            "gradebook_update_events": 0,
+            "last_gradebook_update_at": None,
+            "recent_logs": [],
+        }
+
+    def _resolve_log_offering(log):
+        if log.entity_type == "GradeActivity":
+            payload = log.after_json or log.before_json or {}
+            return payload.get("offering_id")
+        if log.entity_type == "StudentActivityScore":
+            activity_id = None
+            if isinstance(log.metadata_json, dict):
+                activity_id = log.metadata_json.get("activity_id")
+            if not activity_id:
+                activity_id = log.entity_id
+            try:
+                return activity_to_offering.get(int(activity_id))
+            except (TypeError, ValueError):
+                return None
+        if log.entity_type == "GradeSubmission":
+            payload = log.after_json or log.before_json or {}
+            return payload.get("offering_id")
+        if log.entity_type == "Enrollment":
+            payload = log.after_json or log.before_json or {}
+            return payload.get("offering_id") or payload.get("course_offering_id")
+        return None
+
+    for log in relevant_logs:
+        bucket = metrics_by_faculty.get(log.actor_user_id)
+        if not bucket:
+            continue
+        if log.action == "LOGIN_SUCCESS" and log.entity_type == "User":
+            bucket["login_count"] += 1
+            continue
+
+        if len(bucket["recent_logs"]) < 8:
+            bucket["recent_logs"].append(log)
+        if not bucket["last_gradebook_update_at"] or log.created_at > bucket["last_gradebook_update_at"]:
+            bucket["last_gradebook_update_at"] = log.created_at
+
+        if log.entity_type == "GradeActivity":
+            if log.action == "CREATE":
+                bucket["activities_created"] += 1
+            else:
+                bucket["activity_updates"] += 1
+            bucket["gradebook_update_events"] += 1
+        elif log.entity_type == "StudentActivityScore":
+            saved_count = 1
+            if isinstance(log.metadata_json, dict):
+                try:
+                    saved_count = int(log.metadata_json.get("saved_count") or 1)
+                except (TypeError, ValueError):
+                    saved_count = 1
+            bucket["scores_saved"] += saved_count
+            bucket["score_update_events"] += 1
+            bucket["gradebook_update_events"] += 1
+        elif log.entity_type in {"AttendanceSession", "AttendanceRecord"}:
+            bucket["attendance_updates"] += 1
+            bucket["gradebook_update_events"] += 1
+        elif log.entity_type == "GradeSubmission":
+            if log.action == "SUBMIT":
+                bucket["submissions"] += 1
+            elif log.action == "REOPEN":
+                bucket["reopens"] += 1
+            bucket["gradebook_update_events"] += 1
+        elif log.entity_type == "GradeCorrectionRequest":
+            if log.action == "CREATE":
+                bucket["corrections_filed"] += 1
+            bucket["gradebook_update_events"] += 1
+        elif log.entity_type == "Enrollment":
+            bucket["classlist_updates"] += 1
+            bucket["gradebook_update_events"] += 1
+
+    monitor_rows = []
+    for faculty in visible_faculty_list:
+        bucket = metrics_by_faculty[faculty.id]
+        faculty_assignments = faculty_assignment_map.get(faculty.id, [])
+        classes_with_no_activity = 0
+        classes_with_no_scores = 0
+        classes_with_recent_updates = 0
+        for assignment in faculty_assignments:
+            offering_id = assignment.offering_id
+            offering_activity_total = int((activity_counts.get(offering_id) or {}).get("total") or 0)
+            offering_score_total = int((score_counts.get(offering_id) or {}).get("total") or 0)
+            if offering_activity_total <= 0:
+                classes_with_no_activity += 1
+            else:
+                classes_with_recent_updates += 1
+            if offering_score_total <= 0:
+                classes_with_no_scores += 1
+        bucket["classes_with_no_activity"] = classes_with_no_activity
+        bucket["classes_with_no_scores"] = classes_with_no_scores
+        bucket["classes_with_recent_updates"] = classes_with_recent_updates
+        bucket["classes_without_recent_updates"] = max(bucket["assigned_classes"] - classes_with_recent_updates, 0)
+        bucket["flags"] = _faculty_activity_flags(bucket, window_start=monitor_window["start"])
+        bucket["status"] = _faculty_activity_status(bucket, window_start=monitor_window["start"])
+        monitor_rows.append(bucket)
+
+    monitor_rows.sort(
+        key=lambda row: (
+            {"danger": 0, "warning": 1, "secondary": 2, "success": 3}.get(row["status"]["variant"], 9),
+            row["faculty"].last_name or "",
+            row["faculty"].first_name or "",
+            row["faculty"].username or "",
+        )
+    )
+
+    summary_cards = [
+        {
+            "label": "Faculty Monitored",
+            "value": len(monitor_rows),
+            "meta": monitor_window["label"],
+        },
+        {
+            "label": "Active in Window",
+            "value": sum(1 for row in monitor_rows if row["status"]["label"] == "Active"),
+            "meta": "Faculty logging in and updating gradebooks.",
+        },
+        {
+            "label": "No Login",
+            "value": sum(1 for row in monitor_rows if row["status"]["label"] == "No Login"),
+            "meta": "No faculty login recorded in the selected window.",
+        },
+        {
+            "label": "No Activity Created",
+            "value": sum(1 for row in monitor_rows if row["activities_created"] <= 0),
+            "meta": "No new grade activities created in the window.",
+        },
+        {
+            "label": "No Grade Encoding",
+            "value": sum(1 for row in monitor_rows if row["scores_saved"] <= 0),
+            "meta": "No score-save action recorded in the window.",
+        },
+        {
+            "label": "Needs Follow-up",
+            "value": sum(
+                1
+                for row in monitor_rows
+                if row["status"]["label"] in {"No Login", "No Gradebook Update", "Needs Follow-up"}
+            ),
+            "meta": "Faculty requiring AC/CAO follow-up.",
+        },
+        {
+            "label": "Flagged Classes",
+            "value": sum(row["classes_with_no_activity"] + row["classes_with_no_scores"] for row in monitor_rows),
+            "meta": "Classes still missing activity or score maintenance.",
+        },
+    ]
+
+    overall_trend_buckets = _build_activity_trend_buckets(
+        logs=relevant_logs,
+        start=monitor_window["start"],
+        end=monitor_window["end"],
+    )
+
+    selected_faculty_detail = None
+    if selected_faculty and selected_faculty.id in metrics_by_faculty:
+        faculty_row = metrics_by_faculty[selected_faculty.id]
+        class_rows = []
+        for assignment in faculty_assignment_map.get(selected_faculty.id, []):
+            offering = assignment.offering
+            offering_id = offering.id
+            activity_row = activity_counts.get(offering_id) or {}
+            score_row = score_counts.get(offering_id) or {}
+            submission_row = submission_counts.get(offering_id) or {}
+            class_rows.append(
+                {
+                    "offering": offering,
+                    "label": _offering_monitor_label(offering),
+                    "activities": int(activity_row.get("total") or 0),
+                    "scores": int(score_row.get("total") or 0),
+                    "submitted_periods": int(submission_row.get("submitted") or 0),
+                    "reopened_periods": int(submission_row.get("reopened") or 0),
+                    "last_activity_at": activity_row.get("last_activity_at"),
+                    "last_score_at": score_row.get("last_score_at"),
+                    "last_submission_at": submission_row.get("last_submission_at"),
+                    "no_activity": int(activity_row.get("total") or 0) <= 0,
+                    "no_scores": int(score_row.get("total") or 0) <= 0,
+                }
+            )
+        class_rows.sort(key=lambda row: (row["offering"].course.code, row["offering"].section.code))
+
+        recent_actions = []
+        for log in faculty_row["recent_logs"]:
+            offering_id = _resolve_log_offering(log)
+            offering = offering_map.get(offering_id)
+            recent_actions.append(
+                {
+                    "when": log.created_at,
+                    "action": log.action.replace("_", " ").title(),
+                    "entity_type": log.entity_type,
+                    "offering_label": _offering_monitor_label(offering) if offering else "Faculty Account",
+                }
+            )
+
+        selected_faculty_detail = {
+            "row": faculty_row,
+            "class_rows": class_rows,
+            "recent_actions": recent_actions,
+            "trend_buckets": _build_activity_trend_buckets(
+                logs=relevant_logs,
+                start=monitor_window["start"],
+                end=monitor_window["end"],
+                actor_user_id=selected_faculty.id,
+            ),
+            "weekly_comparison_buckets": _build_week_over_week_buckets(
+                logs=relevant_logs,
+                end=monitor_window["end"],
+                actor_user_id=selected_faculty.id,
+                week_count=6,
+            ),
+        }
+
+    context = {
+        "title": "Faculty Activity Monitor",
+        "term_options": term_options,
+        "campus_options": campus_options,
+        "department_options": department_options,
+        "faculty_candidates": faculty_candidates,
+        "selected_term_id": selected_term_id,
+        "selected_term": selected_term,
+        "selected_campus_id": selected_campus_id,
+        "selected_department_id": selected_department_id,
+        "selected_faculty_id": selected_faculty_id,
+        "selected_faculty": selected_faculty,
+        "faculty_q": faculty_q,
+        "window_options": [
+            {"code": "7d", "label": "Last 7 Days"},
+            {"code": "30d", "label": "Last 30 Days"},
+            {"code": "term", "label": "Current Term"},
+        ],
+        "selected_window_code": monitor_window["code"],
+        "monitor_window": monitor_window,
+        "summary_cards": summary_cards,
+        "monitor_rows": monitor_rows,
+        "overall_trend_buckets": overall_trend_buckets,
+        "selected_faculty_detail": selected_faculty_detail,
+        "grade_prediction_enabled": FeatureSettingsService.can_user_access_grade_prediction(
+            user=request.user,
+            tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+        ),
+        "is_print_mode": is_print_mode,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/academics/faculty_activity_monitor.html", context)
+
+
+@portal_required("ADMIN")
 @permission_required("grading_analytics.read")
 def grading_analytics_view(request):
     offerings_qs = AdminScopeService.scoped_course_offerings(request)
@@ -653,6 +1279,7 @@ def grading_analytics_view(request):
     offering_threshold_source_map = {}
     tenant_threshold_cache = {}
     profile_threshold_offerings = 0
+    template_threshold_offerings = 0
     tenant_threshold_offerings = 0
     for offering in offerings:
         profile = FacultyGradingService.resolve_grading_profile_for_offering(offering)
@@ -663,6 +1290,15 @@ def grading_analytics_view(request):
             offering_threshold_map[offering.id] = profile_threshold
             offering_threshold_source_map[offering.id] = f"Profile {profile.profile_code}"
             profile_threshold_offerings += 1
+            continue
+        template = FacultyGradingService.resolve_template_for_offering(offering)
+        template_threshold = None
+        if template and template.passing_grade_threshold is not None:
+            template_threshold = GradingGovernanceService._round(Decimal(template.passing_grade_threshold))
+        if template_threshold is not None:
+            offering_threshold_map[offering.id] = template_threshold
+            offering_threshold_source_map[offering.id] = f"Template {template.code}"
+            template_threshold_offerings += 1
             continue
         if offering.tenant_id not in tenant_threshold_cache:
             tenant_raw = SystemSettingService.get(
@@ -708,8 +1344,9 @@ def grading_analytics_view(request):
         "fail_rate": _pct(failed_count, graded_count),
         "avg_period_grade": avg_period_grade,
         "profile_threshold_offerings": profile_threshold_offerings,
+        "template_threshold_offerings": template_threshold_offerings,
         "tenant_threshold_offerings": tenant_threshold_offerings,
-        "threshold_policy": "Profile threshold -> Tenant PASSING_GRADE_THRESHOLD -> 75.00",
+        "threshold_policy": "Profile threshold -> Template threshold -> Tenant PASSING_GRADE_THRESHOLD -> 75.00",
     }
 
     submission_status_rows = list(
@@ -2000,6 +2637,18 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default="IGNORE_MISSING",
     )
+    current_faculty_official_period_grades_after_deadline = (
+        FeatureSettingsService.show_faculty_official_period_grades_after_deadline(
+            tenant_id=tenant_id,
+            default=False,
+        )
+    )
+    current_faculty_official_final_grades_after_deadline = (
+        FeatureSettingsService.show_faculty_official_final_grades_after_deadline(
+            tenant_id=tenant_id,
+            default=False,
+        )
+    )
 
     form = ConfigurableFeatureSettingForm(
         request.POST or None,
@@ -2037,6 +2686,8 @@ def configurable_features_settings_view(request):
             "grade_prediction_show_worst_case": current_grade_prediction_show_worst_case,
             "grade_prediction_show_target_needed": current_grade_prediction_show_target_needed,
             "grade_prediction_default_assumption": current_grade_prediction_default_assumption,
+            "faculty_official_period_grades_after_deadline": current_faculty_official_period_grades_after_deadline,
+            "faculty_official_final_grades_after_deadline": current_faculty_official_final_grades_after_deadline,
         },
         role_queryset=role_queryset,
         campus_queryset=campus_queryset,
@@ -2292,6 +2943,20 @@ def configurable_features_settings_view(request):
             value_type="STRING",
             is_active=True,
         )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE_KEY,
+            bool(form.cleaned_data["faculty_official_period_grades_after_deadline"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE_KEY,
+            bool(form.cleaned_data["faculty_official_final_grades_after_deadline"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
 
         AuditService.log_event(
             action="UPDATE_SYSTEM_SETTING",
@@ -2333,6 +2998,8 @@ def configurable_features_settings_view(request):
                 "grade_prediction_show_worst_case": current_grade_prediction_show_worst_case,
                 "grade_prediction_show_target_needed": current_grade_prediction_show_target_needed,
                 "grade_prediction_default_assumption": current_grade_prediction_default_assumption,
+                "faculty_official_period_grades_after_deadline": current_faculty_official_period_grades_after_deadline,
+                "faculty_official_final_grades_after_deadline": current_faculty_official_final_grades_after_deadline,
             },
             after_data={
                 "correction_official_report_enabled": bool(form.cleaned_data["correction_official_report_enabled"]),
@@ -2381,6 +3048,12 @@ def configurable_features_settings_view(request):
                 "grade_prediction_show_worst_case": bool(form.cleaned_data["grade_prediction_show_worst_case"]),
                 "grade_prediction_show_target_needed": bool(form.cleaned_data["grade_prediction_show_target_needed"]),
                 "grade_prediction_default_assumption": str(form.cleaned_data["grade_prediction_default_assumption"]),
+                "faculty_official_period_grades_after_deadline": bool(
+                    form.cleaned_data["faculty_official_period_grades_after_deadline"]
+                ),
+                "faculty_official_final_grades_after_deadline": bool(
+                    form.cleaned_data["faculty_official_final_grades_after_deadline"]
+                ),
             },
             metadata={
                 "setting_keys": [
@@ -2415,11 +3088,13 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.GRADE_PREDICTION_SHOW_WORST_CASE_KEY,
                     FeatureSettingsService.GRADE_PREDICTION_SHOW_TARGET_NEEDED_KEY,
                     FeatureSettingsService.GRADE_PREDICTION_DEFAULT_ASSUMPTION_KEY,
+                    FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE_KEY,
+                    FeatureSettingsService.FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE_KEY,
                 ],
             },
             request=request,
         )
-        messages.success(request, "Configurable features updated.")
+        messages.success(request, "Configuration management updated.")
         redirect_url = reverse("admin_portal:configurable_features_settings")
         redirect_params = {}
         if selected_class_override_term:
@@ -2433,7 +3108,7 @@ def configurable_features_settings_view(request):
         return redirect(redirect_url)
 
     context = {
-        "title": "Configurable Features",
+        "title": "Configuration Management",
         "form": form,
         "campus_count": campus_queryset.count(),
         "campus_field_rows": [{"campus": campus, "field": form[field_name]} for field_name, campus in form.campus_fields],
@@ -2835,6 +3510,7 @@ def _scoped_audit_queryset(request):
 
 def _active_user_activity_rows(request, limit=25):
     now = timezone.now()
+    session_timeout = timedelta(seconds=getattr(settings, "SESSION_COOKIE_AGE", 0) or 0)
     active_sessions = Session.objects.filter(expire_date__gte=now).order_by("-expire_date")[:500]
 
     active_user_ids = []
@@ -2875,13 +3551,28 @@ def _active_user_activity_rows(request, limit=25):
             continue
         session_obj = session_map.get(user_id)
         last_log = audit_map.get(user_id)
+        activity_anchor = None
+        if last_log and last_log.created_at:
+            activity_anchor = last_log.created_at
+        elif getattr(user, "last_login", None):
+            activity_anchor = user.last_login
+
+        effective_session_expires_at = session_obj.expire_date if session_obj else None
+        if activity_anchor and session_timeout.total_seconds() > 0:
+            policy_expires_at = activity_anchor + session_timeout
+            if effective_session_expires_at is None or policy_expires_at < effective_session_expires_at:
+                effective_session_expires_at = policy_expires_at
+
+        if effective_session_expires_at and effective_session_expires_at <= now:
+            continue
+
         activity_label = "No recent activity"
         if last_log:
             activity_label = last_log.route_name or f"{last_log.action} {last_log.entity_type}".strip()
         rows.append(
             {
                 "user": user,
-                "session_expires_at": session_obj.expire_date if session_obj else None,
+                "session_expires_at": effective_session_expires_at,
                 "last_activity_at": last_log.created_at if last_log else None,
                 "last_activity_label": activity_label,
                 "last_activity_action": last_log.action if last_log else None,
@@ -4780,6 +5471,142 @@ def grade_prediction_monitor_view(request):
 
 @portal_required("ADMIN")
 @permission_required("faculty_assignments.read")
+def faculty_final_clearance_view(request):
+    current_tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    current_campus_id = getattr(request, "scope", {}).get("campus_id")
+    if not current_tenant_id or not current_campus_id:
+        messages.error(request, "Select the correct tenant and campus scope first.")
+        return _redirect_back_or_default(request, "admin_portal:dashboard")
+
+    term_queryset = AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
+    selected_term = None
+    selected_term_id = request.GET.get("term_id") or request.POST.get("term_id")
+    if selected_term_id:
+        selected_term = term_queryset.filter(id=selected_term_id).first()
+
+    faculty_queryset = (
+        User.objects.filter(
+            faculty_assignments__is_active=True,
+            faculty_assignments__offering__tenant_id=current_tenant_id,
+            faculty_assignments__offering__campus_id=current_campus_id,
+        )
+        .distinct()
+        .order_by("last_name", "first_name", "username")
+    )
+    if selected_term:
+        faculty_queryset = faculty_queryset.filter(faculty_assignments__offering__term_id=selected_term.id).distinct()
+
+    selected_faculty = None
+    selected_faculty_id = request.GET.get("faculty_user_id") or request.POST.get("faculty_user_id")
+    if selected_faculty_id:
+        selected_faculty = faculty_queryset.filter(id=selected_faculty_id).first()
+
+    lookup_reference_no = (request.GET.get("lookup_reference_no") or "").strip()
+    lookup_verification_code = (request.GET.get("lookup_verification_code") or "").strip().upper()
+    lookup_report = None
+    lookup_error = ""
+    if lookup_reference_no or lookup_verification_code:
+        if not lookup_reference_no or not lookup_verification_code:
+            lookup_error = "Enter both the Reference No. and Verification Code to verify a printed clearance."
+        else:
+            lookup_report = (
+                FacultyFinalClearanceReport.objects.filter(
+                    tenant_id=current_tenant_id,
+                    campus_id=current_campus_id,
+                    reference_no=lookup_reference_no,
+                    verification_code=lookup_verification_code,
+                )
+                .select_related("faculty_user", "term", "academic_year", "generated_by_user")
+                .first()
+            )
+            if not lookup_report:
+                lookup_error = (
+                    "No official NCBA faculty final clearance report matched the supplied Reference No. "
+                    "and Verification Code for the current campus scope."
+                )
+
+    campus = get_object_or_404(AdminScopeService.scoped_campuses(request), id=current_campus_id)
+    preview = None
+    if selected_term and selected_faculty:
+        preview = FacultyFinalClearanceReportService.evaluate_faculty_clearance(
+            faculty_user=selected_faculty,
+            term=selected_term,
+            campus=campus,
+        )
+
+    if request.method == "POST":
+        if not selected_term or not selected_faculty:
+            messages.error(request, "Select a term and faculty member first.")
+        else:
+            messages.error(
+                request,
+                "Official Final Clearance generation is available only in the Faculty Portal. Admin may preview and verify reports here.",
+            )
+        query_string = urlencode(
+            {
+                key: value
+                for key, value in {
+                    "term_id": selected_term.id if selected_term else "",
+                    "faculty_user_id": selected_faculty.id if selected_faculty else "",
+                }.items()
+                if value
+            }
+        )
+        target_url = reverse("admin_portal:faculty_final_clearance")
+        if query_string:
+            target_url = f"{target_url}?{query_string}"
+        return redirect(target_url)
+
+    recent_reports = (
+        FacultyFinalClearanceReport.objects.filter(
+            tenant_id=current_tenant_id,
+            campus_id=current_campus_id,
+        )
+        .select_related("faculty_user", "term", "academic_year", "generated_by_user")
+        .order_by("-created_at")[:10]
+    )
+
+    context = {
+        "title": "Faculty Final Clearance",
+        "term_options": term_queryset,
+        "faculty_options": faculty_queryset,
+        "selected_term": selected_term,
+        "selected_faculty": selected_faculty,
+        "preview": preview,
+        "lookup_reference_no": lookup_reference_no,
+        "lookup_verification_code": lookup_verification_code,
+        "lookup_report": lookup_report,
+        "lookup_error": lookup_error,
+        "recent_reports": recent_reports,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/academics/faculty_final_clearance.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("faculty_assignments.read")
+def faculty_final_clearance_verify_view(request, report_id: int):
+    report_obj = get_object_or_404(
+        FacultyFinalClearanceReport.objects.select_related(
+            "tenant", "campus", "academic_year", "term", "faculty_user", "generated_by_user"
+        ),
+        id=report_id,
+    )
+    scope = getattr(request, "scope", {})
+    if report_obj.tenant_id not in set(scope.get("tenant_ids", [])) or report_obj.campus_id not in set(scope.get("campus_ids", [])):
+        raise PermissionDenied("You do not have access to this clearance report.")
+
+    context = {
+        "title": "Faculty Final Clearance Verification",
+        "report_obj": report_obj,
+        "rows": (report_obj.snapshot_json or {}).get("rows", []),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/academics/faculty_final_clearance_verify.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("faculty_assignments.read")
 def faculty_assignment_dashboard_view(request):
     FacultyAssignmentWorkflowService.expire_overdue_assignments()
 
@@ -5533,7 +6360,9 @@ def enrollment_list_view(request):
     section_id = request.GET.get("section_id", "").strip()
     course_id = request.GET.get("course_id", "").strip()
     offering_id = request.GET.get("offering_id", "").strip()
-    status = request.GET.get("status", "").strip()
+    status = request.GET.get("status", "").strip().upper()
+    if status == "DR":
+        status = Enrollment.Status.DRP
 
     if campus_id:
         queryset = queryset.filter(campus_id=campus_id)
@@ -5547,8 +6376,6 @@ def enrollment_list_view(request):
         queryset = queryset.filter(course_offering__course_id=course_id)
     if offering_id:
         queryset = queryset.filter(course_offering_id=offering_id)
-    if status:
-        queryset = queryset.filter(enrollment_status=status)
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(
@@ -5558,6 +6385,14 @@ def enrollment_list_view(request):
             | Q(course_offering__course__code__icontains=q)
             | Q(course_offering__section__code__icontains=q)
         )
+    status_summary = queryset.aggregate(
+        active_count=Count("id", filter=Q(enrollment_status=Enrollment.Status.ACTIVE)),
+        drp_count=Count("id", filter=Q(enrollment_status=Enrollment.Status.DRP)),
+        withdrawn_count=Count("id", filter=Q(enrollment_status=Enrollment.Status.W)),
+        incomplete_count=Count("id", filter=Q(enrollment_status=Enrollment.Status.INC)),
+    )
+    if status:
+        queryset = queryset.filter(enrollment_status=status)
 
     offerings = AdminScopeService.scoped_course_offerings(request)
     if campus_id:
@@ -5600,6 +6435,12 @@ def enrollment_list_view(request):
     context["section_id"] = section_id
     context["course_id"] = course_id
     context["offering_id"] = offering_id
+    context["status_summary"] = {
+        "active": status_summary.get("active_count") or 0,
+        "drp": status_summary.get("drp_count") or 0,
+        "w": status_summary.get("withdrawn_count") or 0,
+        "inc": status_summary.get("incomplete_count") or 0,
+    }
     return render(request, "admin_portal/enrollment/enrollment_list.html", context)
 
 
@@ -5980,8 +6821,8 @@ def grading_template_calculator_view(request):
             "This tool is read-only. It does not create grades, activities, or student records.",
             "Enter sample raw score and total score values at the lowest active level of the selected template.",
             "EduGradesPro will first convert raw score to computed percentage, then roll the result upward into component, period, and final grades.",
-            "Period grades and final grade follow the same current EduGradesPro computation logic used by the official grading engine.",
-            "Final grade is computed from the active period grades currently defined in the selected grading template.",
+            "Period grades follow the same current EduGradesPro computation logic used by the official grading engine.",
+            "This calculator previews the template structure only. In live class computation, the official final grade may also follow a tenant grading profile formula.",
         ],
     }
     context.update(_scope_context(request))
@@ -6343,6 +7184,19 @@ def template_hotfix_create_view(request, template_id: int):
         tenant_id=template.tenant_id,
         status=CourseOffering.Status.OPEN,
         is_active=True,
+    ).select_related(
+        "course",
+        "section",
+        "academic_year",
+        "term",
+        "campus",
+    ).order_by(
+        "course__title",
+        "course__code",
+        "section__code",
+        "academic_year__code",
+        "term__sequence_no",
+        "id",
     )
     form = TemplateHotfixRequestForm(request.POST or None, offering_queryset=scoped_offerings)
     _style_form(form)
@@ -6383,9 +7237,35 @@ def template_hotfix_create_view(request, template_id: int):
         messages.success(request, f"Hotfix request created for template {template.code}.")
         return _redirect_back_or_default(request, "admin_portal:template_hotfix_list")
 
-    context = {"form": form, "title": f"Create Hotfix Request: {template.code}"}
+    selected_ids = {
+        str(value)
+        for value in (
+            request.POST.getlist("selected_offerings")
+            if request.method == "POST"
+            else form.initial.get("selected_offerings", [])
+        )
+    }
+    offering_cards = [
+        {
+            "id": row.id,
+            "title": row.course.title,
+            "course_code": row.course.code,
+            "section_code": row.section.code,
+            "academic_year_code": row.academic_year.code,
+            "term_code": row.term.code,
+            "campus_code": row.campus.code if row.campus_id else "",
+            "checked": str(row.id) in selected_ids,
+        }
+        for row in scoped_offerings
+    ]
+    context = {
+        "form": form,
+        "title": f"Create Hotfix Request: {template.code}",
+        "template_obj": template,
+        "offering_cards": offering_cards,
+    }
     context.update(_scope_context(request))
-    return render(request, "admin_portal/shared/form_page.html", context)
+    return render(request, "admin_portal/grading/template_hotfix_create.html", context)
 
 
 @portal_required("ADMIN")

@@ -218,9 +218,11 @@
       <a href="{% url 'admin_portal:grading_period_lock_list' %}">Period Locks</a>
       <a href="{% url 'admin_portal:grade_submission_list' %}">Grade Submissions</a>
       <a href="{% url 'admin_portal:grade_correction_request_list' %}">Correction Requests</a>
-      <a href="{% url 'admin_portal:faculty_gradebook_monitor' %}">Faculty Grade Book Monitor</a>
-      <a href="{% url 'admin_portal:grade_prediction_monitor' %}">Grade Prediction Monitor</a>
-      <a href="{% url 'admin_portal:audit_log_list' %}">Audit Logs</a>
+        <a href="{% url 'admin_portal:faculty_gradebook_monitor' %}">Faculty Grade Book Monitor</a>
+        <a href="{% url 'admin_portal:faculty_activity_monitor' %}">Faculty Activity Monitor</a>
+        <a href="{% url 'admin_portal:faculty_final_clearance' %}">Faculty Final Clearance</a>
+        <a href="{% url 'admin_portal:grade_prediction_monitor' %}">Grade Prediction Monitor</a>
+        <a href="{% url 'admin_portal:audit_log_list' %}">Audit Logs</a>
     </div>
   </div>
 
@@ -437,6 +439,7 @@
           <ol class="guide-steps">
             <li>Filter -> Edit exact record -> Save -> Re-verify in list.</li>
             <li>Inactivate records instead of deleting when operations already depend on them.</li>
+            <li>In <strong>Admin Portal -> Enrollment</strong>, use the status summary cards to quickly review how many rows are currently <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>W</strong>, or <strong>INC</strong> inside the current filtered scope.</li>
           </ol>
           <div class="guide-note">
             Data quality is the top source of grading stability.
@@ -496,8 +499,13 @@
               </tr>
               <tr>
                 <td>Optional Workflow Features</td>
-                <td><strong>Admin Portal -> Tools -> Configurable Features</strong></td>
-                <td>Turn optional features on/off such as official correction PDF, registrar auto-email, assignment-primary default behavior, and class master list ownership mode for faculty roster maintenance, including optional class-level overrides filtered by tenant, campus, term, and optional faculty name, with a clearer multi-class picker that no longer repeats the already selected term/academic year, visually emphasizes faculty names, and sits inside collapsible setting cards for easier navigation.</td>
+                <td><strong>Admin Portal -> Tools -> Configuration Management</strong></td>
+                <td>Turn optional features on/off such as official correction PDF, registrar auto-email, assignment-primary default behavior, class master list ownership mode for faculty roster maintenance, grade prediction options, login security, and the official-grade release restriction that can delay computed period grades and final grades until after deadline.</td>
+              </tr>
+              <tr>
+                <td>Tenant Grading Formula</td>
+                <td><strong>Admin Portal -> Grading -> Tenant Grading Profiles</strong></td>
+                <td>Define the matched grading template, passing threshold override, and final-grade formula for a tenant scope. Default mode averages all active template periods; weighted mode lets you declare specific period weights per tenant/campus/department/program/course scope. If the profile leaves passing threshold blank, EduGradesPro now falls back to the grading template threshold before using the tenant default.</td>
               </tr>
             </tbody>
           </table>
@@ -773,16 +781,21 @@
                 <td>Requires users to review and accept the current EduGradesPro Privacy Consent before using the portal.</td>
                 <td>Shown automatically at login when consent has not yet been recorded for the current version.</td>
               </tr>
-              <tr>
-                <td>Single-Device Session Enforcement</td>
-                <td>Revokes older active sessions for the same user when they sign in on a new device or browser.</td>
-                <td>Applied automatically on successful sign-in for protected portals.</td>
-              </tr>
-              <tr>
-                <td>Temporary Login Lockout</td>
-                <td>Temporarily blocks repeated failed login attempts to reduce password-guessing and brute-force abuse.</td>
-                <td><strong>Admin Portal -> Tools -> Configurable Features -> Login Security</strong> for policy, and <strong>Admin Portal -> Security -> Login Lockouts</strong> for monitoring and manual unlock.</td>
-              </tr>
+                <tr>
+                  <td>Single-Device Session Enforcement</td>
+                  <td>Revokes older active sessions for the same user when they sign in on a new device or browser.</td>
+                  <td>Applied automatically on successful sign-in for protected portals.</td>
+                </tr>
+                <tr>
+                  <td>Session Timeout</td>
+                  <td>Ends inactive portal sessions after 1 hour so stale browser sessions do not stay open too long.</td>
+                  <td>Applied automatically through Django session settings for both Admin Portal and Faculty Portal.</td>
+                </tr>
+                <tr>
+                  <td>Temporary Login Lockout</td>
+                  <td>Temporarily blocks repeated failed login attempts to reduce password-guessing and brute-force abuse.</td>
+                  <td><strong>Admin Portal -> Tools -> Configuration Management -> Login Security</strong> for policy, and <strong>Admin Portal -> Security -> Login Lockouts</strong> for monitoring and manual unlock.</td>
+                </tr>
             </tbody>
           </table>
           <div class="guide-subhead">Admin Rules</div>
@@ -847,8 +860,25 @@
             <li>Use dashboard and analytics to monitor submissions, failures, and exceptions.</li>
             <li>Use audit logs for policy-critical actions and decision traceability.</li>
             <li>Review correction/reopen actions before official release.</li>
+            <li>Use Faculty Activity Monitor to identify faculty who have not logged in, created activities, or encoded grades within the selected weekly or term window.</li>
             <li>Use Faculty Grade Book Monitor for read-only academic oversight of a scoped faculty member's classes and period grades.</li>
           </ul>
+          <div class="guide-subhead">Faculty Activity Monitoring</div>
+          <ol class="guide-steps">
+            <li>Open <strong>Faculty Activity Monitor</strong> from the Dashboard quick actions or from the Faculty Assignments page.</li>
+            <li>Filter by campus, department, and term so AC and CAO review only the teaching loads they are responsible for.</li>
+            <li>Choose the monitoring window, such as <strong>Last 7 Days</strong> or <strong>Current Term</strong>, to match the follow-up cycle you want.</li>
+            <li>Review the summary cards first for <strong>No Login</strong>, <strong>No Activity Created</strong>, and <strong>No Grade Encoding</strong> counts.</li>
+            <li>Use the new <strong>Window Activity Trend</strong> section to see whether logins, activity creation, score encoding, and gradebook work are sustained across the selected weekly or term view.</li>
+            <li>Use the faculty table to spot who still has classes with <strong>No Activity Yet</strong> or <strong>No Scores Yet</strong>.</li>
+            <li>Review the row-level flag badges to identify faculty who need follow-up for <strong>No Login</strong>, <strong>No Gradebook Update</strong>, or missing class maintenance.</li>
+            <li>Open the optional faculty drilldown when you need the class-by-class view and recent auditable actions before contacting the faculty member.</li>
+            <li>Inside the selected faculty drilldown, use the new <strong>Week-over-Week Comparison</strong> charts to compare six weekly slices of login, activity setup, score encoding, and gradebook work for one faculty member.</li>
+            <li>Use <strong>Print Report</strong> when you need a clean monitoring snapshot for meetings, weekly review, or compliance follow-up.</li>
+          </ol>
+          <div class="guide-note">
+            This monitor is designed for academic follow-up. It helps AC and CAO see whether faculty are actively maintaining gradebooks before deadline pressure becomes a larger governance issue.
+          </div>
           <div class="guide-subhead">Faculty Grade Book Monitoring</div>
           <ol class="guide-steps">
             <li>Open Faculty Assignments and select the faculty member within your allowed tenant, campus, and department scope.</li>
@@ -867,7 +897,7 @@
           </div>
           <div class="guide-subhead">Grade Prediction Monitor</div>
           <ul class="guide-list">
-            <li>Prediction is unofficial and read-only. It must be enabled first in <strong>Configurable Features</strong>.</li>
+            <li>Prediction is unofficial and read-only. It must be enabled first in <strong>Configuration Management</strong>.</li>
             <li>Open <strong>Grade Prediction Monitor</strong> to review projected outcomes for the scoped faculty, class, and period.</li>
             <li>Use the monitor to spot low coverage, at-risk students, and likely grade outcomes before submission deadlines.</li>
             <li>Prediction uses the same grading template path as the official computation engine, but it never writes to the gradebook.</li>
@@ -883,13 +913,15 @@
     <div class="guide-section-body">
       <div class="guide-grid">
         <div>
-          <ul class="guide-list">
-            <li>Confirm active AY/Term and role scopes.</li>
-            <li>Confirm all lock/deadline configurations are correct.</li>
-            <li>Track and resolve non-submitted classes.</li>
-            <li>Process correction/reopen according to chosen policy mode.</li>
-            <li>Review audit logs and analytics before final release/export.</li>
-          </ul>
+            <ul class="guide-list">
+              <li>Confirm active AY/Term and role scopes.</li>
+              <li>Confirm all lock/deadline configurations are correct.</li>
+              <li>Track and resolve non-submitted classes.</li>
+              <li>Process correction/reopen according to chosen policy mode.</li>
+              <li>Open <strong>Faculty Final Clearance</strong> once final submissions are complete to preview which assigned classes are already complete or still incomplete per faculty member, and to verify already generated official clearance reports.</li>
+              <li>Faculty generates the official clearance in the Faculty Portal. Authorized personnel may verify a printed copy either by scanning the printed QR code or by entering the printed <strong>Reference No.</strong> and <strong>Verification Code</strong> in the Admin Portal verification lookup.</li>
+              <li>Review audit logs and analytics before final release/export.</li>
+            </ul>
         </div>
         <div class="guide-image">
           <img src="{% get_media_prefix %}portal-img/admin_operations_checklist.png" alt="Admin operations checklist screenshot">

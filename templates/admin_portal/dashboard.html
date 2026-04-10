@@ -222,10 +222,10 @@
         <div class="help-card">
           <div class="eyebrow">Operations Reminder</div>
           <h3>Reminder and Expiry Rules Are Configurable</h3>
-          <p>Use Configurable Features to define response-window days, reminder timing, and whether overdue assignments expire automatically for the selected tenant.</p>
+          <p>Use Configuration Management to define response-window days, reminder timing, and whether overdue assignments expire automatically for the selected tenant.</p>
           <div class="d-flex gap-2 flex-wrap">
             {% if has_system_settings_update %}
-            <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:configurable_features_settings' %}">Open Configurable Features</a>
+            <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:configurable_features_settings' %}">Open Configuration Management</a>
             {% endif %}
             <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:guide' %}#assignment-acceptance">Review Rules</a>
           </div>
@@ -316,7 +316,7 @@
             Configure Active Grading Period
           </a>
           <a class="btn btn-outline-secondary" href="{% url 'admin_portal:configurable_features_settings' %}">
-            Configurable Features
+            Configuration Management
           </a>
         </div>
         {% endif %}
@@ -485,12 +485,14 @@
           {% if "grading_analytics.read" in effective_permissions %}
           <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:grading_analytics' %}">Grading Analytics</a></div>
           {% endif %}
-          {% if has_faculty_assignments_read %}
-          <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_assignment_dashboard' %}">Assignment Dashboard</a></div>
-          {% endif %}
+            {% if has_faculty_assignments_read %}
+            <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_assignment_dashboard' %}">Assignment Dashboard</a></div>
+            <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_activity_monitor' %}">Faculty Activity Monitor</a></div>
+            <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_final_clearance' %}">Faculty Final Clearance</a></div>
+            {% endif %}
+          </div>
         </div>
       </div>
-    </div>
   </div>
 
   {% if has_users_read %}

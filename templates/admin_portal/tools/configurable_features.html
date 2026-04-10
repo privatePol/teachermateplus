@@ -3,11 +3,27 @@
 {% block extra_head %}
 {{ block.super }}
 <style>
+  .feature-settings-form .settings-card-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  @media (min-width: 992px) {
+    .feature-settings-form .settings-card-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: start;
+    }
+  }
+
   .feature-settings-form .settings-card {
     overflow: hidden;
     border-radius: 1rem;
-    margin-bottom: 1.6rem !important;
     box-shadow: 0 0.75rem 1.8rem rgba(28, 49, 38, 0.14) !important;
+  }
+
+  .feature-settings-form .settings-card.is-expanded {
+    grid-column: 1 / -1;
   }
 
   .feature-settings-form .settings-card .card-header,
@@ -60,6 +76,55 @@
 
   .feature-settings-form .settings-card .card-body {
     padding: 1.2rem;
+  }
+
+  .feature-settings-form .settings-card-summary {
+    display: none;
+    width: 100%;
+    border: 0;
+    background: linear-gradient(180deg, #ffffff, #f7fbf8);
+    padding: 1rem 1.1rem 1.15rem;
+    text-align: left;
+    color: #365242;
+    cursor: pointer;
+  }
+
+  .feature-settings-form .settings-card-summary:hover {
+    background: linear-gradient(180deg, #fbfdfb, #eff6f1);
+  }
+
+  .feature-settings-form .settings-card-summary:focus {
+    outline: none;
+    box-shadow: inset 0 0 0 2px rgba(52, 93, 70, 0.14);
+  }
+
+  .feature-settings-form .settings-card-summary-title {
+    display: block;
+    font-weight: 600;
+    color: #1f3d29;
+    margin-bottom: 0.35rem;
+  }
+
+  .feature-settings-form .settings-card-summary-text {
+    display: block;
+    font-size: 0.94rem;
+    line-height: 1.45;
+    color: #5c7366;
+  }
+
+  .feature-settings-form .settings-card.is-collapsed .settings-card-summary {
+    display: block;
+  }
+
+  .feature-settings-form .settings-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .feature-settings-form .settings-footer {
+    margin-top: 2.4rem;
   }
 
   .feature-settings-form .settings-card:nth-of-type(1) .card-header { background: linear-gradient(135deg, #3d6b35, #68a357) !important; }
@@ -213,22 +278,28 @@
   <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
 </div>
 
-<div class="alert alert-info">
-  Configure optional workflows here instead of hard-enabling them in code. Use this page for global feature toggles and, where needed, role-based control.
-</div>
-
 <form method="post" novalidate class="feature-settings-form">
   {% csrf_token %}
   {% if form.non_field_errors %}
   <div class="alert alert-danger">{{ form.non_field_errors }}</div>
   {% endif %}
 
-  <div class="card border-0 shadow-sm mb-3 settings-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-official-report" aria-expanded="true" aria-controls="feature-card-correction-official-report">
+  <div class="settings-toolbar">
+    <button class="btn btn-outline-secondary btn-sm" type="button" id="expand-all-settings">Expand All</button>
+    <button class="btn btn-outline-secondary btn-sm" type="button" id="collapse-all-settings">Collapse All</button>
+  </div>
+
+  <div class="settings-card-grid">
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-official-report" aria-expanded="false" aria-controls="feature-card-correction-official-report">
       <strong>Correction Official Report</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-correction-official-report" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-official-report" aria-expanded="false" aria-controls="feature-card-correction-official-report">
+      <span class="settings-card-summary-title">Correction Official Report</span>
+      <span class="settings-card-summary-text">Control the official printable correction artifact used as registrar reference and audit support.</span>
+    </button>
+    <div id="feature-card-correction-official-report" class="collapse">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.correction_official_report_enabled }}
@@ -247,12 +318,16 @@
     </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3 settings-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-approval-email" aria-expanded="true" aria-controls="feature-card-correction-approval-email">
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-approval-email" aria-expanded="false" aria-controls="feature-card-correction-approval-email">
       <strong>Correction Approval Notification Email</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-correction-approval-email" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-approval-email" aria-expanded="false" aria-controls="feature-card-correction-approval-email">
+      <span class="settings-card-summary-title">Correction Approval Notification Email</span>
+      <span class="settings-card-summary-text">Choose whether approvers receive email as soon as faculty submit a correction petition.</span>
+    </button>
+    <div id="feature-card-correction-approval-email" class="collapse">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.correction_submission_approval_email_enabled }}
@@ -279,12 +354,16 @@
     </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3 settings-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-registrar-auto-email" aria-expanded="true" aria-controls="feature-card-registrar-auto-email">
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-registrar-auto-email" aria-expanded="false" aria-controls="feature-card-registrar-auto-email">
       <strong>Registrar Auto Email</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-registrar-auto-email" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-registrar-auto-email" aria-expanded="false" aria-controls="feature-card-registrar-auto-email">
+      <span class="settings-card-summary-title">Registrar Auto Email</span>
+      <span class="settings-card-summary-text">Set default and campus-specific registrar recipients for approved correction notifications and reports.</span>
+    </button>
+    <div id="feature-card-registrar-auto-email" class="collapse">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.correction_registrar_auto_email_enabled }}
@@ -322,12 +401,16 @@
     </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3 settings-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-assignment" aria-expanded="true" aria-controls="feature-card-faculty-assignment">
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-assignment" aria-expanded="false" aria-controls="feature-card-faculty-assignment">
       <strong>Faculty Assignment Acceptance Workflow</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-faculty-assignment" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-assignment" aria-expanded="false" aria-controls="feature-card-faculty-assignment">
+      <span class="settings-card-summary-title">Faculty Assignment Acceptance Workflow</span>
+      <span class="settings-card-summary-text">Set response windows, reminder timing, expiry behavior, and default primary-assignment handling.</span>
+    </button>
+    <div id="feature-card-faculty-assignment" class="collapse">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.faculty_assignment_reminders_enabled }}
@@ -390,12 +473,16 @@
     </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3 settings-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-reminder" aria-expanded="true" aria-controls="feature-card-faculty-reminder">
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-reminder" aria-expanded="false" aria-controls="feature-card-faculty-reminder">
       <strong>Faculty Reminder Center</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-faculty-reminder" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-reminder" aria-expanded="false" aria-controls="feature-card-faculty-reminder">
+      <span class="settings-card-summary-title">Faculty Reminder Center</span>
+      <span class="settings-card-summary-text">Manage portal reminders and optional queued email reminders for faculty tasks and future activities.</span>
+    </button>
+    <div id="feature-card-faculty-reminder" class="collapse">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.faculty_reminder_center_enabled }}
@@ -424,12 +511,16 @@
     </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3 settings-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-memo" aria-expanded="true" aria-controls="feature-card-faculty-memo">
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-memo" aria-expanded="false" aria-controls="feature-card-faculty-memo">
       <strong>Faculty Memo Center</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-faculty-memo" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-faculty-memo" aria-expanded="false" aria-controls="feature-card-faculty-memo">
+      <span class="settings-card-summary-title">Faculty Memo Center</span>
+      <span class="settings-card-summary-text">Control the faculty private memo workspace for class reminders, student follow-up, and personal notes.</span>
+    </button>
+    <div id="feature-card-faculty-memo" class="collapse">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.faculty_memo_center_enabled }}
@@ -448,12 +539,16 @@
     </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3 settings-card settings-anchor-card" id="class-master-list-ownership-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-class-master-list" aria-expanded="true" aria-controls="feature-card-class-master-list">
+  <div class="card border-0 shadow-sm settings-card settings-anchor-card is-collapsed" id="class-master-list-ownership-card">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-class-master-list" aria-expanded="false" aria-controls="feature-card-class-master-list">
       <strong>Class Master List Ownership</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-class-master-list" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-class-master-list" aria-expanded="false" aria-controls="feature-card-class-master-list">
+      <span class="settings-card-summary-title">Class Master List Ownership</span>
+      <span class="settings-card-summary-text">Decide whether class roster maintenance stays admin-only or can be delegated per class during adjustment periods.</span>
+    </button>
+    <div id="feature-card-class-master-list" class="collapse">
     <div class="card-body">
       <div class="mb-3">
         <label class="form-label" for="{{ form.enrollment_ownership_mode.id_for_label }}">{{ form.enrollment_ownership_mode.label }}</label>
@@ -584,12 +679,16 @@
     </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3 settings-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-login-security" aria-expanded="true" aria-controls="feature-card-login-security">
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-login-security" aria-expanded="false" aria-controls="feature-card-login-security">
       <strong>Login Security</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-login-security" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-login-security" aria-expanded="false" aria-controls="feature-card-login-security">
+      <span class="settings-card-summary-title">Login Security</span>
+      <span class="settings-card-summary-text">Protect accounts with temporary lockout, retry thresholds, and lockout duration settings for both portals.</span>
+    </button>
+    <div id="feature-card-login-security" class="collapse">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.login_lockout_enabled }}
@@ -628,12 +727,16 @@
     </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3 settings-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-prediction" aria-expanded="true" aria-controls="feature-card-grade-prediction">
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-prediction" aria-expanded="false" aria-controls="feature-card-grade-prediction">
       <strong>Grade Prediction</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-grade-prediction" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-prediction" aria-expanded="false" aria-controls="feature-card-grade-prediction">
+      <span class="settings-card-summary-title">Grade Prediction</span>
+      <span class="settings-card-summary-text">Enable unofficial prediction, what-if simulation, at-risk flags, and the target-needed calculation.</span>
+    </button>
+    <div id="feature-card-grade-prediction" class="collapse">
     <div class="card-body">
       <div class="form-check form-switch mb-3">
         {{ form.grade_prediction_enabled }}
@@ -719,15 +822,19 @@
     </div>
   </div>
 
-  <div class="card border-0 shadow-sm mb-3 settings-card">
-    <button class="card-header settings-card-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-campus-recipients" aria-expanded="true" aria-controls="feature-card-campus-recipients">
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-campus-recipients" aria-expanded="false" aria-controls="feature-card-campus-recipients">
       <span>
         <strong>Campus / Branch Recipient Emails</strong>
         <span class="text-muted small ms-2">{{ campus_count }} campus{% if campus_count != 1 %}es{% endif %}</span>
       </span>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
-    <div id="feature-card-campus-recipients" class="collapse show">
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-campus-recipients" aria-expanded="false" aria-controls="feature-card-campus-recipients">
+      <span class="settings-card-summary-title">Campus / Branch Recipient Emails</span>
+      <span class="settings-card-summary-text">Maintain branch-specific registrar recipient lists when email routing differs by campus.</span>
+    </button>
+    <div id="feature-card-campus-recipients" class="collapse">
     <div class="card-body">
       <div class="alert alert-light border small">
         Use campus-specific recipient emails when each branch has a different registrar destination. Leave a campus blank to fall back to the default recipient list above.
@@ -742,11 +849,54 @@
         </div>
         {% endfor %}
         </div>
-      </div>
+    </div>
     </div>
   </div>
 
-  <button class="btn btn-primary" type="submit">Save Feature Settings</button>
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-release" aria-expanded="false" aria-controls="feature-card-grade-release">
+      <strong>Official Grade Release to Faculty</strong>
+      <span class="toggle-indicator" aria-hidden="true">âŒ„</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-release" aria-expanded="false" aria-controls="feature-card-grade-release">
+      <span class="settings-card-summary-title">Official Grade Release to Faculty</span>
+      <span class="settings-card-summary-text">Control when official periodic grades and final grades may appear in the Faculty Portal.</span>
+    </button>
+    <div id="feature-card-grade-release" class="collapse">
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.faculty_official_period_grades_after_deadline }}
+        <label class="form-check-label" for="{{ form.faculty_official_period_grades_after_deadline.id_for_label }}">
+          {{ form.faculty_official_period_grades_after_deadline.label }}
+        </label>
+        {% if form.faculty_official_period_grades_after_deadline.help_text %}
+        <div class="form-text">{{ form.faculty_official_period_grades_after_deadline.help_text }}</div>
+        {% endif %}
+        {% for error in form.faculty_official_period_grades_after_deadline.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="form-check form-switch mb-0">
+        {{ form.faculty_official_final_grades_after_deadline }}
+        <label class="form-check-label" for="{{ form.faculty_official_final_grades_after_deadline.id_for_label }}">
+          {{ form.faculty_official_final_grades_after_deadline.label }}
+        </label>
+        {% if form.faculty_official_final_grades_after_deadline.help_text %}
+        <div class="form-text">{{ form.faculty_official_final_grades_after_deadline.help_text }}</div>
+        {% endif %}
+        {% for error in form.faculty_official_final_grades_after_deadline.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="alert alert-light border small mt-3 mb-0">
+        These controls affect official computed grades only. Prediction remains unofficial and continues to use its own feature card above.
+      </div>
+    </div>
+    </div>
+  </div>
+  </div>
+
+  <div class="settings-footer">
+    <button class="btn btn-primary" type="submit">Save Feature Settings</button>
+  </div>
 </form>
 {% endblock %}
 
@@ -757,11 +907,54 @@
     const ownershipCardId = "class-master-list-ownership-card";
     const termField = document.getElementById("id_class_master_list_term");
     const facultyField = document.getElementById("id_class_master_list_faculty");
+    const expandAllButton = document.getElementById("expand-all-settings");
+    const collapseAllButton = document.getElementById("collapse-all-settings");
+    const collapseElements = Array.from(document.querySelectorAll(".settings-card .collapse"));
+    const syncCollapsedState = function (collapseElement) {
+      if (!collapseElement || !collapseElement.closest) {
+        return;
+      }
+      const card = collapseElement.closest(".settings-card");
+      if (!card) {
+        return;
+      }
+      const isShown = collapseElement.classList.contains("show");
+      card.classList.toggle("is-expanded", isShown);
+      card.classList.toggle("is-collapsed", !isShown);
+      const toggleButton = card.querySelector(".settings-card-toggle");
+      if (toggleButton) {
+        toggleButton.classList.toggle("collapsed", !isShown);
+        toggleButton.setAttribute("aria-expanded", isShown ? "true" : "false");
+      }
+    };
     const anchorOwnershipCard = function () {
       const url = new URL(window.location.href);
       url.hash = ownershipCardId;
       return url;
     };
+    collapseElements.forEach(function (collapseElement) {
+      syncCollapsedState(collapseElement);
+      collapseElement.addEventListener("shown.bs.collapse", function () {
+        syncCollapsedState(collapseElement);
+      });
+      collapseElement.addEventListener("hidden.bs.collapse", function () {
+        syncCollapsedState(collapseElement);
+      });
+    });
+    if (expandAllButton) {
+      expandAllButton.addEventListener("click", function () {
+        collapseElements.forEach(function (collapseElement) {
+          bootstrap.Collapse.getOrCreateInstance(collapseElement, { toggle: false }).show();
+        });
+      });
+    }
+    if (collapseAllButton) {
+      collapseAllButton.addEventListener("click", function () {
+        collapseElements.forEach(function (collapseElement) {
+          bootstrap.Collapse.getOrCreateInstance(collapseElement, { toggle: false }).hide();
+        });
+      });
+    }
     if (termField) {
       termField.addEventListener("change", function () {
         const url = anchorOwnershipCard();

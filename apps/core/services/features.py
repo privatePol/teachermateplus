@@ -33,6 +33,8 @@ class FeatureSettingsService:
     GRADE_PREDICTION_SHOW_WORST_CASE_KEY = "FEATURE_GRADE_PREDICTION_SHOW_WORST_CASE"
     GRADE_PREDICTION_SHOW_TARGET_NEEDED_KEY = "FEATURE_GRADE_PREDICTION_SHOW_TARGET_NEEDED"
     GRADE_PREDICTION_DEFAULT_ASSUMPTION_KEY = "FEATURE_GRADE_PREDICTION_DEFAULT_ASSUMPTION"
+    FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE_KEY = "FEATURE_FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE"
+    FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE_KEY = "FEATURE_FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE"
 
     @staticmethod
     def _positive_int(value, *, default: int, minimum: int = 0) -> int:
@@ -407,6 +409,36 @@ class FeatureSettingsService:
         if value not in {"IGNORE_MISSING", "RAW_ZERO", "FULL_SCORE"}:
             return default
         return value
+
+    @classmethod
+    def show_faculty_official_period_grades_after_deadline(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: bool = False,
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def show_faculty_official_final_grades_after_deadline(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: bool = False,
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
 
     @classmethod
     def can_user_access_grade_prediction(cls, *, user, tenant_id: int | None) -> bool:

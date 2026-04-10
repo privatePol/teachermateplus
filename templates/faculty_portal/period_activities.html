@@ -8,6 +8,8 @@
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
 </div>
 
+{% include "faculty_portal/partials/period_quick_nav.html" with nav_current="activities" %}
+
 {% if is_correction_active %}
 <div class="alert alert-warning">
   A governed manual correction window is active. Only scoped correction items can be edited here.

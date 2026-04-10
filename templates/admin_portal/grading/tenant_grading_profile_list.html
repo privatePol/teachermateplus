@@ -51,6 +51,7 @@
           <th>Template</th>
           <th>Base Override</th>
           <th>Passing Threshold</th>
+          <th>Final Grade Formula</th>
           <th>Priority</th>
           <th>Status</th>
           <th></th>
@@ -74,6 +75,18 @@
           <td>{{ row.grading_template.code }} - {{ row.grading_template.name }}</td>
           <td>{{ row.default_base_value|default:"-" }}</td>
           <td>{{ row.passing_grade_threshold|default:"Tenant Default" }}</td>
+          <td>
+            {{ row.get_final_grade_formula_mode_display }}<br>
+            {% if row.final_grade_formula_json and row.final_grade_formula_json.period_weights %}
+              <small class="text-muted">
+                {% for item in row.final_grade_formula_json.period_weights %}
+                  {{ item.period_code }}={{ item.weight }}{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+              </small>
+            {% else %}
+              <small class="text-muted">Uses all active template periods.</small>
+            {% endif %}
+          </td>
           <td>{{ row.priority }}</td>
           <td>
             {% if row.is_active %}
@@ -90,7 +103,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="10" class="text-center text-muted py-4">No tenant grading profiles found.</td></tr>
+        <tr><td colspan="11" class="text-center text-muted py-4">No tenant grading profiles found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

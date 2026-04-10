@@ -11,6 +11,8 @@
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
 </div>
 
+{% include "faculty_portal/partials/period_quick_nav.html" with nav_current="who_viewed" %}
+
 <div class="alert alert-light border mb-3">
   This history shows admin-side read-only grade book monitor openings recorded in the audit trail for this class period.
 </div>

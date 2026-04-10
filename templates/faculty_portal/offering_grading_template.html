@@ -101,12 +101,13 @@
       <div class="col-md-6"><strong>Template:</strong> {{ template.name }}</div>
       <div class="col-md-3"><strong>Base Value:</strong> {{ template.default_base_value }}</div>
       <div class="col-md-3"><strong>Campus:</strong> {{ offering.campus.code }}</div>
+      <div class="col-md-6"><strong>Template Passing Threshold:</strong> {{ template.passing_grade_threshold|default:"Tenant/Profile Default" }}</div>
     </div>
     {% if final_formula %}
     <div class="mt-3">
       <div class="template-tree-title">Final Grade Rule</div>
       <div class="template-formula">{{ final_formula }}</div>
-      <div class="template-note mt-1">EduGradesPro currently computes the final grade by averaging the active period grades in this assigned template.</div>
+      <div class="template-note mt-1">EduGradesPro follows the tenant grading policy matched to this class. If no special tenant formula is configured, it falls back to the default average across the active grading periods of the assigned template.</div>
     </div>
     {% endif %}
   </div>

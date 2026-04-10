@@ -160,8 +160,9 @@
     border-top: 1px solid #e2ebe1;
     padding: 0.55rem 0.75rem;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 0.4rem;
+    flex-wrap: wrap;
   }
   .course-card-footer .btn {
     border-radius: 999px;
@@ -278,6 +279,54 @@
     font-weight: 800;
     color: #8b6f14;
   }
+  .final-clearance-board {
+    border: 1px solid #e4d48e;
+    border-radius: 1.05rem;
+    background: linear-gradient(135deg, #fffdf4 0%, #fff4ce 52%, #f0e2a5 100%);
+    box-shadow: 0 14px 24px rgba(112, 92, 25, 0.10);
+    padding: 1rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  .final-clearance-title {
+    font-size: 1.02rem;
+    font-weight: 800;
+    color: #5a4510;
+    margin-bottom: 0.25rem;
+  }
+  .final-clearance-copy {
+    color: #7b6630;
+    margin-bottom: 0.85rem;
+  }
+  .final-clearance-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+  }
+  .final-clearance-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 999px;
+    padding: 0.48rem 0.9rem;
+    border: 1px solid #d9c15e;
+    background: linear-gradient(135deg, #fff6d8 0%, #f3df92 55%, #d0b44d 100%);
+    color: #54430e;
+    font-size: 0.83rem;
+    font-weight: 800;
+    text-decoration: none;
+    box-shadow: 0 8px 16px rgba(112, 92, 25, 0.16);
+  }
+  .final-clearance-link:hover,
+  .final-clearance-link:focus {
+    color: #44370c;
+    border-color: #ccb14c;
+    background: linear-gradient(135deg, #fff8e1 0%, #f6e39b 55%, #d4b950 100%);
+  }
+  .final-clearance-link .meta {
+    color: #6e5820;
+    font-size: 0.74rem;
+    font-weight: 700;
+  }
   @media (max-width: 767.98px) {
     .faculty-deadline-banner {
       flex-direction: column;
@@ -317,6 +366,24 @@
 {% endif %}
 {% if deadline_banner %}
 {% include "faculty_portal/partials/deadline_banner.html" with reminder=deadline_banner %}
+{% endif %}
+{% if final_clearance_targets %}
+<section class="final-clearance-board">
+  <div class="final-clearance-title">Final Clearance</div>
+  <div class="final-clearance-copy">Open the official end-of-term clearance page from here instead of from every class card. If you handle more than one campus or term scope, choose the matching clearance target below.</div>
+  <div class="final-clearance-actions">
+    {% for target in final_clearance_targets %}
+    <a
+      class="final-clearance-link"
+      href="{% url 'faculty_portal:period_final_clearance' target.offering_id target.period_id %}"
+    >
+      <span aria-hidden="true">&#128424;</span>
+      <span>Print Final Clearance</span>
+      <span class="meta">{{ target.campus.code }} / {{ target.academic_year.code }} / {{ target.term.code }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
 {% endif %}
 
 {% if pending_assignments %}

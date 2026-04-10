@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.core import mail
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
@@ -11,6 +11,7 @@ from apps.faculty_portal.forms import GradeCorrectionRequestForm
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
     CourseTemplateAssignment,
+    FacultyFinalClearanceReport,
     GradeActivity,
     GradeCorrectionRequest,
     GradeCorrectionRequestItem,
@@ -21,9 +22,10 @@ from apps.grading.models import (
     StudentActivityScore,
     StudentFinalGrade,
     StudentPeriodGrade,
+    TenantGradingProfile,
 )
 from apps.grading.notifications import CorrectionNotificationService
-from apps.grading.reporting import CorrectionOfficialReportService
+from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
 from apps.rbac.models import Role, UserRole
 from apps.students.models import Student
@@ -592,3 +594,301 @@ class CorrectionWorkflowTests(TestCase):
         ]
         self.assertEqual(len(pdf_filenames), 1)
         self.assertTrue(pdf_filenames[0].endswith(".pdf"))
+
+
+class FinalGradeFormulaTests(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(code="TEN", name="Tenant")
+        self.campus = Campus.objects.create(tenant=self.tenant, code="MAIN", name="Main Campus")
+        self.department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="CS",
+            name="Computer Studies",
+        )
+        self.program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="BSCS",
+            name="BS Computer Science",
+        )
+        self.academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2025-2026",
+            name="AY 2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        self.term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="1ST",
+            name="First Term",
+            sequence_no=1,
+            start_date=date(2025, 6, 1),
+            end_date=date(2025, 10, 31),
+        )
+        self.course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="CS101",
+            title="Intro to Computing",
+        )
+        self.section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSCS-1A",
+            name="BSCS 1A",
+        )
+        self.offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=self.section,
+        )
+        self.faculty_user = User.objects.create_user(
+            username="faculty_formula",
+            email="faculty_formula@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+        )
+        self.template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TMP-FINAL",
+            name="Final Formula Template",
+            is_published=True,
+            is_active=True,
+        )
+        self.prelim = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+            is_active=True,
+        )
+        self.midterm = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="MIDTERM",
+            name="Midterm",
+            sequence_no=2,
+            is_active=True,
+        )
+        self.prefinal = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PREFINAL",
+            name="Pre-Final",
+            sequence_no=3,
+            is_active=True,
+        )
+        self.final_period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="FINAL",
+            name="Final",
+            sequence_no=4,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=self.template,
+            effective_from_term=self.term,
+        )
+        self.student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-0001",
+            first_name="Juan",
+            last_name="Dela Cruz",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            course_offering=self.offering,
+            student=self.student,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            is_active=True,
+        )
+
+    def _create_period_grade(self, period, value):
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            student=self.student,
+            period_grade=Decimal(value),
+            class_standing_grade=Decimal(value),
+            exam_grade=Decimal(value),
+            computed_by_user=self.faculty_user,
+            is_finalized=True,
+        )
+
+    def test_default_final_grade_averages_all_active_periods(self):
+        self._create_period_grade(self.prelim, "92.00")
+        self._create_period_grade(self.midterm, "88.00")
+
+        FacultyGradingService.recompute_final_grades_from_stored_periods(
+            user=self.faculty_user,
+            offering=self.offering,
+            template=self.template,
+        )
+
+        final_grade = StudentFinalGrade.objects.get(offering=self.offering, student=self.student)
+        self.assertEqual(final_grade.final_grade, Decimal("45.00"))
+
+    def test_weighted_final_grade_uses_profile_configuration(self):
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            profile_code="WEIGHTED",
+            profile_name="Weighted Formula",
+            grading_template=self.template,
+            final_grade_formula_mode=TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
+            final_grade_formula_json={
+                "period_weights": [
+                    {"period_code": "PRELIM", "weight": "20.00"},
+                    {"period_code": "MIDTERM", "weight": "20.00"},
+                    {"period_code": "PREFINAL", "weight": "20.00"},
+                    {"period_code": "FINAL", "weight": "40.00"},
+                ]
+            },
+            is_default=True,
+            is_active=True,
+        )
+        self._create_period_grade(self.prelim, "92.00")
+        self._create_period_grade(self.midterm, "88.00")
+
+        FacultyGradingService.recompute_final_grades_from_stored_periods(
+            user=self.faculty_user,
+            offering=self.offering,
+            template=self.template,
+        )
+
+        final_grade = StudentFinalGrade.objects.get(offering=self.offering, student=self.student)
+        self.assertEqual(final_grade.final_grade, Decimal("36.00"))
+
+    def test_passing_threshold_falls_back_to_template_threshold(self):
+        self.template.passing_grade_threshold = Decimal("80.00")
+        self.template.save(update_fields=["passing_grade_threshold"])
+
+        self.assertEqual(
+            FacultyGradingService.resolve_passing_threshold(self.offering),
+            Decimal("80.00"),
+        )
+
+    def test_profile_passing_threshold_overrides_template_threshold(self):
+        self.template.passing_grade_threshold = Decimal("80.00")
+        self.template.save(update_fields=["passing_grade_threshold"])
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            profile_code="THRESHOLD",
+            profile_name="Threshold Override",
+            grading_template=self.template,
+            passing_grade_threshold=Decimal("78.00"),
+            is_default=True,
+            is_active=True,
+        )
+
+        self.assertEqual(
+            FacultyGradingService.resolve_passing_threshold(self.offering),
+            Decimal("78.00"),
+        )
+
+
+class FacultyFinalClearanceQrTests(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(code="NCBA", name="NCBA")
+        self.campus = Campus.objects.create(tenant=self.tenant, code="FAIRVIEW", name="Fairview")
+        self.department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="COLL",
+            name="College",
+        )
+        self.program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="BSIT",
+            name="BSIT",
+        )
+        self.academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2025-2026",
+            name="AY 2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        self.term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="2ND",
+            name="Second Term",
+            sequence_no=2,
+            start_date=date(2025, 11, 1),
+            end_date=date(2026, 3, 31),
+        )
+        self.user = User.objects.create_user(
+            username="faculty_clearance_qr",
+            email="faculty_clearance_qr@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        self.report_obj = FacultyFinalClearanceReport.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            faculty_user=self.user,
+            generated_by_user=self.user,
+            reference_no="FCR-TEST-001",
+            verification_code="ABCDEF1234567890",
+            clearance_status=FacultyFinalClearanceReport.ClearanceStatus.CLEARED,
+            total_assigned_courses=1,
+            complete_courses=1,
+            incomplete_courses=0,
+            snapshot_json={"rows": [], "clearance_status": "CLEARED"},
+        )
+
+    @override_settings(SITE_URL="https://grades.ncba.edu.ph")
+    def test_verification_lookup_value_uses_site_url_when_available(self):
+        value = FacultyFinalClearanceReportService.verification_lookup_value(report_obj=self.report_obj)
+
+        self.assertIn("https://grades.ncba.edu.ph/admin-portal/academics/faculty-final-clearance/", value)
+        self.assertIn("lookup_reference_no=FCR-TEST-001", value)
+        self.assertIn("lookup_verification_code=ABCDEF1234567890", value)
+
+    @override_settings(SITE_URL="")
+    def test_verification_lookup_value_falls_back_to_manual_payload(self):
+        value = FacultyFinalClearanceReportService.verification_lookup_value(report_obj=self.report_obj)
+
+        self.assertIn("NCBA Faculty Final Clearance Verification", value)
+        self.assertIn("Reference No: FCR-TEST-001", value)
+        self.assertIn("Verification Code: ABCDEF1234567890", value)

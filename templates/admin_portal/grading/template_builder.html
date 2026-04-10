@@ -177,6 +177,7 @@
       <div class="col-md-3"><strong>Tenant:</strong> {{ template_obj.tenant.code }}</div>
       <div class="col-md-3"><strong>Name:</strong> {{ template_obj.name }}</div>
       <div class="col-md-2"><strong>Base:</strong> {{ template_obj.default_base_value }}</div>
+      <div class="col-md-2"><strong>Passing:</strong> {{ template_obj.passing_grade_threshold|default:"Tenant/Profile Default" }}</div>
       <div class="col-md-2">
         <strong>Publish:</strong>
         {% if template_obj.is_published %}

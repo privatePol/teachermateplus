@@ -14,6 +14,7 @@ from apps.grading.models import (
     StudentFinalGrade,
     StudentPeriodGrade,
     StudentActivityScore,
+    TenantGradingProfile,
 )
 from apps.grading.services import FacultyGradingService
 from apps.predictions.services import PredictionComputationService, PredictionSnapshotService, PredictionWhatIfService
@@ -270,4 +271,74 @@ class PredictionSnapshotTests(TestCase):
 
         self.assertEqual(requirement["status"], "REQUIRED")
         self.assertEqual(requirement["required_average"], Decimal("54.38"))
+        self.assertEqual(requirement["remaining_period_names"], ["Pre-Final", "FX"])
+
+    def test_weighted_profile_affects_prediction_final_projection_and_requirement(self):
+        midterm = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="MIDTERM",
+            name="Midterm",
+            sequence_no=2,
+            weight_percentage=Decimal("25.00"),
+        )
+        prefinal = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PREFINAL",
+            name="Pre-Final",
+            sequence_no=3,
+            weight_percentage=Decimal("25.00"),
+        )
+        final_exam = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="FINAL",
+            name="FX",
+            sequence_no=4,
+            weight_percentage=Decimal("25.00"),
+        )
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            profile_code="WEIGHTED",
+            profile_name="Weighted Final Formula",
+            grading_template=self.template,
+            final_grade_formula_mode=TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
+            final_grade_formula_json={
+                "period_weights": [
+                    {"period_code": "PRELIM", "weight": "20.00"},
+                    {"period_code": "MIDTERM", "weight": "20.00"},
+                    {"period_code": "PREFINAL", "weight": "20.00"},
+                    {"period_code": "FINAL", "weight": "40.00"},
+                ]
+            },
+            is_default=True,
+            is_active=True,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            student=self.student,
+            class_standing_grade=Decimal("91.43"),
+            period_grade=Decimal("91.43"),
+        )
+
+        projected_final = PredictionComputationService._final_projection(
+            offering=self.offering,
+            template_period=midterm,
+            student_id=self.student.id,
+            period_grade=Decimal("99.80"),
+        )
+        requirement = PredictionComputationService.final_requirement_for_remaining_periods(
+            offering=self.offering,
+            template_period=midterm,
+            student_id=self.student.id,
+            current_period_grade=Decimal("99.80"),
+        )
+
+        self.assertEqual(projected_final, Decimal("38.25"))
+        self.assertEqual(requirement["status"], "REQUIRED")
+        self.assertEqual(requirement["required_average"], Decimal("61.26"))
         self.assertEqual(requirement["remaining_period_names"], ["Pre-Final", "FX"])

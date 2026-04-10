@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
@@ -699,9 +699,9 @@ class GradingTemplateTestingCalculatorService:
                     "meta": "Used when EduGradesPro converts raw score to computed percentage for Base-50 items.",
                 },
                 {
-                    "label": "Computed Final Grade",
+                    "label": "Template Final Preview",
                     "value": f"{final_grade:.2f}" if final_grade is not None else "-",
-                    "meta": "Read-only result using the same current EduGradesPro final-grade averaging logic.",
+                    "meta": "Template-only average preview. Live class final grade may follow a tenant grading profile formula.",
                 },
             ],
             "input_errors": input_errors,
@@ -1858,7 +1858,7 @@ class GradingGovernanceService:
                 course_offering_id=offering.id,
                 is_active=True,
             )
-            .exclude(enrollment_status__in={Enrollment.Status.DR, Enrollment.Status.W})
+            .exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES)
             .select_related("student")
         )
         eligible_student_ids = [row.student_id for row in eligible_enrollments]
@@ -1869,9 +1869,36 @@ class GradingGovernanceService:
                 "eligible_student_count": 0,
                 "students_with_any_grade": 0,
                 "students_missing_any_grade": 0,
+                "students_with_complete_records": 0,
+                "expected_activity_count": 0,
+                "expected_attendance_session_count": 0,
                 "coverage_percent": Decimal("0.00"),
                 "missing_students": [],
             }
+
+        active_activity_ids = list(
+            GradeActivity.objects.filter(
+                offering_id=offering.id,
+                template_period_id=template_period.id,
+                is_active=True,
+            ).values_list("id", flat=True)
+        )
+        expected_activity_count = len(active_activity_ids)
+
+        has_attendance_component = GradingTemplateSubcomponent.objects.filter(
+            template_component__template_period_id=template_period.id,
+            template_component__is_active=True,
+            is_active=True,
+            is_attendance_component=True,
+        ).exists()
+        active_attendance_session_ids = list(
+            AttendanceSession.objects.filter(
+                offering_id=offering.id,
+                template_period_id=template_period.id,
+                is_active=True,
+            ).values_list("id", flat=True)
+        )
+        expected_attendance_session_count = len(active_attendance_session_ids) if has_attendance_component else 0
 
         score_student_ids = set(
             StudentActivityScore.objects.filter(
@@ -1897,23 +1924,60 @@ class GradingGovernanceService:
         )
         students_with_any_grade_ids = score_student_ids | attendance_student_ids
         students_with_any_grade = len(students_with_any_grade_ids)
+        score_count_map = {
+            row["student_id"]: row["encoded_count"]
+            for row in StudentActivityScore.objects.filter(
+                activity_id__in=active_activity_ids,
+                is_active=True,
+                student_id__in=eligible_student_ids,
+            )
+            .values("student_id")
+            .annotate(encoded_count=Count("activity_id", distinct=True))
+        }
+        attendance_count_map = {
+            row["student_id"]: row["recorded_count"]
+            for row in AttendanceRecord.objects.filter(
+                session_id__in=active_attendance_session_ids,
+                is_active=True,
+                student_id__in=eligible_student_ids,
+            )
+            .values("student_id")
+            .annotate(recorded_count=Count("session_id", distinct=True))
+        }
         missing_students = [
             {
                 "student_id": enrollment.student_id,
                 "student_no": enrollment.student.student_no,
                 "last_name": enrollment.student.last_name,
                 "first_name": enrollment.student.first_name,
+                "missing_activity_records": max(
+                    expected_activity_count - score_count_map.get(enrollment.student_id, 0),
+                    0,
+                ),
+                "missing_attendance_records": max(
+                    expected_attendance_session_count - attendance_count_map.get(enrollment.student_id, 0),
+                    0,
+                ),
             }
             for enrollment in eligible_enrollments
-            if enrollment.student_id not in students_with_any_grade_ids
+            if (
+                score_count_map.get(enrollment.student_id, 0) < expected_activity_count
+                or attendance_count_map.get(enrollment.student_id, 0) < expected_attendance_session_count
+            )
         ]
         missing_count = len(missing_students)
-        coverage_percent = cls._round((Decimal(students_with_any_grade) / Decimal(eligible_count)) * Decimal("100"))
+        students_with_complete_records = eligible_count - missing_count
+        coverage_percent = cls._round(
+            (Decimal(students_with_complete_records) / Decimal(eligible_count)) * Decimal("100")
+        )
 
         return {
             "eligible_student_count": eligible_count,
             "students_with_any_grade": students_with_any_grade,
             "students_missing_any_grade": missing_count,
+            "students_with_complete_records": students_with_complete_records,
+            "expected_activity_count": expected_activity_count,
+            "expected_attendance_session_count": expected_attendance_session_count,
             "coverage_percent": coverage_percent,
             "missing_students": missing_students,
         }
@@ -2244,7 +2308,12 @@ class GradingGovernanceService:
         if readiness["students_with_any_grade"] <= 0:
             raise ValidationError(
                 "Cannot submit yet. No grade records are encoded for ACTIVE students. "
-                "Encode at least one grade/attendance record or mark students as DR/W first."
+                "Encode at least one grade/attendance record or mark students as DRP/W/INC first."
+            )
+        if readiness["students_missing_any_grade"] > 0:
+            raise ValidationError(
+                "Cannot submit yet. Some ACTIVE students still have blank required grade or attendance records. "
+                "Complete all visible records first, or update the class-list status to DRP/W/INC where applicable."
             )
 
         summary = FacultyGradingService.recompute_period_summary(
@@ -2925,6 +2994,12 @@ class FacultyGradingService:
                 return cls._round(Decimal(profile.passing_grade_threshold))
             except Exception:
                 pass
+        template = cls.resolve_template_for_offering(offering)
+        if template and template.passing_grade_threshold is not None:
+            try:
+                return cls._round(Decimal(template.passing_grade_threshold))
+            except Exception:
+                pass
         tenant_value = SystemSettingService.get(
             "PASSING_GRADE_THRESHOLD",
             tenant_id=offering.tenant_id,
@@ -2934,6 +3009,107 @@ class FacultyGradingService:
             return cls._round(Decimal(str(tenant_value)))
         except Exception:
             return Decimal("75.00")
+
+    @classmethod
+    def resolve_final_grade_strategy(cls, offering, template=None):
+        template = template or cls.resolve_template_for_offering(offering)
+        active_periods = list(cls.get_template_periods(template))
+        profile = cls.resolve_grading_profile_for_offering(offering)
+        default_strategy = {
+            "mode": TenantGradingProfile.FinalGradeFormulaMode.AVERAGE_ACTIVE_PERIODS,
+            "entries": [
+                {
+                    "period_id": period.id,
+                    "period_code": period.code,
+                    "period_name": period.name,
+                    "weight": None,
+                }
+                for period in active_periods
+            ],
+            "formula_label": (
+                "FG = ("
+                + " + ".join(period.code for period in active_periods)
+                + f") / {len(active_periods)}"
+                if active_periods
+                else "No active grading periods configured."
+            ),
+        }
+        if not profile:
+            return default_strategy
+
+        if (
+            profile.final_grade_formula_mode != TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS
+            or not profile.final_grade_formula_json
+        ):
+            return default_strategy
+
+        weight_rows = (profile.final_grade_formula_json or {}).get("period_weights") or []
+        weights_by_code = {}
+        for row in weight_rows:
+            code = (str(row.get("period_code") or "").strip()).upper()
+            if not code:
+                continue
+            try:
+                weight = cls._round(Decimal(str(row.get("weight") or "0")))
+            except Exception:
+                continue
+            if weight <= 0:
+                continue
+            weights_by_code[code] = weight
+
+        weighted_entries = []
+        for period in active_periods:
+            weight = weights_by_code.get((period.code or "").strip().upper())
+            if weight is None:
+                continue
+            weighted_entries.append(
+                {
+                    "period_id": period.id,
+                    "period_code": period.code,
+                    "period_name": period.name,
+                    "weight": weight,
+                }
+            )
+
+        if not weighted_entries:
+            return default_strategy
+
+        return {
+            "mode": TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
+            "entries": weighted_entries,
+            "formula_label": "FG = "
+            + " + ".join(
+                f"({entry['period_code']} x {entry['weight']:.2f}%)"
+                for entry in weighted_entries
+            ),
+        }
+
+    @classmethod
+    def compute_final_grade_from_period_values(cls, *, offering, template=None, period_values_by_period_id: dict):
+        template = template or cls.resolve_template_for_offering(offering)
+        final_grade_strategy = cls.resolve_final_grade_strategy(offering, template=template)
+        strategy_entries = final_grade_strategy["entries"]
+        if not strategy_entries:
+            return None
+
+        has_any_period_grade = any(
+            period_values_by_period_id.get(entry["period_id"]) is not None for entry in strategy_entries
+        )
+        if not has_any_period_grade:
+            return None
+
+        if final_grade_strategy["mode"] == TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS:
+            weighted_total = Decimal("0")
+            for entry in strategy_entries:
+                period_value = period_values_by_period_id.get(entry["period_id"]) or Decimal("0")
+                weighted_total += Decimal(period_value) * (Decimal(entry["weight"]) / Decimal("100"))
+            return cls._round(weighted_total)
+
+        total_value = sum(
+            (Decimal(period_values_by_period_id.get(entry["period_id"]) or Decimal("0")))
+            for entry in strategy_entries
+        )
+        return cls._round(total_value / Decimal(len(strategy_entries)))
 
     @staticmethod
     def get_active_enrollments(offering):
@@ -3322,6 +3498,46 @@ class FacultyGradingService:
             return None
         return cls._round(sum(vals) / Decimal(len(vals)))
 
+    @classmethod
+    def recompute_final_grades_from_stored_periods(cls, *, user, offering, template=None):
+        template = template or cls.resolve_template_for_offering(offering)
+        enrollments = list(cls.get_active_enrollments(offering))
+        final_grade_strategy = cls.resolve_final_grade_strategy(offering, template=template)
+        strategy_entries = final_grade_strategy["entries"]
+        strategy_period_ids = [entry["period_id"] for entry in strategy_entries]
+        total_active_periods = len(strategy_entries)
+        period_grade_map = defaultdict(dict)
+        existing_period_rows = StudentPeriodGrade.objects.filter(
+            offering=offering,
+            template_period_id__in=strategy_period_ids,
+        )
+        for row in existing_period_rows:
+            if row.period_grade is not None:
+                period_grade_map[row.student_id][row.template_period_id] = Decimal(row.period_grade)
+
+        for enrollment in enrollments:
+            student_id = enrollment.student_id
+            if enrollment.enrollment_status in Enrollment.NON_ACTIVE_GRADING_STATUSES:
+                final_value = None
+            else:
+                student_period_values = period_grade_map.get(student_id, {})
+                final_value = cls.compute_final_grade_from_period_values(
+                    offering=offering,
+                    template=template,
+                    period_values_by_period_id=student_period_values,
+                )
+            StudentFinalGrade.objects.update_or_create(
+                offering=offering,
+                student_id=student_id,
+                defaults={
+                    "tenant_id": offering.tenant_id,
+                    "campus_id": offering.campus_id,
+                    "final_grade": final_value,
+                    "computed_by_user": user,
+                    "is_submitted": False,
+                },
+            )
+
     @staticmethod
     def _mark_prediction_dirty(*, offering, template_period, reason: str):
         try:
@@ -3376,7 +3592,7 @@ class FacultyGradingService:
             student = enrollment.student
             student_id = student.id
 
-            if enrollment.enrollment_status in {Enrollment.Status.DR, Enrollment.Status.W}:
+            if enrollment.enrollment_status in Enrollment.NON_ACTIVE_GRADING_STATUSES:
                 StudentPeriodGrade.objects.update_or_create(
                     offering=offering,
                     template_period=template_period,
@@ -3503,36 +3719,7 @@ class FacultyGradingService:
                 }
             )
 
-        all_period_codes = list(
-            template.periods.filter(is_active=True).order_by("sequence_no").values_list("id", flat=True)
-        )
-        period_grade_map = defaultdict(dict)
-        existing_period_rows = StudentPeriodGrade.objects.filter(
-            offering=offering,
-            template_period_id__in=all_period_codes,
-        )
-        for row in existing_period_rows:
-            if row.period_grade is not None:
-                period_grade_map[row.student_id][row.template_period_id] = Decimal(row.period_grade)
-
-        for enrollment in enrollments:
-            student_id = enrollment.student_id
-            if enrollment.enrollment_status in {Enrollment.Status.DR, Enrollment.Status.W}:
-                final_value = None
-            else:
-                vals = list(period_grade_map.get(student_id, {}).values())
-                final_value = cls._round(sum(vals) / Decimal(len(vals))) if vals else None
-            StudentFinalGrade.objects.update_or_create(
-                offering=offering,
-                student_id=student_id,
-                defaults={
-                    "tenant_id": offering.tenant_id,
-                    "campus_id": offering.campus_id,
-                    "final_grade": final_value,
-                    "computed_by_user": user,
-                    "is_submitted": False,
-                },
-            )
+        cls.recompute_final_grades_from_stored_periods(user=user, offering=offering, template=template)
 
         cls._mark_prediction_dirty(
             offering=offering,

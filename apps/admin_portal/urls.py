@@ -41,6 +41,9 @@ from .views import (
     enrollment_create_view,
     enrollment_list_view,
     enrollment_update_view,
+    faculty_activity_monitor_view,
+    faculty_final_clearance_view,
+    faculty_final_clearance_verify_view,
     faculty_assignment_create_view,
     faculty_assignment_assign_view,
     faculty_assignment_dashboard_view,
@@ -228,6 +231,21 @@ urlpatterns = [
         "admin-portal/academics/faculty-gradebook/",
         faculty_gradebook_monitor_view,
         name="faculty_gradebook_monitor",
+    ),
+    path(
+        "admin-portal/academics/faculty-activity-monitor/",
+        faculty_activity_monitor_view,
+        name="faculty_activity_monitor",
+    ),
+    path(
+        "admin-portal/academics/faculty-final-clearance/",
+        faculty_final_clearance_view,
+        name="faculty_final_clearance",
+    ),
+    path(
+        "admin-portal/academics/faculty-final-clearance/<int:report_id>/verify/",
+        faculty_final_clearance_verify_view,
+        name="faculty_final_clearance_verify",
     ),
     path(
         "admin-portal/academics/grade-predictions/",

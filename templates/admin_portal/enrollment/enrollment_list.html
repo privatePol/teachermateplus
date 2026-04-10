@@ -13,6 +13,44 @@
     {% endif %}
   </div>
 </div>
+<div class="row g-3 mb-3">
+  <div class="col-lg-3 col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="small text-muted text-uppercase fw-semibold">Status Count</div>
+        <div class="h3 mb-1 text-success">{{ status_summary.active }}</div>
+        <div class="text-muted">ACTIVE</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="small text-muted text-uppercase fw-semibold">Status Count</div>
+        <div class="h3 mb-1 text-danger">{{ status_summary.drp }}</div>
+        <div class="text-muted">DRP</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="small text-muted text-uppercase fw-semibold">Status Count</div>
+        <div class="h3 mb-1 text-warning">{{ status_summary.w }}</div>
+        <div class="text-muted">W</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="small text-muted text-uppercase fw-semibold">Status Count</div>
+        <div class="h3 mb-1 text-info">{{ status_summary.inc }}</div>
+        <div class="text-muted">INC</div>
+      </div>
+    </div>
+  </div>
+</div>
 <form class="row g-2 mb-3">
   <div class="col-md-2">
     <select class="form-select" name="campus_id">
@@ -69,8 +107,9 @@
     <select class="form-select" name="status">
       <option value="">All Status</option>
       <option value="ACTIVE" {% if status == "ACTIVE" %}selected{% endif %}>ACTIVE</option>
-      <option value="DR" {% if status == "DR" %}selected{% endif %}>DR</option>
+      <option value="DRP" {% if status == "DRP" %}selected{% endif %}>DRP</option>
       <option value="W" {% if status == "W" %}selected{% endif %}>W</option>
+      <option value="INC" {% if status == "INC" %}selected{% endif %}>INC</option>
     </select>
   </div>
   <div class="col-md-4"><input class="form-control" name="q" value="{{ q }}" placeholder="Student / course / section"></div>

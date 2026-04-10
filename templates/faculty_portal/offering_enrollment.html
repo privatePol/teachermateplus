@@ -79,10 +79,29 @@
 <div class="alert {% if mode == 'FACULTY_ALLOWED' %}alert-success{% else %}alert-warning{% endif %}">
   Class Master List Mode: <strong>{{ mode }}</strong>
   {% if mode != 'FACULTY_ALLOWED' %}
-    - Adding or removing students from this class list is admin-only, but faculty may still update true <strong>DR</strong> or <strong>W</strong> status on existing class-list rows.
+    - Adding or removing students from this class list is admin-only, but faculty may still update true <strong>DRP</strong>, <strong>W</strong>, or <strong>INC</strong> status on existing class-list rows.
   {% else %}
-    - Use <strong>Remove from Class</strong> for schedule movement. Use <strong>DR</strong> only when the student dropped this class, and <strong>W</strong> only when the student withdrew from the term.
+    - Use <strong>Remove from Class</strong> for schedule movement. Use <strong>DRP</strong> only when the student dropped this class, <strong>W</strong> only when the student withdrew from the term, and <strong>INC</strong> when the class record should be marked incomplete.
   {% endif %}
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body py-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <span class="small text-uppercase fw-semibold text-muted">Status Legend</span>
+      <span class="badge text-bg-success">ACTIVE</span>
+      <span class="small text-muted">Included in normal grading coverage.</span>
+      <span class="badge text-bg-danger">DRP</span>
+      <span class="small text-muted">Dropped from this class.</span>
+      <span class="badge text-bg-warning text-dark">W</span>
+      <span class="small text-muted">Withdrawn from the term.</span>
+      <span class="badge text-bg-info text-dark">INC</span>
+      <span class="small text-muted">Incomplete class record.</span>
+    </div>
+    <div class="small text-muted">
+      Use <strong>Remove from Class</strong> only for schedule movement. `DRP`, `W`, and `INC` are excluded from normal active grading coverage and submission readiness.
+    </div>
+  </div>
 </div>
 
 {% if can_manage %}
@@ -153,7 +172,7 @@
             <span class="class-list-name-first">{{ row.student.first_name|title }}</span>
           </td>
           <td>
-            <span class="badge {% if row.enrollment_status == 'DR' %}text-bg-danger{% elif row.enrollment_status == 'W' %}text-bg-warning text-dark{% elif row.enrollment_status == 'ACTIVE' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+            <span class="badge {% if row.enrollment_status == 'DRP' %}text-bg-danger{% elif row.enrollment_status == 'W' %}text-bg-warning text-dark{% elif row.enrollment_status == 'ACTIVE' %}text-bg-success{% elif row.enrollment_status == 'INC' %}text-bg-info text-dark{% else %}text-bg-secondary{% endif %}">
               {{ row.enrollment_status }}
             </span>
           </td>
@@ -167,8 +186,9 @@
                 <input type="hidden" name="enrollment_id" value="{{ row.id }}">
                 <select name="enrollment_status" class="form-select form-select-sm" style="min-width: 120px;">
                   <option value="ACTIVE" {% if row.enrollment_status == "ACTIVE" %}selected{% endif %}>ACTIVE</option>
-                  <option value="DR" {% if row.enrollment_status == "DR" %}selected{% endif %}>DR</option>
+                  <option value="DRP" {% if row.enrollment_status == "DRP" %}selected{% endif %}>DRP</option>
                   <option value="W" {% if row.enrollment_status == "W" %}selected{% endif %}>W</option>
+                  <option value="INC" {% if row.enrollment_status == "INC" %}selected{% endif %}>INC</option>
                 </select>
                 <button class="btn btn-sm btn-outline-primary" type="submit">Save Status</button>
               </form>
@@ -200,7 +220,7 @@
             <span class="class-list-name-first">{{ row.student.first_name|title }}</span>
           </td>
           <td>
-            <span class="badge {% if row.enrollment_status == 'DR' %}text-bg-danger{% elif row.enrollment_status == 'W' %}text-bg-warning text-dark{% elif row.enrollment_status == 'ACTIVE' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+            <span class="badge {% if row.enrollment_status == 'DRP' %}text-bg-danger{% elif row.enrollment_status == 'W' %}text-bg-warning text-dark{% elif row.enrollment_status == 'ACTIVE' %}text-bg-success{% elif row.enrollment_status == 'INC' %}text-bg-info text-dark{% else %}text-bg-secondary{% endif %}">
               {{ row.enrollment_status }}
             </span>
           </td>
