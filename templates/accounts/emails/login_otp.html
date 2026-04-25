@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>NCBA EduGradesPro Login Verification</title>
+</head>
+<body style="margin:0; padding:0; background:#f5f8f4; font-family:Arial, Helvetica, sans-serif; color:#173d27;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f8f4; padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:640px; max-width:94%; background:#ffffff; border-radius:14px; overflow:hidden; border:1px solid #dbe7d8;">
+          <tr>
+            <td style="background:#0f472b; padding:22px 28px; color:#ffffff;">
+              {% if logo_url %}
+                <img src="{{ logo_url }}" alt="NCBA EduGradesPro" style="height:72px; width:auto; display:block; margin-bottom:12px;">
+              {% endif %}
+              <div style="font-size:20px; font-weight:700;">NCBA EduGradesPro Login Verification</div>
+              <div style="font-size:13px; color:#dcebdd; margin-top:4px;">{{ portal_name }}</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px;">
+              <p style="margin:0 0 14px;">Hello {{ user.full_name|default:user.username }},</p>
+              <p style="margin:0 0 18px;">Use this one-time verification code to continue signing in:</p>
+              <div style="text-align:center; margin:24px 0;">
+                <div style="display:inline-block; padding:16px 28px; border-radius:12px; background:#fbf3d4; border:1px solid #e7c861; font-size:34px; font-weight:800; letter-spacing:8px; color:#173d27;">
+                  {{ otp_code }}
+                </div>
+              </div>
+              <p style="margin:0 0 10px;">This code expires in about {{ expires_in_minutes }} minute(s).</p>
+              <p style="margin:0; color:#607667;">If you did not request this login, please contact your EduGradesPro administrator immediately.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 28px; background:#f8fbf7; color:#607667; font-size:12px;">
+              This is a security notice from NCBA EduGradesPro.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

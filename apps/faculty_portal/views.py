@@ -8,7 +8,7 @@ from django.contrib import messages
 from django import forms as django_forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Avg, Count, Prefetch, Q
-from django.http import FileResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -32,6 +32,7 @@ from apps.faculty_portal.forms import (
     GradeActivityForm,
     GradeCorrectionRequestForm,
 )
+from apps.faculty_portal.services import FacultyDashboardService
 from apps.grading.models import (
     FacultyFinalClearanceReport,
     GradeCorrectionAttachment,
@@ -58,7 +59,7 @@ from apps.predictions.services import (
     PredictionSnapshotService,
     PredictionWhatIfService,
 )
-from apps.notifications.models import FacultyMemo, FacultyReminder
+from apps.notifications.models import FacultyMemo, FacultyReminder, SubmissionNonComplianceNotice
 from apps.notifications.services import FacultyReminderService
 from apps.students.models import Student
 
@@ -100,6 +101,29 @@ def guide_view(request):
 @permission_required("faculty_portal.access")
 def guide_manual_view(request):
     return render(request, "faculty_portal/guide_manual.html")
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def quick_tour_disable_view(request):
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required."}, status=405)
+    before_value = bool(getattr(request.user, "faculty_quick_tour_disabled", False))
+    request.user.faculty_quick_tour_disabled = True
+    request.user.save(update_fields=["faculty_quick_tour_disabled", "updated_at"])
+    AuditService.log_event(
+        action="FACULTY_QUICK_TOUR_DISABLED",
+        portal="FACULTY",
+        entity_type="User",
+        entity_id=request.user.id,
+        actor=request.user,
+        tenant=getattr(request.user, "default_tenant_id", None),
+        campus=getattr(request.user, "default_campus_id", None),
+        before_data={"faculty_quick_tour_disabled": before_value},
+        after_data={"faculty_quick_tour_disabled": True},
+        request=request,
+    )
+    return JsonResponse({"ok": True})
 
 
 def _faculty_assignment_queryset(user):
@@ -280,7 +304,14 @@ def _apply_assignment_response(*, request, assignment, response_status: str, suc
     messages.success(request, success_message)
 
 
-def _resolve_faculty_period_governance_state(offering, period, *, active_grading_period=None, submission=None):
+def _resolve_faculty_period_governance_state(
+    offering,
+    period,
+    *,
+    active_grading_period=None,
+    submission=None,
+    completion_window_state=None,
+):
     if period is None:
         return {
             "has_active_period_setting": False,
@@ -294,7 +325,12 @@ def _resolve_faculty_period_governance_state(offering, period, *, active_grading
         }
     if submission is None:
         submission = GradingGovernanceService.get_submission(offering=offering, template_period=period)
-    return AcademicGovernanceService.faculty_period_governance_state(
+    if completion_window_state is None:
+        completion_window_state = GradingGovernanceService.get_completion_window_state(
+            offering=offering,
+            template_period=period,
+        )
+    state = AcademicGovernanceService.faculty_period_governance_state(
         tenant_id=offering.tenant_id,
         campus_id=offering.campus_id,
         term_id=offering.term_id,
@@ -307,6 +343,14 @@ def _resolve_faculty_period_governance_state(offering, period, *, active_grading
         ),
         now=timezone.now(),
     )
+    if state["is_past_period"] and (submission is None or submission.status != GradeSubmission.Status.SUBMITTED):
+        state["is_reopened_override"] = True
+        state["is_closed_by_active_period"] = False
+        if completion_window_state["is_non_compliant"]:
+            state["message"] = "This earlier period remains open until submitted even though the deadline already passed."
+        else:
+            state["message"] = "This earlier period remains open until submitted."
+    return state
 
 
 def _resolve_offering_period(request, offering_id: int, period_id: int, *, allow_governance_closed: bool = False):
@@ -339,14 +383,20 @@ def _period_edit_state(offering, period):
         offering=offering, template_period=period
     )
     is_correction_active = bool(active_correction_request)
+    completion_window_state = GradingGovernanceService.get_completion_window_state(
+        offering=offering,
+        template_period=period,
+    )
     governance_state = _resolve_faculty_period_governance_state(
         offering,
         period,
         submission=submission,
+        completion_window_state=completion_window_state,
     )
-    is_editable = ((not is_locked and not is_submitted) or is_correction_active) and not governance_state[
-        "is_closed_by_active_period"
-    ]
+    is_editable = (
+        ((not is_locked and not is_submitted) or is_correction_active)
+        and not governance_state["is_closed_by_active_period"]
+    )
     correction_mode = GradingGovernanceService.get_correction_mode(tenant_id=offering.tenant_id)
     system_correction_enabled = correction_mode == GradingGovernanceService.CORRECTION_MODE_SYSTEM_REQUEST
     return {
@@ -358,21 +408,25 @@ def _period_edit_state(offering, period):
             offering=offering,
             template_period=period,
         ),
+        "completion_grace_until": None,
+        "encoding_close_deadline": None,
+        "is_within_completion_grace": False,
+        "grace_expired": False,
+        "is_non_compliant": completion_window_state["is_non_compliant"],
+        "is_overdue": completion_window_state.get("is_overdue", completion_window_state["is_non_compliant"]),
+        "active_late_completion_request": None,
+        "pending_late_completion_request": None,
+        "has_active_late_completion_request": False,
+        "has_pending_late_completion_request": False,
+        "can_request_late_completion": False,
         "is_correction_active": is_correction_active,
         "active_correction_request": active_correction_request,
         "is_editable": is_editable,
         "governance_state": governance_state,
         "is_governance_closed": governance_state["is_closed_by_active_period"],
         "governance_message": governance_state["message"],
-        "predeadline_correction_mode": GradingGovernanceService.get_predeadline_correction_mode(
-            tenant_id=offering.tenant_id
-        ),
         "correction_mode": correction_mode,
         "system_correction_enabled": system_correction_enabled,
-        "can_self_reopen_before_deadline": GradingGovernanceService.can_faculty_self_reopen_before_deadline(
-            offering=offering,
-            template_period=period,
-        ),
     }
 
 
@@ -425,7 +479,7 @@ def _build_summary_layout(period, activities):
     exam_components = []
 
     for component in components:
-        component_is_exam = "EXAM" in component.code.upper()
+        component_is_exam = FacultyGradingService.is_exam_component(component)
         subcomponents = [sub for sub in component.subcomponents.all() if sub.is_active]
         component_layout = {
             "component_id": component.id,
@@ -804,6 +858,13 @@ def _build_summary_row_values(row, summary_layout, score_by_activity):
 @permission_required("dashboard.read")
 def dashboard_view(request):
     offerings_qs = _faculty_offering_queryset(request.user)
+    scope = getattr(request, "scope", {})
+    tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    campus_id = scope.get("campus_id") or getattr(request.user, "default_campus_id", None)
+    if tenant_id:
+        offerings_qs = offerings_qs.filter(tenant_id=tenant_id)
+    if campus_id:
+        offerings_qs = offerings_qs.filter(campus_id=campus_id)
     active_term_cache = {}
 
     def _is_in_active_scope(offering):
@@ -934,6 +995,18 @@ def dashboard_view(request):
         now=dashboard_now,
     )
     active_grading_period_rows = _build_active_grading_period_rows(active_offerings, now=dashboard_now)
+    at_risk_preview = FacultyDashboardService.build_at_risk_students_preview(
+        user=request.user,
+        active_offerings=active_offerings,
+        tenant_id=tenant_id,
+        limit=5,
+    )
+    priority_actions = FacultyDashboardService.build_priority_actions(
+        user=request.user,
+        active_offerings=active_offerings,
+        now=dashboard_now,
+        at_risk_total=at_risk_preview["total_count"] if at_risk_preview["enabled"] else 0,
+    )
 
     stats = {
         "assigned_courses": offerings_qs.count(),
@@ -954,6 +1027,8 @@ def dashboard_view(request):
         "classes_with_missing_grades": classes_with_missing_grades,
         "deadline_reminder": deadline_reminder,
         "active_grading_period_rows": active_grading_period_rows,
+        "priority_actions": priority_actions,
+        "at_risk_preview": at_risk_preview,
     }
     return render(request, "faculty_portal/dashboard.html", {"stats": stats})
 
@@ -1266,7 +1341,7 @@ def _build_deadline_reminder_for_offerings(offerings, *, now=None):
             "has_deadline": True,
             "title": "Grade submission deadline reminder",
             "note": (
-                "This deadline already passed. Review your pending class periods and follow the governed reopen or correction process if further action is needed."
+                "This deadline already passed. You may continue encoding and submit as soon as possible. Late submission is recorded in the non-compliance monitor."
                 if is_overdue
                 else "Keep this deadline in view while encoding, checking summaries, and preparing final period submission."
             ),
@@ -1378,7 +1453,7 @@ def _build_deadline_reminder_for_period_cards(offering, period_cards, *, now=Non
             "has_deadline": True,
             "title": "Class period deadline reminder",
             "note": (
-                "This class period deadline already passed. Use the governed reopen or correction flow if changes are still required."
+                "This class period deadline already passed. Continue encoding and submit as soon as the class period is complete. Late submission is recorded for non-compliance monitoring."
                 if is_overdue
                 else "Finish score encoding and summary review before this class period deadline."
             ),
@@ -1553,6 +1628,7 @@ def reminder_center_view(request):
     )
 
     reminders = []
+    compliance_notices = []
     counts = {
         "upcoming": 0,
         "due_today": 0,
@@ -1585,9 +1661,40 @@ def reminder_center_view(request):
             }
         )
 
+    notice_qs = (
+        SubmissionNonComplianceNotice.objects.filter(
+            tenant_id=tenant_id,
+            faculty_user=request.user,
+        )
+        .select_related("campus", "department", "offering", "offering__course", "offering__section", "template_period")
+        .order_by("-issued_at", "-id")
+    )
+    for notice in notice_qs[:8]:
+        if notice.status == SubmissionNonComplianceNotice.Status.RESOLVED:
+            badge_variant = "success"
+            status_label = "Resolved"
+        elif notice.notice_level == SubmissionNonComplianceNotice.NoticeLevel.ESCALATION:
+            badge_variant = "danger"
+            status_label = "Escalated"
+        elif notice.notice_level == SubmissionNonComplianceNotice.NoticeLevel.WARNING:
+            badge_variant = "warning"
+            status_label = "Warning"
+        else:
+            badge_variant = "info"
+            status_label = "Notice"
+        compliance_notices.append(
+            {
+                "obj": notice,
+                "badge_variant": badge_variant,
+                "status_label": status_label,
+                "recipient_roles": ", ".join(notice.recipient_roles_json or []),
+            }
+        )
+
     context = {
         "form": form,
         "reminders": reminders,
+        "compliance_notices": compliance_notices,
         "counts": counts,
         "send_email_enabled": send_email_enabled,
         "reminder_center_enabled": center_enabled,
@@ -2293,11 +2400,16 @@ def offering_periods_view(request, offering_id: int):
     for p in periods:
         lock = GradingGovernanceService.resolve_lock(offering=offering, template_period=p)
         submission = GradingGovernanceService.get_submission(offering=offering, template_period=p)
+        completion_window_state = GradingGovernanceService.get_completion_window_state(
+            offering=offering,
+            template_period=p,
+        )
         governance_state = _resolve_faculty_period_governance_state(
             offering,
             p,
             active_grading_period=active_grading_period,
             submission=submission,
+            completion_window_state=completion_window_state,
         )
         can_access_corrections = bool(
             submission
@@ -2314,6 +2426,12 @@ def offering_periods_view(request, offering_id: int):
                     template_period=p,
                 ),
                 "deadline_at": lock.deadline_at if lock else None,
+                "completion_grace_until": completion_window_state["completion_grace_until"],
+                "is_within_completion_grace": completion_window_state["is_within_completion_grace"],
+                "is_non_compliant": completion_window_state["is_non_compliant"],
+                "pending_late_completion_request": completion_window_state["pending_late_completion_request"],
+                "active_late_completion_request": completion_window_state["active_late_completion_request"],
+                "can_request_late_completion": completion_window_state["can_request_late_completion"],
                 "is_active_period": AcademicGovernanceService.template_period_matches_active_period(
                     template_period=p,
                     active_period_setting=active_grading_period,
@@ -2715,6 +2833,12 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         "active_correction_request": state["active_correction_request"],
         "is_editable": state["is_editable"],
         "system_correction_enabled": state["system_correction_enabled"],
+        "completion_grace_until": state["completion_grace_until"],
+        "is_within_completion_grace": state["is_within_completion_grace"],
+        "is_non_compliant": state["is_non_compliant"],
+        "pending_late_completion_request": state["pending_late_completion_request"],
+        "active_late_completion_request": state["active_late_completion_request"],
+        "can_request_late_completion": state["can_request_late_completion"],
         "can_create_activity": not state["is_locked"] and not state["is_submitted"],
         "editing_activity": editing_activity,
         "component_option_data": component_option_data,
@@ -2911,6 +3035,12 @@ def activity_scores_view(request, offering_id: int, period_id: int, activity_id:
         "active_correction_request": state["active_correction_request"],
         "is_editable": state["is_editable"],
         "system_correction_enabled": state["system_correction_enabled"],
+        "completion_grace_until": state["completion_grace_until"],
+        "is_within_completion_grace": state["is_within_completion_grace"],
+        "is_non_compliant": state["is_non_compliant"],
+        "pending_late_completion_request": state["pending_late_completion_request"],
+        "active_late_completion_request": state["active_late_completion_request"],
+        "can_request_late_completion": state["can_request_late_completion"],
     }
     return render(request, "faculty_portal/activity_scores.html", context)
 
@@ -3047,6 +3177,12 @@ def period_attendance_view(request, offering_id: int, period_id: int):
         "is_governance_closed": state["is_governance_closed"],
         "governance_message": state["governance_message"],
         "system_correction_enabled": state["system_correction_enabled"],
+        "completion_grace_until": state["completion_grace_until"],
+        "is_within_completion_grace": state["is_within_completion_grace"],
+        "is_non_compliant": state["is_non_compliant"],
+        "pending_late_completion_request": state["pending_late_completion_request"],
+        "active_late_completion_request": state["active_late_completion_request"],
+        "can_request_late_completion": state["can_request_late_completion"],
         "can_manage_sessions": not state["is_locked"] and not state["is_submitted"] and not state["is_governance_closed"],
     }
     return render(request, "faculty_portal/period_attendance.html", context)
@@ -3076,6 +3212,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
             user=request.user,
             offering=offering,
             template_period=period,
+            audit_portal="FACULTY",
         )
         AuditService.log_event(
             action="COMPUTE",
@@ -3244,7 +3381,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
     print_header_name = SystemSettingService.get(
         "PRINT_HEADER_SCHOOL_NAME",
         tenant_id=offering.tenant_id,
-        default=offering.tenant.name,
+        default="NATIONAL COLLEGE OF BUSINESS AND ARTS",
     )
     print_header_address = SystemSettingService.get(
         "PRINT_HEADER_SCHOOL_ADDRESS",
@@ -3283,15 +3420,14 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "prior_period_headers": prior_period_headers,
         "submit_readiness": submit_readiness,
         "submission_deadline": summary_lock.deadline_at if summary_lock else None,
+        "completion_grace_until": state["completion_grace_until"],
         "is_locked": state["is_locked"],
         "is_submitted": state["is_submitted"],
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
         "submission_status": state["submission_status"],
-        "predeadline_correction_mode": state["predeadline_correction_mode"],
         "correction_mode": state["correction_mode"],
         "system_correction_enabled": state["system_correction_enabled"],
-        "can_self_reopen_before_deadline": state["can_self_reopen_before_deadline"],
         "print_header_name": print_header_name,
         "print_header_address": print_header_address,
         "generated_at": timezone.localtime(),
@@ -3304,6 +3440,11 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "print_sheet_colspan": print_sheet_colspan,
         "is_governance_closed": state["is_governance_closed"],
         "governance_message": state["governance_message"],
+        "is_within_completion_grace": state["is_within_completion_grace"],
+        "is_non_compliant": state["is_non_compliant"],
+        "pending_late_completion_request": state["pending_late_completion_request"],
+        "active_late_completion_request": state["active_late_completion_request"],
+        "can_request_late_completion": state["can_request_late_completion"],
         "summary_status_counts": status_counts,
         "summary_passed_count": passed_count,
         "summary_failed_count": failed_count,
@@ -3419,28 +3560,51 @@ def period_prediction_view(request, offering_id: int, period_id: int):
         row.final_requirement_label = final_requirement["label"]
         row.final_requirement_value = final_requirement["required_average"]
         row.final_requirement_period_names = final_requirement["remaining_period_names"]
+        if row.current_projected_period_grade is None:
+            row.period_prediction_message = "Prediction not available yet because there are not enough encoded scores yet."
+        else:
+            row.period_prediction_message = ""
+        if row.current_projected_final_grade is None and final_requirement["status"] == "UNAVAILABLE":
+            row.final_prediction_message = final_requirement["label"]
+        else:
+            row.final_prediction_message = ""
+        if final_requirement["status"] == "NOT_REACHABLE":
+            row.can_still_pass_label = "No"
+        elif final_requirement["status"] == "UNAVAILABLE":
+            row.can_still_pass_label = "Not available"
+        else:
+            row.can_still_pass_label = "Yes"
+        if row.current_projected_period_grade is None:
+            row.status_label = "Needs Attention"
+            row.status_variant = "at-risk"
+        elif row.at_risk_flag:
+            row.status_label = "At Risk"
+            row.status_variant = "at-risk"
+        else:
+            row.status_label = "On Track"
+            row.status_variant = "ok"
 
     summary = prediction_data["summary"]
     metric_cards = [
         {"label": "Students", "value": summary.student_count, "meta": "Active students in this class."},
         {
-            "label": "With Projection",
+            "label": "With Estimate",
             "value": summary.students_with_projection,
-            "meta": f"{summary.avg_coverage_percent}% average coverage",
+            "meta": f"{summary.avg_coverage_percent}% average progress",
         },
         {"label": "At Risk", "value": summary.at_risk_count, "meta": "Projected below passing threshold."},
         {
-            "label": "Average Projection",
+            "label": "Average Estimated Grade",
             "value": _format_decimal_display(summary.avg_projected_grade),
-            "meta": "Unofficial projected period grade.",
+            "meta": f"Unofficial estimate for {period.name}.",
         },
         {
-            "label": "Best Case",
+            "label": "Highest Possible",
             "value": _format_decimal_display(summary.avg_best_case_grade),
             "meta": "If remaining items are completed at full score.",
         },
         {
-            "label": "Worst Case",
+            "label": "Lowest Possible",
             "value": _format_decimal_display(summary.avg_worst_case_grade),
             "meta": "If remaining items get zero raw score.",
         },
@@ -3497,6 +3661,7 @@ def period_prediction_view(request, offering_id: int, period_id: int):
         "offering": offering,
         "template": template,
         "period": period,
+        "prediction_page_title": f"{period.name} Grade Prediction",
         "state": state,
         "rows": rows,
         "metric_cards": metric_cards,
@@ -3753,7 +3918,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         "If a subcomponent has details, EduGradesPro averages those details upward using the detail weights.",
         "If a component has subcomponents, EduGradesPro averages those subcomponents upward using the subcomponent weights.",
         "The period grade is then the weighted sum of all active top-level components in the selected period.",
-        "If the template has an EXAM component and there is still no exam data, the official period grade remains unavailable until the exam side has data.",
+        "If the template has a configured exam component and there is still no exam data, the official period grade remains unavailable until the exam side has data.",
     ]
 
     period_grade_formula = (
@@ -4088,8 +4253,6 @@ def period_corrections_view(request, offering_id: int, period_id: int):
         "submission_deadline": state["submission_deadline"],
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
-        "predeadline_correction_mode": state["predeadline_correction_mode"],
-        "can_self_reopen_before_deadline": state["can_self_reopen_before_deadline"],
         "official_report_enabled": official_report_enabled,
         "correction_students": [
             {
@@ -4141,70 +4304,6 @@ def period_corrections_view(request, offering_id: int, period_id: int):
         "selected_grade_activity_ids": set(form.data.getlist("grade_activities")) if form.is_bound else set(),
     }
     return render(request, "faculty_portal/period_corrections.html", context)
-
-
-@portal_required("FACULTY")
-@permission_required("corrections.create")
-def period_self_reopen_view(request, offering_id: int, period_id: int):
-    if request.method != "POST":
-        return redirect("faculty_portal:period_corrections", offering_id=offering_id, period_id=period_id)
-
-    offering, template, period = _resolve_offering_period(
-        request,
-        offering_id,
-        period_id,
-        allow_governance_closed=True,
-    )
-    if period is None:
-        return redirect("faculty_portal:offering_periods", offering_id=offering_id)
-
-    if not GradingGovernanceService.is_system_correction_enabled(tenant_id=offering.tenant_id):
-        messages.error(
-            request,
-            "Self-reopen is disabled by tenant policy (MANUAL_ONLY).",
-        )
-        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
-
-    if not GradingGovernanceService.can_faculty_self_reopen_before_deadline(
-        offering=offering,
-        template_period=period,
-    ):
-        messages.error(
-            request,
-            "Self-reopen is not allowed for this period. Use the correction request workflow instead.",
-        )
-        return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
-
-    submission = GradingGovernanceService.get_submission(offering=offering, template_period=period)
-    before = {
-        "submission_status": submission.status if submission else None,
-        "submitted_at": submission.submitted_at.isoformat() if submission and submission.submitted_at else None,
-    }
-    reopened = GradingGovernanceService.reopen_period(
-        user=request.user,
-        offering=offering,
-        template_period=period,
-        remarks="Faculty self-reopen before deadline",
-    )
-    AuditService.log_event(
-        action="REOPEN",
-        portal="FACULTY",
-        entity_type="GradeSubmission",
-        entity_id=reopened.id if reopened else None,
-        actor=request.user,
-        tenant=offering.tenant,
-        campus=offering.campus,
-        before_data=before,
-        after_data={
-            "submission_status": reopened.status if reopened else GradeSubmission.Status.REOPENED,
-            "reopened_at": reopened.reopened_at.isoformat() if reopened and reopened.reopened_at else None,
-            "mode": "FACULTY_SELF_REOPEN",
-        },
-        request=request,
-    )
-    messages.success(request, "Period reopened. You may now update grades and resubmit before the deadline.")
-    return redirect("faculty_portal:offering_periods", offering_id=offering.id)
-
 
 @portal_required("FACULTY")
 @permission_required("corrections.create")
@@ -4262,11 +4361,30 @@ def period_correction_finalize_view(request, offering_id: int, period_id: int, r
         return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
 
     try:
-        FacultyGradingService.recompute_period_summary(
-            user=request.user,
-            offering=offering,
-            template_period=period,
-        )
+        affected_student_ids = {
+            item.student_id for item in correction.items.filter(is_active=True, student__isnull=False) if item.student_id
+        }
+        if affected_student_ids:
+            FacultyGradingService.recompute_period_summary_for_students(
+                user=request.user,
+                offering=offering,
+                template_period=period,
+                student_ids=affected_student_ids,
+                audit_reason="CORRECTION_FINALIZE",
+                audit_portal="FACULTY",
+                period_is_finalized=True,
+                final_is_submitted=True,
+            )
+        else:
+            FacultyGradingService.recompute_period_summary(
+                user=request.user,
+                offering=offering,
+                template_period=period,
+                audit_reason="CORRECTION_FINALIZE",
+                audit_portal="FACULTY",
+                period_is_finalized=True,
+                final_is_submitted=True,
+            )
         GradingGovernanceService.close_correction_window(request_obj=correction, actor=request.user)
     except ValidationError as exc:
         messages.error(request, str(exc))

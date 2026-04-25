@@ -2,6 +2,10 @@
 
 Prepared for academic leadership presentation
 
+Presentation page available at:
+
+- `docs/EDUGRADESPRO_ACADEMIC_PRESENTATION.html`
+
 ---
 
 ## Presentation Goal

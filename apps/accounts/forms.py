@@ -2,6 +2,7 @@ from django import forms
 from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import PasswordChangeForm, SetPasswordForm
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from apps.accounts.services import LoginLockoutService
 
@@ -68,6 +69,31 @@ class AdminLoginForm(PortalLoginForm):
 
 class FacultyLoginForm(PortalLoginForm):
     portal_code = "FACULTY"
+
+
+class LoginOtpVerificationForm(forms.Form):
+    otp_code = forms.CharField(
+        label="Verification Code",
+        max_length=6,
+        min_length=6,
+        widget=forms.TextInput(
+            attrs={
+                "autocomplete": "one-time-code",
+                "inputmode": "numeric",
+                "placeholder": "Enter 6-digit code",
+            }
+        ),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["otp_code"].widget.attrs.update({"class": "form-control text-center fw-bold"})
+
+    def clean_otp_code(self):
+        value = (self.cleaned_data.get("otp_code") or "").strip().replace(" ", "")
+        if not value.isdigit():
+            raise forms.ValidationError("Enter the 6-digit code sent to your registered email.")
+        return value
 
 
 class FacultyForgotPasswordForm(forms.Form):
@@ -166,3 +192,46 @@ class PrivacyConsentForm(forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["consent"].widget.attrs.update({"class": "form-check-input"})
+
+
+class UserSignatureUploadForm(forms.Form):
+    signature_file = forms.FileField(
+        label="Signature Image",
+        help_text="Upload a PNG or JPG/JPEG file. EduGradesPro will normalize and encrypt it before storage.",
+    )
+    current_password = forms.CharField(
+        widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
+        label="Current Password",
+        help_text="Re-enter your current password to authorize signature upload or replacement.",
+    )
+
+    def __init__(self, user, *args, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+        self.fields["signature_file"].widget.attrs.update({"class": "form-control", "accept": ".png,.jpg,.jpeg,image/png,image/jpeg"})
+        self.fields["current_password"].widget.attrs.update({"class": "form-control"})
+
+    def clean_current_password(self):
+        value = (self.cleaned_data.get("current_password") or "").strip()
+        if not self.user.check_password(value):
+            raise DjangoValidationError("Current password is incorrect.")
+        return value
+
+
+class UserSignatureDeleteForm(forms.Form):
+    current_password = forms.CharField(
+        widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
+        label="Current Password",
+        help_text="Re-enter your current password to remove the stored signature.",
+    )
+
+    def __init__(self, user, *args, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+        self.fields["current_password"].widget.attrs.update({"class": "form-control"})
+
+    def clean_current_password(self):
+        value = (self.cleaned_data.get("current_password") or "").strip()
+        if not self.user.check_password(value):
+            raise DjangoValidationError("Current password is incorrect.")
+        return value

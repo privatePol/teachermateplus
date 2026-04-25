@@ -127,6 +127,7 @@ from apps.grading.services import (
 )
 from apps.imports.models import ImportBatch
 from apps.navigation.models import MenuGroup, MenuItem, MenuItemPermission
+from apps.notifications.models import SubmissionNonComplianceNotice
 from apps.predictions.services import PredictionAuditService, PredictionSnapshotService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
@@ -2210,7 +2211,6 @@ def correction_governance_settings_view(request):
         messages.error(request, "Select a tenant scope first.")
         return _redirect_back_or_default(request, "admin_portal:dashboard")
 
-    current_mode = GradingGovernanceService.get_predeadline_correction_mode(tenant_id=tenant_id)
     current_correction_mode = GradingGovernanceService.get_correction_mode(tenant_id=tenant_id)
     tenant_obj = Tenant.objects.filter(id=tenant_id).first()
     department_qs = AdminScopeService.scoped_departments(request).filter(tenant_id=tenant_id)
@@ -2219,7 +2219,6 @@ def correction_governance_settings_view(request):
     mode_form = CorrectionGovernanceSettingForm(
         initial={
             "correction_mode": current_correction_mode,
-            "predeadline_correction_mode": current_mode,
         },
         prefix="mode",
     )
@@ -2248,7 +2247,6 @@ def correction_governance_settings_view(request):
             _style_form(mode_form)
             if mode_form.is_valid():
                 selected_correction_mode = mode_form.cleaned_data["correction_mode"]
-                selected_mode = mode_form.cleaned_data["predeadline_correction_mode"]
                 SystemSettingService.set(
                     GradingGovernanceService.CORRECTION_MODE_KEY,
                     selected_correction_mode,
@@ -2257,34 +2255,23 @@ def correction_governance_settings_view(request):
                     is_active=True,
                     description="Controls whether correction handling is manual-only or in-system request workflow.",
                 )
-                SystemSettingService.set(
-                    GradingGovernanceService.PREDEADLINE_CORRECTION_MODE_KEY,
-                    selected_mode,
-                    tenant_id=tenant_id,
-                    value_type="STRING",
-                    is_active=True,
-                    description="Controls how submitted period corrections are handled before the deadline.",
-                )
                 AuditService.log_event(
                     action="UPDATE_SYSTEM_SETTING",
                     portal="ADMIN",
                     entity_type="SystemSetting",
-                    entity_id=f"tenant:{tenant_id}:predeadline-correction-mode",
+                    entity_id=f"tenant:{tenant_id}:correction-mode",
                     actor=request.user,
                     tenant=tenant_id,
                     campus=getattr(request, "scope", {}).get("campus_id"),
                     before_data={
                         "correction_mode": current_correction_mode,
-                        "predeadline_correction_mode": current_mode,
                     },
                     after_data={
                         "correction_mode": selected_correction_mode,
-                        "predeadline_correction_mode": selected_mode,
                     },
                     metadata={
                         "setting_keys": [
                             GradingGovernanceService.CORRECTION_MODE_KEY,
-                            GradingGovernanceService.PREDEADLINE_CORRECTION_MODE_KEY,
                         ],
                     },
                     request=request,
@@ -2530,6 +2517,18 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default=False,
     )
+    current_user_signatures_enabled = FeatureSettingsService.is_user_signatures_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_user_signatures_final_clearance_enabled = FeatureSettingsService.is_user_signature_final_clearance_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_user_signatures_correction_report_enabled = FeatureSettingsService.is_user_signature_correction_report_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
     current_submission_email_enabled = FeatureSettingsService.is_correction_submission_approval_email_enabled(
         tenant_id=tenant_id,
         default=False,
@@ -2568,6 +2567,28 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default=True,
     )
+    current_faculty_quick_tour_enabled = FeatureSettingsService.is_faculty_quick_tour_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    current_submission_non_compliance_notice_enabled = (
+        FeatureSettingsService.is_submission_non_compliance_notice_enabled(
+            tenant_id=tenant_id,
+            default=False,
+        )
+    )
+    current_submission_non_compliance_notice_interval_days = (
+        FeatureSettingsService.get_submission_non_compliance_notice_interval_days(
+            tenant_id=tenant_id,
+            default=3,
+        )
+    )
+    current_submission_non_compliance_head_role_codes = (
+        FeatureSettingsService.get_submission_non_compliance_head_role_codes(tenant_id=tenant_id)
+    )
+    current_submission_non_compliance_hr_recipients = (
+        FeatureSettingsService.get_submission_non_compliance_hr_recipients(tenant_id=tenant_id)
+    )
     current_enrollment_ownership_mode = EnrollmentService.get_enrollment_mode(tenant_id)
     current_enrollment_override_map = EnrollmentService.get_enrollment_mode_overrides(tenant_id)
     selected_override_modes = {
@@ -2592,6 +2613,14 @@ def configurable_features_settings_view(request):
     current_login_lockout_duration_minutes = FeatureSettingsService.get_login_lockout_duration_minutes(
         tenant_id=tenant_id,
         default=15,
+    )
+    current_login_email_otp_enabled = FeatureSettingsService.is_login_email_otp_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_login_email_otp_expiry_minutes = FeatureSettingsService.get_login_email_otp_expiry_minutes(
+        tenant_id=tenant_id,
+        default=10,
     )
     current_response_window_days = FeatureSettingsService.get_faculty_assignment_response_window_days(
         tenant_id=tenant_id,
@@ -2654,6 +2683,9 @@ def configurable_features_settings_view(request):
         request.POST or None,
         initial={
             "correction_official_report_enabled": current_report_enabled,
+            "user_signatures_enabled": current_user_signatures_enabled,
+            "user_signatures_final_clearance_enabled": current_user_signatures_final_clearance_enabled,
+            "user_signatures_correction_report_enabled": current_user_signatures_correction_report_enabled,
             "correction_submission_approval_email_enabled": current_submission_email_enabled,
             "correction_submission_approval_email_roles": role_queryset.filter(code__in=current_submission_email_role_codes),
             "correction_registrar_auto_email_enabled": current_auto_email_enabled,
@@ -2665,6 +2697,13 @@ def configurable_features_settings_view(request):
             "faculty_reminder_center_enabled": current_faculty_reminder_center_enabled,
             "faculty_reminder_email_enabled": current_faculty_reminder_email_enabled,
             "faculty_memo_center_enabled": current_faculty_memo_center_enabled,
+            "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
+            "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
+            "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
+            "submission_non_compliance_head_roles": role_queryset.filter(
+                code__in=current_submission_non_compliance_head_role_codes
+            ),
+            "submission_non_compliance_hr_recipients": ", ".join(current_submission_non_compliance_hr_recipients),
             "enrollment_ownership_mode": current_enrollment_ownership_mode,
             "class_master_list_term": selected_term.id if selected_term else None,
             "class_master_list_faculty": selected_faculty.id if selected_faculty else None,
@@ -2674,6 +2713,8 @@ def configurable_features_settings_view(request):
             "login_lockout_max_attempts": current_login_lockout_max_attempts,
             "login_lockout_window_minutes": current_login_lockout_window_minutes,
             "login_lockout_duration_minutes": current_login_lockout_duration_minutes,
+            "login_email_otp_enabled": current_login_email_otp_enabled,
+            "login_email_otp_expiry_minutes": current_login_email_otp_expiry_minutes,
             "faculty_assignment_response_window_days": current_response_window_days,
             "faculty_assignment_first_reminder_days": current_first_reminder_days,
             "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
@@ -2706,6 +2747,9 @@ def configurable_features_settings_view(request):
         selected_role_codes = list(
             form.cleaned_data["correction_registrar_auto_email_roles"].values_list("code", flat=True)
         )
+        selected_submission_non_compliance_head_role_codes = list(
+            form.cleaned_data["submission_non_compliance_head_roles"].values_list("code", flat=True)
+        )
         selected_grade_prediction_role_codes = list(
             form.cleaned_data["grade_prediction_roles"].values_list("code", flat=True)
         )
@@ -2714,6 +2758,9 @@ def configurable_features_settings_view(request):
         )
         selected_default_recipients = form.cleaned_data["correction_registrar_default_recipient_list"]
         selected_campus_recipients = form.cleaned_data["correction_registrar_campus_recipient_map"]
+        selected_submission_non_compliance_hr_recipients = form.cleaned_data[
+            "submission_non_compliance_hr_recipient_list"
+        ]
         selected_class_override_term = form.cleaned_data.get("class_master_list_term")
         selected_class_override_faculty = form.cleaned_data.get("class_master_list_faculty")
         selected_class_override_offerings = list(form.cleaned_data.get("class_master_list_offering") or [])
@@ -2729,6 +2776,27 @@ def configurable_features_settings_view(request):
         SystemSettingService.set(
             FeatureSettingsService.CORRECTION_OFFICIAL_REPORT_ENABLED_KEY,
             bool(form.cleaned_data["correction_official_report_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
+            bool(form.cleaned_data["user_signatures_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_FINAL_CLEARANCE_ENABLED_KEY,
+            bool(form.cleaned_data["user_signatures_final_clearance_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY,
+            bool(form.cleaned_data["user_signatures_correction_report_enabled"]),
             tenant_id=tenant_id,
             value_type="BOOL",
             is_active=True,
@@ -2818,6 +2886,41 @@ def configurable_features_settings_view(request):
             is_active=True,
         )
         SystemSettingService.set(
+            FeatureSettingsService.FACULTY_QUICK_TOUR_ENABLED_KEY,
+            bool(form.cleaned_data["faculty_quick_tour_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY,
+            bool(form.cleaned_data["submission_non_compliance_notice_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
+            int(form.cleaned_data["submission_non_compliance_notice_interval_days"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY,
+            selected_submission_non_compliance_head_role_codes,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY,
+            selected_submission_non_compliance_hr_recipients,
+            tenant_id=tenant_id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
             EnrollmentService.MODE_KEY,
             str(form.cleaned_data["enrollment_ownership_mode"]),
             tenant_id=tenant_id,
@@ -2855,6 +2958,20 @@ def configurable_features_settings_view(request):
         SystemSettingService.set(
             FeatureSettingsService.LOGIN_LOCKOUT_DURATION_MINUTES_KEY,
             int(form.cleaned_data["login_lockout_duration_minutes"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.LOGIN_EMAIL_OTP_ENABLED_KEY,
+            bool(form.cleaned_data["login_email_otp_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.LOGIN_EMAIL_OTP_EXPIRY_MINUTES_KEY,
+            int(form.cleaned_data["login_email_otp_expiry_minutes"]),
             tenant_id=tenant_id,
             value_type="INT",
             is_active=True,
@@ -2968,6 +3085,9 @@ def configurable_features_settings_view(request):
             campus=getattr(request, "scope", {}).get("campus_id"),
             before_data={
                 "correction_official_report_enabled": current_report_enabled,
+                "user_signatures_enabled": current_user_signatures_enabled,
+                "user_signatures_final_clearance_enabled": current_user_signatures_final_clearance_enabled,
+                "user_signatures_correction_report_enabled": current_user_signatures_correction_report_enabled,
                 "correction_submission_approval_email_enabled": current_submission_email_enabled,
                 "correction_submission_approval_email_role_codes": current_submission_email_role_codes,
                 "correction_registrar_auto_email_enabled": current_auto_email_enabled,
@@ -2980,12 +3100,19 @@ def configurable_features_settings_view(request):
                 "faculty_reminder_center_enabled": current_faculty_reminder_center_enabled,
                 "faculty_reminder_email_enabled": current_faculty_reminder_email_enabled,
                 "faculty_memo_center_enabled": current_faculty_memo_center_enabled,
+                "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
+                "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
+                "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
+                "submission_non_compliance_head_role_codes": current_submission_non_compliance_head_role_codes,
+                "submission_non_compliance_hr_recipients": current_submission_non_compliance_hr_recipients,
                 "enrollment_ownership_mode": current_enrollment_ownership_mode,
                 "enrollment_ownership_mode_by_offering": current_enrollment_override_map,
                 "login_lockout_enabled": current_login_lockout_enabled,
                 "login_lockout_max_attempts": current_login_lockout_max_attempts,
                 "login_lockout_window_minutes": current_login_lockout_window_minutes,
                 "login_lockout_duration_minutes": current_login_lockout_duration_minutes,
+                "login_email_otp_enabled": current_login_email_otp_enabled,
+                "login_email_otp_expiry_minutes": current_login_email_otp_expiry_minutes,
                 "faculty_assignment_response_window_days": current_response_window_days,
                 "faculty_assignment_first_reminder_days": current_first_reminder_days,
                 "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
@@ -3003,6 +3130,13 @@ def configurable_features_settings_view(request):
             },
             after_data={
                 "correction_official_report_enabled": bool(form.cleaned_data["correction_official_report_enabled"]),
+                "user_signatures_enabled": bool(form.cleaned_data["user_signatures_enabled"]),
+                "user_signatures_final_clearance_enabled": bool(
+                    form.cleaned_data["user_signatures_final_clearance_enabled"]
+                ),
+                "user_signatures_correction_report_enabled": bool(
+                    form.cleaned_data["user_signatures_correction_report_enabled"]
+                ),
                 "correction_submission_approval_email_enabled": bool(
                     form.cleaned_data["correction_submission_approval_email_enabled"]
                 ),
@@ -3019,6 +3153,15 @@ def configurable_features_settings_view(request):
                 "faculty_reminder_center_enabled": bool(form.cleaned_data["faculty_reminder_center_enabled"]),
                 "faculty_reminder_email_enabled": bool(form.cleaned_data["faculty_reminder_email_enabled"]),
                 "faculty_memo_center_enabled": bool(form.cleaned_data["faculty_memo_center_enabled"]),
+                "faculty_quick_tour_enabled": bool(form.cleaned_data["faculty_quick_tour_enabled"]),
+                "submission_non_compliance_notice_enabled": bool(
+                    form.cleaned_data["submission_non_compliance_notice_enabled"]
+                ),
+                "submission_non_compliance_notice_interval_days": int(
+                    form.cleaned_data["submission_non_compliance_notice_interval_days"]
+                ),
+                "submission_non_compliance_head_role_codes": selected_submission_non_compliance_head_role_codes,
+                "submission_non_compliance_hr_recipients": selected_submission_non_compliance_hr_recipients,
                 "enrollment_ownership_mode": str(form.cleaned_data["enrollment_ownership_mode"]),
                 "enrollment_ownership_mode_by_offering": updated_enrollment_override_map,
                 "selected_class_master_list_term": selected_class_override_term.code if selected_class_override_term else None,
@@ -3036,6 +3179,8 @@ def configurable_features_settings_view(request):
                 "login_lockout_max_attempts": int(form.cleaned_data["login_lockout_max_attempts"]),
                 "login_lockout_window_minutes": int(form.cleaned_data["login_lockout_window_minutes"]),
                 "login_lockout_duration_minutes": int(form.cleaned_data["login_lockout_duration_minutes"]),
+                "login_email_otp_enabled": bool(form.cleaned_data["login_email_otp_enabled"]),
+                "login_email_otp_expiry_minutes": int(form.cleaned_data["login_email_otp_expiry_minutes"]),
                 "faculty_assignment_response_window_days": int(form.cleaned_data["faculty_assignment_response_window_days"]),
                 "faculty_assignment_first_reminder_days": int(form.cleaned_data["faculty_assignment_first_reminder_days"]),
                 "faculty_assignment_repeat_reminder_days": int(form.cleaned_data["faculty_assignment_repeat_reminder_days"]),
@@ -3058,6 +3203,9 @@ def configurable_features_settings_view(request):
             metadata={
                 "setting_keys": [
                     FeatureSettingsService.CORRECTION_OFFICIAL_REPORT_ENABLED_KEY,
+                    FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
+                    FeatureSettingsService.USER_SIGNATURES_FINAL_CLEARANCE_ENABLED_KEY,
+                    FeatureSettingsService.USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY,
                     FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
                     FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ROLE_CODES_KEY,
                     FeatureSettingsService.CORRECTION_REGISTRAR_AUTO_EMAIL_ENABLED_KEY,
@@ -3070,12 +3218,19 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.FACULTY_REMINDER_CENTER_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_REMINDER_EMAIL_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_MEMO_CENTER_ENABLED_KEY,
+                    FeatureSettingsService.FACULTY_QUICK_TOUR_ENABLED_KEY,
+                    FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY,
+                    FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
+                    FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY,
+                    FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY,
                     EnrollmentService.MODE_KEY,
                     EnrollmentService.MODE_OVERRIDE_MAP_KEY,
                     FeatureSettingsService.LOGIN_LOCKOUT_ENABLED_KEY,
                     FeatureSettingsService.LOGIN_LOCKOUT_MAX_ATTEMPTS_KEY,
                     FeatureSettingsService.LOGIN_LOCKOUT_WINDOW_MINUTES_KEY,
                     FeatureSettingsService.LOGIN_LOCKOUT_DURATION_MINUTES_KEY,
+                    FeatureSettingsService.LOGIN_EMAIL_OTP_ENABLED_KEY,
+                    FeatureSettingsService.LOGIN_EMAIL_OTP_EXPIRY_MINUTES_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS_KEY,
@@ -8445,9 +8600,6 @@ def grading_period_lock_reopen_view(request, lock_id: int):
 @permission_required("grade_submissions.read")
 def overdue_unsubmitted_report_view(request):
     now = timezone.now()
-    current_tenant_id = getattr(request, "scope", {}).get("tenant_id")
-    current_campus_id = getattr(request, "scope", {}).get("campus_id")
-
     locks_qs = AdminScopeService.scoped_grading_period_locks(request).filter(
         is_active=True,
         deadline_at__isnull=False,
@@ -8584,6 +8736,13 @@ def overdue_unsubmitted_report_view(request):
 
         delta = now - lock.deadline_at if lock.deadline_at else None
         overdue_hours = int(delta.total_seconds() // 3600) if delta else 0
+        missing_records = None
+        if template_period:
+            readiness = GradingGovernanceService.evaluate_submission_readiness(
+                offering=offering,
+                template_period=template_period,
+            )
+            missing_records = readiness["students_missing_any_grade"]
         report_rows.append(
             {
                 "lock_id": lock.id,
@@ -8602,9 +8761,41 @@ def overdue_unsubmitted_report_view(request):
                 "submitted_at": submission.submitted_at if submission else None,
                 "skip_reason": skip_reason,
                 "overdue_hours": overdue_hours,
+                "missing_records": missing_records,
+                "compliance_stage": "NON_COMPLIANT",
                 "offering_id": offering.id,
+                "template_period_id": template_period.id if template_period else None,
+                "latest_notice_level": None,
+                "latest_notice_title": "",
+                "latest_notice_issued_at": None,
+                "latest_notice_status": None,
             }
         )
+
+    notice_map = {}
+    notice_offering_ids = {row["offering_id"] for row in report_rows if row.get("template_period_id")}
+    notice_period_ids = {row["template_period_id"] for row in report_rows if row.get("template_period_id")}
+    if notice_offering_ids and notice_period_ids:
+        notice_rows = SubmissionNonComplianceNotice.objects.filter(
+            offering_id__in=notice_offering_ids,
+            template_period_id__in=notice_period_ids,
+        ).order_by("offering_id", "template_period_id", "-issued_at", "-id")
+        for notice in notice_rows:
+            key = (notice.offering_id, notice.template_period_id)
+            if key not in notice_map:
+                notice_map[key] = notice
+
+    for row in report_rows:
+        template_period_id = row.get("template_period_id")
+        if not template_period_id:
+            continue
+        latest_notice = notice_map.get((row["offering_id"], template_period_id))
+        if latest_notice is None:
+            continue
+        row["latest_notice_level"] = latest_notice.notice_level
+        row["latest_notice_title"] = latest_notice.title
+        row["latest_notice_issued_at"] = latest_notice.issued_at
+        row["latest_notice_status"] = latest_notice.status
 
     report_rows.sort(
         key=lambda row: (
@@ -8620,6 +8811,7 @@ def overdue_unsubmitted_report_view(request):
         "total_overdue_unsubmitted": len(report_rows),
         "locked_unsubmitted": sum(1 for row in report_rows if row["lock_state"] == "LOCKED"),
         "open_overdue_unsubmitted": sum(1 for row in report_rows if row["lock_state"] == "OPEN_OVERDUE"),
+        "non_compliant": sum(1 for row in report_rows if row["compliance_stage"] == "NON_COMPLIANT"),
     }
     context = {
         "page_obj": _get_page(request, report_rows, per_page=30),
@@ -8629,12 +8821,6 @@ def overdue_unsubmitted_report_view(request):
         "campus_options": AdminScopeService.scoped_campuses(request).order_by("code"),
         "academic_year_options": AdminScopeService.scoped_academic_years(request).order_by("-start_date"),
         "term_options": AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no"),
-        "can_force_reopen": PermissionService.has_permission(
-            request.user,
-            "grade_submissions.reopen",
-            tenant_id=current_tenant_id,
-            campus_id=current_campus_id,
-        ),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/overdue_unsubmitted_report.html", context)

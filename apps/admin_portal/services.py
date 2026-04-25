@@ -429,6 +429,7 @@ class AdminScopeService:
         )
         return AdminScopeService._visible_queryset(request, queryset)
 
+
     @staticmethod
     def scoped_tenant_grading_profiles(request):
         tenants = AdminScopeService.scoped_tenants(request).values_list("id", flat=True)

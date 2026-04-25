@@ -993,6 +993,7 @@ class GradingTemplateComponentForm(forms.ModelForm):
             "weight_percentage",
             "sort_order",
             "score_input_mode",
+            "is_exam_component",
             "is_active",
         ]
 
@@ -1009,6 +1010,11 @@ class GradingTemplateComponentForm(forms.ModelForm):
             "Set the default entry method for this major component. "
             "Use Raw Score (Base-50) for quizzes/exams scored by points, "
             "or Direct Percentage for items encoded directly as a percentage."
+        )
+        self.fields["is_exam_component"].label = "Exam component"
+        self.fields["is_exam_component"].help_text = (
+            "Enable this for the major exam component of the period. EduGradesPro uses this flag, not the component code, "
+            "to separate exam grade from class standing."
         )
         _enforce_active_reference_choices(self)
 
@@ -1250,7 +1256,26 @@ class GradingPeriodLockForm(forms.ModelForm):
         if term_queryset is not None:
             self.fields["term"].queryset = term_queryset
         if offering_queryset is not None:
-            self.fields["course_offering"].queryset = offering_queryset
+            sorted_offering_queryset = offering_queryset.select_related(
+                "course",
+                "section",
+                "term__academic_year",
+            ).order_by(
+                "course__title",
+                "course__code",
+                "section__name",
+                "section__code",
+                "term__academic_year__name",
+                "term__name",
+                "id",
+            )
+            self.fields["course_offering"].queryset = sorted_offering_queryset
+        self.fields["course_offering"].widget.attrs.update(
+            {
+                "data-searchable-select": "true",
+                "data-search-placeholder": "Search course offering by title, code, section, or term",
+            }
+        )
 
         self._valid_period_codes = set()
         period_field = self.fields["period_code"]
@@ -1297,8 +1322,8 @@ class GradingPeriodLockForm(forms.ModelForm):
         _enforce_active_reference_choices(self)
         self.fields["deadline_at"].input_formats = ["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"]
         self.fields["deadline_at"].help_text = (
-            "Submission deadline for this period scope. "
-            "Admin submission revert is allowed only before this timestamp."
+            "Submission deadline for this period scope. Unsubmitted grade books remain open after this timestamp, "
+            "but EduGradesPro marks them as overdue for faculty reminder banners and admin non-compliance monitoring."
         )
         self.fields["period_code"].help_text = (
             "Choose the actual grading period code used by the grading template, such as PRELIM or GENED_PRELIM. "
@@ -1314,6 +1339,7 @@ class GradingPeriodLockForm(forms.ModelForm):
         campus = cleaned.get("campus")
         academic_year = cleaned.get("academic_year")
         term = cleaned.get("term")
+        deadline_at = cleaned.get("deadline_at")
         cleaned["period_code"] = period_code
 
         if period_code and self._valid_period_codes and period_code not in self._valid_period_codes:
@@ -1773,10 +1799,6 @@ class CorrectionGovernanceSettingForm(forms.Form):
         ("MANUAL_ONLY", "Manual Only (paper form + admin reopen)"),
         ("SYSTEM_REQUEST", "System Request Workflow"),
     ]
-    PREDEADLINE_CORRECTION_MODE_CHOICES = [
-        ("REQUEST_REVIEW", "Request Review"),
-        ("FACULTY_SELF_REOPEN", "Faculty Self-Reopen Before Deadline"),
-    ]
 
     correction_mode = forms.ChoiceField(
         choices=CORRECTION_MODE_CHOICES,
@@ -1784,15 +1806,6 @@ class CorrectionGovernanceSettingForm(forms.Form):
         help_text=(
             "Manual Only disables faculty in-portal correction request filing. "
             "System Request enables the in-portal correction workflow."
-        ),
-    )
-
-    predeadline_correction_mode = forms.ChoiceField(
-        choices=PREDEADLINE_CORRECTION_MODE_CHOICES,
-        label="Pre-deadline correction handling",
-        help_text=(
-            "Choose whether faculty must file a correction request even before the deadline, "
-            "or may directly reopen their own submitted grading period before deadline."
         ),
     )
 
@@ -1873,6 +1886,21 @@ class ConfigurableFeatureSettingForm(forms.Form):
         label="Enable official correction PDF/report generation",
         help_text="When enabled, approved correction workflows may generate an official printable/exportable registrar reference document.",
     )
+    user_signatures_enabled = forms.BooleanField(
+        required=False,
+        label="Enable encrypted user signatures",
+        help_text="Allows portal users to upload and maintain an encrypted signature image in their own account profile.",
+    )
+    user_signatures_final_clearance_enabled = forms.BooleanField(
+        required=False,
+        label="Allow stored signatures on Faculty Final Clearance",
+        help_text="When enabled, EduGradesPro may place the generating faculty member's stored signature on the printed Final Clearance PDF.",
+    )
+    user_signatures_correction_report_enabled = forms.BooleanField(
+        required=False,
+        label="Allow stored signatures on Correction Official Report",
+        help_text="When enabled, EduGradesPro may place stored requester and approver signatures on the official correction PDF when those users have uploaded a signature.",
+    )
     correction_submission_approval_email_enabled = forms.BooleanField(
         required=False,
         label="Enable approval notification email on correction submission",
@@ -1930,6 +1958,34 @@ class ConfigurableFeatureSettingForm(forms.Form):
         required=False,
         label="Enable faculty memo center",
         help_text="Shows a private notes/memo area for faculty to keep class and student reminders inside the portal.",
+    )
+    faculty_quick_tour_enabled = forms.BooleanField(
+        required=False,
+        label="Enable faculty portal quick tour",
+        help_text="Shows the guided callout tour for faculty users who have not disabled it on their account.",
+    )
+    submission_non_compliance_notice_enabled = forms.BooleanField(
+        required=False,
+        label="Enable non-compliance notices for overdue grade submissions",
+        help_text="When enabled, EduGradesPro can issue notice, warning, and escalation follow-ups for overdue unsubmitted periodic grades.",
+    )
+    submission_non_compliance_notice_interval_days = forms.IntegerField(
+        required=True,
+        min_value=1,
+        label="Notice repeat interval (days)",
+        help_text="How many days EduGradesPro waits before sending the next follow-up while the period is still overdue and unsubmitted.",
+    )
+    submission_non_compliance_head_roles = forms.ModelMultipleChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Academic head roles for visibility and escalation",
+        help_text="Select the scoped academic oversight roles that should be included in escalation recipients and monitoring visibility.",
+    )
+    submission_non_compliance_hr_recipients = forms.CharField(
+        required=False,
+        label="HR escalation recipient email(s)",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Separate multiple HR email addresses with commas or new lines. These recipients are used at escalation stage only.",
     )
     enrollment_ownership_mode = forms.ChoiceField(
         required=True,
@@ -1990,6 +2046,17 @@ class ConfigurableFeatureSettingForm(forms.Form):
         min_value=1,
         label="Lockout duration (minutes)",
         help_text="How long the temporary lockout stays active before the user can try again.",
+    )
+    login_email_otp_enabled = forms.BooleanField(
+        required=False,
+        label="Enable email OTP during login",
+        help_text="Requires users to enter a one-time code sent to their registered email after a correct password.",
+    )
+    login_email_otp_expiry_minutes = forms.IntegerField(
+        required=False,
+        min_value=1,
+        label="Email OTP expiry (minutes)",
+        help_text="How long a login verification code remains valid.",
     )
     faculty_assignment_response_window_days = forms.IntegerField(
         required=True,
@@ -2087,6 +2154,7 @@ class ConfigurableFeatureSettingForm(forms.Form):
         if role_queryset is not None:
             self.fields["correction_submission_approval_email_roles"].queryset = role_queryset
             self.fields["correction_registrar_auto_email_roles"].queryset = role_queryset
+            self.fields["submission_non_compliance_head_roles"].queryset = role_queryset
             self.fields["grade_prediction_roles"].queryset = role_queryset
             self.fields["grade_prediction_what_if_roles"].queryset = role_queryset
         if term_queryset is not None:
@@ -2124,6 +2192,10 @@ class ConfigurableFeatureSettingForm(forms.Form):
     def clean(self):
         cleaned = super().clean()
 
+        if not cleaned.get("user_signatures_enabled"):
+            cleaned["user_signatures_final_clearance_enabled"] = False
+            cleaned["user_signatures_correction_report_enabled"] = False
+
         if (
             cleaned.get("correction_submission_approval_email_enabled")
             and not cleaned.get("correction_submission_approval_email_roles")
@@ -2137,6 +2209,14 @@ class ConfigurableFeatureSettingForm(forms.Form):
         for email in parsed_default:
             validate_email(email)
         cleaned["correction_registrar_default_recipient_list"] = parsed_default
+
+        parsed_hr_recipients = self._parse_email_list(cleaned.get("submission_non_compliance_hr_recipients", ""))
+        for email in parsed_hr_recipients:
+            try:
+                validate_email(email)
+            except DjangoValidationError:
+                self.add_error("submission_non_compliance_hr_recipients", f"{email} is not a valid email address.")
+        cleaned["submission_non_compliance_hr_recipient_list"] = parsed_hr_recipients
 
         campus_recipient_map = {}
         for field_name, campus in self.campus_fields:
@@ -2197,12 +2277,20 @@ class ConfigurableFeatureSettingForm(forms.Form):
             cleaned["faculty_reminder_email_enabled"] = False
         if not cleaned.get("faculty_memo_center_enabled"):
             cleaned["faculty_memo_center_enabled"] = False
+        if not cleaned.get("faculty_quick_tour_enabled"):
+            cleaned["faculty_quick_tour_enabled"] = False
+        if not cleaned.get("submission_non_compliance_notice_enabled"):
+            cleaned["submission_non_compliance_notice_enabled"] = False
         if not cleaned.get("enrollment_ownership_mode"):
             cleaned["enrollment_ownership_mode"] = EnrollmentService.ADMIN_ONLY
         if not cleaned.get("class_master_list_override_mode"):
             cleaned["class_master_list_override_mode"] = ""
         if not cleaned.get("login_lockout_enabled"):
             cleaned["login_lockout_enabled"] = False
+        if not cleaned.get("login_email_otp_enabled"):
+            cleaned["login_email_otp_enabled"] = False
+        if cleaned.get("login_email_otp_expiry_minutes") is None:
+            cleaned["login_email_otp_expiry_minutes"] = 10
 
         selected_term = cleaned.get("class_master_list_term")
         selected_offerings = cleaned.get("class_master_list_offering")

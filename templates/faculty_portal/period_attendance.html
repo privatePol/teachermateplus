@@ -17,6 +17,10 @@
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">View request</a>
   {% endif %}
 </div>
+{% elif is_non_compliant %}
+<div class="alert alert-danger">
+  Submission deadline already passed. You may continue encoding and submit as soon as possible, but this class is already listed in the non-compliance monitor.
+</div>
 {% elif is_governance_closed %}
 <div class="alert alert-secondary">
   This period is currently read-only under active grading period governance. You may still review attendance records, but editing is disabled.
@@ -32,7 +36,7 @@
   <div class="card-header bg-white"><strong>Create or Select Session</strong></div>
   <div class="card-body">
     {% if can_manage_sessions %}
-      <form method="post" class="row g-2 align-items-end">
+      <form method="post" class="row g-2 align-items-end" id="attendance-session-form">
         {% csrf_token %}
         <input type="hidden" name="action" value="create_session">
         <div class="col-md-3">
@@ -44,6 +48,10 @@
           {{ session_form.title }}
         </div>
         <div class="col-md-2">
+          <div class="save-action-cue justify-content-center mb-2" id="attendance-session-save-cue" aria-hidden="true">
+            <span class="save-action-cue-arrow" aria-hidden="true">→</span>
+            <span class="save-action-cue-text">Click Save Session</span>
+          </div>
           <button class="btn btn-success w-100" type="submit">Save Session</button>
         </div>
       </form>
@@ -71,7 +79,7 @@
 </div>
 
 {% if selected_session %}
-<form method="post">
+<form method="post" id="attendance-records-form">
   {% csrf_token %}
   <input type="hidden" name="action" value="save_records">
   <input type="hidden" name="session_id" value="{{ selected_session.id }}">
@@ -120,8 +128,12 @@
         </tbody>
       </table>
     </div>
-    <div class="card-footer d-flex justify-content-end">
+    <div class="card-footer d-flex justify-content-end align-items-center gap-2 flex-wrap">
       {% if is_editable %}
+      <div class="save-action-cue" id="attendance-records-save-cue" aria-hidden="true">
+        <span class="save-action-cue-arrow" aria-hidden="true">→</span>
+        <span class="save-action-cue-text">Click Save Attendance</span>
+      </div>
       <button class="btn btn-primary" type="submit">Save Attendance</button>
       {% endif %}
     </div>
@@ -130,4 +142,59 @@
 {% else %}
 <div class="alert alert-warning">Create or select a session to encode attendance.</div>
 {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    function wireSaveCue(formId, cueId) {
+      const form = document.getElementById(formId);
+      const cue = document.getElementById(cueId);
+      if (!form || !cue) return;
+
+      const inputs = Array.from(form.querySelectorAll("input, select, textarea")).filter(function (element) {
+        return element.name && element.type !== "hidden" && !element.disabled;
+      });
+      if (!inputs.length) return;
+
+      function normalizeValue(element) {
+        if (element.type === "checkbox" || element.type === "radio") {
+          return element.checked ? "checked" : "unchecked";
+        }
+        return (element.value || "").trim();
+      }
+
+      const initialValues = new Map(inputs.map(function (element) {
+        return [element.name, normalizeValue(element)];
+      }));
+
+      function setCueVisibility(isVisible) {
+        cue.classList.toggle("is-visible", !!isVisible);
+        cue.setAttribute("aria-hidden", isVisible ? "false" : "true");
+      }
+
+      function updateCue() {
+        const isDirty = inputs.some(function (element) {
+          return normalizeValue(element) !== (initialValues.get(element.name) || "");
+        });
+        setCueVisibility(isDirty);
+      }
+
+      inputs.forEach(function (element) {
+        element.addEventListener("input", updateCue);
+        element.addEventListener("change", updateCue);
+      });
+
+      form.addEventListener("submit", function () {
+        setCueVisibility(false);
+      });
+
+      updateCue();
+    }
+
+    wireSaveCue("attendance-session-form", "attendance-session-save-cue");
+    wireSaveCue("attendance-records-form", "attendance-records-save-cue");
+  });
+</script>
 {% endblock %}

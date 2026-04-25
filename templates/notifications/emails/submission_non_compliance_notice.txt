@@ -1,0 +1,17 @@
+NCBA-EDUGRADESPRO Notice
+
+{{ notice.title }}
+Faculty: {{ notice.faculty_user.full_name }}
+Class: {{ notice.offering.course.title }} ({{ notice.offering.course.code }}) / {{ notice.offering.section.code }}
+Period: {{ notice.template_period.name }}
+Deadline: {{ notice.deadline_at|date:"F j, Y g:i A" }}
+Notice Level: {{ notice.get_notice_level_display }}
+
+{{ notice.message }}
+
+{% if faculty_portal_url %}Open the Faculty Reminder Center:
+{{ faculty_portal_url }}
+{% endif %}
+{% if admin_report_url %}Open the Non-Compliance Report:
+{{ admin_report_url }}
+{% endif %}

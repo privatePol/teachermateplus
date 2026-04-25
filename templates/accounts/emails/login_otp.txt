@@ -1,0 +1,12 @@
+NCBA EduGradesPro Login Verification
+{{ portal_name }}
+
+Hello {{ user.full_name|default:user.username }},
+
+Use this one-time verification code to continue signing in:
+
+{{ otp_code }}
+
+This code expires in about {{ expires_in_minutes }} minute(s).
+
+If you did not request this login, please contact your EduGradesPro administrator immediately.

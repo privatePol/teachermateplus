@@ -1,0 +1,74 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="h5 mb-1">My Signature</h2>
+    <div class="text-muted">Upload your encrypted signature image for approved governance and printable documents.</div>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back</a>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white"><strong>Current Signature</strong></div>
+      <div class="card-body">
+        {% if credential and credential.has_signature %}
+          <div class="border rounded-3 bg-light p-3 text-center mb-3">
+            <img src="{% url 'accounts:admin_signature_preview' %}" alt="Signature Preview" style="max-width: 100%; max-height: 160px; object-fit: contain;">
+          </div>
+          <div class="small text-muted">
+            Uploaded: {{ credential.uploaded_at|date:"Y-m-d H:i" }}<br>
+            Stored as: {{ credential.image_format }} | {{ credential.file_size_bytes }} bytes
+          </div>
+        {% else %}
+          <div class="alert alert-warning mb-0">No signature image is stored yet.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-header bg-white"><strong>Upload or Replace Signature</strong></div>
+      <div class="card-body">
+        <form method="post" enctype="multipart/form-data" novalidate>
+          {% csrf_token %}
+          <input type="hidden" name="action" value="upload">
+          <div class="mb-3">
+            <label class="form-label" for="{{ upload_form.signature_file.id_for_label }}">{{ upload_form.signature_file.label }}</label>
+            {{ upload_form.signature_file }}
+            {% if upload_form.signature_file.help_text %}<div class="form-text">{{ upload_form.signature_file.help_text }}</div>{% endif %}
+            {% for error in upload_form.signature_file.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="{{ upload_form.current_password.id_for_label }}">{{ upload_form.current_password.label }}</label>
+            {{ upload_form.current_password }}
+            {% if upload_form.current_password.help_text %}<div class="form-text">{{ upload_form.current_password.help_text }}</div>{% endif %}
+            {% for error in upload_form.current_password.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          <button class="btn btn-success" type="submit">Save Encrypted Signature</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Remove Stored Signature</strong></div>
+      <div class="card-body">
+        <form method="post" novalidate>
+          {% csrf_token %}
+          <input type="hidden" name="action" value="delete">
+          <div class="mb-3">
+            <label class="form-label" for="{{ delete_form.current_password.id_for_label }}">{{ delete_form.current_password.label }}</label>
+            {{ delete_form.current_password }}
+            {% if delete_form.current_password.help_text %}<div class="form-text">{{ delete_form.current_password.help_text }}</div>{% endif %}
+            {% for error in delete_form.current_password.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          <button class="btn btn-outline-danger" type="submit">Remove Signature</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

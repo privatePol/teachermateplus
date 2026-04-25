@@ -10,9 +10,18 @@ from django.utils import timezone
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
-from apps.grading.models import GradeActivity, GradingTemplate, GradingTemplateComponent, GradingTemplatePeriod
-from apps.notifications.models import FacultyReminder, FacultyReminderEmailQueue
-from apps.notifications.services import FacultyReminderService
+from apps.grading.models import (
+    CourseTemplateAssignment,
+    GradeActivity,
+    GradeSubmission,
+    GradingPeriodLock,
+    GradingTemplate,
+    GradingTemplateComponent,
+    GradingTemplatePeriod,
+)
+from apps.notifications.models import FacultyReminder, FacultyReminderEmailQueue, SubmissionNonComplianceNotice
+from apps.notifications.services import FacultyReminderService, SubmissionNonComplianceNoticeService
+from apps.rbac.models import Role, UserRole
 from apps.tenants.models import Campus, Department, Program, Tenant
 
 User = get_user_model()
@@ -136,6 +145,12 @@ class FacultyReminderServiceTests(TestCase):
             name="Quizzes",
             weight_percentage=100,
             sort_order=1,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=self.template,
+            effective_from_term=self.term,
+            is_active=True,
         )
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@edugradespro.local")
@@ -263,3 +278,102 @@ class FacultyReminderServiceTests(TestCase):
 
         self.assertIsNotNone(reminder)
         self.assertFalse(reminder.send_email)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@edugradespro.local")
+    def test_submission_non_compliance_notice_progression_and_resolution(self):
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
+            3,
+            tenant_id=self.tenant.id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY,
+            ["hr@ncba.edu.ph"],
+            tenant_id=self.tenant.id,
+            value_type="JSON",
+            is_active=True,
+        )
+        dean_user = User.objects.create_user(
+            username="dean1",
+            email="dean1@ncba.edu.ph",
+            password="testpassword123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            is_active=True,
+        )
+        dean_role = Role.objects.create(code="DEAN", name="Dean", is_active=True)
+        UserRole.objects.create(
+            user=dean_user,
+            role=dean_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            is_active=True,
+        )
+        lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code="PRELIM",
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() - timedelta(days=1),
+            is_locked=False,
+            is_active=True,
+        )
+
+        first_run = timezone.now()
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=first_run, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 1)
+        first_notice = SubmissionNonComplianceNotice.objects.get()
+        self.assertEqual(first_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.NOTICE)
+        self.assertEqual(first_notice.recipient_emails_json, [self.user.email])
+
+        second_run = first_run + timedelta(days=3, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=second_run, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 1)
+        second_notice = SubmissionNonComplianceNotice.objects.order_by("issued_at", "id")[1]
+        self.assertEqual(second_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.WARNING)
+
+        third_run = second_run + timedelta(days=3, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=third_run, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 1)
+        third_notice = SubmissionNonComplianceNotice.objects.order_by("issued_at", "id")[2]
+        self.assertEqual(third_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.ESCALATION)
+        self.assertIn(self.user.email, third_notice.recipient_emails_json or [])
+        self.assertIn(dean_user.email, third_notice.recipient_emails_json or [])
+        self.assertIn("hr@ncba.edu.ph", third_notice.recipient_emails_json or [])
+        self.assertEqual(len(mail.outbox), 3)
+
+        submission = GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.user,
+            submitted_at=third_run,
+        )
+        resolved = SubmissionNonComplianceNoticeService.resolve_submitted_notices(
+            tenant_id=self.tenant.id,
+            now=third_run + timedelta(minutes=5),
+        )
+        self.assertEqual(resolved, 3)
+        self.assertEqual(
+            SubmissionNonComplianceNotice.objects.filter(status=SubmissionNonComplianceNotice.Status.RESOLVED).count(),
+            3,
+        )
+        self.assertEqual(
+            SubmissionNonComplianceNotice.objects.filter(submission=submission).count(),
+            3,
+        )

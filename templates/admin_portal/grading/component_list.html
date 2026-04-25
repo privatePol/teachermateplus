@@ -53,6 +53,7 @@
           <th>Name</th>
           <th>Weight %</th>
           <th>Score Entry</th>
+          <th>Exam</th>
           <th>Sort</th>
           <th>Active</th>
           <th></th>
@@ -67,6 +68,7 @@
           <td>{{ row.name }}</td>
           <td>{{ row.weight_percentage }}</td>
           <td>{{ row.get_score_input_mode_display }}</td>
+          <td>{% if row.is_exam_component %}Yes{% else %}No{% endif %}</td>
           <td>{{ row.sort_order }}</td>
           <td>
             {% if row.is_active %}
@@ -93,7 +95,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="9" class="text-center text-muted py-4">No template components found.</td></tr>
+        <tr><td colspan="10" class="text-center text-muted py-4">No template components found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

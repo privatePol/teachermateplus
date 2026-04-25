@@ -53,7 +53,12 @@
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="h4 mb-0">Prediction | {{ offering.course.code }} | {{ period.name }}</h2>
+  <div>
+    <h2 class="h4 mb-1">{{ prediction_page_title }}</h2>
+    <div class="text-muted">
+      This tool estimates the student's grade for the current grading period based on encoded scores and assumed results for remaining items. It does not change the actual gradebook.
+    </div>
+  </div>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-info" href="{% url 'faculty_portal:period_prediction_guide' offering.id period.id %}">How Prediction Works</a>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
@@ -61,7 +66,7 @@
 </div>
 
 <div class="alert alert-info">
-  Projected grades are unofficial and read-only. EduGradesPro uses the assigned grading template and current encoded records to estimate possible outcomes without writing anything into the gradebook.
+  The main estimate on this page is for <strong>{{ period.name }}</strong>. The final-grade column is only a secondary guide showing how this period estimate may affect the overall final grade.
   <div class="mt-2">
     <a class="alert-link" href="{% url 'faculty_portal:period_prediction_guide' offering.id period.id %}">Open the prediction interpretation guide</a>
     for column definitions, examples, and simulation reminders.
@@ -110,24 +115,24 @@
         </select>
       </div>
       <div class="col-lg-3">
-        <label class="form-label">Remaining Performance %</label>
+        <label class="form-label" title="Enter the average score to assume for the student's remaining activities in this grading period.">Assumed Score for Remaining Items (%)</label>
         <input class="form-control" type="number" step="0.01" min="0" max="100" name="assumed_remaining_percent" value="{{ request.POST.assumed_remaining_percent|default:'50' }}">
       </div>
       <div class="col-lg-3">
-        <label class="form-label">Scenario Name</label>
+        <label class="form-label">Scenario Name (Optional)</label>
         <input class="form-control" type="text" name="scenario_name" value="{{ request.POST.scenario_name|default:'' }}" placeholder="Optional draft name">
       </div>
-      <div class="col-lg-2 d-flex gap-2">
-        <button class="btn btn-outline-primary flex-fill" type="submit" name="action" value="simulate">Simulate</button>
-        <button class="btn btn-outline-success flex-fill" type="submit" name="action" value="save_draft">Save</button>
+      <div class="col-lg-2 d-grid gap-2">
+        <button class="btn btn-outline-primary" type="submit" name="action" value="simulate">Predict</button>
+        <button class="btn btn-outline-success" type="submit" name="action" value="save_draft">Save Scenario</button>
       </div>
     </form>
     {% if what_if_result and what_if_student %}
     <div class="alert alert-light border mt-3 mb-0">
       <strong>{{ what_if_student.last_name }}, {{ what_if_student.first_name }}</strong><br>
-      Projected {{ period.name }} Grade: <strong>{{ what_if_result.projected_period_grade|default:"-" }}</strong><br>
-      Projected Final Grade: <strong>{{ what_if_result.projected_final_grade|default:"-" }}</strong><br>
-      Average Needed to Pass Final:
+      Estimated {{ period.name }} Grade: <strong>{{ what_if_result.projected_period_grade|default:"-" }}</strong><br>
+      Possible Final Grade: <strong>{{ what_if_result.projected_final_grade|default:"-" }}</strong><br>
+      Needed Score in Future Periods:
       <strong>{{ what_if_result.final_requirement.label }}</strong>
     </div>
     {% endif %}
@@ -143,8 +148,8 @@
         <input class="form-control" name="q" value="{{ q }}" placeholder="Search by student number or name">
       </div>
       <div class="col-md-4 d-flex gap-2">
-        <button class="btn btn-outline-primary flex-fill" type="submit">Filter</button>
-        <a class="btn btn-outline-secondary flex-fill" href="{% url 'faculty_portal:period_prediction' offering.id period.id %}">Reset</a>
+        <button class="btn btn-outline-primary flex-fill" type="submit">Apply Filter</button>
+        <a class="btn btn-outline-secondary flex-fill" href="{% url 'faculty_portal:period_prediction' offering.id period.id %}">Clear</a>
       </div>
     </form>
 
@@ -154,15 +159,15 @@
           <tr>
             <th>Student No.</th>
             <th>Student Name</th>
-            <th>Current Projection</th>
-            {% if show_best_case %}<th>Best Case</th>{% endif %}
-            {% if show_worst_case %}<th>Worst Case</th>{% endif %}
-            <th>Projected Final</th>
-            {% if show_target_needed %}<th>Target Needed</th>{% endif %}
-            <th>Average Needed to Pass Final</th>
-            <th>Coverage</th>
-            <th>Remaining</th>
-            {% if at_risk_enabled %}<th>Risk</th>{% endif %}
+            <th>Estimated Grade</th>
+            {% if show_best_case %}<th>Highest Possible</th>{% endif %}
+            {% if show_worst_case %}<th>Lowest Possible</th>{% endif %}
+            <th title="This shows the possible effect of the current period estimate on the student's overall final grade.">Possible Final Grade</th>
+            <th>Can Still Pass?</th>
+            {% if show_target_needed %}<th title="This is the estimated average score needed in the remaining items to still reach passing.">Needed Score in Remaining Items</th>{% endif %}
+            <th>Progress</th>
+            <th>Remaining Items</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
@@ -170,10 +175,23 @@
           <tr>
             <td>{{ row.student.student_no }}</td>
             <td>{{ row.student.last_name }}, {{ row.student.first_name }}</td>
-            <td><strong>{{ row.current_projected_period_grade|default:"-" }}</strong></td>
+            <td>
+              {% if row.current_projected_period_grade is None %}
+                <span class="text-muted">{{ row.period_prediction_message }}</span>
+              {% else %}
+                <strong>{{ row.current_projected_period_grade }}</strong>
+              {% endif %}
+            </td>
             {% if show_best_case %}<td>{{ row.best_case_period_grade|default:"-" }}</td>{% endif %}
             {% if show_worst_case %}<td>{{ row.worst_case_period_grade|default:"-" }}</td>{% endif %}
-            <td>{{ row.current_projected_final_grade|default:"-" }}</td>
+            <td>
+              {% if row.current_projected_final_grade is None and row.final_prediction_message %}
+                <span class="text-muted">{{ row.final_prediction_message }}</span>
+              {% else %}
+                {{ row.current_projected_final_grade|default:"-" }}
+              {% endif %}
+            </td>
+            <td>{{ row.can_still_pass_label }}</td>
             {% if show_target_needed %}
             <td>
               {% if row.target_needed_percent is None %}
@@ -185,23 +203,14 @@
               {% endif %}
             </td>
             {% endif %}
-            <td>
-              {{ row.final_requirement_label }}
-            </td>
             <td>{{ row.coverage_percent }}%</td>
             <td>{{ row.remaining_item_count }}</td>
-            {% if at_risk_enabled %}
             <td>
-              {% if row.at_risk_flag %}
-              <span class="risk-pill at-risk">At Risk</span>
-              {% else %}
-              <span class="risk-pill ok">On Track</span>
-              {% endif %}
+              <span class="risk-pill {{ row.status_variant }}">{{ row.status_label }}</span>
             </td>
-            {% endif %}
           </tr>
           {% empty %}
-          <tr><td colspan="12" class="text-center text-muted py-4">No prediction rows available yet.</td></tr>
+          <tr><td colspan="12" class="text-center text-muted py-4">Prediction not available yet because there are not enough encoded scores yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>

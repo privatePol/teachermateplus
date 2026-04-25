@@ -626,7 +626,12 @@
               <tr>
                 <td>Grading Period Locks</td>
                 <td><strong>Admin Portal -> Grading -> Period Locks</strong></td>
-                <td>Set the submission deadline, open/close behavior, and lock coverage per campus, term, and period scope.</td>
+                <td>Set the submission deadline, optional grace/completion cutoff, open/close behavior, and lock coverage per campus, term, and period scope.</td>
+              </tr>
+              <tr>
+                <td>Non-Compliance Monitor</td>
+                <td><strong>Admin Portal -> Grading -> Non-Compliance on Periodic Grades Submission</strong></td>
+                <td>Track overdue class-period rows after deadline, including which ones are still within grace, already non-compliant, or waiting on late-completion review.</td>
               </tr>
               <tr>
                 <td>Grade Submission Status</td>
@@ -654,8 +659,9 @@
           <ol class="guide-steps">
             <li>Create the needed <strong>Period Lock</strong> row first, with the correct campus, term, and the actual <strong>grading period code used by the template</strong> plus the intended deadline.</li>
             <li>Use <strong>Grade Submissions</strong> to monitor open classes as the deadline approaches and follow up on rows that are still pending.</li>
-            <li>For a reopen, confirm the approved basis first, then process the exact class-period from <strong>Grade Submissions</strong> using an authorized account only.</li>
-            <li>After reopen, inform the faculty member of the approved action window and verify that the class is submitted again before the lock closes.</li>
+            <li>After deadline, use <strong>Non-Compliance on Periodic Grades Submission</strong> to see which faculty members still have overdue unsubmitted grade books for each grading period.</li>
+            <li>Unsubmitted overdue grade books remain open until the faculty submits them. The deadline acts as a compliance checkpoint, not an automatic encoding shutdown.</li>
+            <li>Use correction workflow only for already submitted grade books that need changes. Do not use deadline policy to force reopen for unfinished but unsubmitted encoding.</li>
           </ol>
           <div class="guide-subhead">Reopening a Submitted Class (Admin Procedure)</div>
           <ol class="guide-steps">
@@ -718,7 +724,7 @@
             <li>Approvers review it based on the configured route matrix and permissions.</li>
             <li>Faculty may include multiple students or the entire class plus multiple grading items in one request.</li>
             <li>Original values are shown in the request, and faculty enters only the corrected values.</li>
-            <li>Final approval applies the corrected values directly into the gradebook and recomputes the submitted period automatically.</li>
+            <li>Final approval applies the corrected values directly into the gradebook and recomputes the affected student period and final grade automatically.</li>
             <li>No additional faculty finalize step is required for this direct score-correction petition flow.</li>
             <li>If the configurable feature is enabled, approved requests can also open as an official PDF artifact in a new browser tab for registrar/AIMS reference and immediate print/download, including campus applicability, before/after official grade values, and approval summary directly above registrar reference.</li>
             <li>If the configurable feature is enabled, submission of a correction request can immediately email the selected approver roles such as CAO and college dean, using the NCBA-branded notification card with petitioner and period name details.</li>
@@ -738,7 +744,7 @@
             <li>CAO, dean, and coordinator users must have the correct scoped roles.</li>
             <li>Use remarks and reference numbers for traceability, especially in manual mode.</li>
             <li>All correction and reopen decisions are auditable.</li>
-            <li>Approved score correction values should be reviewed carefully because the final approval posts them directly into the gradebook.</li>
+            <li>Approved score correction values should be reviewed carefully because the final approval posts them directly into the gradebook and records before/after score, period-grade, and final-grade audit entries.</li>
           </ul>
           <div class="guide-note">
             If registrar policy requires paper source-of-truth, set mode to MANUAL_ONLY. Faculty does not file online request; admin executes reopen only after approved form.
@@ -792,6 +798,11 @@
                   <td>Applied automatically through Django session settings for both Admin Portal and Faculty Portal.</td>
                 </tr>
                 <tr>
+                  <td>Email Login OTP</td>
+                  <td>Requires a one-time code sent to the user's registered email after the password is accepted.</td>
+                  <td><strong>Admin Portal -> Tools -> Configuration Management -> Login Security</strong> controls enablement and OTP expiry minutes.</td>
+                </tr>
+                <tr>
                   <td>Temporary Login Lockout</td>
                   <td>Temporarily blocks repeated failed login attempts to reduce password-guessing and brute-force abuse.</td>
                   <td><strong>Admin Portal -> Tools -> Configuration Management -> Login Security</strong> for policy, and <strong>Admin Portal -> Security -> Login Lockouts</strong> for monitoring and manual unlock.</td>
@@ -803,6 +814,7 @@
             <li>Assign default tenant, campus, and department correctly per user before giving portal access.</li>
             <li>Grant least privilege and role scopes carefully. Role assignments can now be scoped by tenant, campus, and department for AC/Dean governance boundaries.</li>
             <li>For dual-role users (admin + faculty), ensure both portal permissions are assigned.</li>
+            <li>If email OTP is enabled, every protected sign-in requires the user's registered email to be present and reachable.</li>
             <li>Recommended login lockout baseline: <strong>5 failed attempts</strong> within <strong>15 minutes</strong>, with a <strong>15-minute</strong> lockout.</li>
           </ul>
         </div>
@@ -903,6 +915,25 @@
             <li>Prediction uses the same grading template path as the official computation engine, but it never writes to the gradebook.</li>
             <li>Refresh the prediction snapshot after major score changes when you need an updated projection immediately.</li>
           </ul>
+          <div class="guide-subhead">Submission Non-Compliance Notices</div>
+          <ol class="guide-steps">
+            <li>Open <strong>Configuration Management</strong>, then find the <strong>Submission Non-Compliance Notices</strong> card.</li>
+            <li>Enable the feature, set the repeat interval in days, select the academic-head roles that should be included in the visibility/escalation chain, and enter the HR escalation email recipients.</li>
+            <li>Use scoped role assignments for academic heads such as AC, Dean, or CAO so each user sees only the overdue classes inside the correct tenant, campus, and department scope.</li>
+            <li>Open the <strong>Non-Compliance on Periodic Grades Submission</strong> report to monitor overdue unsubmitted classes and review the latest notice stage and issue date.</li>
+            <li>Remember the cadence: first communication is <strong>Notice for Non-Compliance</strong>, second is <strong>Warning for Continued Non-Compliance</strong>, and third onward is <strong>Escalation for Unresolved Non-Compliance</strong> until the affected grading period is submitted.</li>
+          </ol>
+          <div class="guide-note">
+            Best practice is to run the notice scheduler daily, not every three days. EduGradesPro checks the configured repeat interval and only issues a new communication when the next stage is actually due.
+          </div>
+          <div class="guide-note mt-3">
+            Scheduled job command: <code>manage.py issue_submission_non_compliance_notices</code><br>
+            Optional dry run: <code>manage.py issue_submission_non_compliance_notices --dry-run</code><br>
+            Optional tenant scope: <code>manage.py issue_submission_non_compliance_notices --tenant-id 1</code>
+          </div>
+          <div class="guide-note mt-3">
+            Operations tip: schedule this command as a daily background task on the application server after SMTP/email settings are confirmed. The command only issues read-only communications and does not lock classes or change any grade records.
+          </div>
         </div>
       </div>
     </div>
@@ -920,6 +951,7 @@
               <li>Process correction/reopen according to chosen policy mode.</li>
               <li>Open <strong>Faculty Final Clearance</strong> once final submissions are complete to preview which assigned classes are already complete or still incomplete per faculty member, and to verify already generated official clearance reports.</li>
               <li>Faculty generates the official clearance in the Faculty Portal. Authorized personnel may verify a printed copy either by scanning the printed QR code or by entering the printed <strong>Reference No.</strong> and <strong>Verification Code</strong> in the Admin Portal verification lookup.</li>
+              <li><strong>Configuration Management</strong> now includes a <strong>User Signatures</strong> card so NCBA can decide whether encrypted account signatures are allowed at all, and whether they may appear on Faculty Final Clearance and Correction Official Report PDFs.</li>
               <li>Review audit logs and analytics before final release/export.</li>
             </ul>
         </div>

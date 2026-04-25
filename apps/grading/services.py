@@ -630,7 +630,7 @@ class GradingTemplateTestingCalculatorService:
                     }
                 )
 
-                if "EXAM" in component.code.upper():
+                if FacultyGradingService.is_exam_component(component):
                     has_exam_component = True
                     exam_grade = (exam_grade or Decimal("0")) + component_score
                     has_exam_data = True
@@ -1526,9 +1526,6 @@ class GradingGovernanceService:
     CORRECTION_MODE_KEY = "CORRECTION_MODE"
     CORRECTION_MODE_SYSTEM_REQUEST = "SYSTEM_REQUEST"
     CORRECTION_MODE_MANUAL_ONLY = "MANUAL_ONLY"
-    PREDEADLINE_CORRECTION_MODE_KEY = "PREDEADLINE_CORRECTION_MODE"
-    PREDEADLINE_CORRECTION_MODE_REQUEST = "REQUEST_REVIEW"
-    PREDEADLINE_CORRECTION_MODE_SELF_REOPEN = "FACULTY_SELF_REOPEN"
     CORRECTION_WINDOW_HOURS = 24
 
     @staticmethod
@@ -1547,20 +1544,6 @@ class GradingGovernanceService:
         if "PRELIM" in raw:
             return "PRELIM"
         return raw
-
-    @classmethod
-    def get_predeadline_correction_mode(cls, *, tenant_id: int | None):
-        mode = SystemSettingService.get(
-            cls.PREDEADLINE_CORRECTION_MODE_KEY,
-            tenant_id=tenant_id,
-            default=cls.PREDEADLINE_CORRECTION_MODE_REQUEST,
-        )
-        if mode not in {
-            cls.PREDEADLINE_CORRECTION_MODE_REQUEST,
-            cls.PREDEADLINE_CORRECTION_MODE_SELF_REOPEN,
-        }:
-            return cls.PREDEADLINE_CORRECTION_MODE_REQUEST
-        return mode
 
     @classmethod
     def get_correction_mode(cls, *, tenant_id: int | None):
@@ -1837,19 +1820,72 @@ class GradingGovernanceService:
         return lock.deadline_at if lock else None
 
     @classmethod
+    def resolve_completion_grace_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
+        return None
+
+    @classmethod
+    def resolve_encoding_close_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
+        return None
+
+    @classmethod
+    def is_within_completion_grace(cls, *, offering, template_period: GradingTemplatePeriod, now=None):
+        return False
+
+    @classmethod
+    def auto_lapse_expired_late_completion_requests(cls, *, at=None, dry_run: bool = False):
+        now = at or timezone.now()
+        return {"checked_at": now, "count": 0, "dry_run": dry_run, "rows": []}
+
+    @classmethod
+    def get_pending_late_completion_request(cls, *, offering, template_period: GradingTemplatePeriod):
+        return None
+
+    @classmethod
+    def get_active_late_completion_request(cls, *, offering, template_period: GradingTemplatePeriod, at=None):
+        return None
+
+    @classmethod
+    def has_active_late_completion_request(cls, *, offering, template_period: GradingTemplatePeriod, at=None):
+        return False
+
+    @classmethod
+    def can_request_late_completion(cls, *, offering, template_period: GradingTemplatePeriod, now=None):
+        return False
+
+    @classmethod
+    def get_completion_window_state(
+        cls,
+        *,
+        offering,
+        template_period: GradingTemplatePeriod,
+        now=None,
+    ):
+        now = now or timezone.now()
+        submission_deadline = cls.resolve_submission_deadline(
+            offering=offering,
+            template_period=template_period,
+        )
+        is_submitted = cls.is_submitted(offering=offering, template_period=template_period)
+        is_overdue = bool(submission_deadline and now > submission_deadline and not is_submitted)
+        return {
+            "submission_deadline": submission_deadline,
+            "completion_grace_until": None,
+            "encoding_close_deadline": None,
+            "has_completion_grace": False,
+            "is_within_completion_grace": False,
+            "grace_expired": False,
+            "active_late_completion_request": None,
+            "pending_late_completion_request": None,
+            "has_active_late_completion_request": False,
+            "has_pending_late_completion_request": False,
+            "can_request_late_completion": False,
+            "is_non_compliant": is_overdue,
+            "is_overdue": is_overdue,
+        }
+
+    @classmethod
     def can_faculty_self_reopen_before_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
-        if not cls.is_system_correction_enabled(tenant_id=offering.tenant_id):
-            return False
-        submission = cls.get_submission(offering=offering, template_period=template_period)
-        if not submission or submission.status != GradeSubmission.Status.SUBMITTED:
-            return False
-        mode = cls.get_predeadline_correction_mode(tenant_id=offering.tenant_id)
-        if mode != cls.PREDEADLINE_CORRECTION_MODE_SELF_REOPEN:
-            return False
-        deadline_at = cls.resolve_submission_deadline(offering=offering, template_period=template_period)
-        if not deadline_at:
-            return False
-        return timezone.now() <= deadline_at
+        return False
 
     @classmethod
     def evaluate_submission_readiness(cls, *, offering, template_period: GradingTemplatePeriod):
@@ -2020,89 +2056,11 @@ class GradingGovernanceService:
     @transaction.atomic
     def auto_lock_due_periods(cls, *, at=None, limit: int | None = None, dry_run: bool = False):
         now = at or timezone.now()
-        queryset = (
-            GradingPeriodLock.objects.select_related("tenant", "campus", "academic_year", "term", "course_offering")
-            .filter(
-                is_active=True,
-                is_locked=False,
-                deadline_at__isnull=False,
-                deadline_at__lte=now,
-            )
-            .order_by("deadline_at", "id")
-        )
-        if limit:
-            queryset = queryset[:limit]
-
-        locked_rows = []
-        for lock in queryset:
-            before_data = {
-                "is_locked": lock.is_locked,
-                "deadline_at": lock.deadline_at,
-                "locked_at": lock.locked_at,
-                "remarks": lock.remarks,
-            }
-            remarks = (lock.remarks or "").strip()
-            auto_note = "Auto-locked by deadline."
-            if auto_note not in remarks:
-                remarks = f"{remarks} {auto_note}".strip() if remarks else auto_note
-
-            locked_rows.append(
-                {
-                    "id": lock.id,
-                    "tenant_code": getattr(lock.tenant, "code", None),
-                    "campus_code": getattr(lock.campus, "code", None),
-                    "academic_year_code": getattr(lock.academic_year, "code", None),
-                    "term_code": getattr(lock.term, "code", None),
-                    "period_code": lock.period_code,
-                    "scope_type": lock.scope_type,
-                    "course_offering_id": lock.course_offering_id,
-                    "deadline_at": lock.deadline_at,
-                    "before": before_data,
-                    "after": {
-                        "is_locked": True,
-                        "deadline_at": lock.deadline_at,
-                        "locked_at": now,
-                        "remarks": remarks,
-                    },
-                }
-            )
-
-            if dry_run:
-                continue
-
-            lock.is_locked = True
-            lock.locked_at = now
-            lock.remarks = remarks
-            lock.save(update_fields=["is_locked", "locked_at", "remarks", "updated_at"])
-
-            AuditService.log_event(
-                action="AUTO_LOCK",
-                portal="ADMIN",
-                entity_type="GradingPeriodLock",
-                entity_id=lock.id,
-                actor=None,
-                tenant=lock.tenant,
-                campus=lock.campus,
-                before_data=before_data,
-                after_data={
-                    "is_locked": lock.is_locked,
-                    "deadline_at": lock.deadline_at,
-                    "locked_at": lock.locked_at,
-                    "remarks": lock.remarks,
-                },
-                metadata={
-                    "mode": "CRON_DEADLINE_AUTO_LOCK",
-                    "scope_type": lock.scope_type,
-                    "period_code": lock.period_code,
-                    "course_offering_id": lock.course_offering_id,
-                },
-            )
-
         return {
             "checked_at": now,
-            "count": len(locked_rows),
+            "count": 0,
             "dry_run": dry_run,
-            "rows": locked_rows,
+            "rows": [],
         }
 
     @classmethod
@@ -2320,6 +2278,10 @@ class GradingGovernanceService:
             user=user,
             offering=offering,
             template_period=template_period,
+            audit_reason="PERIOD_SUBMISSION",
+            audit_portal="FACULTY",
+            period_is_finalized=True,
+            final_is_submitted=True,
         )
         period_rows = StudentPeriodGrade.objects.filter(
             offering_id=offering.id,
@@ -2616,7 +2578,22 @@ class GradingGovernanceService:
             ).select_related("template_component", "template_subcomponent", "template_detail")
         }
         payload_by_activity = defaultdict(list)
+        affected_student_ids = set()
         effective_user = request_obj.requested_by_user or actor
+        before_score_map = {
+            (row.student_id, row.activity_id): {
+                "id": row.id,
+                "student_id": row.student_id,
+                "activity_id": row.activity_id,
+                "raw_score": row.raw_score,
+                "computed_score": row.computed_score,
+            }
+            for row in StudentActivityScore.objects.filter(
+                activity_id__in=activity_map.keys(),
+                student_id__in={item.student_id for item in items if item.student_id},
+                is_active=True,
+            )
+        }
 
         for item in items:
             activity = activity_map.get(item.grade_activity_id)
@@ -2632,24 +2609,68 @@ class GradingGovernanceService:
                     "raw_score": parsed_new_value,
                 }
             )
+            affected_student_ids.add(item.student_id)
 
         for activity_id, score_payload in payload_by_activity.items():
             FacultyGradingService.upsert_activity_scores(
                 user=effective_user,
                 activity=activity_map[activity_id],
                 score_payload=score_payload,
+                recompute=False,
+                audit_reason="CORRECTION_SCORE_APPLY",
+                audit_portal="ADMIN",
             )
 
-        FacultyGradingService.recompute_period_summary(
+        after_score_rows = {
+            (row.student_id, row.activity_id): row
+            for row in StudentActivityScore.objects.filter(
+                activity_id__in=activity_map.keys(),
+                student_id__in=affected_student_ids,
+                is_active=True,
+            )
+        }
+        for item in items:
+            score_row = after_score_rows.get((item.student_id, item.grade_activity_id))
+            if not score_row:
+                continue
+            after_score = {
+                "id": score_row.id,
+                "student_id": score_row.student_id,
+                "activity_id": score_row.activity_id,
+                "raw_score": score_row.raw_score,
+                "computed_score": score_row.computed_score,
+            }
+            before_score = before_score_map.get((item.student_id, item.grade_activity_id))
+            if before_score != after_score:
+                AuditService.log_event(
+                    action="UPDATE",
+                    portal="ADMIN",
+                    entity_type="StudentActivityScore",
+                    entity_id=score_row.id,
+                    actor=actor,
+                    tenant=request_obj.tenant,
+                    campus=request_obj.campus,
+                    before_data=before_score,
+                    after_data=after_score,
+                    metadata={
+                        "reason": "CORRECTION_APPROVAL",
+                        "correction_request_id": request_obj.id,
+                        "student_id": item.student_id,
+                        "activity_id": item.grade_activity_id,
+                    },
+                )
+
+        FacultyGradingService.recompute_period_summary_for_students(
             user=effective_user,
             offering=request_obj.offering,
             template_period=request_obj.template_period,
+            student_ids=affected_student_ids,
+            audit_reason="CORRECTION_APPROVAL",
+            audit_portal="ADMIN",
+            audit_actor=actor,
+            period_is_finalized=True,
+            final_is_submitted=True,
         )
-        StudentPeriodGrade.objects.filter(
-            offering_id=request_obj.offering_id,
-            template_period_id=request_obj.template_period_id,
-        ).update(is_finalized=True)
-        StudentFinalGrade.objects.filter(offering_id=request_obj.offering_id).update(is_submitted=True)
         return request_obj
 
     @classmethod
@@ -2862,6 +2883,10 @@ class FacultyGradingService:
             "RAW_BASE50": "Raw Score (Base-50)",
             "DIRECT_PERCENTAGE": "Direct Percentage",
         }.get(score_input_mode, "Raw Score (Base-50)")
+
+    @staticmethod
+    def is_exam_component(component: GradingTemplateComponent) -> bool:
+        return bool(getattr(component, "is_exam_component", False))
 
     @classmethod
     def resolve_template_for_offering(cls, offering):
@@ -3299,7 +3324,16 @@ class FacultyGradingService:
 
     @classmethod
     @transaction.atomic
-    def upsert_activity_scores(cls, *, user, activity: GradeActivity, score_payload: list[dict]):
+    def upsert_activity_scores(
+        cls,
+        *,
+        user,
+        activity: GradeActivity,
+        score_payload: list[dict],
+        recompute: bool = True,
+        audit_reason: str | None = "SCORE_WRITE",
+        audit_portal: str = "FACULTY",
+    ):
         template = cls.resolve_template_for_offering(activity.offering)
         base_value = cls.resolve_base_value(activity.offering, template)
         score_input_mode = cls.resolve_score_input_mode(
@@ -3312,10 +3346,12 @@ class FacultyGradingService:
         )
 
         saved = 0
+        affected_student_ids = set()
         for row in score_payload:
             student_id = int(row["student_id"])
             if student_id not in enrolled_student_ids:
                 continue
+            affected_student_ids.add(student_id)
             GradingGovernanceService.assert_encoding_allowed(
                 offering=activity.offering,
                 template_period=activity.template_period,
@@ -3350,6 +3386,15 @@ class FacultyGradingService:
                 },
             )
             saved += 1
+        if recompute and affected_student_ids:
+            cls.recompute_period_summary_for_students(
+                user=user,
+                offering=activity.offering,
+                template_period=activity.template_period,
+                student_ids=affected_student_ids,
+                audit_reason=audit_reason,
+                audit_portal=audit_portal,
+            )
         cls._mark_prediction_dirty(
             offering=activity.offering,
             template_period=activity.template_period,
@@ -3425,10 +3470,12 @@ class FacultyGradingService:
             cls.get_active_enrollments(session.offering).values_list("student_id", flat=True)
         )
         saved = 0
+        affected_student_ids = set()
         for row in status_payload:
             student_id = int(row["student_id"])
             if student_id not in enrolled_student_ids:
                 continue
+            affected_student_ids.add(student_id)
             GradingGovernanceService.assert_encoding_allowed(
                 offering=session.offering,
                 template_period=session.template_period,
@@ -3452,6 +3499,15 @@ class FacultyGradingService:
                 },
             )
             saved += 1
+        if affected_student_ids:
+            cls.recompute_period_summary_for_students(
+                user=user,
+                offering=session.offering,
+                template_period=session.template_period,
+                student_ids=affected_student_ids,
+                audit_reason="ATTENDANCE_WRITE",
+                audit_portal="FACULTY",
+            )
         cls._mark_prediction_dirty(
             offering=session.offering,
             template_period=session.template_period,
@@ -3498,23 +3554,91 @@ class FacultyGradingService:
             return None
         return cls._round(sum(vals) / Decimal(len(vals)))
 
+    @staticmethod
+    def _period_grade_audit_snapshot(row: StudentPeriodGrade | None):
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "offering_id": row.offering_id,
+            "template_period_id": row.template_period_id,
+            "student_id": row.student_id,
+            "class_standing_grade": row.class_standing_grade,
+            "exam_grade": row.exam_grade,
+            "period_grade": row.period_grade,
+            "is_finalized": row.is_finalized,
+        }
+
+    @staticmethod
+    def _final_grade_audit_snapshot(row: StudentFinalGrade | None):
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "offering_id": row.offering_id,
+            "student_id": row.student_id,
+            "final_grade": row.final_grade,
+            "is_submitted": row.is_submitted,
+        }
+
     @classmethod
     def recompute_final_grades_from_stored_periods(cls, *, user, offering, template=None):
+        return cls.recompute_final_grades_for_students(
+            user=user,
+            offering=offering,
+            student_ids=None,
+            template=template,
+            audit_reason="FINAL_GRADE_RECOMPUTE",
+        )
+
+    @classmethod
+    def recompute_final_grades_for_students(
+        cls,
+        *,
+        user,
+        offering,
+        student_ids,
+        template=None,
+        audit_reason: str | None = "FINAL_GRADE_RECOMPUTE",
+        audit_portal: str = "SYSTEM",
+        audit_actor=None,
+        is_submitted: bool = False,
+    ):
         template = template or cls.resolve_template_for_offering(offering)
-        enrollments = list(cls.get_active_enrollments(offering))
+        normalized_student_ids = None
+        if student_ids is not None:
+            normalized_student_ids = {int(student_id) for student_id in student_ids if student_id is not None}
+            if not normalized_student_ids:
+                return []
+        enrollment_qs = cls.get_active_enrollments(offering)
+        if normalized_student_ids is not None:
+            enrollment_qs = enrollment_qs.filter(student_id__in=normalized_student_ids)
+        enrollments = list(enrollment_qs)
         final_grade_strategy = cls.resolve_final_grade_strategy(offering, template=template)
         strategy_entries = final_grade_strategy["entries"]
         strategy_period_ids = [entry["period_id"] for entry in strategy_entries]
-        total_active_periods = len(strategy_entries)
+        target_student_ids = {enrollment.student_id for enrollment in enrollments}
+        if not target_student_ids:
+            return []
         period_grade_map = defaultdict(dict)
         existing_period_rows = StudentPeriodGrade.objects.filter(
             offering=offering,
             template_period_id__in=strategy_period_ids,
+            student_id__in=target_student_ids,
         )
         for row in existing_period_rows:
             if row.period_grade is not None:
                 period_grade_map[row.student_id][row.template_period_id] = Decimal(row.period_grade)
 
+        before_map = {
+            row.student_id: cls._final_grade_audit_snapshot(row)
+            for row in StudentFinalGrade.objects.filter(
+                offering=offering,
+                student_id__in=target_student_ids,
+            )
+        }
+        changed_rows = []
+        actor = audit_actor or user
         for enrollment in enrollments:
             student_id = enrollment.student_id
             if enrollment.enrollment_status in Enrollment.NON_ACTIVE_GRADING_STATUSES:
@@ -3526,7 +3650,7 @@ class FacultyGradingService:
                     template=template,
                     period_values_by_period_id=student_period_values,
                 )
-            StudentFinalGrade.objects.update_or_create(
+            final_row, _created = StudentFinalGrade.objects.update_or_create(
                 offering=offering,
                 student_id=student_id,
                 defaults={
@@ -3534,9 +3658,34 @@ class FacultyGradingService:
                     "campus_id": offering.campus_id,
                     "final_grade": final_value,
                     "computed_by_user": user,
-                    "is_submitted": False,
+                    "is_submitted": is_submitted,
                 },
             )
+            after_snapshot = cls._final_grade_audit_snapshot(final_row)
+            before_snapshot = before_map.get(student_id)
+            if before_snapshot != after_snapshot:
+                changed_rows.append(final_row)
+                if audit_reason:
+                    AuditService.log_event(
+                        action="RECOMPUTE",
+                        portal=audit_portal,
+                        entity_type="StudentFinalGrade",
+                        entity_id=final_row.id,
+                        actor=actor,
+                        tenant=offering.tenant,
+                        campus=offering.campus,
+                        before_data=before_snapshot,
+                        after_data=after_snapshot,
+                        metadata={
+                            "reason": audit_reason,
+                            "offering_id": offering.id,
+                            "student_id": student_id,
+                            "template_id": template.id,
+                            "formula_mode": final_grade_strategy["mode"],
+                            "period_ids": strategy_period_ids,
+                        },
+                    )
+        return changed_rows
 
     @staticmethod
     def _mark_prediction_dirty(*, offering, template_period, reason: str):
@@ -3553,7 +3702,46 @@ class FacultyGradingService:
 
     @classmethod
     @transaction.atomic
-    def recompute_period_summary(cls, *, user, offering, template_period: GradingTemplatePeriod):
+    def recompute_period_summary_for_students(
+        cls,
+        *,
+        user,
+        offering,
+        template_period: GradingTemplatePeriod,
+        student_ids,
+        audit_reason: str | None = "PERIOD_GRADE_RECOMPUTE",
+        audit_portal: str = "SYSTEM",
+        audit_actor=None,
+        period_is_finalized: bool = False,
+        final_is_submitted: bool = False,
+    ):
+        return cls.recompute_period_summary(
+            user=user,
+            offering=offering,
+            template_period=template_period,
+            student_ids=student_ids,
+            audit_reason=audit_reason,
+            audit_portal=audit_portal,
+            audit_actor=audit_actor,
+            period_is_finalized=period_is_finalized,
+            final_is_submitted=final_is_submitted,
+        )
+
+    @classmethod
+    @transaction.atomic
+    def recompute_period_summary(
+        cls,
+        *,
+        user,
+        offering,
+        template_period: GradingTemplatePeriod,
+        student_ids=None,
+        audit_reason: str | None = "PERIOD_GRADE_RECOMPUTE",
+        audit_portal: str = "SYSTEM",
+        audit_actor=None,
+        period_is_finalized: bool = False,
+        final_is_submitted: bool = False,
+    ):
         GradingGovernanceService.assert_summary_compute_allowed(
             offering=offering,
             template_period=template_period,
@@ -3561,7 +3749,20 @@ class FacultyGradingService:
         template = cls.resolve_template_for_offering(offering)
         base_value = cls.resolve_base_value(offering, template)
 
-        enrollments = list(cls.get_active_enrollments(offering))
+        normalized_student_ids = None
+        if student_ids is not None:
+            normalized_student_ids = {int(student_id) for student_id in student_ids if student_id is not None}
+            if not normalized_student_ids:
+                return {
+                    "rows": [],
+                    "component_codes": [],
+                    "base_value": base_value,
+                }
+        enrollment_qs = cls.get_active_enrollments(offering)
+        if normalized_student_ids is not None:
+            enrollment_qs = enrollment_qs.filter(student_id__in=normalized_student_ids)
+        enrollments = list(enrollment_qs)
+        target_student_ids = {enrollment.student_id for enrollment in enrollments}
         components = list(
             template_period.components.filter(is_active=True)
             .prefetch_related("subcomponents", "subcomponents__details")
@@ -3586,14 +3787,22 @@ class FacultyGradingService:
             score_lookup[key].append(Decimal(score.computed_score or 0))
 
         rows = []
-        period_values_for_final = defaultdict(list)
+        before_period_map = {
+            row.student_id: cls._period_grade_audit_snapshot(row)
+            for row in StudentPeriodGrade.objects.filter(
+                offering=offering,
+                template_period=template_period,
+                student_id__in=target_student_ids,
+            )
+        }
+        actor = audit_actor or user
 
         for enrollment in enrollments:
             student = enrollment.student
             student_id = student.id
 
             if enrollment.enrollment_status in Enrollment.NON_ACTIVE_GRADING_STATUSES:
-                StudentPeriodGrade.objects.update_or_create(
+                period_row, _created = StudentPeriodGrade.objects.update_or_create(
                     offering=offering,
                     template_period=template_period,
                     student=student,
@@ -3604,9 +3813,29 @@ class FacultyGradingService:
                         "exam_grade": None,
                         "period_grade": None,
                         "computed_by_user": user,
-                        "is_finalized": False,
+                        "is_finalized": period_is_finalized,
                     },
                 )
+                after_snapshot = cls._period_grade_audit_snapshot(period_row)
+                before_snapshot = before_period_map.get(student_id)
+                if before_snapshot != after_snapshot and audit_reason:
+                    AuditService.log_event(
+                        action="RECOMPUTE",
+                        portal=audit_portal,
+                        entity_type="StudentPeriodGrade",
+                        entity_id=period_row.id,
+                        actor=actor,
+                        tenant=offering.tenant,
+                        campus=offering.campus,
+                        before_data=before_snapshot,
+                        after_data=after_snapshot,
+                        metadata={
+                            "reason": audit_reason,
+                            "offering_id": offering.id,
+                            "student_id": student_id,
+                            "template_period_id": template_period.id,
+                        },
+                    )
                 rows.append(
                     {
                         "student": student,
@@ -3676,7 +3905,7 @@ class FacultyGradingService:
                     component_has_data = component_score is not None
                 component_scores[component.code] = component_score
 
-                if "EXAM" in component.code.upper():
+                if cls.is_exam_component(component):
                     has_exam_component = True
                     if component_has_data:
                         exam_grade = (exam_grade or Decimal("0")) + component_score
@@ -3693,7 +3922,7 @@ class FacultyGradingService:
             if not has_exam_component or has_exam_data:
                 period_grade = cls._round(weighted_period_grade)
 
-            StudentPeriodGrade.objects.update_or_create(
+            period_row, _created = StudentPeriodGrade.objects.update_or_create(
                 offering=offering,
                 template_period=template_period,
                 student=student,
@@ -3704,10 +3933,29 @@ class FacultyGradingService:
                     "exam_grade": exam_grade,
                     "period_grade": period_grade,
                     "computed_by_user": user,
-                    "is_finalized": False,
+                    "is_finalized": period_is_finalized,
                 },
             )
-            period_values_for_final[student_id].append(period_grade)
+            after_snapshot = cls._period_grade_audit_snapshot(period_row)
+            before_snapshot = before_period_map.get(student_id)
+            if before_snapshot != after_snapshot and audit_reason:
+                AuditService.log_event(
+                    action="RECOMPUTE",
+                    portal=audit_portal,
+                    entity_type="StudentPeriodGrade",
+                    entity_id=period_row.id,
+                    actor=actor,
+                    tenant=offering.tenant,
+                    campus=offering.campus,
+                    before_data=before_snapshot,
+                    after_data=after_snapshot,
+                    metadata={
+                        "reason": audit_reason,
+                        "offering_id": offering.id,
+                        "student_id": student_id,
+                        "template_period_id": template_period.id,
+                    },
+                )
             rows.append(
                 {
                     "student": student,
@@ -3719,7 +3967,16 @@ class FacultyGradingService:
                 }
             )
 
-        cls.recompute_final_grades_from_stored_periods(user=user, offering=offering, template=template)
+        cls.recompute_final_grades_for_students(
+            user=user,
+            offering=offering,
+            student_ids=target_student_ids if normalized_student_ids is not None else None,
+            template=template,
+            audit_reason=audit_reason,
+            audit_portal=audit_portal,
+            audit_actor=actor,
+            is_submitted=final_is_submitted,
+        )
 
         cls._mark_prediction_dirty(
             offering=offering,

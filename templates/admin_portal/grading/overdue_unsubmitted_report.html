@@ -2,7 +2,7 @@
 
 {% block admin_content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-  <h2 class="h5 mb-0">Overdue Unsubmitted Classes</h2>
+  <h2 class="h5 mb-0">Non-Compliance on Periodic Grades Submission</h2>
   <div class="d-flex flex-wrap gap-2">
     <a href="{% url 'admin_portal:grade_submission_list' %}" class="btn btn-sm btn-outline-secondary">Back to Grade Submissions</a>
     <a href="{% url 'admin_portal:grading_period_lock_list' %}" class="btn btn-sm btn-outline-success">Open Lock Rules</a>
@@ -10,7 +10,7 @@
 </div>
 
 <div class="row g-2 mb-3">
-  <div class="col-md-4 col-xl-2">
+  <div class="col-md-4 col-xl-3">
     <div class="card border-0 shadow-sm h-100">
       <div class="card-body py-2">
         <div class="small text-muted">Total Overdue</div>
@@ -18,19 +18,27 @@
       </div>
     </div>
   </div>
-  <div class="col-md-4 col-xl-2">
+  <div class="col-md-4 col-xl-3">
     <div class="card border-0 shadow-sm h-100">
       <div class="card-body py-2">
-        <div class="small text-muted">Locked</div>
+        <div class="small text-muted">Still Open</div>
+        <div class="h5 mb-0">{{ summary.open_overdue_unsubmitted }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 col-xl-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body py-2">
+        <div class="small text-muted">Locked by Admin</div>
         <div class="h5 mb-0">{{ summary.locked_unsubmitted }}</div>
       </div>
     </div>
   </div>
-  <div class="col-md-4 col-xl-2">
+  <div class="col-md-4 col-xl-3">
     <div class="card border-0 shadow-sm h-100">
       <div class="card-body py-2">
-        <div class="small text-muted">Open + Overdue</div>
-        <div class="h5 mb-0">{{ summary.open_overdue_unsubmitted }}</div>
+        <div class="small text-muted">Non-Compliant</div>
+        <div class="h5 mb-0">{{ summary.non_compliant }}</div>
       </div>
     </div>
   </div>
@@ -84,8 +92,9 @@
           <th>Section</th>
           <th>Faculty</th>
           <th>Deadline</th>
-          <th>Overdue</th>
-          <th>Lock</th>
+          <th>Hours Late</th>
+          <th>Missing</th>
+          <th>Latest Notice</th>
           <th>Submission</th>
           <th></th>
         </tr>
@@ -103,12 +112,20 @@
           <td>{{ row.section_code }}</td>
           <td>{{ row.faculty_name }}</td>
           <td>{{ row.deadline_at|date:"Y-m-d H:i" }}</td>
-          <td>{{ row.overdue_hours }}h</td>
+          <td>{{ row.overdue_hours }}</td>
+          <td>{% if row.missing_records is not None %}{{ row.missing_records }}{% else %}<span class="text-muted">-</span>{% endif %}</td>
           <td>
-            {% if row.lock_state == "LOCKED" %}
-              <span class="badge text-bg-danger">Locked</span>
+            {% if row.latest_notice_level %}
+              {% if row.latest_notice_level == "ESCALATION" %}
+                <span class="badge text-bg-danger">Escalation</span>
+              {% elif row.latest_notice_level == "WARNING" %}
+                <span class="badge text-bg-warning">Warning</span>
+              {% else %}
+                <span class="badge text-bg-info">Notice</span>
+              {% endif %}
+              <div class="small text-muted">{{ row.latest_notice_issued_at|date:"Y-m-d H:i" }}</div>
             {% else %}
-              <span class="badge text-bg-warning">Open Overdue</span>
+              <span class="text-muted">Not yet issued</span>
             {% endif %}
           </td>
           <td>
@@ -127,19 +144,19 @@
             {% endif %}
           </td>
           <td class="text-end">
-            {% if row.lock_state == "OPEN_OVERDUE" %}
-              <span class="small text-warning">Pending lock job</span>
-            {% elif row.submission_status == "NO_TEMPLATE" %}
+            {% if row.submission_status == "NO_TEMPLATE" %}
               <span class="small text-danger">Assign template</span>
             {% elif row.submission_status == "NO_PERIOD" %}
               <span class="small text-danger">Fix period mapping</span>
+            {% elif row.lock_state == "LOCKED" %}
+              <span class="small text-danger">Locked by admin</span>
             {% else %}
-              <span class="small text-muted">Needs faculty completion</span>
+              <span class="small text-danger">Escalate non-compliance</span>
             {% endif %}
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="11" class="text-center text-muted py-4">No overdue unsubmitted classes found for current filters.</td></tr>
+        <tr><td colspan="12" class="text-center text-muted py-4">No non-compliant classes found for current filters.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -147,4 +164,3 @@
   <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
 </div>
 {% endblock %}
-

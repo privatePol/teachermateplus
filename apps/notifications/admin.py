@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import FacultyMemo, FacultyReminder, FacultyReminderEmailQueue, NotificationQueue
+from .models import (
+    FacultyMemo,
+    FacultyReminder,
+    FacultyReminderEmailQueue,
+    NotificationQueue,
+    SubmissionNonComplianceNotice,
+)
 
 
 @admin.register(FacultyReminder)
@@ -29,3 +35,25 @@ class NotificationQueueAdmin(admin.ModelAdmin):
     list_display = ("recipient_user", "channel", "status", "scheduled_at", "sent_at", "reference_type", "reference_id")
     list_filter = ("channel", "status")
     search_fields = ("recipient_user__username", "recipient_user__email", "subject", "reference_type", "reference_id")
+
+
+@admin.register(SubmissionNonComplianceNotice)
+class SubmissionNonComplianceNoticeAdmin(admin.ModelAdmin):
+    list_display = (
+        "faculty_user",
+        "offering",
+        "template_period",
+        "notice_level",
+        "sequence_no",
+        "status",
+        "issued_at",
+        "resolved_at",
+    )
+    list_filter = ("notice_level", "status", "tenant", "campus", "department")
+    search_fields = (
+        "faculty_user__username",
+        "faculty_user__email",
+        "offering__course__code",
+        "offering__section__code",
+        "title",
+    )

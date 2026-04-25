@@ -250,3 +250,82 @@ class NotificationQueue(TimeStampedModel):
 
     def __str__(self):
         return f"{self.channel}:{self.recipient_user_id}:{self.status}"
+
+
+class SubmissionNonComplianceNotice(TimeStampedModel):
+    class NoticeLevel(models.TextChoices):
+        NOTICE = "NOTICE", "Notice"
+        WARNING = "WARNING", "Warning"
+        ESCALATION = "ESCALATION", "Escalation"
+
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Open"
+        RESOLVED = "RESOLVED", "Resolved"
+        FAILED = "FAILED", "Failed"
+
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="submission_non_compliance_notices",
+    )
+    campus = models.ForeignKey(
+        "tenants.Campus",
+        on_delete=models.PROTECT,
+        related_name="submission_non_compliance_notices",
+    )
+    department = models.ForeignKey(
+        "tenants.Department",
+        on_delete=models.PROTECT,
+        related_name="submission_non_compliance_notices",
+        blank=True,
+        null=True,
+    )
+    offering = models.ForeignKey(
+        "academics.CourseOffering",
+        on_delete=models.PROTECT,
+        related_name="submission_non_compliance_notices",
+    )
+    template_period = models.ForeignKey(
+        "grading.GradingTemplatePeriod",
+        on_delete=models.PROTECT,
+        related_name="submission_non_compliance_notices",
+    )
+    faculty_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="submission_non_compliance_notices",
+    )
+    submission = models.ForeignKey(
+        "grading.GradeSubmission",
+        on_delete=models.SET_NULL,
+        related_name="resolved_non_compliance_notices",
+        blank=True,
+        null=True,
+    )
+    notice_level = models.CharField(max_length=20, choices=NoticeLevel.choices)
+    sequence_no = models.PositiveIntegerField(default=1)
+    title = models.CharField(max_length=180)
+    message = models.TextField()
+    deadline_at = models.DateTimeField()
+    issued_at = models.DateTimeField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.OPEN)
+    resolved_at = models.DateTimeField(blank=True, null=True)
+    resolution_note = models.CharField(max_length=255, blank=True, null=True)
+    recipient_emails_json = models.JSONField(blank=True, null=True)
+    recipient_roles_json = models.JSONField(blank=True, null=True)
+    email_status = models.CharField(max_length=12, choices=Status.choices, default=Status.OPEN)
+    email_sent_at = models.DateTimeField(blank=True, null=True)
+    email_attempt_count = models.PositiveIntegerField(default=0)
+    email_error_message = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = "submission_non_compliance_notices"
+        ordering = ["-issued_at", "-id"]
+        indexes = [
+            models.Index(fields=["tenant", "faculty_user", "status"], name="idx_nc_notice_faculty_status"),
+            models.Index(fields=["offering", "template_period", "issued_at"], name="idx_nc_notice_scope_issued"),
+            models.Index(fields=["notice_level", "issued_at"], name="idx_nc_notice_level_issued"),
+        ]
+
+    def __str__(self):
+        return f"{self.faculty_user_id}:{self.offering_id}:{self.template_period_id}:{self.notice_level}:{self.sequence_no}"

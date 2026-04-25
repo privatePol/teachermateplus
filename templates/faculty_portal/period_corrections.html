@@ -17,30 +17,12 @@
   {% endif %}
   If it is not finalized within the validity window, the request is marked <strong>LAPSED</strong> and a new request is required.
 </div>
-{% elif can_self_reopen_before_deadline %}
-<div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-3">
-  <div>
-    <strong>Before-deadline correction mode:</strong> Faculty Self-Reopen.<br>
-    This period is still within the submission deadline window.
-    {% if submission_deadline %}Deadline: <strong>{{ submission_deadline|date:"Y-m-d H:i" }}</strong>.{% endif %}
-    Use the button to reopen this submitted period immediately, then return to Activities or Attendance to update records.
-  </div>
-  <form method="post" action="{% url 'faculty_portal:period_self_reopen' offering.id period.id %}">
-    {% csrf_token %}
-    <button class="btn btn-warning" type="submit">Reopen Before Deadline</button>
-  </form>
-</div>
 {% elif submission_status == "REOPENED" %}
 <div class="alert alert-success">
   This period has already been reopened. Continue editing in Activities or Attendance, then resubmit when ready.
 </div>
 {% elif not is_submitted %}
 <div class="alert alert-info">Correction requests can be filed after period submission.</div>
-{% elif predeadline_correction_mode == "REQUEST_REVIEW" and submission_deadline %}
-<div class="alert alert-info">
-  Before-deadline correction mode is set to <strong>Request Review</strong>.
-  Faculty must submit a correction request even before the deadline.
-</div>
 {% endif %}
 
 {% if not is_correction_active %}
@@ -160,11 +142,7 @@
 <div class="card border-0 shadow-sm">
   <div class="card-header bg-white"><strong>File New Request</strong></div>
   <div class="card-body">
-    {% if can_self_reopen_before_deadline %}
-      <div class="text-muted">
-        Direct self-reopen is enabled before deadline for this tenant, so the correction request form is temporarily hidden.
-      </div>
-    {% elif submission_status == "REOPENED" %}
+    {% if submission_status == "REOPENED" %}
       <div class="text-muted">
         This period is already reopened. Continue editing in the period workflow and resubmit after your corrections.
       </div>

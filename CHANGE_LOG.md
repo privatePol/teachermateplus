@@ -7,6 +7,36 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Grading engine production-readiness improvements:
+  - `GradingTemplateComponent.is_exam_component` now marks the official exam bucket structurally, replacing component-code string matching for exam/class-standing separation
+  - existing components whose code or name contains `EXAM` are migrated into the new exam flag so current templates keep their intended behavior
+  - the Admin component form, component list, and template builder now expose the exam-component setting
+  - added student-scoped period and final recomputation services for targeted grade refreshes
+  - grade recomputation now writes explicit audit events for changed period and final grade rows
+- Faculty dashboard command-center enhancements:
+  - added a `Priority Actions` panel that surfaces urgent read-only follow-ups such as overdue unsubmitted periods, missing grades, at-risk students, pending/approved correction requests, and activities without scores
+  - added a `Students At Risk` preview that shows the top five prediction-based risk rows from the faculty member's current active class scope with direct drill-down links
+- Faculty portal onboarding:
+  - added a guided Faculty Portal quick tour with animated callouts, 10-second auto-advance, Prev/Next controls, and a per-user `Disable on next logon` preference
+  - `Configuration Management` now includes a tenant-level switch for enabling or disabling the Faculty Portal quick tour
+- Login email OTP:
+  - added optional email one-time-code verification after successful password entry for Admin Portal and Faculty Portal sign-in
+  - OTP codes are stored as hashes, expire after the tenant-configured number of minutes, and use an NCBA-branded email notice
+  - `Configuration Management -> Login Security` now controls whether login email OTP is enabled and how long each OTP remains valid
+- Faculty periodic grade summary printing:
+  - the Faculty Summary print output now uses an NCBA-branded `Summary of Periodic Grades` format intended for encoding final periodic grades into the Pinnacle system
+  - the print header now includes the NCBA logo, school heading/address, grading period, academic year, semester/term, faculty name, course code, course title, units, and section
+- Simplified periodic-submission compliance policy:
+  - unsubmitted grade books now stay open after the deadline instead of moving into a grace / late-completion workflow
+  - faculty receive overdue reminders/notices for late submission
+  - authorized admin/governance users use a cleaner `Non-Compliance on Periodic Grades Submission` monitor instead of late-completion request review
+  - faculty self-reopen for late/unsubmitted grade books was removed from the normal workflow
+- Submission non-compliance notice workflow:
+  - added a tenant-configurable notice engine for overdue unsubmitted periodic grades with 3-stage follow-up support: `Notice`, `Warning`, and `Escalation`
+  - added a scheduler command `manage.py issue_submission_non_compliance_notices` to issue due communications and send email follow-ups without tying the work to a web request
+  - the Faculty Reminder Center now shows `Submission Compliance Notices` so faculty can review formal overdue-submission communications inside the portal
+  - the admin non-compliance monitor now shows the latest notice stage and issue date for each overdue unsubmitted class
+  - `Configuration Management` now includes a dedicated `Submission Non-Compliance Notices` card for enablement, interval, academic-head roles, and HR escalation recipients
 - Documentation refinement:
   - `EDUGRADESPRO_CONTEXT.md` now explicitly documents how attendance participates in grading: it is template-driven through `is_attendance_component`, inherits normal weight roll-up, contributes to class standing only when placed under a non-exam component, and uses the internal status-to-score mapping for attendance records
   - `EDUGRADESPRO_CONTEXT.md` now also includes a worked attendance computation example showing status conversion, averaging, and weighted roll-up into class standing / period grade
@@ -23,6 +53,16 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Template hotfix request UX:
   - the hotfix-create page now uses a dedicated workflow layout instead of the generic shared form
   - `Selected Offerings` are now sorted by course title and rendered as searchable selection cards so admins can review and pick live-scope classes more easily
+- Encrypted user-signature workflow:
+  - Faculty Portal and Admin Portal now provide a `My Signature` page where authorized users can upload, preview, replace, or remove an encrypted signature image after confirming their current password
+  - `Configuration Management` now includes a `User Signatures` card for global enablement plus per-document toggles for `Faculty Final Clearance` and `Correction Official Report`
+  - Faculty Final Clearance can now place the generating faculty member's stored signature on the PDF when the feature is enabled
+  - Correction Official Report can now place stored requester and reviewer/approver signatures on the PDF when the feature is enabled and the signer has a stored signature on file
+  - signature placements are logged to a dedicated signature-usage audit table so NCBA can trace when a stored signature was actually used on a generated document
+- Faculty score-entry guidance:
+  - when faculty cancel the unsaved-changes leave warning on the score-entry page, EduGradesPro now scrolls back to the `Save Scores` button and briefly shows a visual arrow prompt pointing to the save action
+  - save-action arrow cues on Activity and Attendance forms are now hidden on clean pages and only appear after the faculty actually changes something that needs saving
+  - the Activity form action row is now right-aligned, with the save cue placed beside the `Save Activity` button instead of above it
 - Faculty final-clearance entry point:
   - the faculty `Final Clearance` action has been relocated from the Final period card to a single dedicated area on the `My Classes` page so faculty can print the clearance with fewer clicks and less repetition
   - admin-side Faculty Final Clearance is now preview-and-verify only; official PDF generation is reserved for the Faculty Portal
@@ -34,6 +74,16 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - Ubuntu deployment documentation now points to the production incident runbook for emergency recovery guidance.
 
 ### Fixed
+- Grade recomputation consistency:
+  - normal score and attendance writes now immediately recompute the affected students' stored period and final grades instead of waiting for Summary or Submit to refresh them
+  - approved score-only correction petitions now recompute only affected student(s), preserving automatic final-grade propagation without recomputing the entire offering
+  - score-only correction approval now logs before/after raw and computed score values in addition to period/final recomputation audit entries
+- Deadline governance and correction workflow:
+  - submission deadlines now act as compliance checkpoints for unsubmitted grade books instead of hard-closing normal faculty encoding
+  - unsubmitted overdue class periods now remain editable until the faculty submits them
+  - correction workflow messaging now clearly applies to already submitted grade books only
+  - correction governance setup no longer exposes the unused faculty self-reopen-before-deadline policy option
+  - period-lock UI and overdue-submission monitoring no longer show grace / late-completion controls that are no longer part of NCBA's simplified process
 - Faculty summary UX:
   - the Summary page submission-readiness line is now presented as colored explanation cards
   - readiness cards now include counts for `DRP`, `W`, and `INC`
@@ -103,6 +153,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - the faculty `How Prediction Works` page now includes a dedicated methodology section that explains the actual prediction flow step by step
   - each prediction column now also documents the factors and source values used to derive it, including how assumption mode, template weights, passing threshold, coverage, and remaining items affect the displayed values
   - the same guide now also explains Base 50 score transmutation, periodic grade roll-up, and final-grade computation so faculty can trace how prediction relates to the official grading engine
+  - the faculty prediction page now uses period-specific titles such as `Prelim Grade Prediction`, clearer table headers, simpler what-if labels, and plainer unavailable-state messages so faculty can distinguish current-period estimates from possible final-grade impact
 - Official computed grade release control:
   - Admin Portal `Configuration Management` now includes tenant-level switches for delaying official computed period grades and official final grades until after the relevant deadline has passed
   - official period/final grades are now visible to faculty by default, and are delayed only when the admin explicitly turns on the post-deadline release restriction
@@ -545,3 +596,10 @@ For every merged change:
 - Faculty Final Clearance PDF typography is now lighter and more consistent: section headings use a softer weight, Section C body text matches Section B sizing, and section spacing is more open for better print readability.
 - Faculty Final Clearance PDF tables now use a softer slate header tint and lighter grid lines so the printed report reads more like a formal clearance document and less like a spreadsheet export.
 - Faculty Final Clearance PDF now includes a QR code in the control section. When `SITE_URL` is configured, the QR opens the Admin Portal verification lookup with the printed reference and verification codes prefilled; otherwise it stores a manual verification payload.
+- Faculty Portal class list now shows `WITHDRAWN` instead of the short `W` label in the status legend, status badges, and status dropdown, while keeping the stored enrollment code unchanged.
+- Grading deadline governance now supports a three-step operational flow: normal encoding until deadline, an optional `Grace / Completion Window` from Period Locks, and a governed `Late Completion Request` after grace expires instead of misusing grade correction for unfinished encoding.
+- Faculty Portal period cards plus Activities, Attendance, and Summary pages now show the current completion-window state directly, including `Grace / Completion Window`, `Late Completion Pending`, `Late Completion Access`, and `Non-Compliant` messaging with the right next action.
+- Faculty can now file a `Late Completion Request` after grace expires, while authorized Admin users can review, approve, reject, and time-box the late-access window from a dedicated request-review screen.
+- Admin Portal overdue grade-submission reporting is now framed as `Non-Compliance on Periodic Grades Submission`, with summary cards for within-grace classes, pending late requests, active late access, and non-compliant rows.
+- Period Lock setup now includes an optional `Grace / Completion Cutoff`, making the formal submission deadline and the final grace-window cutoff visible and distinct in governance screens.
+- Admin Portal `Create/Edit Period Lock` now sorts the `Course Offering` list by course title and turns that field into an editable combobox-style picker so admins can type to search offerings directly.

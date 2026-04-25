@@ -283,6 +283,10 @@ class GradingTemplateComponent(TimeStampedModel, ActivatableModel):
         choices=ScoreInputMode.choices,
         default=ScoreInputMode.RAW_BASE50,
     )
+    is_exam_component = models.BooleanField(
+        default=False,
+        help_text="Marks this major component as the period exam bucket for class-standing/exam summary separation.",
+    )
 
     class Meta:
         db_table = "grading_template_components"

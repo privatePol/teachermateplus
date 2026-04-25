@@ -22,10 +22,12 @@ class PortalAccessMiddleware:
     ADMIN_PREFIX = "/admin-portal/"
     FACULTY_PREFIX = "/faculty/"
     ADMIN_LOGIN_PATH = "/admin-portal/login/"
+    ADMIN_LOGIN_OTP_PATH = "/admin-portal/login/otp/"
     FACULTY_LOGIN_PATH = "/faculty/login/"
     FACULTY_PUBLIC_PATHS = {
         "/faculty/",
         "/faculty/index/",
+        "/faculty/login/otp/",
         "/faculty/forgot-password/",
         "/faculty/forgot-password/sent/",
         "/faculty/reset/done/",
@@ -43,7 +45,7 @@ class PortalAccessMiddleware:
         tenant_id = scope.get("tenant_id")
         campus_id = scope.get("campus_id")
 
-        if path.startswith(self.ADMIN_PREFIX) and path != self.ADMIN_LOGIN_PATH:
+        if path.startswith(self.ADMIN_PREFIX) and path not in {self.ADMIN_LOGIN_PATH, self.ADMIN_LOGIN_OTP_PATH}:
             if not request.user.is_authenticated:
                 return redirect(reverse("accounts:admin_login"))
             if not PermissionService.has_permission(
@@ -73,6 +75,7 @@ class PostLoginSecurityMiddleware:
     FACULTY_PREFIX = "/faculty/"
     ADMIN_ALLOWED_PATHS = {
         "/admin-portal/login/",
+        "/admin-portal/login/otp/",
         "/admin-portal/logout/",
         "/admin-portal/change-password/",
         "/admin-portal/privacy-consent/",
@@ -81,6 +84,7 @@ class PostLoginSecurityMiddleware:
         "/faculty/",
         "/faculty/index/",
         "/faculty/login/",
+        "/faculty/login/otp/",
         "/faculty/logout/",
         "/faculty/forgot-password/",
         "/faculty/forgot-password/sent/",

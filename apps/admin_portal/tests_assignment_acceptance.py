@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -17,12 +17,14 @@ from apps.grading.models import (
     CourseTemplateAssignment,
     FacultyFinalClearanceReport,
     GradeSubmission,
+    GradingPeriodLock,
     GradingTemplate,
     GradingTemplatePeriod,
     StudentFinalGrade,
     StudentPeriodGrade,
 )
 from apps.grading.reporting import FacultyFinalClearanceReportService
+from apps.notifications.models import SubmissionNonComplianceNotice
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
@@ -351,6 +353,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_assignment_response_window_days": 3,
                 "faculty_assignment_first_reminder_days": 1,
                 "faculty_assignment_repeat_reminder_days": 1,
+                "submission_non_compliance_notice_interval_days": 3,
                 "grade_prediction_default_assumption": "IGNORE_MISSING",
             },
             follow=True,
@@ -380,6 +383,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_assignment_response_window_days": 3,
                 "faculty_assignment_first_reminder_days": 1,
                 "faculty_assignment_repeat_reminder_days": 1,
+                "submission_non_compliance_notice_interval_days": 3,
                 "grade_prediction_default_assumption": "IGNORE_MISSING",
                 f"campus_recipient_{self.campus.id}": "",
             },
@@ -454,6 +458,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_assignment_response_window_days": "5",
                 "faculty_assignment_first_reminder_days": "2",
                 "faculty_assignment_repeat_reminder_days": "1",
+                "submission_non_compliance_notice_interval_days": "3",
                 "grade_prediction_enabled": "",
                 "grade_prediction_what_if_enabled": "",
                 "grade_prediction_at_risk_enabled": "",
@@ -492,6 +497,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_assignment_response_window_days": 3,
                 "faculty_assignment_first_reminder_days": 1,
                 "faculty_assignment_repeat_reminder_days": 1,
+                "submission_non_compliance_notice_interval_days": 3,
                 "grade_prediction_default_assumption": "IGNORE_MISSING",
                 "faculty_official_period_grades_after_deadline": "on",
                 "faculty_official_final_grades_after_deadline": "on",
@@ -919,3 +925,164 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         created = FacultyAssignment.objects.get(offering=third_offering, faculty_user=self.faculty_user)
         self.assertFalse(created.is_primary)
+
+
+class AdminNonComplianceMonitorTests(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(code="NCBA", name="NCBA")
+        self.campus = Campus.objects.create(tenant=self.tenant, code="NCBA-FAIRVIEW", name="Fairview")
+        self.department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="FVW_COLL_IS",
+            name="Fairview Information Systems",
+        )
+        self.program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="BSIT",
+            name="BSIT",
+        )
+        self.academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2025-2026",
+            name="AY 2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        self.term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="2ND",
+            name="Second Term",
+            sequence_no=2,
+            start_date=date(2025, 11, 1),
+            end_date=date(2026, 3, 31),
+        )
+        self.course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="A132-ITAPPS",
+            title="IT Application Tools",
+        )
+        self.section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIT-1A",
+            name="BSIT 1A",
+        )
+        self.offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=self.section,
+        )
+        self.template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TMP-GRACE",
+            name="Grace Template",
+            is_published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        self.period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=self.template,
+            effective_from_term=self.term,
+            is_active=True,
+        )
+        self.admin_user = User.objects.create_user(
+            username="late_admin",
+            email="late_admin@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        self.faculty_user = User.objects.create_user(
+            username="late_faculty",
+            email="late_faculty@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+        )
+        admin_role = Role.objects.create(code="CAMPUS_ADMIN", name="Campus Admin", is_active=True)
+        for code, module, action in (
+            ("admin_portal.access", "admin_portal", "access"),
+            ("grade_submissions.read", "grade_submissions", "read"),
+        ):
+            permission = Permission.objects.create(code=code, module=module, action=action)
+            RolePermission.objects.create(role=admin_role, permission=permission)
+        UserRole.objects.create(
+            user=self.admin_user,
+            role=admin_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            is_active=True,
+        )
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code="PRELIM",
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() - timedelta(days=2),
+            is_locked=False,
+        )
+
+    def test_non_compliance_report_lists_overdue_unsubmitted_class(self):
+        SubmissionNonComplianceNotice.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            offering=self.offering,
+            template_period=self.period,
+            faculty_user=self.faculty_user,
+            notice_level=SubmissionNonComplianceNotice.NoticeLevel.WARNING,
+            sequence_no=2,
+            title="Warning for Continued Non-Compliance",
+            message="The class remains overdue after the first notice.",
+            deadline_at=timezone.now() - timedelta(days=2),
+            issued_at=timezone.now() - timedelta(hours=1),
+            recipient_emails_json=[self.faculty_user.email],
+            recipient_roles_json=["FACULTY"],
+        )
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("admin_portal:overdue_unsubmitted_report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Non-Compliance on Periodic Grades Submission")
+        self.assertContains(response, self.faculty_user.full_name)
+        self.assertContains(response, "Warning")
+        self.assertContains(response, "Escalate non-compliance")
+        self.assertNotContains(response, "Review Request")

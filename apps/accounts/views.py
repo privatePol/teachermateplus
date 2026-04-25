@@ -5,8 +5,10 @@ from django.contrib.auth import get_user_model, login, logout, update_session_au
 from django.contrib.sessions.models import Session
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import EmailMultiAlternatives
+from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.conf import settings
+from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -23,13 +25,17 @@ from apps.accounts.forms import (
     AdminLoginForm,
     FacultyForgotPasswordForm,
     FacultyLoginForm,
+    LoginOtpVerificationForm,
     FacultyPasswordResetSetForm,
     FacultySelfChangePasswordForm,
     PrivacyConsentForm,
+    UserSignatureDeleteForm,
+    UserSignatureUploadForm,
 )
-from apps.accounts.services import LoginLockoutService
+from apps.accounts.services import LoginLockoutService, LoginOtpService, UserSignatureService
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
+from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 
 User = get_user_model()
@@ -106,6 +112,48 @@ def _enforce_single_device_session(request, user, portal_code: str):
         )
 
 
+PENDING_OTP_USER_ID_KEY = "pending_login_otp_user_id"
+PENDING_OTP_PORTAL_KEY = "pending_login_otp_portal"
+PENDING_OTP_BACKEND_KEY = "pending_login_otp_backend"
+
+
+def _otp_verify_url_name(portal_code: str) -> str:
+    return "accounts:admin_login_otp" if (portal_code or "").upper() == "ADMIN" else "accounts:faculty_login_otp"
+
+
+def _login_url_name(portal_code: str) -> str:
+    return "accounts:admin_login" if (portal_code or "").upper() == "ADMIN" else "accounts:faculty_login"
+
+
+def _store_pending_otp_login(request, *, user, portal_code: str) -> None:
+    request.session[PENDING_OTP_USER_ID_KEY] = user.id
+    request.session[PENDING_OTP_PORTAL_KEY] = (portal_code or "").upper()
+    request.session[PENDING_OTP_BACKEND_KEY] = getattr(
+        user,
+        "backend",
+        getattr(settings, "AUTHENTICATION_BACKENDS", ["django.contrib.auth.backends.ModelBackend"])[0],
+    )
+    request.session.modified = True
+
+
+def _clear_pending_otp_login(request) -> None:
+    for key in (PENDING_OTP_USER_ID_KEY, PENDING_OTP_PORTAL_KEY, PENDING_OTP_BACKEND_KEY):
+        request.session.pop(key, None)
+    request.session.modified = True
+
+
+def _complete_portal_login(request, *, user, portal_code: str, dashboard_url_name: str, backend: str | None = None):
+    LoginLockoutService.register_success(username=user.username, portal_code=portal_code)
+    login(request, user, backend=backend)
+    _clear_pending_otp_login(request)
+    _enforce_single_device_session(request, user, portal_code)
+    AuditService.log_login_success(request, user=user, portal=portal_code)
+    security_redirect = _resolve_security_redirect(user, portal_code)
+    if security_redirect:
+        return redirect(reverse(security_redirect))
+    return redirect(reverse(dashboard_url_name))
+
+
 class _BasePortalLoginView(FormView):
     template_name = ""
     form_class = None
@@ -135,17 +183,22 @@ class _BasePortalLoginView(FormView):
             form.add_error(None, "You do not have access to this portal.")
             return self.form_invalid(form)
 
-        LoginLockoutService.register_success(
-            username=form.cleaned_data.get("username", ""),
+        if LoginOtpService.is_enabled_for_user(user):
+            otp_result = LoginOtpService.create_and_send(request=self.request, user=user, portal_code=self.portal_code)
+            if not otp_result.success:
+                form.add_error(None, otp_result.message)
+                return self.form_invalid(form)
+            _store_pending_otp_login(self.request, user=user, portal_code=self.portal_code)
+            messages.info(self.request, "A verification code was sent to your registered email address.")
+            return redirect(reverse(_otp_verify_url_name(self.portal_code)))
+
+        return _complete_portal_login(
+            self.request,
+            user=user,
             portal_code=self.portal_code,
+            dashboard_url_name=self.dashboard_url_name,
+            backend=getattr(user, "backend", None),
         )
-        login(self.request, user)
-        _enforce_single_device_session(self.request, user, self.portal_code)
-        AuditService.log_login_success(self.request, user=user, portal=self.portal_code)
-        security_redirect = _resolve_security_redirect(user, self.portal_code)
-        if security_redirect:
-            return redirect(reverse(security_redirect))
-        return redirect(reverse(self.dashboard_url_name))
 
     def form_invalid(self, form):
         username = self.request.POST.get("username", "")
@@ -167,6 +220,70 @@ class AdminLoginView(_BasePortalLoginView):
 class FacultyLoginView(_BasePortalLoginView):
     template_name = "faculty_portal/login.html"
     form_class = FacultyLoginForm
+    portal_code = "FACULTY"
+    portal_permission = "faculty_portal.access"
+    dashboard_url_name = "faculty_portal:dashboard"
+
+
+@method_decorator(ensure_csrf_cookie, name="dispatch")
+class _BaseLoginOtpView(FormView):
+    template_name = "accounts/login_otp.html"
+    form_class = LoginOtpVerificationForm
+    portal_code = ""
+    portal_permission = ""
+    dashboard_url_name = ""
+
+    def dispatch(self, request, *args, **kwargs):
+        self.pending_user = None
+        pending_user_id = request.session.get(PENDING_OTP_USER_ID_KEY)
+        pending_portal = request.session.get(PENDING_OTP_PORTAL_KEY)
+        if not pending_user_id or pending_portal != self.portal_code:
+            messages.error(request, "Please sign in again to request a new verification code.")
+            return redirect(reverse(_login_url_name(self.portal_code)))
+        self.pending_user = User.objects.filter(id=pending_user_id, is_active=True).first()
+        if not self.pending_user or not PermissionService.has_permission(self.pending_user, self.portal_permission):
+            _clear_pending_otp_login(request)
+            messages.error(request, "Please sign in again to request a new verification code.")
+            return redirect(reverse(_login_url_name(self.portal_code)))
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                "portal_name": "Admin Portal" if self.portal_code == "ADMIN" else "Faculty Portal",
+                "masked_email": LoginOtpService._masked_email(self.pending_user.email),
+                "login_url_name": _login_url_name(self.portal_code),
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        result = LoginOtpService.verify(
+            user=self.pending_user,
+            portal_code=self.portal_code,
+            code=form.cleaned_data["otp_code"],
+            request=self.request,
+        )
+        if not result.success:
+            form.add_error("otp_code", result.message)
+            return self.form_invalid(form)
+        return _complete_portal_login(
+            self.request,
+            user=self.pending_user,
+            portal_code=self.portal_code,
+            dashboard_url_name=self.dashboard_url_name,
+            backend=self.request.session.get(PENDING_OTP_BACKEND_KEY),
+        )
+
+
+class AdminLoginOtpView(_BaseLoginOtpView):
+    portal_code = "ADMIN"
+    portal_permission = "admin_portal.access"
+    dashboard_url_name = "admin_portal:dashboard"
+
+
+class FacultyLoginOtpView(_BaseLoginOtpView):
     portal_code = "FACULTY"
     portal_permission = "faculty_portal.access"
     dashboard_url_name = "faculty_portal:dashboard"
@@ -424,3 +541,176 @@ def faculty_privacy_consent_view(request):
         "faculty_portal/privacy_consent.html",
         {"form": form, "consent_version": getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03")},
     )
+
+
+def _signature_feature_enabled(*, user) -> bool:
+    return FeatureSettingsService.is_user_signatures_enabled(
+        tenant_id=getattr(user, "default_tenant_id", None),
+        default=False,
+    )
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def faculty_signature_view(request):
+    if not _signature_feature_enabled(user=request.user):
+        messages.error(request, "Stored signature management is currently disabled for this tenant.")
+        return redirect("faculty_portal:dashboard")
+
+    credential = getattr(request.user, "signature_credential", None)
+    upload_form = UserSignatureUploadForm(request.user, request.POST or None, request.FILES or None, prefix="upload")
+    delete_form = UserSignatureDeleteForm(request.user, request.POST or None, prefix="delete")
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "upload":
+            if upload_form.is_valid():
+                try:
+                    credential = UserSignatureService.store_signature(
+                        user=request.user,
+                        uploaded_file=upload_form.cleaned_data["signature_file"],
+                        actor=request.user,
+                    )
+                except ValidationError as exc:
+                    upload_form.add_error("signature_file", exc.message)
+                else:
+                    AuditService.log_event(
+                        action="UPLOAD_SIGNATURE",
+                        portal="FACULTY",
+                        entity_type="UserSignatureCredential",
+                        entity_id=credential.id,
+                        actor=request.user,
+                        tenant=request.user.default_tenant_id,
+                        campus=request.user.default_campus_id,
+                        metadata={
+                            "filename": credential.original_filename,
+                            "mime_type": credential.mime_type,
+                            "file_size_bytes": credential.file_size_bytes,
+                        },
+                        request=request,
+                    )
+                    messages.success(request, "Your encrypted signature image has been saved.")
+                    return redirect("accounts:faculty_signature")
+            else:
+                messages.error(request, "Please correct the signature upload errors below.")
+        elif action == "delete":
+            if delete_form.is_valid():
+                credential = UserSignatureService.clear_signature(user=request.user)
+                AuditService.log_event(
+                    action="REMOVE_SIGNATURE",
+                    portal="FACULTY",
+                    entity_type="UserSignatureCredential",
+                    entity_id=credential.id,
+                    actor=request.user,
+                    tenant=request.user.default_tenant_id,
+                    campus=request.user.default_campus_id,
+                    request=request,
+                )
+                messages.success(request, "Your stored signature has been removed.")
+                return redirect("accounts:faculty_signature")
+            messages.error(request, "Please correct the signature removal confirmation first.")
+
+    return render(
+        request,
+        "faculty_portal/signature_profile.html",
+        {
+            "upload_form": upload_form,
+            "delete_form": delete_form,
+            "credential": credential,
+        },
+    )
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def faculty_signature_preview_view(request):
+    if not _signature_feature_enabled(user=request.user):
+        return HttpResponse(status=404)
+    credential = UserSignatureService.get_active_credential(user=request.user)
+    if not credential:
+        return HttpResponse(status=404)
+    image_bytes = UserSignatureService.decrypt_signature_bytes(credential=credential)
+    return HttpResponse(image_bytes, content_type=credential.mime_type or "image/png")
+
+
+@portal_required("ADMIN")
+@permission_required("admin_portal.access")
+def admin_signature_view(request):
+    if not _signature_feature_enabled(user=request.user):
+        messages.error(request, "Stored signature management is currently disabled for this tenant.")
+        return redirect("admin_portal:dashboard")
+
+    credential = getattr(request.user, "signature_credential", None)
+    upload_form = UserSignatureUploadForm(request.user, request.POST or None, request.FILES or None, prefix="upload")
+    delete_form = UserSignatureDeleteForm(request.user, request.POST or None, prefix="delete")
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "upload":
+            if upload_form.is_valid():
+                try:
+                    credential = UserSignatureService.store_signature(
+                        user=request.user,
+                        uploaded_file=upload_form.cleaned_data["signature_file"],
+                        actor=request.user,
+                    )
+                except ValidationError as exc:
+                    upload_form.add_error("signature_file", exc.message)
+                else:
+                    AuditService.log_event(
+                        action="UPLOAD_SIGNATURE",
+                        portal="ADMIN",
+                        entity_type="UserSignatureCredential",
+                        entity_id=credential.id,
+                        actor=request.user,
+                        tenant=request.user.default_tenant_id,
+                        campus=request.user.default_campus_id,
+                        metadata={
+                            "filename": credential.original_filename,
+                            "mime_type": credential.mime_type,
+                            "file_size_bytes": credential.file_size_bytes,
+                        },
+                        request=request,
+                    )
+                    messages.success(request, "Your encrypted signature image has been saved.")
+                    return redirect("accounts:admin_signature")
+            else:
+                messages.error(request, "Please correct the signature upload errors below.")
+        elif action == "delete":
+            if delete_form.is_valid():
+                credential = UserSignatureService.clear_signature(user=request.user)
+                AuditService.log_event(
+                    action="REMOVE_SIGNATURE",
+                    portal="ADMIN",
+                    entity_type="UserSignatureCredential",
+                    entity_id=credential.id,
+                    actor=request.user,
+                    tenant=request.user.default_tenant_id,
+                    campus=request.user.default_campus_id,
+                    request=request,
+                )
+                messages.success(request, "Your stored signature has been removed.")
+                return redirect("accounts:admin_signature")
+            messages.error(request, "Please correct the signature removal confirmation first.")
+
+    return render(
+        request,
+        "admin_portal/security/signature_profile.html",
+        {
+            "upload_form": upload_form,
+            "delete_form": delete_form,
+            "credential": credential,
+        },
+    )
+
+
+@portal_required("ADMIN")
+@permission_required("admin_portal.access")
+def admin_signature_preview_view(request):
+    if not _signature_feature_enabled(user=request.user):
+        return HttpResponse(status=404)
+    credential = UserSignatureService.get_active_credential(user=request.user)
+    if not credential:
+        return HttpResponse(status=404)
+    image_bytes = UserSignatureService.decrypt_signature_bytes(credential=credential)
+    return HttpResponse(image_bytes, content_type=credential.mime_type or "image/png")

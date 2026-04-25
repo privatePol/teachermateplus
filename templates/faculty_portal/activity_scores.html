@@ -1,6 +1,65 @@
 {% extends "faculty_portal/base.html" %}
 
 {% block faculty_content %}
+<style>
+  .save-scores-guidance {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-right: 0.85rem;
+    padding: 0.45rem 0.8rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #fff6d6, #ffe28a);
+    color: #6b4d00;
+    box-shadow: 0 0.4rem 1rem rgba(176, 127, 0, 0.18);
+    opacity: 0;
+    transform: translateX(10px);
+    pointer-events: none;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+  }
+
+  .save-scores-guidance.is-visible {
+    opacity: 1;
+    transform: translateX(0);
+    animation: saveScoresGuidancePulse 1s ease-in-out 3;
+  }
+
+  .save-scores-guidance-arrow {
+    font-size: 1.1rem;
+    line-height: 1;
+    animation: saveScoresArrowNudge 0.9s ease-in-out infinite;
+  }
+
+  .save-scores-guidance-text {
+    font-size: 0.88rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  @keyframes saveScoresGuidancePulse {
+    0%, 100% { box-shadow: 0 0.4rem 1rem rgba(176, 127, 0, 0.18); }
+    50% { box-shadow: 0 0.65rem 1.25rem rgba(176, 127, 0, 0.28); }
+  }
+
+  @keyframes saveScoresArrowNudge {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(4px); }
+  }
+
+  @media (max-width: 576px) {
+    .save-scores-guidance {
+      margin-right: 0;
+      margin-bottom: 0.65rem;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .save-scores-footer {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+  }
+</style>
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">
     Encode Scores | {{ offering.course.code }} | {{ period.name }} | {{ activity.title }}
@@ -100,8 +159,12 @@
         </tbody>
       </table>
     </div>
-    <div class="card-footer d-flex justify-content-end">
+    <div class="card-footer d-flex justify-content-end align-items-center save-scores-footer">
       {% if is_editable %}
+      <div class="save-scores-guidance" id="save-scores-guidance" aria-live="polite" aria-hidden="true">
+        <span class="save-scores-guidance-arrow" aria-hidden="true">→</span>
+        <span class="save-scores-guidance-text">Click Save Scores here</span>
+      </div>
       <button type="submit" class="btn btn-success" id="save-scores-button">Save Scores</button>
       {% endif %}
     </div>
@@ -116,13 +179,35 @@
     const form = document.getElementById("activity-scores-form");
     const messageBox = document.getElementById("score-validation-message");
     const saveButton = document.getElementById("save-scores-button");
+    const saveGuidance = document.getElementById("save-scores-guidance");
     if (!form || !messageBox) return;
     const scoreInputs = Array.from(form.querySelectorAll('input[name^="raw_"]:not([disabled])'));
     const initialValues = new Map(scoreInputs.map((input) => [input.name, (input.value || "").trim()]));
     let isSubmitting = false;
+    let guidanceTimer = null;
 
     function hasUnsavedChanges() {
       return scoreInputs.some((input) => (input.value || "").trim() !== (initialValues.get(input.name) || ""));
+    }
+
+    function hideSaveGuidance() {
+      if (!saveGuidance) return;
+      saveGuidance.classList.remove("is-visible");
+      saveGuidance.setAttribute("aria-hidden", "true");
+      if (guidanceTimer) {
+        window.clearTimeout(guidanceTimer);
+        guidanceTimer = null;
+      }
+    }
+
+    function showSaveGuidance() {
+      if (!saveGuidance) return;
+      hideSaveGuidance();
+      saveGuidance.classList.add("is-visible");
+      saveGuidance.setAttribute("aria-hidden", "false");
+      guidanceTimer = window.setTimeout(function () {
+        hideSaveGuidance();
+      }, 5200);
     }
 
     function confirmLossIfNeeded() {
@@ -134,6 +219,7 @@
         window.setTimeout(function () {
           saveButton.scrollIntoView({ behavior: "smooth", block: "center" });
           saveButton.focus({ preventScroll: true });
+          showSaveGuidance();
         }, 40);
       }
       return shouldLeave;
@@ -194,6 +280,7 @@
 
       messageBox.classList.add("d-none");
       messageBox.textContent = "";
+      hideSaveGuidance();
       isSubmitting = true;
     });
 

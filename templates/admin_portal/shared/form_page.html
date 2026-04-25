@@ -29,6 +29,112 @@
 </div>
 <script>
   document.addEventListener("DOMContentLoaded", function () {
+    const parentForms = new Set();
+
+    document.querySelectorAll('select[data-searchable-select="true"]').forEach(function (selectField) {
+      const searchInput = document.createElement("input");
+      const dataList = document.createElement("datalist");
+      const listId = (selectField.id || "searchable-select") + "-options";
+      const originalOptions = Array.from(selectField.options).map(function (option) {
+        return {
+          value: option.value,
+          text: option.text,
+          disabled: option.disabled,
+        };
+      });
+
+      searchInput.type = "text";
+      searchInput.className = "form-control";
+      searchInput.placeholder = selectField.dataset.searchPlaceholder || "Search options";
+      searchInput.setAttribute("aria-label", "Search and choose dropdown option");
+      searchInput.setAttribute("list", listId);
+      searchInput.setAttribute("autocomplete", "off");
+      searchInput.dataset.linkedSelectId = selectField.id;
+
+      dataList.id = listId;
+
+      originalOptions.forEach(function (optionConfig) {
+        if (!optionConfig.value || optionConfig.disabled) {
+          return;
+        }
+        const option = document.createElement("option");
+        option.value = optionConfig.text;
+        dataList.appendChild(option);
+      });
+
+      const selectedOption = originalOptions.find(function (optionConfig) {
+        return String(optionConfig.value) === String(selectField.value);
+      });
+      if (selectedOption) {
+        searchInput.value = selectedOption.text;
+      }
+
+      selectField.parentNode.insertBefore(searchInput, selectField);
+      searchInput.insertAdjacentElement("afterend", dataList);
+
+      selectField.style.display = "none";
+      selectField.setAttribute("aria-hidden", "true");
+      selectField.tabIndex = -1;
+
+      function syncSelectFromInput() {
+        const typedText = (searchInput.value || "").trim().toLowerCase();
+        if (!typedText) {
+          selectField.value = "";
+          searchInput.setCustomValidity("");
+          return;
+        }
+
+        const exactMatch = originalOptions.find(function (optionConfig) {
+          return optionConfig.value && !optionConfig.disabled && optionConfig.text.trim().toLowerCase() === typedText;
+        });
+
+        if (exactMatch) {
+          selectField.value = exactMatch.value;
+          searchInput.value = exactMatch.text;
+          searchInput.setCustomValidity("");
+          return;
+        }
+
+        const singlePrefixMatch = originalOptions.filter(function (optionConfig) {
+          return optionConfig.value && !optionConfig.disabled && optionConfig.text.trim().toLowerCase().startsWith(typedText);
+        });
+
+        if (singlePrefixMatch.length === 1) {
+          selectField.value = singlePrefixMatch[0].value;
+          searchInput.value = singlePrefixMatch[0].text;
+          searchInput.setCustomValidity("");
+          return;
+        }
+
+        selectField.value = "";
+        searchInput.setCustomValidity("Choose a course offering from the suggested list.");
+      }
+
+      searchInput.addEventListener("input", syncSelectFromInput);
+      searchInput.addEventListener("change", syncSelectFromInput);
+      searchInput.addEventListener("blur", syncSelectFromInput);
+
+      if (selectField.form) {
+        parentForms.add(selectField.form);
+      }
+    });
+
+    parentForms.forEach(function (formElement) {
+      formElement.addEventListener("submit", function (event) {
+        const invalidSearchInput = Array.from(
+          formElement.querySelectorAll('input[data-linked-select-id]')
+        ).find(function (inputField) {
+          return !inputField.checkValidity();
+        });
+
+        if (invalidSearchInput) {
+          event.preventDefault();
+          invalidSearchInput.reportValidity();
+          invalidSearchInput.focus();
+        }
+      });
+    });
+
     const campusField = document.getElementById("id_campus");
     const departmentField = document.getElementById("id_department");
 

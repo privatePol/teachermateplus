@@ -4,14 +4,22 @@ from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
+from django.db.models import Q
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.academics.models import CourseOffering
+from apps.academics.models import CourseOffering, FacultyAssignment
 from apps.core.services.features import FeatureSettingsService
 from apps.grading.models import GradeSubmission, GradingPeriodLock
-from apps.notifications.models import FacultyReminder, FacultyReminderEmailQueue, NotificationQueue
+from apps.grading.services import FacultyGradingService, GradingGovernanceService
+from apps.notifications.models import (
+    FacultyReminder,
+    FacultyReminderEmailQueue,
+    NotificationQueue,
+    SubmissionNonComplianceNotice,
+)
+from apps.rbac.models import UserRole
 
 
 class ReminderService:
@@ -332,3 +340,428 @@ class FacultyReminderService:
                 entry.error_message = str(exc)
                 entry.save(update_fields=["status", "error_message", "updated_at"])
         return processed
+
+
+class SubmissionNonComplianceNoticeService:
+    FACULTY_PORTAL_REFERENCE_TYPE = "SUBMISSION_NON_COMPLIANCE_NOTICE"
+
+    @classmethod
+    def _portal_url(cls, path_name: str) -> str:
+        base_url = (
+            getattr(settings, "FACULTY_PORTAL_BASE_URL", "")
+            or getattr(settings, "SITE_URL", "")
+            or ""
+        ).strip().rstrip("/")
+        path = reverse(path_name)
+        if base_url:
+            return f"{base_url}{path}"
+        return path
+
+    @classmethod
+    def _admin_url(cls, path_name: str) -> str:
+        base_url = (
+            getattr(settings, "ADMIN_PORTAL_BASE_URL", "")
+            or getattr(settings, "SITE_URL", "")
+            or ""
+        ).strip().rstrip("/")
+        path = reverse(path_name)
+        if base_url:
+            return f"{base_url}{path}"
+        return path
+
+    @classmethod
+    def _latest_open_notice(cls, *, offering, template_period, faculty_user):
+        return (
+            SubmissionNonComplianceNotice.objects.filter(
+                offering=offering,
+                template_period=template_period,
+                faculty_user=faculty_user,
+                status=SubmissionNonComplianceNotice.Status.OPEN,
+            )
+            .order_by("-issued_at", "-id")
+            .first()
+        )
+
+    @classmethod
+    def _title_for_level(cls, level: str) -> str:
+        return {
+            SubmissionNonComplianceNotice.NoticeLevel.NOTICE: "Notice for Non-Compliance",
+            SubmissionNonComplianceNotice.NoticeLevel.WARNING: "Warning for Continued Non-Compliance",
+            SubmissionNonComplianceNotice.NoticeLevel.ESCALATION: "Escalation for Unresolved Non-Compliance",
+        }.get(level, "Notice for Non-Compliance")
+
+    @classmethod
+    def _message_for_level(cls, *, level: str, offering, template_period, deadline_at):
+        deadline_text = timezone.localtime(deadline_at).strftime("%B %d, %Y %I:%M %p")
+        prefix = {
+            SubmissionNonComplianceNotice.NoticeLevel.NOTICE: "This is a formal notice that the periodic grade submission is already overdue.",
+            SubmissionNonComplianceNotice.NoticeLevel.WARNING: "This is a warning that the periodic grade submission remains overdue after the earlier notice.",
+            SubmissionNonComplianceNotice.NoticeLevel.ESCALATION: "This is an escalation because the periodic grade submission remains overdue after prior notice and warning follow-up.",
+        }.get(level, "The periodic grade submission is overdue.")
+        return (
+            f"{prefix} "
+            f"Class: {offering.course.code} / {offering.section.code}. "
+            f"Period: {template_period.name}. "
+            f"Original deadline: {deadline_text}. "
+            "Please complete any missing records and submit the period as soon as possible."
+        )
+
+    @classmethod
+    def _collect_overdue_targets(cls, *, now, tenant_id: int | None = None):
+        locks_qs = GradingPeriodLock.objects.filter(
+            is_active=True,
+            deadline_at__isnull=False,
+            deadline_at__lt=now,
+        )
+        if tenant_id is not None:
+            locks_qs = locks_qs.filter(tenant_id=tenant_id)
+        overdue_locks = list(locks_qs.select_related("tenant", "campus", "term"))
+        lock_targets = {}
+
+        def _pick_lock(previous, new_lock):
+            if previous is None:
+                return new_lock
+            if (
+                previous.scope_type == GradingPeriodLock.ScopeType.CAMPUS
+                and new_lock.scope_type == GradingPeriodLock.ScopeType.COURSE
+            ):
+                return new_lock
+            if previous.scope_type == new_lock.scope_type and new_lock.updated_at > previous.updated_at:
+                return new_lock
+            return previous
+
+        offerings_by_scope = {}
+        for lock in overdue_locks:
+            period_key = GradingGovernanceService._normalize_period_key(lock.period_code)
+            if lock.scope_type == GradingPeriodLock.ScopeType.COURSE and lock.course_offering_id:
+                target_key = (lock.course_offering_id, period_key)
+                lock_targets[target_key] = _pick_lock(lock_targets.get(target_key), lock)
+                continue
+            scope_key = (lock.tenant_id, lock.campus_id, lock.academic_year_id, lock.term_id)
+            if scope_key not in offerings_by_scope:
+                offerings_by_scope[scope_key] = list(
+                    CourseOffering.objects.filter(
+                        tenant_id=lock.tenant_id,
+                        campus_id=lock.campus_id,
+                        academic_year_id=lock.academic_year_id,
+                        term_id=lock.term_id,
+                        is_active=True,
+                    )
+                )
+            for offering in offerings_by_scope[scope_key]:
+                target_key = (offering.id, period_key)
+                lock_targets[target_key] = _pick_lock(lock_targets.get(target_key), lock)
+
+        if not lock_targets:
+            return []
+
+        offering_ids = {offering_id for offering_id, _period_key in lock_targets.keys()}
+        offerings = {
+            row.id: row
+            for row in CourseOffering.objects.filter(id__in=offering_ids).select_related(
+                "tenant",
+                "campus",
+                "department",
+                "academic_year",
+                "term",
+                "course",
+                "section",
+            )
+        }
+        assignment_rows = list(
+            FacultyAssignment.objects.filter(
+                offering_id__in=offering_ids,
+                is_active=True,
+                faculty_user__is_active=True,
+            ).select_related("faculty_user")
+        )
+        assignments_by_offering = {}
+        grouped_assignments = {}
+        for assignment in assignment_rows:
+            grouped_assignments.setdefault(assignment.offering_id, []).append(assignment)
+        for offering_id, assignments in grouped_assignments.items():
+            accepted_primary = next((row for row in assignments if row.accepted_at and row.is_primary), None)
+            accepted_any = next((row for row in assignments if row.accepted_at), None)
+            primary_any = next((row for row in assignments if row.is_primary), None)
+            assignments_by_offering[offering_id] = accepted_primary or accepted_any or primary_any or assignments[0]
+
+        targets = []
+        for (offering_id, period_key), lock in lock_targets.items():
+            offering = offerings.get(offering_id)
+            if offering is None:
+                continue
+            assignment = assignments_by_offering.get(offering_id)
+            if assignment is None:
+                continue
+            try:
+                template = FacultyGradingService.resolve_template_for_offering(offering)
+            except Exception:
+                continue
+            template_period = next(
+                (
+                    period
+                    for period in template.periods.filter(is_active=True).order_by("sequence_no", "id")
+                    if GradingGovernanceService._normalize_period_key(period.code or period.name) == period_key
+                ),
+                None,
+            )
+            if template_period is None:
+                continue
+            submission = GradingGovernanceService.get_submission(
+                offering=offering,
+                template_period=template_period,
+            )
+            if submission and submission.status == GradeSubmission.Status.SUBMITTED:
+                cls.resolve_open_notices_for_scope(
+                    offering=offering,
+                    template_period=template_period,
+                    submission=submission,
+                    now=now,
+                )
+                continue
+            targets.append(
+                {
+                    "offering": offering,
+                    "template_period": template_period,
+                    "faculty_user": assignment.faculty_user,
+                    "deadline_at": lock.deadline_at,
+                }
+            )
+        return targets
+
+    @classmethod
+    def resolve_open_notices_for_scope(cls, *, offering, template_period, submission=None, now=None):
+        now = now or timezone.now()
+        open_rows = SubmissionNonComplianceNotice.objects.filter(
+            offering=offering,
+            template_period=template_period,
+            status=SubmissionNonComplianceNotice.Status.OPEN,
+        )
+        if submission is None:
+            submission = GradingGovernanceService.get_submission(offering=offering, template_period=template_period)
+        return open_rows.update(
+            status=SubmissionNonComplianceNotice.Status.RESOLVED,
+            resolved_at=now,
+            resolution_note="Periodic grade submission completed.",
+            submission=submission,
+            updated_at=now,
+        )
+
+    @classmethod
+    def resolve_submitted_notices(cls, *, tenant_id: int | None = None, now=None):
+        now = now or timezone.now()
+        notices = SubmissionNonComplianceNotice.objects.filter(
+            status=SubmissionNonComplianceNotice.Status.OPEN,
+        ).select_related("offering", "template_period")
+        if tenant_id is not None:
+            notices = notices.filter(tenant_id=tenant_id)
+        resolved = 0
+        seen = set()
+        for notice in notices:
+            key = (notice.offering_id, notice.template_period_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            submission = GradingGovernanceService.get_submission(
+                offering=notice.offering,
+                template_period=notice.template_period,
+            )
+            if submission and submission.status == GradeSubmission.Status.SUBMITTED:
+                resolved += cls.resolve_open_notices_for_scope(
+                    offering=notice.offering,
+                    template_period=notice.template_period,
+                    submission=submission,
+                    now=now,
+                )
+        return resolved
+
+    @classmethod
+    def _resolve_head_users(cls, *, offering):
+        role_codes = FeatureSettingsService.get_submission_non_compliance_head_role_codes(
+            tenant_id=offering.tenant_id
+        )
+        if not role_codes:
+            return []
+        rows = (
+            UserRole.objects.filter(
+                is_active=True,
+                role__is_active=True,
+                user__is_active=True,
+                role__code__in=role_codes,
+            )
+            .filter(Q(tenant_id=offering.tenant_id) | Q(tenant__isnull=True))
+            .filter(Q(campus_id=offering.campus_id) | Q(campus__isnull=True))
+            .filter(Q(department_id=offering.department_id) | Q(department__isnull=True))
+            .select_related("user", "role")
+        )
+        result = []
+        seen = set()
+        for row in rows:
+            if row.user_id in seen:
+                continue
+            seen.add(row.user_id)
+            result.append(row.user)
+        return result
+
+    @classmethod
+    def _recipient_payload(cls, *, level: str, offering, faculty_user):
+        faculty_emails = [email for email in [(faculty_user.email or "").strip()] if email]
+        head_users = cls._resolve_head_users(offering=offering)
+        head_emails = sorted({(user.email or "").strip() for user in head_users if (user.email or "").strip()})
+        hr_emails = FeatureSettingsService.get_submission_non_compliance_hr_recipients(
+            tenant_id=offering.tenant_id
+        )
+        recipient_emails = list(faculty_emails)
+        recipient_roles = ["FACULTY"]
+        if level == SubmissionNonComplianceNotice.NoticeLevel.ESCALATION:
+            recipient_emails.extend([email for email in head_emails if email not in recipient_emails])
+            recipient_emails.extend([email for email in hr_emails if email not in recipient_emails])
+            if head_emails:
+                recipient_roles.extend(
+                    FeatureSettingsService.get_submission_non_compliance_head_role_codes(tenant_id=offering.tenant_id)
+                )
+            if hr_emails:
+                recipient_roles.append("HR")
+        return {
+            "emails": recipient_emails,
+            "roles": recipient_roles,
+        }
+
+    @classmethod
+    def _build_email_payload(cls, *, notice):
+        faculty_portal_url = cls._portal_url("faculty_portal:reminder_center")
+        admin_report_url = cls._admin_url("admin_portal:overdue_unsubmitted_report")
+        context = {
+            "notice": notice,
+            "faculty_portal_url": faculty_portal_url,
+            "admin_report_url": admin_report_url,
+            "logo_url": getattr(settings, "FACULTY_PORTAL_REMINDER_LOGO_URL", "").strip()
+            or "/media/logos/ncba-logo.png",
+        }
+        text_body = render_to_string("notifications/emails/submission_non_compliance_notice.txt", context)
+        html_body = render_to_string("notifications/emails/submission_non_compliance_notice.html", context)
+        subject = f"NCBA-EDUGRADESPRO: {notice.title} - {notice.template_period.name}"
+        return subject, text_body, html_body
+
+    @classmethod
+    def _send_notice_email(cls, *, notice, recipient_emails, now=None, dry_run: bool = False):
+        now = now or timezone.now()
+        if dry_run:
+            return True
+        notice.email_attempt_count = notice.email_attempt_count + 1
+        if not recipient_emails:
+            notice.email_status = SubmissionNonComplianceNotice.Status.FAILED
+            notice.email_error_message = "No recipient emails configured for this notice."
+            notice.save(update_fields=["email_attempt_count", "email_status", "email_error_message", "updated_at"])
+            return False
+        subject, text_body, html_body = cls._build_email_payload(notice=notice)
+        try:
+            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
+            message = EmailMultiAlternatives(
+                subject=subject,
+                body=text_body,
+                from_email=from_email,
+                to=recipient_emails,
+            )
+            message.attach_alternative(html_body, "text/html")
+            message.send(fail_silently=False)
+            notice.email_status = SubmissionNonComplianceNotice.Status.RESOLVED
+            notice.email_sent_at = now
+            notice.email_error_message = None
+            notice.save(
+                update_fields=[
+                    "email_attempt_count",
+                    "email_status",
+                    "email_sent_at",
+                    "email_error_message",
+                    "updated_at",
+                ]
+            )
+            return True
+        except Exception as exc:
+            notice.email_status = SubmissionNonComplianceNotice.Status.FAILED
+            notice.email_error_message = str(exc)
+            notice.save(
+                update_fields=[
+                    "email_attempt_count",
+                    "email_status",
+                    "email_error_message",
+                    "updated_at",
+                ]
+            )
+            return False
+
+    @classmethod
+    def issue_due_notices(cls, *, now=None, tenant_id: int | None = None, dry_run: bool = False):
+        now = now or timezone.now()
+        if tenant_id is not None and not FeatureSettingsService.is_submission_non_compliance_notice_enabled(
+            tenant_id=tenant_id
+        ):
+            return {"issued": 0, "resolved": 0, "dry_run": dry_run}
+
+        resolved = cls.resolve_submitted_notices(tenant_id=tenant_id, now=now)
+        targets = cls._collect_overdue_targets(now=now, tenant_id=tenant_id)
+        issued = 0
+        for target in targets:
+            offering = target["offering"]
+            if not FeatureSettingsService.is_submission_non_compliance_notice_enabled(tenant_id=offering.tenant_id):
+                continue
+            template_period = target["template_period"]
+            faculty_user = target["faculty_user"]
+            latest_notice = cls._latest_open_notice(
+                offering=offering,
+                template_period=template_period,
+                faculty_user=faculty_user,
+            )
+            interval_days = FeatureSettingsService.get_submission_non_compliance_notice_interval_days(
+                tenant_id=offering.tenant_id
+            )
+            if latest_notice and now < latest_notice.issued_at + timedelta(days=interval_days):
+                continue
+            if latest_notice is None:
+                level = SubmissionNonComplianceNotice.NoticeLevel.NOTICE
+                sequence_no = 1
+            elif latest_notice.notice_level == SubmissionNonComplianceNotice.NoticeLevel.NOTICE:
+                level = SubmissionNonComplianceNotice.NoticeLevel.WARNING
+                sequence_no = latest_notice.sequence_no + 1
+            else:
+                level = SubmissionNonComplianceNotice.NoticeLevel.ESCALATION
+                sequence_no = latest_notice.sequence_no + 1
+
+            recipient_payload = cls._recipient_payload(
+                level=level,
+                offering=offering,
+                faculty_user=faculty_user,
+            )
+            if dry_run:
+                issued += 1
+                continue
+            notice = SubmissionNonComplianceNotice.objects.create(
+                tenant_id=offering.tenant_id,
+                campus_id=offering.campus_id,
+                department_id=offering.department_id,
+                offering=offering,
+                template_period=template_period,
+                faculty_user=faculty_user,
+                notice_level=level,
+                sequence_no=sequence_no,
+                title=cls._title_for_level(level),
+                message=cls._message_for_level(
+                    level=level,
+                    offering=offering,
+                    template_period=template_period,
+                    deadline_at=target["deadline_at"],
+                ),
+                deadline_at=target["deadline_at"],
+                issued_at=now,
+                recipient_emails_json=recipient_payload["emails"],
+                recipient_roles_json=recipient_payload["roles"],
+            )
+            cls._send_notice_email(
+                notice=notice,
+                recipient_emails=recipient_payload["emails"],
+                now=now,
+                dry_run=dry_run,
+            )
+            issued += 1
+        return {"issued": issued, "resolved": resolved, "dry_run": dry_run}

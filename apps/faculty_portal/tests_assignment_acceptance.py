@@ -34,7 +34,7 @@ from apps.grading.models import (
     StudentActivityScore,
     StudentPeriodGrade,
 )
-from apps.notifications.models import FacultyMemo, FacultyReminder
+from apps.notifications.models import FacultyMemo, FacultyReminder, SubmissionNonComplianceNotice
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
@@ -217,6 +217,81 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             ]
         )
 
+    def _accept_assignment(self, assignment=None, faculty_user=None):
+        assignment = assignment or self.assignment
+        faculty_user = faculty_user or self.faculty_user
+        assignment.accepted_at = timezone.now()
+        assignment.accepted_by = faculty_user
+        assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        return assignment
+
+    def _enable_grade_prediction(self):
+        SystemSetting.objects.update_or_create(
+            tenant=None,
+            setting_key="FEATURE_GRADE_PREDICTION_ENABLED",
+            defaults={"setting_value": "1", "value_type": SystemSetting.ValueType.BOOL, "is_active": True},
+        )
+        SystemSetting.objects.update_or_create(
+            tenant=self.tenant,
+            setting_key="GRADE_PREDICTION_ENABLED",
+            defaults={"setting_value": "1", "value_type": SystemSetting.ValueType.BOOL, "is_active": True},
+        )
+
+    def _create_active_student(self, *, student_no="2025-RISK-001", last_name="Risk", first_name="Student"):
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no=student_no,
+            last_name=last_name,
+            first_name=first_name,
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+        return student
+
+    def _create_low_exam_score(self, *, student, offering=None, period=None, title="Prelim Exam 1"):
+        offering = offering or self.offering
+        period = period or self.prelim
+        exam_component = GradingTemplateComponent.objects.get(template_period=period, code="EXAM")
+        exam_component.is_exam_component = True
+        exam_component.save(update_fields=["is_exam_component", "updated_at"])
+        activity = GradeActivity.objects.create(
+            tenant=offering.tenant,
+            campus=offering.campus,
+            offering=offering,
+            template_period=period,
+            template_component=exam_component,
+            title=title,
+            total_score=100,
+            created_by_user=self.faculty_user,
+        )
+        computed_score = FacultyGradingService.compute_activity_score(
+            raw_score=Decimal("20"),
+            total_score=Decimal("100"),
+            base_value=Decimal("50"),
+        )
+        StudentActivityScore.objects.create(
+            activity=activity,
+            student=student,
+            raw_score=20,
+            computed_score=computed_score,
+            encoded_by_user=self.faculty_user,
+        )
+        return activity
+
     def test_faculty_must_accept_assignment_before_opening_course(self):
         self.client.force_login(self.faculty_user)
 
@@ -305,21 +380,8 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "PRELIM GRADE = Class Standing (60.00%) + Prelim Exam (40.00%)")
 
     def test_faculty_can_open_at_risk_monitor_when_prediction_is_enabled(self):
-        SystemSetting.objects.update_or_create(
-            tenant=None,
-            setting_key="FEATURE_GRADE_PREDICTION_ENABLED",
-            defaults={"setting_value": "1", "value_type": SystemSetting.ValueType.BOOL, "is_active": True},
-        )
-        SystemSetting.objects.update_or_create(
-            tenant=self.tenant,
-            setting_key="GRADE_PREDICTION_ENABLED",
-            defaults={"setting_value": "1", "value_type": SystemSetting.ValueType.BOOL, "is_active": True},
-        )
-
-        self.assignment.accepted_at = timezone.now()
-        self.assignment.accepted_by = self.faculty_user
-        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
-        self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        self._enable_grade_prediction()
+        self._accept_assignment()
 
         self.client.force_login(self.faculty_user)
         response = self.client.get(reverse("faculty_portal:student_at_risk_monitor"))
@@ -328,21 +390,8 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Student At-Risk Monitor")
 
     def test_prediction_guide_includes_methodology_and_column_factors(self):
-        SystemSetting.objects.update_or_create(
-            tenant=None,
-            setting_key="FEATURE_GRADE_PREDICTION_ENABLED",
-            defaults={"setting_value": "1", "value_type": SystemSetting.ValueType.BOOL, "is_active": True},
-        )
-        SystemSetting.objects.update_or_create(
-            tenant=self.tenant,
-            setting_key="GRADE_PREDICTION_ENABLED",
-            defaults={"setting_value": "1", "value_type": SystemSetting.ValueType.BOOL, "is_active": True},
-        )
-
-        self.assignment.accepted_at = timezone.now()
-        self.assignment.accepted_by = self.faculty_user
-        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
-        self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        self._enable_grade_prediction()
+        self._accept_assignment()
 
         self.client.force_login(self.faculty_user)
         response = self.client.get(
@@ -362,6 +411,70 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Computed Score = ((Raw Score / Total Score)")
         self.assertContains(response, "Assigned grading template")
         self.assertContains(response, "Current Projection")
+
+    def test_period_prediction_page_uses_teacher_friendly_period_specific_labels(self):
+        self._enable_grade_prediction()
+        SystemSetting.objects.update_or_create(
+            tenant=None,
+            setting_key="FEATURE_GRADE_PREDICTION_WHAT_IF_ENABLED",
+            defaults={"setting_value": "1", "value_type": SystemSetting.ValueType.BOOL, "is_active": True},
+        )
+
+        self._accept_assignment()
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_prediction",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Prelim Grade Prediction")
+        self.assertContains(response, "current grading period")
+        self.assertContains(response, "It does not change the actual gradebook.")
+        self.assertContains(response, "Assumed Score for Remaining Items (%)")
+        self.assertContains(response, "Scenario Name (Optional)")
+        self.assertContains(response, "Predict")
+        self.assertContains(response, "Save Scenario")
+        self.assertContains(response, "Apply Filter")
+        self.assertContains(response, "Clear")
+        self.assertContains(response, "Estimated Grade")
+        self.assertContains(response, "Highest Possible")
+        self.assertContains(response, "Lowest Possible")
+        self.assertContains(response, "Possible Final Grade")
+        self.assertContains(response, "Can Still Pass?")
+        self.assertContains(response, "Needed Score in Remaining Items")
+        self.assertContains(response, "Progress")
+        self.assertContains(response, "Remaining Items")
+        self.assertContains(response, "Status")
+
+    def test_reminder_center_shows_submission_non_compliance_notice(self):
+        self.client.force_login(self.faculty_user)
+        SubmissionNonComplianceNotice.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            offering=self.offering,
+            template_period=self.prelim,
+            faculty_user=self.faculty_user,
+            notice_level=SubmissionNonComplianceNotice.NoticeLevel.WARNING,
+            sequence_no=2,
+            title="Warning for Continued Non-Compliance",
+            message="The Prelim submission is still overdue and needs immediate follow-up.",
+            deadline_at=timezone.now() - timedelta(days=4),
+            issued_at=timezone.now() - timedelta(hours=1),
+            recipient_emails_json=[self.faculty_user.email],
+            recipient_roles_json=["FACULTY"],
+        )
+
+        response = self.client.get(reverse("faculty_portal:reminder_center"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Submission Compliance Notices")
+        self.assertContains(response, "Warning for Continued Non-Compliance")
+        self.assertContains(response, "The Prelim submission is still overdue")
 
     def test_faculty_can_create_and_view_private_memo(self):
         self.assignment.accepted_at = timezone.now()
@@ -486,6 +599,335 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Incomplete Students")
         self.assertContains(response, "Students currently marked as")
         self.assertContains(response, "INC")
+
+    def test_dashboard_priority_actions_and_at_risk_widgets_show_zero_states(self):
+        self._enable_grade_prediction()
+        self._accept_assignment()
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(reverse("faculty_portal:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Priority Actions")
+        self.assertContains(response, "Focus on these first to avoid deadline, submission, and grading issues.")
+        self.assertContains(response, "No priority actions right now.")
+        self.assertContains(response, "Students At Risk")
+        self.assertContains(response, "No at-risk students are flagged in your current active classes.")
+        self.assertContains(response, reverse("faculty_portal:student_at_risk_monitor"))
+
+    def test_dashboard_priority_actions_appear_only_when_relevant(self):
+        self._accept_assignment()
+        self._create_active_student(student_no="2025-MISS-001", last_name="Missing", first_name="Grade")
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(reverse("faculty_portal:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "has missing grades that may affect submission")
+        self.assertContains(response, "Review Missing Grades")
+        self.assertNotContains(response, "is currently at risk this grading period")
+
+    def test_dashboard_priority_actions_are_scoped_to_logged_in_faculty(self):
+        other_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIT-1B",
+            name="BSIT 1B",
+        )
+        other_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=other_section,
+        )
+        other_faculty = User.objects.create_user(
+            username="other_faculty",
+            email="other_faculty@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        other_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=other_offering,
+            faculty_user=other_faculty,
+            is_primary=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=other_faculty,
+        )
+        self._accept_assignment()
+        exam_component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
+        GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=other_offering,
+            template_period=self.prelim,
+            template_component=exam_component,
+            title="Other Faculty Activity",
+            total_score=100,
+            created_by_user=other_faculty,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(reverse("faculty_portal:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Other Faculty Activity")
+        self.assertNotContains(response, "BSIT-1B")
+        self.assertEqual(other_assignment.faculty_user_id, other_faculty.id)
+
+    def test_dashboard_at_risk_preview_shows_only_active_scope_students(self):
+        self._enable_grade_prediction()
+        self._accept_assignment()
+        visible_student = self._create_active_student(
+            student_no="2025-RISK-101",
+            last_name="Visible",
+            first_name="Learner",
+        )
+        self._create_low_exam_score(student=visible_student)
+
+        hidden_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIT-1C",
+            name="BSIT 1C",
+        )
+        hidden_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=hidden_section,
+        )
+        hidden_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-RISK-999",
+            last_name="Hidden",
+            first_name="Learner",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=hidden_student,
+            course_offering=hidden_offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(reverse("faculty_portal:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Visible Learner")
+        self.assertContains(response, "Estimated grade below passing")
+        self.assertContains(response, "At Risk")
+        self.assertNotContains(response, "Hidden Learner")
+        self.assertNotContains(response, "2025-RISK-999")
+
+    def test_dashboard_priority_actions_follow_urgency_order(self):
+        self._accept_assignment()
+        exam_component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=exam_component,
+            title="Unscored Activity",
+            total_score=100,
+            created_by_user=self.faculty_user,
+        )
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code="PRELIM",
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() - timezone.timedelta(hours=1),
+            is_locked=False,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(reverse("faculty_portal:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("is past the submission deadline", content)
+        self.assertIn("still has no scores encoded", content)
+        self.assertLess(
+            content.index("is past the submission deadline"),
+            content.index("still has no scores encoded"),
+        )
+        self.assertContains(
+            response,
+            reverse("faculty_portal:activity_scores", args=[self.offering.id, self.prelim.id, activity.id]),
+        )
+
+    def test_dashboard_does_not_leak_cross_tenant_priority_actions(self):
+        self._accept_assignment()
+        other_tenant = Tenant.objects.create(code="OTHER", name="Other School")
+        other_campus = Campus.objects.create(tenant=other_tenant, code="OTHER-MAIN", name="Other Main")
+        other_department = Department.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            code="OTHER-DEPT",
+            name="Other Department",
+        )
+        other_program = Program.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            department=other_department,
+            code="BSOA",
+            name="BS Office Admin",
+        )
+        other_year = AcademicYear.objects.create(
+            tenant=other_tenant,
+            code="2025-2026",
+            name="AY 2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        other_term = Term.objects.create(
+            tenant=other_tenant,
+            academic_year=other_year,
+            code="1ST",
+            name="First Term",
+            sequence_no=1,
+            start_date=date(2025, 6, 1),
+            end_date=date(2025, 10, 31),
+        )
+        other_course = Course.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            department=other_department,
+            code="OTHER-COURSE",
+            title="Other Course",
+        )
+        other_section = Section.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            department=other_department,
+            program=other_program,
+            code="OTHER-1A",
+            name="Other 1A",
+        )
+        other_offering = CourseOffering.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            department=other_department,
+            program=other_program,
+            academic_year=other_year,
+            term=other_term,
+            course=other_course,
+            section=other_section,
+        )
+        FacultyAssignment.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            offering=other_offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+        )
+        other_template = GradingTemplate.objects.create(
+            tenant=other_tenant,
+            code="OTHER_TEMPLATE",
+            name="Other Template",
+            is_published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+            default_base_value=50,
+        )
+        other_period = GradingTemplatePeriod.objects.create(
+            template=other_template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+        )
+        other_component = GradingTemplateComponent.objects.create(
+            template_period=other_period,
+            code="EXAM",
+            name="Exam",
+            weight_percentage=100,
+            sort_order=1,
+            is_exam_component=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=other_course,
+            grading_template=other_template,
+            effective_from_term=other_term,
+        )
+        GradeActivity.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            offering=other_offering,
+            template_period=other_period,
+            template_component=other_component,
+            title="Cross Tenant Activity",
+            total_score=100,
+            created_by_user=self.faculty_user,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(reverse("faculty_portal:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "OTHER-COURSE")
+        self.assertNotContains(response, "Cross Tenant Activity")
+
+    def test_period_summary_print_sheet_is_pinnacle_ready(self):
+        self._accept_assignment()
+        self._create_active_student(
+            student_no="2025-PIN-001",
+            last_name="Pinnacle",
+            first_name="Ready",
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_summary",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Print Periodic Grades")
+        self.assertContains(response, "logos/ncba-logo.png")
+        self.assertContains(response, "Summary of Periodic Grades")
+        self.assertContains(response, "For encoding of final periodic grades into the Pinnacle system")
+        self.assertContains(response, "NATIONAL COLLEGE OF BUSINESS AND ARTS")
+        self.assertContains(response, "Grading Period:")
+        self.assertContains(response, "Semester / Term:")
+        self.assertContains(response, "Faculty:")
+        self.assertContains(response, "Course Code:")
+        self.assertContains(response, "Course Title:")
+        self.assertContains(response, "Prelim Grade")
 
     def test_period_summary_hides_official_period_and_final_grades_before_deadline(self):
         student = Student.objects.create(
@@ -1092,6 +1534,53 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "This period is closed until Midterm becomes the active grading period.")
+
+    def test_non_active_period_route_stays_open_when_overdue_and_unsubmitted(self):
+        canonical_period = TenantTermGradingPeriod.objects.create(
+            tenant=self.tenant,
+            term=self.term,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+        )
+        TenantTermGradingPeriod.objects.create(
+            tenant=self.tenant,
+            term=self.term,
+            code="MIDTERM",
+            name="Midterm",
+            sequence_no=2,
+        )
+        ActiveGradingPeriodSetting.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            term=self.term,
+            period=TenantTermGradingPeriod.objects.get(tenant=self.tenant, term=self.term, code="MIDTERM"),
+        )
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code="PRELIM",
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() - timedelta(hours=2),
+            is_locked=False,
+        )
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.accepted_by = self.faculty_user
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_activities",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Submission deadline already passed")
 
     def test_non_active_period_attendance_is_accessible_but_read_only(self):
         student = Student.objects.create(
@@ -1792,3 +2281,31 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "<option value=\"DRP\">DRP</option>", html=True)
         self.assertContains(response, "<option value=\"INC\">INC</option>", html=True)
         self.assertContains(response, "text-bg-warning text-dark")
+
+    def test_period_summary_shows_overdue_notice_without_late_completion_action(self):
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code="PRELIM",
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() - timedelta(days=2),
+            is_locked=False,
+        )
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.accepted_by = self.faculty_user
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_summary",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Submission deadline already passed")
+        self.assertNotContains(response, "Request Late Completion Access")

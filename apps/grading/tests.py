@@ -1,11 +1,18 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+from io import BytesIO
 
 from django.core import mail
 from django.test import TestCase, override_settings
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 
+from PIL import Image
 from apps.accounts.models import User
+from apps.accounts.models import UserSignatureUsageLog
+from apps.accounts.services import UserSignatureService
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.auditlog.models import AuditLog
 from apps.enrollment.models import Enrollment
 from apps.faculty_portal.forms import GradeCorrectionRequestForm
 from apps.grading.models import (
@@ -16,6 +23,7 @@ from apps.grading.models import (
     GradeCorrectionRequest,
     GradeCorrectionRequestItem,
     GradeSubmission,
+    GradingPeriodLock,
     GradingTemplate,
     GradingTemplateComponent,
     GradingTemplatePeriod,
@@ -415,7 +423,120 @@ class CorrectionWorkflowTests(TestCase):
         self.assertTrue(period_grade.is_finalized)
         self.assertEqual(final_grade.final_grade, Decimal("95.00"))
         self.assertTrue(final_grade.is_submitted)
+        self.assertFalse(
+            StudentPeriodGrade.objects.filter(
+                offering=self.offering,
+                template_period=self.period,
+                student=self.student2,
+            ).exists()
+        )
+        self.assertFalse(StudentFinalGrade.objects.filter(offering=self.offering, student=self.student2).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="UPDATE",
+                entity_type="StudentActivityScore",
+                entity_id=str(score.id),
+                metadata_json__reason="CORRECTION_APPROVAL",
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="RECOMPUTE",
+                entity_type="StudentPeriodGrade",
+                entity_id=str(period_grade.id),
+                metadata_json__reason="CORRECTION_APPROVAL",
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="RECOMPUTE",
+                entity_type="StudentFinalGrade",
+                entity_id=str(final_grade.id),
+                metadata_json__reason="CORRECTION_APPROVAL",
+            ).exists()
+        )
         self.assertTrue(updated.unlock_window.is_consumed)
+
+    def test_score_write_recomputes_scoped_period_and_final_immediately(self):
+        GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
+            status=GradeSubmission.Status.REOPENED
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=self.activity,
+            score_payload=[{"student_id": self.student1.id, "raw_score": Decimal("40.00")}],
+        )
+
+        score = StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True)
+        period_grade = StudentPeriodGrade.objects.get(
+            offering=self.offering,
+            template_period=self.period,
+            student=self.student1,
+        )
+        final_grade = StudentFinalGrade.objects.get(offering=self.offering, student=self.student1)
+
+        self.assertEqual(score.computed_score, Decimal("90.00"))
+        self.assertEqual(period_grade.period_grade, Decimal("90.00"))
+        self.assertEqual(final_grade.final_grade, Decimal("90.00"))
+        self.assertFalse(
+            StudentPeriodGrade.objects.filter(
+                offering=self.offering,
+                template_period=self.period,
+                student=self.student2,
+            ).exists()
+        )
+
+    def test_exam_component_flag_drives_exam_bucket_without_code_name_dependency(self):
+        GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
+            status=GradeSubmission.Status.REOPENED
+        )
+        self.component.weight_percentage = Decimal("60.00")
+        self.component.save(update_fields=["weight_percentage", "updated_at"])
+        exam_component = GradingTemplateComponent.objects.create(
+            template_period=self.period,
+            code="ME",
+            name="Major Assessment",
+            weight_percentage=Decimal("40.00"),
+            sort_order=2,
+            is_exam_component=True,
+        )
+        exam_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=exam_component,
+            title="Major Assessment 1",
+            total_score=Decimal("50.00"),
+            created_by_user=self.faculty_user,
+        )
+        StudentActivityScore.objects.create(
+            activity=exam_activity,
+            student=self.student1,
+            raw_score=Decimal("40.00"),
+            computed_score=FacultyGradingService.compute_activity_score(
+                raw_score=Decimal("40.00"),
+                total_score=Decimal("50.00"),
+                base_value=Decimal("50.00"),
+            ),
+            encoded_by_user=self.faculty_user,
+        )
+
+        FacultyGradingService.recompute_period_summary_for_students(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            student_ids=[self.student1.id],
+        )
+
+        period_grade = StudentPeriodGrade.objects.get(
+            offering=self.offering,
+            template_period=self.period,
+            student=self.student1,
+        )
+        self.assertEqual(period_grade.class_standing_grade, Decimal("80.00"))
+        self.assertEqual(period_grade.exam_grade, Decimal("90.00"))
+        self.assertEqual(period_grade.period_grade, Decimal("84.00"))
 
     def test_official_correction_report_builds_pdf_for_closed_request(self):
         correction = GradingGovernanceService.create_correction_request(
@@ -449,6 +570,72 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(report_data["official_grade_rows"][0][3], "95")
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertGreater(len(pdf_bytes), 1000)
+
+    def test_official_correction_report_logs_signature_usage_for_requester_and_approver(self):
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+
+        def _signature_upload(name, color):
+            buffer = BytesIO()
+            Image.new("RGBA", (180, 60), color).save(buffer, format="PNG")
+            return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/png")
+
+        UserSignatureService.store_signature(
+            user=self.faculty_user,
+            uploaded_file=_signature_upload("faculty-signature.png", (10, 120, 10, 255)),
+            actor=self.faculty_user,
+        )
+        UserSignatureService.store_signature(
+            user=self.reviewer_user,
+            uploaded_file=_signature_upload("reviewer-signature.png", (120, 10, 10, 255)),
+            actor=self.reviewer_user,
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Include stored signatures in the official correction report.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "45",
+                }
+            ],
+        )
+        closed_request = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Approved with signature.",
+        )
+
+        pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(
+            UserSignatureUsageLog.objects.filter(
+                document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
+                document_reference=f"CGR-{closed_request.id:06d}",
+            ).count(),
+            2,
+        )
+        self.faculty_user.signature_credential.refresh_from_db()
+        self.reviewer_user.signature_credential.refresh_from_db()
+        self.assertIsNotNone(self.faculty_user.signature_credential.last_used_at)
+        self.assertIsNotNone(self.reviewer_user.signature_credential.last_used_at)
 
     def test_correction_submission_notification_emails_configured_roles(self):
         SystemSettingService.set(
@@ -892,3 +1079,181 @@ class FacultyFinalClearanceQrTests(TestCase):
         self.assertIn("NCBA Faculty Final Clearance Verification", value)
         self.assertIn("Reference No: FCR-TEST-001", value)
         self.assertIn("Verification Code: ABCDEF1234567890", value)
+
+    def test_final_clearance_pdf_logs_signature_usage_when_enabled(self):
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_FINAL_CLEARANCE_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        buffer = BytesIO()
+        Image.new("RGBA", (180, 60), (40, 80, 140, 255)).save(buffer, format="PNG")
+        UserSignatureService.store_signature(
+            user=self.user,
+            uploaded_file=SimpleUploadedFile("clearance-signature.png", buffer.getvalue(), content_type="image/png"),
+            actor=self.user,
+        )
+
+        pdf_bytes = FacultyFinalClearanceReportService.build_pdf_bytes(report_obj=self.report_obj)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(
+            UserSignatureUsageLog.objects.filter(
+                document_type=UserSignatureUsageLog.DocumentType.FINAL_CLEARANCE,
+                document_reference="FCR-TEST-001",
+            ).count(),
+            1,
+        )
+
+
+class CompletionGraceWindowTests(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(code="TEN-GRACE", name="Tenant Grace")
+        self.campus = Campus.objects.create(tenant=self.tenant, code="MAIN", name="Main Campus")
+        self.department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="CS",
+            name="Computer Studies",
+        )
+        self.program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="BSCS",
+            name="BS Computer Science",
+        )
+        self.academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2025-2026",
+            name="AY 2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        self.term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="2ND",
+            name="Second Term",
+            sequence_no=2,
+            start_date=date(2025, 11, 1),
+            end_date=date(2026, 3, 31),
+        )
+        self.course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="CS101",
+            title="Intro to Computing",
+        )
+        self.section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSCS-1A",
+            name="BSCS 1A",
+        )
+        self.offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=self.section,
+        )
+        self.faculty_user = User.objects.create_user(
+            username="faculty_grace",
+            email="faculty_grace@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+        )
+        self.student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-10001",
+            last_name="Arcilla",
+            first_name="Janica",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            course_offering=self.offering,
+            student=self.student,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+        )
+        self.template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TPL-GRACE",
+            name="Grace Template",
+            is_published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        self.period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+            is_active=True,
+        )
+        self.component = GradingTemplateComponent.objects.create(
+            template_period=self.period,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=self.template,
+            effective_from_term=self.term,
+            is_active=True,
+        )
+        now = timezone.now()
+        self.lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code="PRELIM",
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            is_locked=False,
+            deadline_at=now - timedelta(hours=1),
+        )
+
+    def test_assert_encoding_allowed_when_period_is_overdue_but_unsubmitted(self):
+        GradingGovernanceService.assert_encoding_allowed(
+            offering=self.offering,
+            template_period=self.period,
+        )
+
+    def test_auto_lock_does_not_lock_overdue_unsubmitted_period(self):
+        result = GradingGovernanceService.auto_lock_due_periods(at=timezone.now())
+
+        self.lock.refresh_from_db()
+        self.assertEqual(result["count"], 0)
+        self.assertFalse(self.lock.is_locked)

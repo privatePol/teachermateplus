@@ -13,6 +13,7 @@ from .views import (
     memo_delete_view,
     memo_edit_view,
     memo_toggle_pin_view,
+    quick_tour_disable_view,
     reminder_center_view,
     reminder_complete_view,
     reminder_snooze_view,
@@ -31,7 +32,6 @@ from .views import (
     period_correction_official_report_view,
     period_correction_finalize_view,
     period_corrections_view,
-    period_self_reopen_view,
     period_submit_view,
     period_summary_view,
 )
@@ -43,6 +43,7 @@ urlpatterns = [
     path("faculty/index/", public_index_view, name="public_index_alias"),
     path("faculty/guide/", guide_view, name="guide"),
     path("faculty/guide/manual/", guide_manual_view, name="guide_manual"),
+    path("faculty/quick-tour/disable/", quick_tour_disable_view, name="quick_tour_disable"),
     path("faculty/dashboard/", dashboard_view, name="dashboard"),
     path("faculty/analytics/", analytics_view, name="analytics"),
     path("faculty/reminders/", reminder_center_view, name="reminder_center"),
@@ -129,11 +130,6 @@ urlpatterns = [
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/corrections/",
         period_corrections_view,
         name="period_corrections",
-    ),
-    path(
-        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/corrections/self-reopen/",
-        period_self_reopen_view,
-        name="period_self_reopen",
     ),
     path(
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/corrections/<int:request_id>/finalize/",

@@ -321,7 +321,7 @@
           </div>
           <div class="manual-rule">
             <strong>Readiness Cards and Threshold</strong>
-            <p>The Summary page now presents submission readiness through colored cards for ACTIVE, complete records, missing records, coverage, DRP, W, and INC. Pass/Fail counts follow the configured passing threshold and normally appear together with the official period grade. EduGradesPro resolves that threshold in this order: Tenant Grading Profile override, assigned grading-template threshold, tenant default setting, then fallback 75.00. Admin may still restrict official-grade release until the configured deadline.</p>
+            <p>The Summary page now presents submission readiness through colored cards for ACTIVE, complete records, missing records, coverage, DRP, WITHDRAWN, and INC. Pass/Fail counts follow the configured passing threshold and normally appear together with the official period grade. EduGradesPro resolves that threshold in this order: Tenant Grading Profile override, assigned grading-template threshold, tenant default setting, then fallback 75.00. Admin may still restrict official-grade release until the configured deadline.</p>
           </div>
           <div class="manual-rule">
             <strong>Final Period Grade Trail</strong>
@@ -344,8 +344,24 @@
               <p>The My Classes page now includes a dedicated Final Clearance action area that lets the faculty member preview campus-term completion status and generate the official final clearance PDF once all clearance conditions are satisfied. Each generated report prints a QR code, Reference No., and Verification Code for NCBA-side validation.</p>
             </div>
             <div class="manual-rule">
+              <strong>My Signature</strong>
+              <p>When NCBA enables stored signatures, faculty can open My Signature from the portal header to upload an encrypted PNG/JPG signature image. Current-password confirmation is required before the stored signature can be saved, replaced, or removed.</p>
+            </div>
+            <div class="manual-rule">
               <strong>Deadline Reminder Banner</strong>
               <p>EduGradesPro surfaces the current active grading period and the current grade submission deadline on the Faculty Dashboard, My Classes page, and the class period page so faculty can see both the official working period and its due date before final submission. If a configured deadline belongs to a different campus or term scope, or uses a period code that does not match the class template, the banner now explains that it does not match the faculty member's accepted classes.</p>
+            </div>
+            <div class="manual-rule">
+              <strong>Dashboard Priority Actions</strong>
+              <p>The Faculty Dashboard now includes Priority Actions and Students At Risk near the top of the page so faculty can quickly open urgent deadline, missing-grade, score-entry, correction, and intervention follow-ups from one read-only command-center area.</p>
+            </div>
+            <div class="manual-rule">
+              <strong>Pinnacle Periodic Grade Summary</strong>
+              <p>The Summary page print button generates an NCBA-branded Summary of Periodic Grades for Pinnacle encoding. The sheet includes the NCBA logo and heading, address, grading period, academic year, semester/term, faculty name, course code, course title, units, section, student list, periodic grade, and status.</p>
+            </div>
+            <div class="manual-rule">
+              <strong>Overdue but Still Open</strong>
+              <p>If the submission deadline passes and the class-period is still unfinished, EduGradesPro keeps the grade book open so the faculty member can complete encoding and submit. The period is simply marked overdue and included in the non-compliance monitor for authorized users.</p>
             </div>
           <div class="manual-rule">
             <strong>Print Record</strong>
@@ -369,12 +385,8 @@
         </div>
         <div class="manual-rule-grid">
           <div class="manual-rule">
-            <strong>Before Deadline</strong>
-            <p>Institutional policy may allow faculty self-reopen before deadline or may require correction workflow review, depending on tenant settings.</p>
-          </div>
-          <div class="manual-rule">
             <strong>After Deadline</strong>
-            <p>Correction and reopen actions become governed requests. Faculty may prepare one request for multiple students or the entire class, and the request can include multiple grading items.</p>
+            <p>If the period is still unsubmitted, continue encoding and submit as soon as possible. If the period was already submitted and later needs changes, use the correction request workflow.</p>
           </div>
           <div class="manual-rule">
             <strong>Audit Traceability</strong>
@@ -386,7 +398,7 @@
           </div>
           <div class="manual-rule">
             <strong>Direct Score Petition Posting</strong>
-            <p>When the correction petition already contains exact corrected score values, final approval allows EduGradesPro to post the approved values directly into the gradebook, recompute the submitted period, and close the request without any additional faculty finalize step.</p>
+            <p>When the correction petition already contains exact corrected score values, final approval allows EduGradesPro to post the approved values directly into the gradebook, recompute the affected student's submitted period and final grade, and close the request without any additional faculty finalize step.</p>
           </div>
         </div>
       </div>
@@ -407,7 +419,7 @@
         </div>
         <div class="manual-rule">
           <strong>Scenario Planning</strong>
-          <p>When enabled, the what-if simulator helps faculty test hypothetical remaining scores without altering saved grading records.</p>
+          <p>When enabled, the what-if simulator helps faculty test assumed scores for remaining items in the current grading period without altering saved grading records.</p>
         </div>
         <div class="manual-rule">
           <strong>Feature-Governed Access</strong>
@@ -420,6 +432,10 @@
         <div class="manual-rule">
           <strong>Passing-Final Requirement</strong>
           <p>For students who remain at risk, the prediction screen may also show the average grade still needed across the remaining final periods so faculty can identify the level required to finish with a passing final grade.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Period-Specific Estimate</strong>
+          <p>Each prediction page is tied to one grading period. The main estimated grade is for that current period, while the possible final grade is shown only as secondary planning guidance.</p>
         </div>
         <div class="manual-rule">
           <strong>Official Grade Release Control</strong>
@@ -474,7 +490,7 @@
             <tr>
               <td>Removed from Class</td>
               <td>Student changed schedule and should be removed from this specific class master list without being marked dropped or withdrawn.</td>
-              <td>Excluded from active grading coverage for this class while preserving cleaner distinction from DRP/W/INC governance. Faculty uses the small remove icon beside the student number and must type <strong>remove</strong> to confirm the action.</td>
+              <td>Excluded from active grading coverage for this class while preserving cleaner distinction from DRP/WITHDRAWN/INC governance. Faculty uses the small remove icon beside the student number and must type <strong>remove</strong> to confirm the action.</td>
             </tr>
             <tr>
               <td>DRP</td>
@@ -482,7 +498,7 @@
               <td>Excluded from active grading coverage and readiness calculations.</td>
             </tr>
             <tr>
-              <td>W</td>
+              <td>WITHDRAWN</td>
               <td>Student is withdrawn from the term.</td>
               <td>Excluded from active grading coverage and tracked separately from dropped students.</td>
             </tr>
@@ -494,7 +510,7 @@
           </tbody>
           </table>
           <div class="manual-note">
-            The class-list page now also shows a visible <strong>Status Legend</strong> so faculty can confirm the meaning of <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>W</strong>, and <strong>INC</strong> at a glance before changing any row.
+            The class-list page now also shows a visible <strong>Status Legend</strong> so faculty can confirm the meaning of <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>WITHDRAWN</strong>, and <strong>INC</strong> at a glance before changing any row.
           </div>
           <div class="manual-note">
             When faculty adds a student to the class, EduGradesPro now supports typed lookup by student number or by the student's last name and first name before the faculty clicks <strong>Save</strong>.
@@ -509,7 +525,8 @@
         <div class="manual-section-title">10. Privacy, Security, and Audit Controls</div>
         <ul class="manual-policy-list">
           <li>Faculty access is limited to assigned offerings and authorized portal functions.</li>
-          <li>Password complexity validation, forced password change, privacy consent, single-device session enforcement, a 1-hour session timeout, and temporary login lockout are governed centrally.</li>
+          <li>Password complexity validation, optional email OTP, forced password change, privacy consent, single-device session enforcement, a 1-hour session timeout, and temporary login lockout are governed centrally.</li>
+          <li>The Faculty Portal quick tour is a read-only orientation aid. Faculty may turn it off for their own next logon using the tour control.</li>
           <li>Operational actions may be audited, including submission, reopen, correction, and related record changes.</li>
           <li>Printed or exported records should be handled according to institutional data privacy requirements.</li>
           <li>The institutional privacy statement remains the authoritative privacy reference.</li>
@@ -552,6 +569,10 @@
         <div class="manual-rule">
           <strong>Performance Safeguard</strong>
           <p>The reminder email flow is queue-based and batch-processed so the web server does not attempt to send hundreds of emails in a single page request.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Submission Compliance Notices</strong>
+          <p>When tenant configuration enables the non-compliance workflow, the Reminder Center can also show formal overdue-submission notices for a class period. These notices are informational and remain visible until the affected periodic grade book is finally submitted and resolved.</p>
         </div>
       </div>
     </div>

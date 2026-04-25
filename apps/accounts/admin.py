@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import PortalLoginLockoutState, User
+from .models import LoginOtpChallenge, PortalLoginLockoutState, User
 
 
 @admin.register(User)
@@ -23,7 +23,10 @@ class UserAdmin(DjangoUserAdmin):
         (None, {"fields": ("username", "password")}),
         ("Personal info", {"fields": ("first_name", "middle_name", "last_name", "email")}),
         ("Scope", {"fields": ("default_tenant", "default_campus", "default_department")}),
-        ("Permissions", {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")}),
+        (
+            "Permissions",
+            {"fields": ("is_active", "is_staff", "is_superuser", "faculty_quick_tour_disabled", "groups", "user_permissions")},
+        ),
         ("Important dates", {"fields": ("last_login",)}),
     )
     add_fieldsets = (
@@ -50,3 +53,20 @@ class PortalLoginLockoutStateAdmin(admin.ModelAdmin):
     list_filter = ("portal_code",)
     search_fields = ("username", "user__username", "user__email")
     autocomplete_fields = ("user",)
+
+
+@admin.register(LoginOtpChallenge)
+class LoginOtpChallengeAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "portal_code",
+        "sent_to_email",
+        "expires_at",
+        "consumed_at",
+        "attempt_count",
+        "created_at",
+    )
+    list_filter = ("portal_code", "consumed_at")
+    search_fields = ("user__username", "user__email", "sent_to_email")
+    autocomplete_fields = ("user",)
+    readonly_fields = ("code_hash", "created_at")

@@ -17,6 +17,10 @@
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">View request</a>
   {% endif %}
 </div>
+{% elif is_non_compliant %}
+<div class="alert alert-danger">
+  Submission deadline already passed. You may continue encoding and submit as soon as possible, but this class is already listed in the non-compliance monitor.
+</div>
 {% elif is_submitted %}
 <div class="alert alert-info">This period is already submitted. Editing is disabled.</div>
 {% elif is_locked %}
@@ -37,7 +41,7 @@
       Updating <strong>{{ editing_activity.title }}</strong>. If encoded scores already exist, EduGradesPro will recompute them using the updated activity settings.
     </div>
     {% endif %}
-    <form method="post" class="row g-2" novalidate action="{% if editing_activity %}{% url 'faculty_portal:period_activity_edit' offering.id period.id editing_activity.id %}{% else %}{% url 'faculty_portal:period_activities' offering.id period.id %}{% endif %}">
+    <form method="post" class="row g-2" novalidate id="activity-edit-form" action="{% if editing_activity %}{% url 'faculty_portal:period_activity_edit' offering.id period.id editing_activity.id %}{% else %}{% url 'faculty_portal:period_activities' offering.id period.id %}{% endif %}">
       {% csrf_token %}
       {% if form.non_field_errors %}
       <div class="col-12">
@@ -80,10 +84,14 @@
         {% if form.activity_date.help_text %}<div class="form-text">{{ form.activity_date.help_text }}</div>{% endif %}
         {% for e in form.activity_date.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
       </div>
-      <div class="col-md-3 d-flex align-items-end">
-        <button class="btn btn-success w-100" type="submit">{% if editing_activity %}Update Activity{% else %}Save Activity{% endif %}</button>
+      </form>
+    <div class="d-flex justify-content-end align-items-center gap-2 flex-wrap mt-3">
+      <div class="save-action-cue" id="activity-save-cue" aria-hidden="true">
+        <span class="save-action-cue-arrow" aria-hidden="true">&rarr;</span>
+        <span class="save-action-cue-text">{% if editing_activity %}Click Update Activity{% else %}Click Save Activity{% endif %}</span>
       </div>
-    </form>
+      <button class="btn btn-success px-4" type="submit" form="activity-edit-form">{% if editing_activity %}Update Activity{% else %}Save Activity{% endif %}</button>
+    </div>
   </div>
 </div>
 {% endif %}
@@ -155,6 +163,8 @@
 {{ block.super }}
 <script>
   document.addEventListener("DOMContentLoaded", function () {
+    const activityForm = document.getElementById("activity-edit-form");
+    const activitySaveCue = document.getElementById("activity-save-cue");
     const componentSelect = document.getElementById("id_template_component");
     const subcomponentSelect = document.getElementById("id_template_subcomponent");
     const detailSelect = document.getElementById("id_template_detail");
@@ -226,6 +236,26 @@
       refreshDetailOptions(componentId, shouldEnable ? subcomponentSelect.value : "", selectedDetailId);
     }
 
+    function activityFormInputs() {
+      if (!activityForm) return [];
+      return Array.from(activityForm.querySelectorAll("input, select, textarea")).filter(function (element) {
+        return element.name && element.type !== "hidden";
+      });
+    }
+
+    function normalizeValue(element) {
+      if (element.type === "checkbox" || element.type === "radio") {
+        return element.checked ? "checked" : "unchecked";
+      }
+      return (element.value || "").trim();
+    }
+
+    function setActivityCueVisibility(isVisible) {
+      if (!activitySaveCue) return;
+      activitySaveCue.classList.toggle("is-visible", !!isVisible);
+      activitySaveCue.setAttribute("aria-hidden", isVisible ? "false" : "true");
+    }
+
     componentSelect.addEventListener("change", function () {
       refreshSubcomponentOptions(componentSelect.value, "", "");
     });
@@ -235,6 +265,30 @@
     });
 
     refreshSubcomponentOptions(selectedComponentId, selectedSubcomponentId, selectedDetailId);
+
+    const initialValues = new Map(activityFormInputs().map(function (element) {
+      return [element.name, normalizeValue(element)];
+    }));
+
+    function updateActivitySaveCue() {
+      const isDirty = activityFormInputs().some(function (element) {
+        return normalizeValue(element) !== (initialValues.get(element.name) || "");
+      });
+      setActivityCueVisibility(isDirty);
+    }
+
+    activityFormInputs().forEach(function (element) {
+      element.addEventListener("input", updateActivitySaveCue);
+      element.addEventListener("change", updateActivitySaveCue);
+    });
+
+    if (activityForm) {
+      activityForm.addEventListener("submit", function () {
+        setActivityCueVisibility(false);
+      });
+    }
+
+    updateActivitySaveCue();
   });
 </script>
 {% endblock %}

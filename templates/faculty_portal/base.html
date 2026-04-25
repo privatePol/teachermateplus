@@ -187,6 +187,105 @@
     width: 14px;
     height: 14px;
   }
+  .faculty-tour-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 36, 22, 0.28);
+    z-index: 1070;
+    display: none;
+  }
+  .faculty-tour-backdrop.is-visible {
+    display: block;
+  }
+  .faculty-tour-card {
+    position: fixed;
+    width: min(360px, calc(100vw - 28px));
+    background: #ffffff;
+    border: 1px solid #dbe7d8;
+    border-radius: 0.95rem;
+    box-shadow: 0 18px 44px rgba(10, 36, 22, 0.24);
+    z-index: 1085;
+    padding: 1rem;
+    display: none;
+    animation: facultyTourPop 0.22s ease-out;
+  }
+  .faculty-tour-card.is-visible {
+    display: block;
+  }
+  .faculty-tour-card::before {
+    content: "";
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: #ffffff;
+    border-left: 1px solid #dbe7d8;
+    border-top: 1px solid #dbe7d8;
+    transform: rotate(45deg);
+    top: -8px;
+    left: 28px;
+  }
+  .faculty-tour-title {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-bottom: 0.35rem;
+  }
+  .faculty-tour-text {
+    color: #556d5e;
+    font-size: 0.92rem;
+    margin-bottom: 0.85rem;
+  }
+  .faculty-tour-progress {
+    color: #6b8273;
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+  .faculty-tour-highlight {
+    position: relative;
+    z-index: 1081 !important;
+    box-shadow: 0 0 0 5px rgba(231, 200, 97, 0.42), 0 0 0 10px rgba(26, 106, 64, 0.16) !important;
+    animation: facultyTourPulse 1.25s ease-in-out infinite;
+  }
+  @keyframes facultyTourPop {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes facultyTourPulse {
+    0%, 100% { outline: 0 solid rgba(231, 200, 97, 0.25); }
+    50% { outline: 6px solid rgba(231, 200, 97, 0.1); }
+  }
+  .save-action-cue {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.42rem 0.78rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #fff7d8, #ffe598);
+    color: #6f5200;
+    box-shadow: 0 0.45rem 1rem rgba(171, 123, 0, 0.16);
+    opacity: 0;
+    transform: translateX(10px);
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  .save-action-cue.is-visible {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .save-action-cue-arrow {
+    font-size: 1rem;
+    line-height: 1;
+    animation: saveActionCueNudge 0.9s ease-in-out infinite;
+  }
+  .save-action-cue-text {
+    font-size: 0.84rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  @keyframes saveActionCueNudge {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(4px); }
+  }
   @media (max-width: 991.98px) {
     .faculty-layout {
       display: block;
@@ -213,16 +312,20 @@
     .faculty-brand-title {
       font-size: 1.2rem;
     }
+    .save-action-cue {
+      width: 100%;
+      justify-content: center;
+    }
   }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="faculty-app">
-  <nav class="navbar faculty-topbar px-2 px-md-3">
+  <nav class="navbar faculty-topbar px-2 px-md-3" data-tour-id="faculty-header">
     <div class="container-fluid">
       <div class="d-flex align-items-center gap-2">
-        <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar">&#9776;</button>
+        <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar" data-tour-id="sidebar-toggle">&#9776;</button>
         <span class="d-inline-flex align-items-center">
           <img src="{% get_media_prefix %}logos/egp_logo_official.png" alt="EduGradesPro" class="faculty-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/egp_logo.jpg';">
         </span>
@@ -233,6 +336,7 @@
       </div>
       <div class="d-flex align-items-center gap-2">
         <span class="small faculty-user">{{ request.user.full_name|default:request.user.username }}</span>
+        <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_signature' %}">My Signature</a>
         <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_change_password' %}">Change Password</a>
         <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_logout' %}">Logout</a>
       </div>
@@ -259,6 +363,7 @@
           href="{% url 'faculty_portal:my_courses' %}"
           class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:my_courses' and request.GET.archived != '1' %}active{% endif %}"
           title="My Classes"
+          data-tour-id="my-classes"
         >
           <span class="sidebar-icon">&#127891;</span>
           <span class="sidebar-label">My Classes</span>
@@ -267,6 +372,7 @@
           href="{% url 'faculty_portal:student_at_risk_monitor' %}"
           class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:student_at_risk_monitor' %}active{% endif %}"
           title="Students At-Risk Monitor"
+          data-tour-id="at-risk-monitor"
         >
           <span class="sidebar-icon">&#9888;</span>
           <span class="sidebar-label">Students At-Risk Monitor</span>
@@ -285,6 +391,7 @@
           href="{% url 'faculty_portal:reminder_center' %}"
           class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:reminder_center' %}active{% endif %}"
           title="Faculty Reminder Center"
+          data-tour-id="reminders"
         >
           <span class="sidebar-icon">&#128276;</span>
           <span class="sidebar-label">Reminders</span>
@@ -304,7 +411,7 @@
     </main>
   </div>
 
-  <a class="help-fab" href="{% url 'faculty_portal:guide' %}" aria-label="Open Faculty User Guide" title="Open Faculty User Guide">?</a>
+  <a class="help-fab" href="{% url 'faculty_portal:guide' %}" aria-label="Open Faculty User Guide" title="Open Faculty User Guide" data-tour-id="user-guide">?</a>
   <a
     class="privacy-chip"
     aria-label="Open NCBA Data Privacy Notice"
@@ -312,6 +419,7 @@
     target="_blank"
     rel="noopener noreferrer"
     title="Open NCBA Data Privacy Notice"
+    data-tour-id="privacy-notice"
   >
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M12 3l7 3v6c0 5-3.5 8.7-7 10-3.5-1.3-7-5-7-10V6l7-3z"></path>
@@ -319,6 +427,24 @@
     </svg>
     <span>Data Privacy Notice</span>
   </a>
+  {% if faculty_quick_tour_enabled and not request.user.faculty_quick_tour_disabled %}
+  <div class="faculty-tour-backdrop" id="faculty-tour-backdrop" aria-hidden="true"></div>
+  <div class="faculty-tour-card" id="faculty-tour-card" role="dialog" aria-live="polite" aria-label="Faculty Portal quick tour">
+    <div class="faculty-tour-title" id="faculty-tour-title"></div>
+    <div class="faculty-tour-text" id="faculty-tour-text"></div>
+    <div class="d-flex align-items-center justify-content-between gap-2">
+      <span class="faculty-tour-progress" id="faculty-tour-progress"></span>
+      <div class="btn-group btn-group-sm" role="group" aria-label="Quick tour controls">
+        <button class="btn btn-outline-secondary" type="button" id="faculty-tour-prev">Prev</button>
+        <button class="btn btn-outline-success" type="button" id="faculty-tour-next">Next</button>
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3">
+      <button class="btn btn-sm btn-outline-secondary" type="button" id="faculty-tour-close">Close</button>
+      <button class="btn btn-sm btn-outline-danger" type="button" id="faculty-tour-disable">Disable on next logon</button>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 
@@ -354,6 +480,116 @@
         layout.classList.toggle("sidebar-collapsed");
         localStorage.setItem(storageKey, layout.classList.contains("sidebar-collapsed") ? "1" : "0");
       });
+    }
+
+    const tourCard = document.getElementById("faculty-tour-card");
+    const tourBackdrop = document.getElementById("faculty-tour-backdrop");
+    if (tourCard && tourBackdrop && sessionStorage.getItem("edugradespro_faculty_tour_seen") !== "1") {
+      const allSteps = [
+        { id: "faculty-header", title: "Faculty Portal Header", text: "Use this area to confirm you are in the Faculty Portal, manage your signature, change your password, or log out." },
+        { id: "sidebar-toggle", title: "Navigation Menu", text: "Collapse or expand the sidebar when you need more space while encoding grades." },
+        { id: "priority-actions", title: "Priority Actions", text: "Start here to see the most urgent grading, submission, and deadline items." },
+        { id: "students-at-risk", title: "Students At Risk", text: "Review students who may need immediate attention based on grades, missing records, or predictions." },
+        { id: "my-classes", title: "My Classes", text: "Open your assigned classes, grading periods, activities, score sheets, summaries, and submissions." },
+        { id: "at-risk-monitor", title: "At-Risk Monitor", text: "Open the full monitor when you need a broader view of students who may need intervention." },
+        { id: "reminders", title: "Reminders", text: "Check portal reminders and notices related to deadlines and grading tasks." },
+        { id: "user-guide", title: "Faculty Guide", text: "Open the guide when you need a step-by-step reference for faculty workflows." },
+        { id: "privacy-notice", title: "Data Privacy Notice", text: "The privacy notice is always available for faculty reference." }
+      ];
+      const steps = allSteps
+        .map((step) => ({ ...step, target: document.querySelector(`[data-tour-id="${step.id}"]`) }))
+        .filter((step) => step.target);
+      const titleEl = document.getElementById("faculty-tour-title");
+      const textEl = document.getElementById("faculty-tour-text");
+      const progressEl = document.getElementById("faculty-tour-progress");
+      const prevBtn = document.getElementById("faculty-tour-prev");
+      const nextBtn = document.getElementById("faculty-tour-next");
+      const closeBtn = document.getElementById("faculty-tour-close");
+      const disableBtn = document.getElementById("faculty-tour-disable");
+      let currentIndex = 0;
+      let timerId = null;
+      let activeTarget = null;
+
+      function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(";").shift();
+        return "";
+      }
+
+      function clearTimer() {
+        if (timerId) {
+          window.clearTimeout(timerId);
+          timerId = null;
+        }
+      }
+
+      function closeTour() {
+        clearTimer();
+        if (activeTarget) activeTarget.classList.remove("faculty-tour-highlight");
+        tourBackdrop.classList.remove("is-visible");
+        tourCard.classList.remove("is-visible");
+        sessionStorage.setItem("edugradespro_faculty_tour_seen", "1");
+      }
+
+      function positionCard(target) {
+        const rect = target.getBoundingClientRect();
+        const cardWidth = Math.min(360, window.innerWidth - 28);
+        let left = Math.min(Math.max(14, rect.left), window.innerWidth - cardWidth - 14);
+        let top = rect.bottom + 16;
+        if (top + 220 > window.innerHeight) {
+          top = Math.max(14, rect.top - 236);
+        }
+        tourCard.style.left = `${left}px`;
+        tourCard.style.top = `${top}px`;
+      }
+
+      function showStep(index) {
+        if (!steps.length) return;
+        clearTimer();
+        if (activeTarget) activeTarget.classList.remove("faculty-tour-highlight");
+        currentIndex = (index + steps.length) % steps.length;
+        const step = steps[currentIndex];
+        activeTarget = step.target;
+        activeTarget.classList.add("faculty-tour-highlight");
+        titleEl.textContent = step.title;
+        textEl.textContent = step.text;
+        progressEl.textContent = `${currentIndex + 1} of ${steps.length}`;
+        tourBackdrop.classList.add("is-visible");
+        tourCard.classList.add("is-visible");
+        positionCard(activeTarget);
+        timerId = window.setTimeout(function () {
+          if (currentIndex >= steps.length - 1) {
+            closeTour();
+          } else {
+            showStep(currentIndex + 1);
+          }
+        }, 10000);
+      }
+
+      prevBtn.addEventListener("click", function () { showStep(currentIndex - 1); });
+      nextBtn.addEventListener("click", function () {
+        if (currentIndex >= steps.length - 1) {
+          closeTour();
+        } else {
+          showStep(currentIndex + 1);
+        }
+      });
+      closeBtn.addEventListener("click", closeTour);
+      window.addEventListener("resize", function () {
+        if (activeTarget && tourCard.classList.contains("is-visible")) positionCard(activeTarget);
+      });
+      disableBtn.addEventListener("click", function () {
+        const csrfToken = getCookie("csrftoken") || "{{ csrf_token }}";
+        fetch("{% url 'faculty_portal:quick_tour_disable' %}", {
+          method: "POST",
+          headers: {
+            "X-CSRFToken": csrfToken,
+            "X-Requested-With": "XMLHttpRequest"
+          }
+        }).finally(closeTour);
+      });
+      window.setTimeout(function () { showStep(0); }, 500);
     }
   });
 </script>

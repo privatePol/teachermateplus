@@ -1,4 +1,5 @@
 {% extends "faculty_portal/base.html" %}
+{% load static %}
 
 {% block extra_head %}
 {{ block.super }}
@@ -288,6 +289,50 @@
       text-align: center;
       font-weight: 700;
     }
+  .gradebook-print-header .print-brand-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .gradebook-print-header .print-logo {
+      width: 66px;
+      height: 66px;
+      object-fit: contain;
+    }
+    .gradebook-print-header .print-school-block {
+      text-align: center;
+    }
+    .gradebook-print-header .print-report-title {
+      margin-top: 0.7rem;
+      font-size: 1rem;
+      color: #111111;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .gradebook-print-header .print-report-purpose {
+      margin-top: 0.15rem;
+      font-size: 0.82rem;
+      color: #333333;
+      font-weight: 600;
+    }
+    .gradebook-print-header .print-metadata-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.18rem 1rem;
+      max-width: 7.25in;
+      margin: 0.65rem auto 0;
+      text-align: left;
+      font-size: 0.88rem;
+      color: #111111;
+    }
+    .gradebook-print-header .print-metadata-grid .metadata-full {
+      grid-column: 1 / -1;
+    }
+    .gradebook-print-header .print-metadata-grid .metadata-label {
+      font-weight: 700;
+    }
     .gradebook-print-sheet .print-row-no {
       width: 52px;
       text-align: center;
@@ -310,20 +355,6 @@
       margin-top: 0.2rem;
       font-size: 0.95rem;
       color: #333333;
-    }
-    .gradebook-print-header .print-subtitle {
-      margin-top: 0.6rem;
-      font-size: 0.95rem;
-      color: #222222;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-    .gradebook-print-header .print-metadata {
-      margin-top: 0.55rem;
-      font-size: 0.9rem;
-      color: #222222;
-      line-height: 1.45;
     }
     .gradebook-print-footer {
       display: block;
@@ -401,7 +432,7 @@
   </h2>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
-    <button class="btn btn-sm btn-outline-primary print-trigger-btn" type="button" onclick="window.print();">Print Grade Book</button>
+    <button class="btn btn-sm btn-outline-primary print-trigger-btn" type="button" onclick="window.print();">Print Periodic Grades</button>
     {% if "corrections.create" in effective_permissions and system_correction_enabled %}
       <a class="btn btn-sm btn-outline-warning" href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Correction Requests</a>
     {% endif %}
@@ -418,21 +449,14 @@
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Corrections</a>.
   {% endif %}
 </div>
+{% elif is_non_compliant %}
+<div class="alert alert-danger no-print">
+  Submission deadline already passed for this period. You may continue encoding until you submit, but this class is already listed in the non-compliance monitor for authorized academic users.
+</div>
 {% elif is_governance_closed %}
 <div class="alert alert-secondary no-print">
   This period is currently read-only under active grading period governance. You may still review the summary and print the grade book, but encoding and submission actions are disabled.
   {% if governance_message %}<div class="small mt-1">{{ governance_message }}</div>{% endif %}
-</div>
-{% elif can_self_reopen_before_deadline %}
-<div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-3 no-print">
-  <div>
-    This period has been submitted, but your tenant policy allows <strong>faculty self-reopen before deadline</strong>.
-    {% if submission_deadline %}Deadline: <strong>{{ submission_deadline|date:"Y-m-d H:i" }}</strong>.{% endif %}
-  </div>
-  <form method="post" action="{% url 'faculty_portal:period_self_reopen' offering.id period.id %}">
-    {% csrf_token %}
-    <button class="btn btn-warning" type="submit">Reopen Before Deadline</button>
-  </form>
 </div>
 {% elif is_submitted %}
 <div class="alert alert-info no-print">This period has been submitted. Summary is view-only.</div>
@@ -566,19 +590,26 @@
 {% endif %}
 
 <div class="gradebook-print-header">
-  <h1>{{ print_header_name }}</h1>
-  {% if print_header_address %}
-  <div class="print-address">{{ print_header_address }}</div>
-  {% endif %}
-  <div class="print-subtitle">{{ period.name|upper }} GRADES</div>
-  <div class="print-metadata">
-    Course Code: <strong>{{ offering.course.code }}</strong> |
-    Course Title: <strong>{{ offering.course.title }}</strong> |
-    Units: <strong>{{ offering.course.units }}</strong>
-    <br>
-    Section: <strong>{{ offering.section.code }}</strong> |
-    Academic Year: <strong>{{ offering.term.academic_year.code }}</strong> |
-    Term: <strong>{{ offering.term.code }}</strong>
+  <div class="print-brand-row">
+    <img class="print-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA">
+    <div class="print-school-block">
+      <h1>{{ print_header_name }}</h1>
+      {% if print_header_address %}
+      <div class="print-address">{{ print_header_address }}</div>
+      {% endif %}
+    </div>
+  </div>
+  <div class="print-report-title">Summary of Periodic Grades</div>
+  <div class="print-report-purpose">For encoding of final periodic grades into the Pinnacle system</div>
+  <div class="print-metadata-grid">
+    <div><span class="metadata-label">Grading Period:</span> {{ period.name }}</div>
+    <div><span class="metadata-label">Academic Year:</span> {{ offering.term.academic_year.code }}</div>
+    <div><span class="metadata-label">Semester / Term:</span> {{ offering.term.name|default:offering.term.code }}</div>
+    <div><span class="metadata-label">Section:</span> {{ offering.section.code }}</div>
+    <div class="metadata-full"><span class="metadata-label">Faculty:</span> {{ request.user.get_full_name|default:request.user.username }}</div>
+    <div><span class="metadata-label">Course Code:</span> {{ offering.course.code }}</div>
+    <div><span class="metadata-label">Units:</span> {{ offering.course.units|default:"" }}</div>
+    <div class="metadata-full"><span class="metadata-label">Course Title:</span> {{ offering.course.title }}</div>
   </div>
 </div>
 
@@ -589,10 +620,8 @@
         <th class="print-row-no">No.</th>
         <th class="print-student-no">Student No</th>
         <th>Student Name</th>
-        {% for prior in prior_period_headers %}<th class="print-grade">{{ prior.label }}</th>{% endfor %}
-        {% if show_official_period_grade %}<th class="print-grade">Periodic Grade</th>{% endif %}
-        {% if show_official_final_grade %}<th class="print-grade">Final Grade</th>{% endif %}
-        {% if show_official_period_grade %}<th class="print-grade-status">Grade Status</th>{% endif %}
+        <th class="print-grade">{{ period.name }} Grade</th>
+        <th class="print-grade-status">Status</th>
       </tr>
     </thead>
     <tbody>
@@ -601,14 +630,12 @@
         <td class="print-row-no">{{ forloop.counter }}</td>
         <td class="print-student-no">{{ row.student.student_no }}</td>
         <td>{{ row.student.last_name }}, {{ row.student.first_name }}</td>
-        {% for value in row.prior_period_grades %}<td class="print-grade">{{ value|default:"" }}</td>{% endfor %}
-        {% if show_official_period_grade %}<td class="print-grade">{{ row.period_grade|default:"" }}</td>{% endif %}
-        {% if show_official_final_grade %}<td class="print-grade">{{ row.final_grade|default:"" }}</td>{% endif %}
-        {% if show_official_period_grade %}<td class="print-grade-status">{{ row.print_grade_status }}</td>{% endif %}
+        <td class="print-grade">{{ row.period_grade|default:"" }}</td>
+        <td class="print-grade-status">{{ row.print_grade_status }}</td>
       </tr>
       {% empty %}
       <tr>
-        <td colspan="{{ print_sheet_colspan }}" class="text-center">No summary rows available.</td>
+        <td colspan="5" class="text-center">No summary rows available.</td>
       </tr>
       {% endfor %}
     </tbody>

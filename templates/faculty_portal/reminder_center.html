@@ -337,6 +337,67 @@
     </div>
   </div>
 
+  <div class="card reminder-panel mb-4">
+    <div class="card-header">
+      <div class="reminder-section-title">Submission Compliance Notices</div>
+      <div class="reminder-section-text">Formal follow-ups for overdue periodic grade submissions. These notices stay visible here until the affected period is submitted and resolved.</div>
+    </div>
+    <div class="card-body">
+      {% if compliance_notices %}
+        <div class="row g-3">
+          {% for notice in compliance_notices %}
+          <div class="col-xl-6">
+            <div class="card reminder-card {% if notice.obj.notice_level == 'ESCALATION' %}overdue{% elif notice.obj.notice_level == 'WARNING' %}today{% else %}sent{% endif %}">
+              <div class="card-body">
+                <div class="reminder-card-head">
+                  <div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                      <div class="reminder-badge {{ notice.badge_variant }}">{{ notice.obj.get_notice_level_display }}</div>
+                      <div class="reminder-badge muted">{{ notice.status_label }}</div>
+                    </div>
+                    <div class="reminder-title">{{ notice.obj.title }}</div>
+                    <p class="reminder-subtitle">{{ notice.obj.offering.course.title }} ({{ notice.obj.offering.course.code }}) | {{ notice.obj.offering.section.code }}</p>
+                  </div>
+                </div>
+
+                <div class="reminder-meta-grid">
+                  <div class="reminder-meta-item">
+                    <span class="reminder-meta-label">Period</span>
+                    <div class="reminder-meta-value">{{ notice.obj.template_period.name }}</div>
+                  </div>
+                  <div class="reminder-meta-item">
+                    <span class="reminder-meta-label">Issued</span>
+                    <div class="reminder-meta-value">{{ notice.obj.issued_at|date:"M d, Y h:i A" }}</div>
+                  </div>
+                  <div class="reminder-meta-item">
+                    <span class="reminder-meta-label">Original Deadline</span>
+                    <div class="reminder-meta-value">{{ notice.obj.deadline_at|date:"M d, Y h:i A" }}</div>
+                  </div>
+                  <div class="reminder-meta-item">
+                    <span class="reminder-meta-label">Visible To</span>
+                    <div class="reminder-meta-value">{{ notice.recipient_roles|default:"FACULTY" }}</div>
+                  </div>
+                </div>
+
+                <div class="reminder-notes">{{ notice.obj.message }}</div>
+
+                <div class="reminder-actions">
+                  <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{% url 'faculty_portal:offering_periods' notice.obj.offering_id %}">Open Class</a>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="reminder-empty">
+          <h3>No compliance notices</h3>
+          <p>Your current active classes do not have overdue periodic grade submission notices.</p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
   <div class="row g-4 mb-4">
     <div class="col-xl-8">
       <div class="card reminder-panel h-100">

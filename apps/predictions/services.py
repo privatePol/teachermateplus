@@ -390,7 +390,7 @@ class PredictionComputationService:
                 base_value=base_value,
             )
             component_rows.append((Decimal(component.weight_percentage or 0), row, component))
-            if "EXAM" in (component.code or "").upper():
+            if FacultyGradingService.is_exam_component(component):
                 if row.current is not None:
                     current_exam = (current_exam or Decimal("0")) + row.current
             else:
@@ -486,7 +486,7 @@ class PredictionComputationService:
                 if current_period_grade is None:
                     return {
                         "status": "UNAVAILABLE",
-                        "label": "Cannot compute yet because the current period still has no projected grade",
+                        "label": "Prediction not available yet because there are not enough encoded scores yet.",
                         "required_average": None,
                         "remaining_period_names": [],
                     }
@@ -500,7 +500,7 @@ class PredictionComputationService:
                 if period_id not in period_rows:
                     return {
                         "status": "UNAVAILABLE",
-                        "label": "Cannot compute yet because an earlier period grade is still missing",
+                        "label": "Prediction not available yet because an earlier grading period has no recorded grade yet.",
                         "required_average": None,
                         "remaining_period_names": [],
                     }

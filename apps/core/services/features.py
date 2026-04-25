@@ -20,10 +20,13 @@ class FeatureSettingsService:
     FACULTY_REMINDER_CENTER_ENABLED_KEY = "FEATURE_FACULTY_REMINDER_CENTER_ENABLED"
     FACULTY_REMINDER_EMAIL_ENABLED_KEY = "FEATURE_FACULTY_REMINDER_EMAIL_ENABLED"
     FACULTY_MEMO_CENTER_ENABLED_KEY = "FEATURE_FACULTY_MEMO_CENTER_ENABLED"
+    FACULTY_QUICK_TOUR_ENABLED_KEY = "FEATURE_FACULTY_QUICK_TOUR_ENABLED"
     LOGIN_LOCKOUT_ENABLED_KEY = "FEATURE_LOGIN_LOCKOUT_ENABLED"
     LOGIN_LOCKOUT_MAX_ATTEMPTS_KEY = "FEATURE_LOGIN_LOCKOUT_MAX_ATTEMPTS"
     LOGIN_LOCKOUT_WINDOW_MINUTES_KEY = "FEATURE_LOGIN_LOCKOUT_WINDOW_MINUTES"
     LOGIN_LOCKOUT_DURATION_MINUTES_KEY = "FEATURE_LOGIN_LOCKOUT_DURATION_MINUTES"
+    LOGIN_EMAIL_OTP_ENABLED_KEY = "FEATURE_LOGIN_EMAIL_OTP_ENABLED"
+    LOGIN_EMAIL_OTP_EXPIRY_MINUTES_KEY = "FEATURE_LOGIN_EMAIL_OTP_EXPIRY_MINUTES"
     GRADE_PREDICTION_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_ENABLED"
     GRADE_PREDICTION_ROLE_CODES_KEY = "FEATURE_GRADE_PREDICTION_ROLE_CODES"
     GRADE_PREDICTION_WHAT_IF_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_WHAT_IF_ENABLED"
@@ -35,6 +38,13 @@ class FeatureSettingsService:
     GRADE_PREDICTION_DEFAULT_ASSUMPTION_KEY = "FEATURE_GRADE_PREDICTION_DEFAULT_ASSUMPTION"
     FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE_KEY = "FEATURE_FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE"
     FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE_KEY = "FEATURE_FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE"
+    USER_SIGNATURES_ENABLED_KEY = "FEATURE_USER_SIGNATURES_ENABLED"
+    USER_SIGNATURES_FINAL_CLEARANCE_ENABLED_KEY = "FEATURE_USER_SIGNATURES_FINAL_CLEARANCE_ENABLED"
+    USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY = "FEATURE_USER_SIGNATURES_CORRECTION_REPORT_ENABLED"
+    SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED"
+    SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS"
+    SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES"
+    SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS"
 
     @staticmethod
     def _positive_int(value, *, default: int, minimum: int = 0) -> int:
@@ -222,6 +232,16 @@ class FeatureSettingsService:
         )
 
     @classmethod
+    def is_faculty_quick_tour_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_QUICK_TOUR_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
     def is_login_lockout_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
         return bool(
             SystemSettingService.get(
@@ -260,6 +280,28 @@ class FeatureSettingsService:
         return cls._positive_int(
             SystemSettingService.get(
                 cls.LOGIN_LOCKOUT_DURATION_MINUTES_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            ),
+            default=default,
+            minimum=1,
+        )
+
+    @classmethod
+    def is_login_email_otp_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.LOGIN_EMAIL_OTP_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def get_login_email_otp_expiry_minutes(cls, *, tenant_id: int | None, default: int = 10) -> int:
+        return cls._positive_int(
+            SystemSettingService.get(
+                cls.LOGIN_EMAIL_OTP_EXPIRY_MINUTES_KEY,
                 tenant_id=tenant_id,
                 default=default,
             ),
@@ -439,6 +481,93 @@ class FeatureSettingsService:
                 default=default,
             )
         )
+
+    @classmethod
+    def is_user_signatures_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.USER_SIGNATURES_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_user_signature_final_clearance_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.USER_SIGNATURES_FINAL_CLEARANCE_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_user_signature_correction_report_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_submission_non_compliance_notice_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def get_submission_non_compliance_notice_interval_days(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: int = 3,
+    ) -> int:
+        return cls._positive_int(
+            SystemSettingService.get(
+                cls.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            ),
+            default=default,
+            minimum=1,
+        )
+
+    @classmethod
+    def get_submission_non_compliance_head_role_codes(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: list[str] | None = None,
+    ) -> list[str]:
+        value = SystemSettingService.get(
+            cls.SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY,
+            tenant_id=tenant_id,
+            default=default or ["CAO", "DEAN", "AC", "AREA_CHAIR", "AREA_CHAIRPERSON"],
+        )
+        return cls._role_code_list(value)
+
+    @classmethod
+    def get_submission_non_compliance_hr_recipients(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: list[str] | None = None,
+    ) -> list[str]:
+        value = SystemSettingService.get(
+            cls.SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY,
+            tenant_id=tenant_id,
+            default=default or [],
+        )
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
 
     @classmethod
     def can_user_access_grade_prediction(cls, *, user, tenant_id: int | None) -> bool:

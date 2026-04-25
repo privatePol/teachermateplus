@@ -19,6 +19,9 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from apps.accounts.models import UserSignatureUsageLog
+from apps.accounts.services import UserSignatureService
+from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 from apps.grading.models import (
@@ -59,6 +62,72 @@ class CorrectionOfficialReportService:
     @staticmethod
     def _safe_text(value):
         return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    @classmethod
+    def _signature_enabled_for_document(cls, *, tenant_id, document_type: str) -> bool:
+        if not FeatureSettingsService.is_user_signatures_enabled(tenant_id=tenant_id, default=False):
+            return False
+        document_type = (document_type or "").upper()
+        if document_type == UserSignatureUsageLog.DocumentType.FINAL_CLEARANCE:
+            return FeatureSettingsService.is_user_signature_final_clearance_enabled(
+                tenant_id=tenant_id,
+                default=False,
+            )
+        if document_type == UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT:
+            return FeatureSettingsService.is_user_signature_correction_report_enabled(
+                tenant_id=tenant_id,
+                default=False,
+            )
+        return False
+
+    @classmethod
+    def _signature_panel(cls, *, user, label: str, role_caption: str, styles, usage_collector: list, usage_kwargs: dict):
+        panel_rows = []
+        credential = UserSignatureService.get_active_credential(user=user) if user else None
+        if credential and credential.has_signature:
+            signature_bytes = UserSignatureService.decrypt_signature_bytes(credential=credential)
+            image_stream = BytesIO(signature_bytes)
+            max_width = 42 * mm
+            max_height = 14 * mm
+            width_ratio = max_width / max(float(credential.image_width or 1), 1.0)
+            height_ratio = max_height / max(float(credential.image_height or 1), 1.0)
+            scale = min(width_ratio, height_ratio)
+            signature_image = Image(
+                image_stream,
+                width=max(float(credential.image_width or 1) * scale, 12),
+                height=max(float(credential.image_height or 1) * scale, 6),
+            )
+            signature_image.hAlign = "LEFT"
+            panel_rows.append([signature_image])
+            usage_collector.append(usage_kwargs)
+        else:
+            panel_rows.append([Paragraph("<i>No stored signature on file.</i>", styles["SmallBody"])])
+
+        signer_name = "-"
+        if user:
+            signer_name = cls._safe_text((getattr(user, "full_name", "") or "").strip() or user.username)
+        panel_rows.extend(
+            [
+                [Paragraph(f"<b>{cls._safe_text(label)}</b>", styles["SmallBody"])],
+                [Paragraph(signer_name, styles["SmallBody"])],
+                [Paragraph(cls._safe_text(role_caption), styles["SmallBody"])],
+            ]
+        )
+        panel = Table(panel_rows, colWidths=[54 * mm])
+        panel.setStyle(
+            TableStyle(
+                [
+                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#d9e2ec")),
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fbfcfd")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        return panel
 
     @classmethod
     def _score_override_map(cls, *, request_obj):
@@ -200,7 +269,7 @@ class CorrectionOfficialReportService:
                     )
                     component_has_data = component_score is not None
 
-                if "EXAM" in component.code.upper():
+                if FacultyGradingService.is_exam_component(component):
                     has_exam_component = True
                     if component_has_data:
                         exam_grade = (exam_grade or Decimal("0")) + component_score
@@ -364,6 +433,7 @@ class CorrectionOfficialReportService:
     def build_pdf_bytes(cls, *, request_obj):
         report = cls.build_report_data(request_obj=request_obj)
         request_obj = report["request_obj"]
+        signature_usage_entries = []
 
         buffer = BytesIO()
         doc = SimpleDocTemplate(
@@ -456,7 +526,85 @@ class CorrectionOfficialReportService:
                     col_widths=[12*mm, 45*mm, 24*mm, 50*mm, 35*mm],
                 ),
                 Spacer(1, 12),
-                Paragraph("E. REGISTRAR REFERENCE", styles["SectionTitle"]),
+            ]
+        )
+
+        signatures_enabled = cls._signature_enabled_for_document(
+            tenant_id=request_obj.tenant_id,
+            document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
+        )
+        if signatures_enabled:
+            signature_panels = [
+                cls._signature_panel(
+                    user=request_obj.requested_by_user,
+                    label="Faculty Petitioner",
+                    role_caption="Requested By",
+                    styles=styles,
+                    usage_collector=signature_usage_entries,
+                    usage_kwargs={
+                        "user": request_obj.requested_by_user,
+                        "document_type": UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
+                        "document_reference": report["reference_no"],
+                        "usage_role": "Faculty Petitioner",
+                        "actor": request_obj.requested_by_user,
+                        "portal_code": "FACULTY",
+                        "metadata": {
+                            "correction_request_id": request_obj.id,
+                            "tenant_id": request_obj.tenant_id,
+                            "campus_id": request_obj.campus_id,
+                        },
+                    },
+                )
+            ]
+            for approval_step in request_obj.approval_steps.select_related("reviewed_by_user").order_by("step_order"):
+                if not approval_step.reviewed_by_user_id:
+                    continue
+                signature_panels.append(
+                    cls._signature_panel(
+                        user=approval_step.reviewed_by_user,
+                        label=approval_step.approver_label,
+                        role_caption=f"{approval_step.status.title()} Step {approval_step.step_order}",
+                        styles=styles,
+                        usage_collector=signature_usage_entries,
+                        usage_kwargs={
+                            "user": approval_step.reviewed_by_user,
+                            "document_type": UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
+                            "document_reference": report["reference_no"],
+                            "usage_role": approval_step.approver_label,
+                            "actor": approval_step.reviewed_by_user,
+                            "portal_code": "ADMIN",
+                            "metadata": {
+                                "correction_request_id": request_obj.id,
+                                "approval_step_id": approval_step.id,
+                                "tenant_id": request_obj.tenant_id,
+                                "campus_id": request_obj.campus_id,
+                            },
+                        },
+                    )
+                )
+            signature_table_rows = []
+            for index in range(0, len(signature_panels), 2):
+                row = signature_panels[index:index + 2]
+                if len(row) == 1:
+                    row.append(Spacer(1, 1))
+                signature_table_rows.append(row)
+
+            story.extend(
+                [
+                    Paragraph("E. SIGNATURES", styles["SectionTitle"]),
+                    Paragraph(
+                        "Stored NCBA user signatures appear below only when the signature feature is enabled and the signer has an encrypted signature on file.",
+                        styles["SmallBody"],
+                    ),
+                    Spacer(1, 4),
+                    Table(signature_table_rows, colWidths=[85 * mm, 85 * mm], hAlign="LEFT"),
+                    Spacer(1, 12),
+                ]
+            )
+
+        story.extend(
+            [
+                Paragraph("F. REGISTRAR REFERENCE" if signatures_enabled else "E. REGISTRAR REFERENCE", styles["SectionTitle"]),
                 Paragraph(
                     "This correction completed academic approval in EduGradesPro and is issued as the official reference document for registrar posting in AIMS.",
                     styles["BodyText"],
@@ -475,6 +623,8 @@ class CorrectionOfficialReportService:
         )
 
         doc.build(story)
+        for usage_kwargs in signature_usage_entries:
+            UserSignatureService.log_signature_usage(**usage_kwargs)
         return buffer.getvalue()
 
 
@@ -484,6 +634,17 @@ class FacultyFinalClearanceReportService:
     @staticmethod
     def _safe_text(value):
         return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    @classmethod
+    def _signature_enabled_for_document(cls, *, tenant_id, document_type: str) -> bool:
+        return CorrectionOfficialReportService._signature_enabled_for_document(
+            tenant_id=tenant_id,
+            document_type=document_type,
+        )
+
+    @classmethod
+    def _signature_panel(cls, **kwargs):
+        return CorrectionOfficialReportService._signature_panel(**kwargs)
 
     @classmethod
     def _official_period_label(cls, period_name: str, period_code: str) -> str:
@@ -766,6 +927,7 @@ class FacultyFinalClearanceReportService:
     def build_pdf_bytes(cls, *, report_obj):
         report = cls.build_report_data(report_obj=report_obj)
         report_obj = report["report_obj"]
+        signature_usage_entries = []
 
         buffer = BytesIO()
         doc = SimpleDocTemplate(
@@ -907,5 +1069,45 @@ class FacultyFinalClearanceReportService:
         )
         story.append(verification_layout)
 
+        if cls._signature_enabled_for_document(
+            tenant_id=report_obj.tenant_id,
+            document_type=UserSignatureUsageLog.DocumentType.FINAL_CLEARANCE,
+        ):
+            faculty_signature_panel = cls._signature_panel(
+                user=report_obj.faculty_user,
+                label="Faculty Signature",
+                role_caption="Printed by Faculty",
+                styles=styles,
+                usage_collector=signature_usage_entries,
+                usage_kwargs={
+                    "user": report_obj.faculty_user,
+                    "document_type": UserSignatureUsageLog.DocumentType.FINAL_CLEARANCE,
+                    "document_reference": report["reference_no"],
+                    "usage_role": "Faculty Signature",
+                    "actor": report_obj.faculty_user,
+                    "portal_code": "FACULTY",
+                    "metadata": {
+                        "faculty_final_clearance_report_id": report_obj.id,
+                        "tenant_id": report_obj.tenant_id,
+                        "campus_id": report_obj.campus_id,
+                        "term_id": report_obj.term_id,
+                    },
+                },
+            )
+            story.extend(
+                [
+                    Spacer(1, 16),
+                    Paragraph("D. FACULTY SIGNATURE", styles["SectionTitle"]),
+                    Paragraph(
+                        "When enabled by NCBA and available in the faculty account profile, the encrypted stored signature appears below for the generated clearance copy.",
+                        styles["SmallBody"],
+                    ),
+                    Spacer(1, 6),
+                    faculty_signature_panel,
+                ]
+            )
+
         doc.build(story)
+        for usage_kwargs in signature_usage_entries:
+            UserSignatureService.log_signature_usage(**usage_kwargs)
         return buffer.getvalue()

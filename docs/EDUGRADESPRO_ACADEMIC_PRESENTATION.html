@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EduGradesPro Academic Presentation</title>
+  <style>
+    :root {
+      --bg: #f4f6f2;
+      --surface: #ffffff;
+      --surface-soft: #f8fbf7;
+      --ink: #183225;
+      --muted: #5d7266;
+      --line: #dce6dd;
+      --accent: #1f6b42;
+      --accent-2: #b5962c;
+      --danger: #9b3d35;
+      --shadow: 0 18px 42px rgba(16, 40, 24, 0.09);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.45;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .deck-shell {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .deck-nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 1.4rem 1.1rem;
+      background: #163625;
+      color: #f1f6f2;
+      overflow: auto;
+    }
+
+    .deck-nav h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      line-height: 1.2;
+    }
+
+    .deck-nav p {
+      margin: 0.55rem 0 1rem;
+      color: #c9d8cf;
+      font-size: 0.92rem;
+    }
+
+    .nav-list {
+      display: grid;
+      gap: 0.45rem;
+    }
+
+    .nav-list a {
+      text-decoration: none;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius);
+      padding: 0.65rem 0.7rem;
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 0.92rem;
+    }
+
+    .nav-list a:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .nav-note {
+      margin-top: 1rem;
+      padding: 0.8rem;
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.06);
+      color: #d5e2da;
+      font-size: 0.86rem;
+    }
+
+    .deck-main {
+      padding: 1.3rem;
+    }
+
+    .slide {
+      min-height: calc(100vh - 2.6rem);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.6rem;
+      margin-bottom: 1.3rem;
+      display: grid;
+      gap: 1.2rem;
+      align-content: start;
+    }
+
+    .slide-hero {
+      background:
+        linear-gradient(135deg, rgba(22, 54, 37, 0.96), rgba(33, 97, 63, 0.92)),
+        linear-gradient(135deg, #214a32, #264f39);
+      color: #f7fbf8;
+      border-color: rgba(14, 44, 28, 0.35);
+    }
+
+    .slide-kicker {
+      display: inline-block;
+      padding: 0.34rem 0.7rem;
+      border-radius: 999px;
+      background: #e2efe4;
+      color: #1a5f38;
+      font-weight: 700;
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .slide-hero .slide-kicker {
+      background: rgba(255, 255, 255, 0.12);
+      color: #eef8f1;
+    }
+
+    .slide h2 {
+      margin: 0;
+      font-size: clamp(1.8rem, 2.8vw, 2.6rem);
+      line-height: 1.08;
+    }
+
+    .slide h3 {
+      margin: 0 0 0.45rem;
+      font-size: 1.05rem;
+    }
+
+    .lead {
+      margin: 0;
+      max-width: 64rem;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .slide-hero .lead,
+    .slide-hero .meta-line {
+      color: rgba(247, 251, 248, 0.88);
+    }
+
+    .meta-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.8rem 1.2rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .grid-2,
+    .grid-3 {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .grid-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .panel,
+    .metric,
+    .note-box {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+      padding: 1rem;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 1.6rem;
+      line-height: 1;
+      margin-bottom: 0.35rem;
+      color: var(--accent);
+    }
+
+    ul.clean-list {
+      margin: 0;
+      padding-left: 1.15rem;
+      display: grid;
+      gap: 0.45rem;
+    }
+
+    .screenshot-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(18, 45, 28, 0.08);
+    }
+
+    .screenshot-card img {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #e8eeea;
+    }
+
+    .screenshot-caption {
+      padding: 0.85rem 0.9rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .highlight-band {
+      display: grid;
+      gap: 0.8rem;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .highlight-item {
+      padding: 0.95rem;
+      border-radius: var(--radius);
+      background: #f7faf7;
+      border: 1px solid var(--line);
+    }
+
+    .highlight-item .label {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+      font-weight: 700;
+    }
+
+    .highlight-item .value {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 0.8rem;
+    }
+
+    .timeline-step {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr);
+      gap: 0.8rem;
+      align-items: start;
+    }
+
+    .timeline-index {
+      border-radius: var(--radius);
+      background: #edf5ee;
+      color: var(--accent);
+      font-weight: 800;
+      padding: 0.7rem 0.8rem;
+      text-align: center;
+    }
+
+    .badge-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.34rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+
+    .badge.good {
+      background: #e1f0e4;
+      color: #175b35;
+    }
+
+    .badge.warn {
+      background: #f5e7bc;
+      color: #7a5b08;
+    }
+
+    .badge.risk {
+      background: #f5ddd9;
+      color: var(--danger);
+    }
+
+    .speaker-note {
+      border-left: 4px solid var(--accent-2);
+      padding: 0.9rem 1rem;
+      background: #fffbef;
+      color: #5e542f;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      font-size: 0.95rem;
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    @media (max-width: 1100px) {
+      .deck-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .deck-nav {
+        position: static;
+        height: auto;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .grid-2,
+      .grid-3,
+      .highlight-band {
+        grid-template-columns: 1fr;
+      }
+
+      .timeline-step {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .deck-shell {
+        display: block;
+      }
+
+      .deck-nav {
+        display: none;
+      }
+
+      .deck-main {
+        padding: 0;
+      }
+
+      .slide {
+        min-height: auto;
+        page-break-after: always;
+        box-shadow: none;
+        border: 1px solid #ccc;
+        margin: 0 0 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck-shell">
+    <aside class="deck-nav">
+      <h1>EduGradesPro</h1>
+      <p>Academic leadership presentation page for NCBA academic heads.</p>
+      <div class="nav-list">
+        <a href="#slide-1">1. Title</a>
+        <a href="#slide-2">2. What It Is</a>
+        <a href="#slide-3">3. Core Platform</a>
+        <a href="#slide-4">4. Faculty Workflow</a>
+        <a href="#slide-5">5. Governance</a>
+        <a href="#slide-6">6. Decision Feeds</a>
+        <a href="#slide-7">7. Correction and Compliance</a>
+        <a href="#slide-8">8. Security and Accountability</a>
+        <a href="#slide-9">9. Institutional Value</a>
+        <a href="#slide-10">10. Closing</a>
+      </div>
+      <div class="nav-note">
+        Tip: open this file in a browser, use it as a scroll presentation, and print to PDF if you want a leave-behind copy for the meeting.
+      </div>
+    </aside>
+
+    <main class="deck-main">
+      <section class="slide slide-hero" id="slide-1">
+        <span class="slide-kicker">NCBA Academic Presentation</span>
+        <h2>EduGradesPro</h2>
+        <p class="lead">A template-driven, governance-aware academic grading platform built to support faculty workflow, academic oversight, and informed administrative decision-making.</p>
+        <div class="meta-line">
+          <span>Prepared for academic heads</span>
+          <span>Focus: operations, governance, and visibility</span>
+          <span>Use case: next-week presentation deck page</span>
+        </div>
+        <div class="highlight-band">
+          <div class="highlight-item">
+            <div class="label">Core</div>
+            <div class="value">Grading, workflow, and policy in one system</div>
+          </div>
+          <div class="highlight-item">
+            <div class="label">Audience</div>
+            <div class="value">Faculty, academic heads, governance roles</div>
+          </div>
+          <div class="highlight-item">
+            <div class="label">Strength</div>
+            <div class="value">Standardized computation with accountability</div>
+          </div>
+          <div class="highlight-item">
+            <div class="label">Outcome</div>
+            <div class="value">Less spreadsheet risk, stronger institutional control</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="slide-2">
+        <span class="slide-kicker">Slide 2</span>
+        <h2>What EduGradesPro Is</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Core identity</h3>
+            <ul class="clean-list">
+              <li>Multi-tenant, multi-campus academic grading platform</li>
+              <li>Separate Admin Portal and Faculty Portal</li>
+              <li>Centralizes grading, submission, correction, and monitoring</li>
+              <li>Designed to reduce risk from disconnected spreadsheets and informal grade handling</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Main message for academic heads</h3>
+            <p class="lead">EduGradesPro is not just a grade encoding page. It is an academic operations platform that brings computation, governance, compliance, and faculty support into one workflow.</p>
+          </div>
+        </div>
+        <div class="screenshot-card">
+          <img src="../media/portal-img/faculty_portal_guide.png" alt="EduGradesPro faculty portal view">
+          <div class="screenshot-caption">Example Faculty Portal view showing the platform as a guided academic workspace, not just a simple grade table.</div>
+        </div>
+      </section>
+
+      <section class="slide" id="slide-3">
+        <span class="slide-kicker">Slide 3</span>
+        <h2>Core Platform Highlights</h2>
+        <div class="grid-3">
+          <div class="metric">
+            <strong>Template-Driven</strong>
+            Grading logic is defined once through templates and reused consistently across classes.
+          </div>
+          <div class="metric">
+            <strong>Period-Aware</strong>
+            Workflows follow Prelim, Midterm, Pre-final, and Finals rather than ad hoc grade entry.
+          </div>
+          <div class="metric">
+            <strong>Governed</strong>
+            Submission, correction, reopening, and monitoring are role-aware and auditable.
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Core academic engine</h3>
+            <ul class="clean-list">
+              <li>assigned grading templates per course</li>
+              <li>components, sub-components, and details</li>
+              <li>period-grade computation</li>
+              <li>final-grade computation</li>
+              <li>correction-aware recomputation</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Why that matters</h3>
+            <ul class="clean-list">
+              <li>less variation in how grades are computed</li>
+              <li>easier faculty onboarding</li>
+              <li>stronger departmental consistency</li>
+              <li>clearer explanation when students or leadership ask how a grade was derived</li>
+            </ul>
+          </div>
+        </div>
+        <div class="screenshot-card">
+          <img src="../media/portal-img/activities_encoding_scores_workflow.png" alt="Activities and score encoding workflow">
+          <div class="screenshot-caption">Faculty workflow is organized around activities, scores, and structured computation rather than separate spreadsheet formulas per class.</div>
+        </div>
+      </section>
+
+      <section class="slide" id="slide-4">
+        <span class="slide-kicker">Slide 4</span>
+        <h2>Faculty Workflow Support</h2>
+        <div class="grid-2">
+          <div class="timeline">
+            <div class="timeline-step">
+              <div class="timeline-index">Step 1</div>
+              <div class="panel">
+                <h3>Receive and accept teaching load</h3>
+                Faculty assignment acceptance, reminders, and acknowledgment are built into the portal.
+              </div>
+            </div>
+            <div class="timeline-step">
+              <div class="timeline-index">Step 2</div>
+              <div class="panel">
+                <h3>Encode activities and scores by grading period</h3>
+                Faculty work inside the actual period structure instead of maintaining separate files per period.
+              </div>
+            </div>
+            <div class="timeline-step">
+              <div class="timeline-index">Step 3</div>
+              <div class="panel">
+                <h3>Review computed summary and submit</h3>
+                The system helps faculty move from encoding to summary to formal submission.
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Faculty support features</h3>
+            <ul class="clean-list">
+              <li>deadline visibility and reminder center</li>
+              <li>private faculty notes</li>
+              <li>period-specific prediction / what-if support</li>
+              <li>students-at-risk monitoring</li>
+              <li>printable periodic summary for external encoding workflows</li>
+            </ul>
+            <div class="speaker-note">
+              Presenter angle: this is not meant to make faculty work heavier. The purpose is to give them a guided, consistent, and less error-prone way to complete grading work.
+            </div>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="screenshot-card">
+            <img src="../media/portal-img/recommended_daily_faculty_workflow.png" alt="Recommended daily faculty workflow">
+            <div class="screenshot-caption">EduGradesPro supports a day-to-day faculty workflow instead of being used only at deadline time.</div>
+          </div>
+          <div class="screenshot-card">
+            <img src="../media/portal-img/grades_prediction.png" alt="Grade prediction page">
+            <div class="screenshot-caption">Prediction and at-risk support help faculty understand the current grading period and intervene earlier.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="slide-5">
+        <span class="slide-kicker">Slide 5</span>
+        <h2>Governance Is Built Into the Workflow</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Governance controls already supported</h3>
+            <ul class="clean-list">
+              <li>active academic year and term</li>
+              <li>active grading period</li>
+              <li>template governance lifecycle</li>
+              <li>submission deadlines and period locks</li>
+              <li>correction route and approval flow</li>
+              <li>configurable security and feature settings</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Why this matters to academic heads</h3>
+            <ul class="clean-list">
+              <li>less informal or hidden grade movement</li>
+              <li>clearer authority lines</li>
+              <li>repeatable academic process across departments</li>
+              <li>stronger trust in institutional grading outputs</li>
+            </ul>
+            <div class="badge-line">
+              <span class="badge good">Role-aware</span>
+              <span class="badge good">Configurable</span>
+              <span class="badge warn">Policy-driven</span>
+            </div>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="screenshot-card">
+            <img src="../media/portal-img/settings_guide.png" alt="Configuration settings guide">
+            <div class="screenshot-caption">Configuration management centralizes institutional controls instead of scattering them across unrelated pages.</div>
+          </div>
+          <div class="screenshot-card">
+            <img src="../media/portal-img/policies_governance_reference.png" alt="Policies and governance reference">
+            <div class="screenshot-caption">Governance is a first-class part of the system: who can draft, review, approve, publish, reopen, and monitor.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="slide-6">
+        <span class="slide-kicker">Slide 6</span>
+        <h2>Administration Feeds for Informed Decision-Making</h2>
+        <p class="lead">EduGradesPro is built not only to process grades, but also to surface decision-support views for academic administrators and heads.</p>
+        <div class="grid-3">
+          <div class="panel">
+            <h3>Readiness and activity monitoring</h3>
+            <ul class="clean-list">
+              <li>faculty assignment dashboard</li>
+              <li>faculty activity monitor</li>
+              <li>grade book monitoring</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Academic quality signals</h3>
+            <ul class="clean-list">
+              <li>prediction monitor</li>
+              <li>at-risk indicators</li>
+              <li>class-level pass/fail visibility</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Compliance and governance signals</h3>
+            <ul class="clean-list">
+              <li>submission status</li>
+              <li>non-compliance monitoring</li>
+              <li>correction history and audit trail</li>
+            </ul>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="screenshot-card">
+            <img src="../media/portal-img/admin_operations_checklist.png" alt="Admin operations checklist">
+            <div class="screenshot-caption">Admin views are intended to help leadership see what needs follow-up before academic issues become bigger governance issues.</div>
+          </div>
+          <div class="screenshot-card">
+            <img src="../media/portal-img/focused_checking.png" alt="Focused checking workflow">
+            <div class="screenshot-caption">The platform supports targeted checking and review rather than forcing leaders to inspect every class manually.</div>
+          </div>
+        </div>
+        <div class="speaker-note">
+          Presenter angle: this is where the system becomes strategic. The admin side helps academic heads act earlier, not only after grades are already problematic.
+        </div>
+      </section>
+
+      <section class="slide" id="slide-7">
+        <span class="slide-kicker">Slide 7</span>
+        <h2>Correction, Submission, and Compliance Governance</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Correction governance</h3>
+            <ul class="clean-list">
+              <li>faculty files a formal petition for correction</li>
+              <li>affected students and items are identified inside the request</li>
+              <li>approval is routed by governance logic</li>
+              <li>approved corrections can trigger recomputation</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Submission compliance</h3>
+            <ul class="clean-list">
+              <li>overdue unsubmitted grade books remain open for completion</li>
+              <li>the system can now issue notice, warning, and escalation communications</li>
+              <li>faculty can see these in the portal</li>
+              <li>academic heads can monitor the same cases from the admin side</li>
+            </ul>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="screenshot-card">
+            <img src="../media/portal-img/submission_rules.png" alt="Submission rules">
+            <div class="screenshot-caption">Submission rules are visible and governed, reducing confusion around what remains open, what is overdue, and what requires follow-up.</div>
+          </div>
+          <div class="screenshot-card">
+            <img src="../media/portal-img/daily_work_rythm.png" alt="Daily work rhythm">
+            <div class="screenshot-caption">The system supports ongoing work rhythm and escalation follow-up rather than relying only on deadline-day action.</div>
+          </div>
+        </div>
+        <div class="badge-line">
+          <span class="badge good">Correction petitions</span>
+          <span class="badge warn">Overdue notices</span>
+          <span class="badge risk">Escalation support</span>
+        </div>
+      </section>
+
+      <section class="slide" id="slide-8">
+        <span class="slide-kicker">Slide 8</span>
+        <h2>Security, Auditability, and Accountability</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Security-oriented controls</h3>
+            <ul class="clean-list">
+              <li>forced password change</li>
+              <li>privacy consent tracking</li>
+              <li>single-device session enforcement</li>
+              <li>login lockout controls</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Academic accountability controls</h3>
+            <ul class="clean-list">
+              <li>submission history</li>
+              <li>correction workflow records</li>
+              <li>audit logs for significant actions</li>
+              <li>governance-safe monitoring pages</li>
+            </ul>
+          </div>
+        </div>
+        <div class="speaker-note">
+          Presenter angle: academic confidence in the system does not come only from computation. It also comes from being able to trace who changed what, when, and under what authority.
+        </div>
+      </section>
+
+      <section class="slide" id="slide-9">
+        <span class="slide-kicker">Slide 9</span>
+        <h2>Institutional Value</h2>
+        <div class="grid-3">
+          <div class="panel">
+            <h3>For Faculty</h3>
+            <ul class="clean-list">
+              <li>clearer grading structure</li>
+              <li>guided workflow by period</li>
+              <li>fewer manual formula dependencies</li>
+              <li>better visibility of deadlines and at-risk cases</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>For Academic Heads</h3>
+            <ul class="clean-list">
+              <li>better oversight on readiness and compliance</li>
+              <li>faster follow-up on concerns</li>
+              <li>more confidence in grading governance</li>
+              <li>better basis for academic decisions</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>For the Institution</h3>
+            <ul class="clean-list">
+              <li>standardization</li>
+              <li>reduced operational risk</li>
+              <li>stronger auditability</li>
+              <li>clearer policy enforcement</li>
+            </ul>
+          </div>
+        </div>
+        <div class="screenshot-card">
+          <img src="../media/portal-img/1.png" alt="EduGradesPro screenshot collage">
+          <div class="screenshot-caption">Presentation takeaway: EduGradesPro is designed as an academic operations platform, not only as a grade-entry utility.</div>
+        </div>
+      </section>
+
+      <section class="slide" id="slide-10">
+        <span class="slide-kicker">Slide 10</span>
+        <h2>Closing Message</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Simple summary for the room</h3>
+            <p class="lead">EduGradesPro helps the institution move from fragmented grading practice toward a more consistent, governed, visible, and support-oriented academic workflow.</p>
+          </div>
+          <div class="panel">
+            <h3>Suggested closing line</h3>
+            <p class="lead">The value of the platform is not only that it computes grades. Its value is that it gives the school a clearer academic process, stronger governance, and better information for timely intervention.</p>
+          </div>
+        </div>
+        <div class="note-box">
+          <h3>Optional discussion prompts after the presentation</h3>
+          <ul class="clean-list">
+            <li>Which governance controls should be required across all departments?</li>
+            <li>Which admin feeds are most useful for deans, CAO, and area chairs?</li>
+            <li>What faculty support features should be prioritized for adoption and training?</li>
+          </ul>
+        </div>
+        <p class="footer-note">File: <code>docs/EDUGRADESPRO_ACADEMIC_PRESENTATION.html</code></p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

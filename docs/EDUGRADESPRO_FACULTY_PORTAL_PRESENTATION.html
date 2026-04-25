@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EduGradesPro Faculty Portal Presentation</title>
+  <style>
+    :root {
+      --bg: #f4f7f2;
+      --surface: #ffffff;
+      --soft: #f8fbf7;
+      --ink: #173424;
+      --muted: #5a7163;
+      --line: #dbe6dc;
+      --green: #1d6b41;
+      --gold: #c29b24;
+      --red: #9c3c33;
+      --shadow: 0 16px 38px rgba(18, 52, 32, 0.09);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.45;
+    }
+
+    .deck {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      height: 100vh;
+      overflow: auto;
+      padding: 1.25rem;
+      background: #153924;
+      color: #f4fbf5;
+      box-shadow: 0 10px 24px rgba(18, 52, 32, 0.12);
+    }
+
+    .nav h1 {
+      margin: 0;
+      font-size: 1.15rem;
+      line-height: 1.2;
+    }
+
+    .nav p {
+      margin: 0.55rem 0 1rem;
+      color: #c9dbd0;
+      font-size: 0.92rem;
+    }
+
+    .nav-links {
+      display: grid;
+      gap: 0.45rem;
+    }
+
+    .nav a {
+      display: block;
+      text-decoration: none;
+      color: #f4fbf5;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--radius);
+      padding: 0.62rem 0.72rem;
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 0.92rem;
+    }
+
+    .nav a:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .nav-note {
+      margin-top: 1rem;
+      padding: 0.8rem;
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.07);
+      color: #dce8df;
+      font-size: 0.86rem;
+    }
+
+    main {
+      width: min(1320px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 1.25rem 0 2rem;
+    }
+
+    .slide {
+      min-height: calc(100vh - 2.5rem);
+      margin-bottom: 1.25rem;
+      padding: 1.75rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 1.05rem;
+      align-content: start;
+    }
+
+    .hero {
+      background:
+        linear-gradient(135deg, rgba(21, 57, 36, 0.95), rgba(31, 105, 64, 0.92)),
+        #153924;
+      color: #f8fff9;
+      border-color: rgba(21, 57, 36, 0.4);
+    }
+
+    .kicker {
+      display: inline-flex;
+      width: fit-content;
+      padding: 0.34rem 0.7rem;
+      border-radius: 999px;
+      background: #e1efe5;
+      color: var(--green);
+      font-size: 0.76rem;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .hero .kicker {
+      background: rgba(255, 255, 255, 0.14);
+      color: #f6fff8;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 2.15rem;
+      line-height: 1.1;
+    }
+
+    h3 {
+      margin: 0 0 0.35rem;
+      font-size: 1.05rem;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .lead {
+      max-width: 70rem;
+      color: var(--muted);
+      font-size: 1.04rem;
+    }
+
+    .hero .lead,
+    .hero .meta {
+      color: rgba(248, 255, 249, 0.88);
+    }
+
+    .hero .panel {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.22);
+      color: #f8fff9;
+    }
+
+    .hero .panel p {
+      color: rgba(248, 255, 249, 0.88);
+    }
+
+    .meta {
+      display: grid;
+      gap: 0.35rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .grid-2,
+    .grid-3 {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: 1fr;
+    }
+
+    .panel,
+    .callout {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--soft);
+      padding: 0.95rem;
+    }
+
+    .callout {
+      border-left: 4px solid var(--gold);
+      background: #fffaf0;
+      color: #5a5031;
+    }
+
+    .list {
+      margin: 0;
+      padding-left: 1.15rem;
+      display: grid;
+      gap: 0.38rem;
+    }
+
+    .workflow {
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.45rem;
+      align-items: start;
+    }
+
+    .step strong {
+      display: inline-flex;
+      width: fit-content;
+      border-radius: var(--radius);
+      background: #e7f2e8;
+      color: var(--green);
+      padding: 0.35rem 0.7rem;
+      text-align: center;
+    }
+
+    .screenshot {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 10px 24px rgba(20, 48, 30, 0.08);
+      width: 100%;
+    }
+
+    .screenshot img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .caption {
+      padding: 0.78rem 0.9rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .badge-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.32rem 0.62rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+
+    .badge.green {
+      background: #e1f1e6;
+      color: #185d35;
+    }
+
+    .badge.gold {
+      background: #f5e9bf;
+      color: #72580d;
+    }
+
+    .badge.red {
+      background: #f5dcd8;
+      color: var(--red);
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    @media (max-width: 900px) {
+      .deck {
+        grid-template-columns: 1fr;
+      }
+
+      .nav {
+        position: static;
+        height: auto;
+      }
+
+      .nav-links {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .nav a {
+        white-space: normal;
+      }
+
+      main {
+        width: min(100% - 1rem, 1320px);
+      }
+
+      .slide {
+        padding: 1.1rem;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .deck {
+        display: block;
+      }
+
+      .nav {
+        display: none;
+      }
+
+      main {
+        padding: 0;
+      }
+
+      .slide {
+        min-height: auto;
+        page-break-after: always;
+        box-shadow: none;
+        margin: 0 0 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <aside class="nav">
+      <h1>Faculty Portal Presentation</h1>
+      <p>How the Faculty Portal works, what information faculty can see, and how the workflow supports grading governance.</p>
+      <div class="nav-links">
+        <a href="#intro">1. Purpose</a>
+        <a href="#first-login">2. First Login</a>
+        <a href="#privacy-security">3. Privacy and Security</a>
+        <a href="#dashboard">4. Dashboard</a>
+        <a href="#my-classes">5. My Classes</a>
+        <a href="#course-tools">6. Course Tools</a>
+        <a href="#periodic-grading">7. Periodic Grading</a>
+        <a href="#activities-scores">8. Activities and Scores</a>
+        <a href="#attendance">9. Attendance</a>
+        <a href="#summary-prediction">10. Summary and Prediction</a>
+        <a href="#who-viewed">11. Who Viewed</a>
+        <a href="#closing">12. Closing</a>
+      </div>
+      <div class="nav-note">Screenshots are generated from actual EduGradesPro Faculty Portal pages using local demo data.</div>
+    </aside>
+
+    <main>
+      <section class="slide hero" id="intro">
+        <span class="kicker">Faculty Portal</span>
+        <h2>How EduGradesPro Supports Faculty Work</h2>
+        <p class="lead">This presentation explains how faculty enter the portal, see their assigned classes, encode periodic grading records, review computed summaries, monitor predictions, and see governance-related information.</p>
+        <div class="meta">
+          <span>Audience: academic heads and faculty coordinators</span>
+          <span>Focus: faculty workflow, information visibility, and controls</span>
+          <span>Output: presentation-ready HTML page with screenshots</span>
+        </div>
+        <div class="grid-3">
+          <div class="panel">
+            <h3>Faculty orientation</h3>
+            <p>Shows what faculty see when they sign in and begin class work.</p>
+          </div>
+          <div class="panel">
+            <h3>Academic workflow</h3>
+            <p>Explains My Classes, grading periods, activities, attendance, summary, and prediction.</p>
+          </div>
+          <div class="panel">
+            <h3>Governance visibility</h3>
+            <p>Highlights privacy, security, submission status, and who-viewed records.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="first-login">
+        <span class="kicker">First Login</span>
+        <h2>Faculty Login and First-Time Entry</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>What faculty do first</h3>
+            <ul class="list">
+              <li>Open the Faculty Portal login page.</li>
+              <li>Enter assigned username and password.</li>
+              <li>Complete required security steps before reaching the dashboard.</li>
+              <li>Use forgot-password flow if access needs to be recovered.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Information available on entry</h3>
+            <ul class="list">
+              <li>portal identity and NCBA branding</li>
+              <li>faculty-specific login route</li>
+              <li>privacy notice access</li>
+              <li>security-controlled access to classes and grading tools</li>
+            </ul>
+          </div>
+        </div>
+        <div class="screenshot">
+          <img src="faculty_portal_screenshots/01_faculty_login.png" alt="Faculty Portal login page screenshot">
+          <div class="caption">Faculty Portal login page. This is the entry point for faculty access to assigned classes and grading tools.</div>
+        </div>
+      </section>
+
+      <section class="slide" id="privacy-security">
+        <span class="kicker">Privacy and Security</span>
+        <h2>Privacy Notice and Account Security</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Privacy notice behavior</h3>
+            <ul class="list">
+              <li>Faculty must accept the EduGradesPro Privacy Consent when required.</li>
+              <li>The page links to the official NCBA Data Privacy Notice.</li>
+              <li>Consent version, acceptance time, and related audit metadata are stored.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Security features to mention</h3>
+            <ul class="list">
+              <li>forced password change support</li>
+              <li>login lockout after repeated failed attempts</li>
+              <li>single-device session behavior</li>
+              <li>privacy notice link available inside the portal</li>
+            </ul>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="screenshot">
+            <img src="faculty_portal_screenshots/02_privacy_consent.png" alt="Faculty privacy consent screenshot">
+            <div class="caption">Privacy Consent page. Faculty review and accept privacy terms before continuing when required.</div>
+          </div>
+          <div class="screenshot">
+            <img src="faculty_portal_screenshots/03_change_password_security.png" alt="Faculty change password screenshot">
+            <div class="caption">Change Password page. Faculty can maintain account security from inside the portal.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="dashboard">
+        <span class="kicker">Dashboard</span>
+        <h2>Faculty Dashboard: What Needs Attention First</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>What the dashboard shows</h3>
+            <ul class="list">
+              <li>current active grading period</li>
+              <li>deadline reminders and overdue status</li>
+              <li>priority actions</li>
+              <li>students at risk</li>
+              <li>class submission and grading readiness signals</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Why this matters</h3>
+            <p>The dashboard turns the faculty portal into a working command center. Faculty do not need to guess which class or period needs attention first.</p>
+            <div class="badge-line">
+              <span class="badge red">Overdue work</span>
+              <span class="badge gold">Missing grades</span>
+              <span class="badge green">At-risk preview</span>
+            </div>
+          </div>
+        </div>
+        <div class="screenshot">
+          <img src="faculty_portal_screenshots/04_dashboard.png" alt="Faculty Dashboard screenshot">
+          <div class="caption">Faculty Dashboard showing active grading period, deadline reminder, Priority Actions, and Students At Risk.</div>
+        </div>
+      </section>
+
+      <section class="slide" id="my-classes">
+        <span class="kicker">My Classes</span>
+        <h2>My Classes: Faculty Load and Class Entry Point</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Information faculty can see</h3>
+            <ul class="list">
+              <li>assigned classes and sections</li>
+              <li>course code and course title</li>
+              <li>term and academic year</li>
+              <li>assignment status and accepted workload</li>
+              <li>entry points to periods, grading template, and class list</li>
+            </ul>
+          </div>
+          <div class="workflow">
+            <div class="step">
+              <strong>1</strong>
+              <div class="panel">
+                <h3>Review assigned classes</h3>
+                Faculty can quickly identify current teaching assignments.
+              </div>
+            </div>
+            <div class="step">
+              <strong>2</strong>
+              <div class="panel">
+                <h3>Open a class</h3>
+                The class card leads to grading periods and class-specific tools.
+              </div>
+            </div>
+            <div class="step">
+              <strong>3</strong>
+              <div class="panel">
+                <h3>Proceed to period work</h3>
+                Faculty work by grading period, not through one large undifferentiated grade table.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="screenshot">
+          <img src="faculty_portal_screenshots/05_my_classes.png" alt="My Classes screenshot">
+          <div class="caption">My Classes page. Faculty use this as the entry point for accepted assignments and class-level actions.</div>
+        </div>
+      </section>
+
+      <section class="slide" id="course-tools">
+        <span class="kicker">Course Tools</span>
+        <h2>My Courses: Grading, Template, and Class List</h2>
+        <div class="grid-3">
+          <div class="panel">
+            <h3>Grading periods</h3>
+            <ul class="list">
+              <li>Prelim, Midterm, Pre-Final, Finals as configured</li>
+              <li>period-specific actions</li>
+              <li>active-period guidance</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Grading template</h3>
+            <ul class="list">
+              <li>official computation structure</li>
+              <li>components and weights</li>
+              <li>template transparency for faculty</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Class list</h3>
+            <ul class="list">
+              <li>enrolled students</li>
+              <li>status such as active, dropped, withdrawn, incomplete</li>
+              <li>student roster used for grade encoding</li>
+            </ul>
+          </div>
+        </div>
+        <div class="grid-3">
+          <div class="screenshot">
+            <img src="faculty_portal_screenshots/06_periods_and_tools.png" alt="Class periods and tools screenshot">
+            <div class="caption">Class grading-period page with period-specific actions.</div>
+          </div>
+          <div class="screenshot">
+            <img src="faculty_portal_screenshots/07_grading_template.png" alt="Grading template screenshot">
+            <div class="caption">Grading Template page showing how the class is computed.</div>
+          </div>
+          <div class="screenshot">
+            <img src="faculty_portal_screenshots/08_class_list.png" alt="Class list screenshot">
+            <div class="caption">Class List page showing students included in the course offering.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="periodic-grading">
+        <span class="kicker">Periodic Grading</span>
+        <h2>Periodic Grading Is Period-Specific</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Main period tools</h3>
+            <ul class="list">
+              <li>Grade Activities</li>
+              <li>Attendance</li>
+              <li>Summary</li>
+              <li>Prediction</li>
+              <li>Who Viewed</li>
+            </ul>
+          </div>
+          <div class="callout">
+            <h3>Important message for presentation</h3>
+            <p>Faculty work inside the selected grading period. This keeps Prelim, Midterm, Pre-Final, and Finals work separate and easier to monitor.</p>
+          </div>
+        </div>
+        <div class="screenshot">
+          <img src="faculty_portal_screenshots/06_periods_and_tools.png" alt="Period tools screenshot">
+          <div class="caption">Each grading period has its own tools, which helps faculty understand what records belong to the current period.</div>
+        </div>
+      </section>
+
+      <section class="slide" id="activities-scores">
+        <span class="kicker">Activities and Scores</span>
+        <h2>Grade Activities and Score Encoding</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Grade Activities</h3>
+            <ul class="list">
+              <li>faculty creates or reviews activities for the current period</li>
+              <li>activities follow template components such as quizzes, participation, or exam</li>
+              <li>each activity can lead to score encoding</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Score Encoding</h3>
+            <ul class="list">
+              <li>scores are encoded per student</li>
+              <li>computed values follow the official template logic</li>
+              <li>save actions keep the official gradebook updated</li>
+            </ul>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="screenshot">
+            <img src="faculty_portal_screenshots/09_period_activities.png" alt="Grade activities screenshot">
+            <div class="caption">Grade Activities page for the active grading period.</div>
+          </div>
+          <div class="screenshot">
+            <img src="faculty_portal_screenshots/14_activity_scores.png" alt="Activity score encoding screenshot">
+            <div class="caption">Activity Scores page where faculty encode student scores for one grading item.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="attendance">
+        <span class="kicker">Attendance</span>
+        <h2>Attendance Records Inside the Period Workflow</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>What faculty can manage</h3>
+            <ul class="list">
+              <li>attendance sessions</li>
+              <li>student attendance status</li>
+              <li>period-linked attendance records</li>
+              <li>attendance scoring when the grading template includes attendance</li>
+            </ul>
+          </div>
+          <div class="callout">
+            <h3>Governance note</h3>
+            <p>Attendance participates in grading only through configured template rules. The portal shows the attendance workspace without changing the official computation model casually.</p>
+          </div>
+        </div>
+        <div class="screenshot">
+          <img src="faculty_portal_screenshots/10_period_attendance.png" alt="Period attendance screenshot">
+          <div class="caption">Attendance page for the current grading period.</div>
+        </div>
+      </section>
+
+      <section class="slide" id="summary-prediction">
+        <span class="kicker">Summary and Prediction</span>
+        <h2>Summary, Printable Periodic Grades, and Prediction</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Summary page</h3>
+            <ul class="list">
+              <li>shows computed period summary</li>
+              <li>supports periodic-grade review before submission</li>
+              <li>includes printable periodic grades for external encoding workflows</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Prediction page</h3>
+            <ul class="list">
+              <li>estimates current grading-period outcome</li>
+              <li>uses encoded scores and assumed scores for remaining items</li>
+              <li>does not change actual grades</li>
+            </ul>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="screenshot">
+            <img src="faculty_portal_screenshots/11_period_summary.png" alt="Period summary screenshot">
+            <div class="caption">Period Summary page, used for computed periodic grade review and print output.</div>
+          </div>
+          <div class="screenshot">
+            <img src="faculty_portal_screenshots/12_period_prediction.png" alt="Period prediction screenshot">
+            <div class="caption">Prediction page, clearly scoped to the current grading period and read-only for what-if planning.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" id="who-viewed">
+        <span class="kicker">Who Viewed</span>
+        <h2>Who Viewed This Grade Book</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>What it shows</h3>
+            <ul class="list">
+              <li>authorized users who opened the grade book</li>
+              <li>viewing activity tied to academic monitoring</li>
+              <li>visibility for faculty when academic heads review records</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Why it matters</h3>
+            <p>This supports trust and accountability. Faculty can see that monitoring access is traceable, and academic heads can review records under a governed process.</p>
+          </div>
+        </div>
+        <div class="screenshot">
+          <img src="faculty_portal_screenshots/13_who_viewed.png" alt="Who Viewed This Grade Book screenshot">
+          <div class="caption">Who Viewed page showing gradebook-view audit visibility for the selected class and period.</div>
+        </div>
+      </section>
+
+      <section class="slide" id="closing">
+        <span class="kicker">Closing</span>
+        <h2>Faculty Portal Takeaway</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Simple message</h3>
+            <p class="lead">The Faculty Portal guides teachers from secure access to class work, periodic grade encoding, computed summaries, prediction support, and submission readiness.</p>
+          </div>
+          <div class="panel">
+            <h3>Academic-head message</h3>
+            <p class="lead">The portal is designed to help faculty work consistently while giving the institution better visibility, governance, and auditability.</p>
+          </div>
+        </div>
+        <div class="callout">
+          <h3>Suggested closing line</h3>
+          <p>EduGradesPro does not only record grades; it helps structure faculty work and makes academic governance visible.</p>
+        </div>
+        <p class="footer-note">File: <code>docs/EDUGRADESPRO_FACULTY_PORTAL_PRESENTATION.html</code></p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

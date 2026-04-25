@@ -311,6 +311,8 @@
           <div class="period-state">
             {% if item.is_correction_active %}
               <span class="badge text-bg-warning">Correction Window Open</span>
+            {% elif item.is_non_compliant %}
+              <span class="badge text-bg-danger">Non-Compliant</span>
             {% elif item.submission_status == "REOPENED" %}
               <span class="badge text-bg-primary">Reopened</span>
             {% elif item.is_closed_by_active_period %}
@@ -336,6 +338,11 @@
               <span>Not set by admin yet</span>
             {% endif %}
           </div>
+          {% if item.is_non_compliant %}
+          <div class="alert alert-danger py-2 small">
+            Submission deadline already passed. This grading period stays open until submitted, but it is already tagged for non-compliance monitoring.
+          </div>
+          {% endif %}
 
           <div class="period-guidance">
             {% if 'PREFINAL' in code %}

@@ -196,15 +196,6 @@ class Command(BaseCommand):
         )
         SystemSetting.objects.update_or_create(
             tenant=None,
-            setting_key="PREDEADLINE_CORRECTION_MODE",
-            defaults={
-                "setting_value": "REQUEST_REVIEW",
-                "value_type": SystemSetting.ValueType.STRING,
-                "is_active": True,
-            },
-        )
-        SystemSetting.objects.update_or_create(
-            tenant=None,
             setting_key="CORRECTION_MODE",
             defaults={
                 "setting_value": "SYSTEM_REQUEST",
@@ -264,15 +255,6 @@ class Command(BaseCommand):
                 "setting_value": "",
                 "value_type": SystemSetting.ValueType.STRING,
                 "is_active": False,
-            },
-        )
-        SystemSetting.objects.update_or_create(
-            tenant=tenant,
-            setting_key="PREDEADLINE_CORRECTION_MODE",
-            defaults={
-                "setting_value": "REQUEST_REVIEW",
-                "value_type": SystemSetting.ValueType.STRING,
-                "is_active": True,
             },
         )
         SystemSetting.objects.update_or_create(

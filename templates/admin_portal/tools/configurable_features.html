@@ -319,6 +319,54 @@
   </div>
 
   <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-user-signatures" aria-expanded="false" aria-controls="feature-card-user-signatures">
+      <strong>User Signatures</strong>
+      <span class="toggle-indicator" aria-hidden="true">âŒ„</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-user-signatures" aria-expanded="false" aria-controls="feature-card-user-signatures">
+      <span class="settings-card-summary-title">User Signatures</span>
+      <span class="settings-card-summary-text">Allow faculty and governance users to store encrypted signature images and place them on approved printable documents.</span>
+    </button>
+    <div id="feature-card-user-signatures" class="collapse">
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.user_signatures_enabled }}
+        <label class="form-check-label" for="{{ form.user_signatures_enabled.id_for_label }}">
+          {{ form.user_signatures_enabled.label }}
+        </label>
+        {% if form.user_signatures_enabled.help_text %}
+        <div class="form-text">{{ form.user_signatures_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.user_signatures_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.user_signatures_final_clearance_enabled }}
+        <label class="form-check-label" for="{{ form.user_signatures_final_clearance_enabled.id_for_label }}">
+          {{ form.user_signatures_final_clearance_enabled.label }}
+        </label>
+        {% if form.user_signatures_final_clearance_enabled.help_text %}
+        <div class="form-text">{{ form.user_signatures_final_clearance_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.user_signatures_final_clearance_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch mb-0">
+        {{ form.user_signatures_correction_report_enabled }}
+        <label class="form-check-label" for="{{ form.user_signatures_correction_report_enabled.id_for_label }}">
+          {{ form.user_signatures_correction_report_enabled.label }}
+        </label>
+        {% if form.user_signatures_correction_report_enabled.help_text %}
+        <div class="form-text">{{ form.user_signatures_correction_report_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.user_signatures_correction_report_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="alert alert-light border small mt-3 mb-0">
+        Signature files are encrypted before storage. Users must still confirm their current password when uploading, replacing, or removing a stored signature from their account profile.
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
     <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-approval-email" aria-expanded="false" aria-controls="feature-card-correction-approval-email">
       <strong>Correction Approval Notification Email</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
@@ -532,8 +580,72 @@
         {% endif %}
         {% for error in form.faculty_memo_center_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.faculty_quick_tour_enabled }}
+        <label class="form-check-label" for="{{ form.faculty_quick_tour_enabled.id_for_label }}">
+          {{ form.faculty_quick_tour_enabled.label }}
+        </label>
+        {% if form.faculty_quick_tour_enabled.help_text %}
+        <div class="form-text">{{ form.faculty_quick_tour_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.faculty_quick_tour_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
       <div class="alert alert-light border small mb-0">
-        Faculty memos are private to the faculty owner and can optionally be linked to a class or a student for quick follow-up notes.
+        Faculty memos are private to the faculty owner and can optionally be linked to a class or a student for quick follow-up notes. The quick tour is a guided, read-only Faculty Portal orientation.
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-non-compliance" aria-expanded="false" aria-controls="feature-card-non-compliance">
+      <strong>Submission Non-Compliance Notices</strong>
+      <span class="toggle-indicator" aria-hidden="true">âŒ„</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-non-compliance" aria-expanded="false" aria-controls="feature-card-non-compliance">
+      <span class="settings-card-summary-title">Submission Non-Compliance Notices</span>
+      <span class="settings-card-summary-text">Control overdue submission notices, follow-up cadence, academic head visibility, and HR escalation recipients.</span>
+    </button>
+    <div id="feature-card-non-compliance" class="collapse">
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.submission_non_compliance_notice_enabled }}
+        <label class="form-check-label" for="{{ form.submission_non_compliance_notice_enabled.id_for_label }}">
+          {{ form.submission_non_compliance_notice_enabled.label }}
+        </label>
+        {% if form.submission_non_compliance_notice_enabled.help_text %}
+        <div class="form-text">{{ form.submission_non_compliance_notice_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.submission_non_compliance_notice_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.submission_non_compliance_notice_interval_days.id_for_label }}">{{ form.submission_non_compliance_notice_interval_days.label }}</label>
+          {{ form.submission_non_compliance_notice_interval_days }}
+          {% if form.submission_non_compliance_notice_interval_days.help_text %}
+          <div class="form-text">{{ form.submission_non_compliance_notice_interval_days.help_text }}</div>
+          {% endif %}
+          {% for error in form.submission_non_compliance_notice_interval_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-8">
+          <label class="form-label" for="{{ form.submission_non_compliance_head_roles.id_for_label }}">{{ form.submission_non_compliance_head_roles.label }}</label>
+          {{ form.submission_non_compliance_head_roles }}
+          {% if form.submission_non_compliance_head_roles.help_text %}
+          <div class="form-text">{{ form.submission_non_compliance_head_roles.help_text }}</div>
+          {% endif %}
+          {% for error in form.submission_non_compliance_head_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="{{ form.submission_non_compliance_hr_recipients.id_for_label }}">{{ form.submission_non_compliance_hr_recipients.label }}</label>
+          {{ form.submission_non_compliance_hr_recipients }}
+          {% if form.submission_non_compliance_hr_recipients.help_text %}
+          <div class="form-text">{{ form.submission_non_compliance_hr_recipients.help_text }}</div>
+          {% endif %}
+          {% for error in form.submission_non_compliance_hr_recipients.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+      <div class="alert alert-light border small mb-0 mt-3">
+        Notice 1 is a formal notice, Notice 2 is a warning, and Notice 3 onward can stay at escalation level every set interval until the affected period is submitted.
       </div>
     </div>
     </div>
@@ -686,7 +798,7 @@
     </button>
     <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-login-security" aria-expanded="false" aria-controls="feature-card-login-security">
       <span class="settings-card-summary-title">Login Security</span>
-      <span class="settings-card-summary-text">Protect accounts with temporary lockout, retry thresholds, and lockout duration settings for both portals.</span>
+      <span class="settings-card-summary-text">Protect accounts with email OTP, temporary lockout, retry thresholds, and lockout duration settings for both portals.</span>
     </button>
     <div id="feature-card-login-security" class="collapse">
     <div class="card-body">
@@ -720,8 +832,26 @@
           {% for error in form.login_lockout_duration_minutes.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
         </div>
       </div>
+      <div class="form-check form-switch mt-3 mb-3">
+        {{ form.login_email_otp_enabled }}
+        <label class="form-check-label" for="{{ form.login_email_otp_enabled.id_for_label }}">
+          {{ form.login_email_otp_enabled.label }}
+        </label>
+        {% if form.login_email_otp_enabled.help_text %}
+        <div class="form-text">{{ form.login_email_otp_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.login_email_otp_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.login_email_otp_expiry_minutes.id_for_label }}">{{ form.login_email_otp_expiry_minutes.label }}</label>
+          {{ form.login_email_otp_expiry_minutes }}
+          {% if form.login_email_otp_expiry_minutes.help_text %}<div class="form-text">{{ form.login_email_otp_expiry_minutes.help_text }}</div>{% endif %}
+          {% for error in form.login_email_otp_expiry_minutes.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
       <div class="alert alert-light border small mt-3 mb-0">
-        Password complexity validation, forced password change, privacy consent, single-device session enforcement, and temporary login lockout work together to protect both Admin Portal and Faculty Portal accounts.
+        Password complexity validation, email OTP when enabled, forced password change, privacy consent, single-device session enforcement, and temporary login lockout work together to protect both Admin Portal and Faculty Portal accounts.
       </div>
     </div>
     </div>
