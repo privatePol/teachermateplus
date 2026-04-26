@@ -169,6 +169,7 @@
         <a href="#manual-assignments">Assignment Acceptance</a>
         <a href="#manual-submission">Submission Governance</a>
         <a href="#manual-corrections">Grade Corrections and Reopen</a>
+        <a href="#manual-sample-computation">Sample Computation</a>
         <a href="#manual-prediction">Grade Prediction</a>
         <a href="#manual-at-risk">At-Risk Monitor</a>
         <a href="#manual-reminders">Reminder Center</a>
@@ -390,7 +391,7 @@
           </div>
           <div class="manual-rule">
             <strong>Audit Traceability</strong>
-            <p>Requests, approvals, rejections, reopen actions, gradebook updates, and optional official correction PDF outputs are captured for accountability and monitoring.</p>
+            <p>Requests, approvals, rejections, reopen actions, gradebook updates, correction attachment uploads/downloads, and optional official correction PDF outputs are captured for accountability and monitoring.</p>
           </div>
           <div class="manual-rule">
             <strong>Submission Notifications</strong>
@@ -401,6 +402,152 @@
             <p>When the correction petition already contains exact corrected score values, final approval allows EduGradesPro to post the approved values directly into the gradebook, recompute the affected student's submitted period and final grade, and close the request without any additional faculty finalize step.</p>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card manual-section-card mb-4" id="manual-sample-computation">
+    <div class="card-body">
+      <div class="manual-section-title">7.1 Sample Grade Computation</div>
+      <p class="manual-copy">
+        The following example shows how EduGradesPro computes one student's grade using a Base-50 raw-score setup,
+        period component weights, and the final-grade formula. Actual classes follow the grading template assigned to the course.
+      </p>
+
+      <div class="manual-rule-grid mb-3">
+        <div class="manual-rule">
+          <strong>Base-50 Raw Score Formula</strong>
+          <p><code>Computed Score = ((Raw Score / Total Score) x 50) + 50</code></p>
+        </div>
+        <div class="manual-rule">
+          <strong>Sample Period Structure</strong>
+          <p>Prelim and Midterm use Class Standing 60% plus Exam 40%. Prefinal uses the class-standing result as the period grade in this example. Final Exam uses the exam score as the period grade.</p>
+        </div>
+      </div>
+
+      <h6 class="fw-bold text-success mt-3 mb-2">A. Prelim Sample Inputs</h6>
+      <table class="manual-table mb-3">
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Sample Scores</th>
+            <th>Computed Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Prelim Exam</td>
+            <td>78/100</td>
+            <td>89.00</td>
+          </tr>
+          <tr>
+            <td>Quizzes</td>
+            <td>Quiz 1: 18/20 = 95.00<br>Quiz 2: 15/20 = 87.50</td>
+            <td>Quiz Average = 91.25</td>
+          </tr>
+          <tr>
+            <td>Recitation</td>
+            <td>Recitation 1: 8/10 = 90.00<br>Recitation 2: 9/10 = 95.00</td>
+            <td>Recitation Average = 92.50</td>
+          </tr>
+          <tr>
+            <td>Assignment</td>
+            <td>Assignment 1: 18/20 = 95.00<br>Assignment 2: 16/20 = 90.00</td>
+            <td>Assignment Average = 92.50</td>
+          </tr>
+          <tr>
+            <td>Activity</td>
+            <td>Activity 1: 28/30 = 96.67<br>Activity 2: 25/30 = 91.67</td>
+            <td>Activity Average = 94.17</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h6 class="fw-bold text-success mt-3 mb-2">B. Prelim Roll-Up</h6>
+      <table class="manual-table mb-3">
+        <thead>
+          <tr>
+            <th>Step</th>
+            <th>Computation</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Participation / Output</td>
+            <td>(Recitation 92.50 x 40%) + (Assignment 92.50 x 30%) + (Activity 94.17 x 30%)</td>
+            <td>93.00</td>
+          </tr>
+          <tr>
+            <td>Class Standing</td>
+            <td>(Quizzes 91.25 x 40%) + (Participation / Output 93.00 x 60%)</td>
+            <td>92.30</td>
+          </tr>
+          <tr>
+            <td>Prelim Grade</td>
+            <td>(Class Standing 92.30 x 60%) + (Prelim Exam 89.00 x 40%)</td>
+            <td>90.98</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h6 class="fw-bold text-success mt-3 mb-2">C. Period Results Through Finals</h6>
+      <table class="manual-table mb-3">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th>Summary of Sample Computation</th>
+            <th>Period Grade</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Prelim</td>
+            <td>Detailed above: Class Standing 92.30 and Prelim Exam 89.00</td>
+            <td>90.98</td>
+          </tr>
+          <tr>
+            <td>Midterm</td>
+            <td>Quiz Average 93.75, Participation / Output 92.75, Class Standing 93.15, Midterm Exam 91.00</td>
+            <td>92.29</td>
+          </tr>
+          <tr>
+            <td>Prefinal</td>
+            <td>Quiz Average 91.25, Participation / Output 94.88, Class Standing used as Prefinal period grade</td>
+            <td>93.43</td>
+          </tr>
+          <tr>
+            <td>Final Exam</td>
+            <td>Final Exam score 85/100 using Base-50 = 92.50</td>
+            <td>92.50</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h6 class="fw-bold text-success mt-3 mb-2">D. Final Grade</h6>
+      <table class="manual-table">
+        <thead>
+          <tr>
+            <th>Term Rule</th>
+            <th>Formula</th>
+            <th>Final Grade</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Regular Term</td>
+            <td>(Prelim 90.98 + Midterm 92.29 + Prefinal 93.43 + Final Exam 92.50) / 4</td>
+            <td>92.30</td>
+          </tr>
+          <tr>
+            <td>Summer Term Example</td>
+            <td>(Midterm 92.29 x 33.33%) + (Prefinal 93.43 x 33.33%) + (Final Exam 92.50 x 33.34%)</td>
+            <td>92.74</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="manual-note">
+        Summer computation depends on the matched Tenant Grading Profile. If the Summer profile uses weighted selected periods, Prelim is excluded by leaving the Prelim period code out of the weight list.
       </div>
     </div>
   </div>

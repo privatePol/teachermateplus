@@ -630,6 +630,20 @@ def faculty_signature_preview_view(request):
     if not credential:
         return HttpResponse(status=404)
     image_bytes = UserSignatureService.decrypt_signature_bytes(credential=credential)
+    AuditService.log_event(
+        action="PREVIEW_SIGNATURE",
+        portal="FACULTY",
+        entity_type="UserSignatureCredential",
+        entity_id=credential.id,
+        actor=request.user,
+        tenant=request.user.default_tenant_id,
+        campus=request.user.default_campus_id,
+        metadata={
+            "mime_type": credential.mime_type,
+            "file_size_bytes": credential.file_size_bytes,
+        },
+        request=request,
+    )
     return HttpResponse(image_bytes, content_type=credential.mime_type or "image/png")
 
 
@@ -713,4 +727,18 @@ def admin_signature_preview_view(request):
     if not credential:
         return HttpResponse(status=404)
     image_bytes = UserSignatureService.decrypt_signature_bytes(credential=credential)
+    AuditService.log_event(
+        action="PREVIEW_SIGNATURE",
+        portal="ADMIN",
+        entity_type="UserSignatureCredential",
+        entity_id=credential.id,
+        actor=request.user,
+        tenant=request.user.default_tenant_id,
+        campus=request.user.default_campus_id,
+        metadata={
+            "mime_type": credential.mime_type,
+            "file_size_bytes": credential.file_size_bytes,
+        },
+        request=request,
+    )
     return HttpResponse(image_bytes, content_type=credential.mime_type or "image/png")

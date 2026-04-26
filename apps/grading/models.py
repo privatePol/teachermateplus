@@ -3,6 +3,7 @@ from django.core.validators import MinValueValidator
 from uuid import uuid4
 
 from apps.core.models import ActivatableModel, TimeStampedModel
+from apps.core.upload_paths import correction_attachment_upload_path
 
 
 class ScoreInputMode(models.TextChoices):
@@ -368,6 +369,11 @@ class TenantGradingProfile(TimeStampedModel, ActivatableModel):
         AVERAGE_ACTIVE_PERIODS = "AVERAGE_ACTIVE_PERIODS", "Average All Active Template Periods"
         WEIGHTED_PERIODS = "WEIGHTED_PERIODS", "Weighted Selected Periods"
 
+    class TermType(models.TextChoices):
+        REGULAR = "REGULAR", "Regular"
+        SUMMER = "SUMMER", "Summer"
+        SPECIAL = "SPECIAL", "Special"
+
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="grading_profiles")
     campus = models.ForeignKey(
         "tenants.Campus",
@@ -398,6 +404,7 @@ class TenantGradingProfile(TimeStampedModel, ActivatableModel):
         null=True,
     )
     course_type = models.CharField(max_length=50, blank=True, null=True)
+    term_type = models.CharField(max_length=20, choices=TermType.choices, blank=True, null=True)
     profile_code = models.CharField(max_length=64)
     profile_name = models.CharField(max_length=150)
     grading_template = models.ForeignKey(
@@ -536,6 +543,10 @@ class GradeActivity(TimeStampedModel, ActivatableModel):
     class Meta:
         db_table = "grade_activities"
         ordering = ["-activity_date", "-created_at"]
+        indexes = [
+            models.Index(fields=["offering", "template_period", "is_active"], name="idx_gradeact_off_period"),
+            models.Index(fields=["tenant", "campus", "is_active"], name="idx_gradeact_scope"),
+        ]
 
     def __str__(self):
         return f"{self.offering_id}:{self.title}"
@@ -567,6 +578,10 @@ class StudentActivityScore(TimeStampedModel, ActivatableModel):
     class Meta:
         db_table = "student_activity_scores"
         ordering = ["student__last_name", "student__first_name", "student__student_no"]
+        indexes = [
+            models.Index(fields=["activity", "is_active"], name="idx_scores_activity_active"),
+            models.Index(fields=["student", "is_active"], name="idx_scores_student_active"),
+        ]
         constraints = [
             models.UniqueConstraint(fields=["activity", "student"], name="uq_student_activity_scores_activity_student"),
         ]
@@ -609,6 +624,11 @@ class StudentPeriodGrade(TimeStampedModel):
     class Meta:
         db_table = "student_period_grades"
         ordering = ["student__last_name", "student__first_name", "student__student_no"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "updated_at"], name="idx_period_grade_scope_upd"),
+            models.Index(fields=["offering", "template_period", "period_grade"], name="idx_period_grade_period"),
+            models.Index(fields=["student", "offering"], name="idx_period_grade_student"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["offering", "template_period", "student"],
@@ -648,6 +668,10 @@ class StudentFinalGrade(TimeStampedModel):
     class Meta:
         db_table = "student_final_grades"
         ordering = ["student__last_name", "student__first_name", "student__student_no"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "is_submitted"], name="idx_final_grade_scope_sub"),
+            models.Index(fields=["student", "offering"], name="idx_final_grade_student"),
+        ]
         constraints = [
             models.UniqueConstraint(fields=["offering", "student"], name="uq_student_final_grades_offering_student"),
         ]
@@ -751,6 +775,10 @@ class GradingPeriodLock(TimeStampedModel, ActivatableModel):
     class Meta:
         db_table = "grading_period_locks"
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "term", "is_active"], name="idx_locks_scope_term"),
+            models.Index(fields=["deadline_at", "is_locked", "is_active"], name="idx_locks_deadline"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["tenant", "campus", "academic_year", "term", "period_code", "scope_type", "course_offering"],
@@ -804,6 +832,11 @@ class GradeSubmission(TimeStampedModel):
     class Meta:
         db_table = "grade_submissions"
         ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "status"], name="idx_submission_scope_status"),
+            models.Index(fields=["offering", "status", "updated_at"], name="idx_submission_off_status"),
+            models.Index(fields=["template_period", "status"], name="idx_submission_period_status"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["offering", "template_period"],
@@ -858,6 +891,10 @@ class GradeSubmissionReopenRequest(TimeStampedModel):
     class Meta:
         db_table = "grade_submission_reopen_requests"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "status"], name="idx_reopen_scope_status"),
+            models.Index(fields=["offering", "template_period", "status"], name="idx_reopen_off_period"),
+        ]
 
     def __str__(self):
         return f"{self.submission_id}:{self.status}"
@@ -971,6 +1008,11 @@ class GradeCorrectionRequest(TimeStampedModel):
     class Meta:
         db_table = "grade_correction_requests"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "status"], name="idx_correction_scope_status"),
+            models.Index(fields=["offering", "template_period", "status"], name="idx_correction_off_period"),
+            models.Index(fields=["requested_by_user", "status"], name="idx_correction_requester"),
+        ]
 
     def __str__(self):
         return f"{self.offering_id}:{self.template_period.code}:{self.status}"
@@ -1064,7 +1106,10 @@ class GradeCorrectionAttachment(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="attachments",
     )
-    file = models.FileField(upload_to="correction_attachments/%Y/%m/")
+    file = models.FileField(upload_to=correction_attachment_upload_path)
+    original_filename = models.CharField(max_length=255, blank=True, null=True)
+    content_type = models.CharField(max_length=100, blank=True, null=True)
+    file_size_bytes = models.PositiveIntegerField(default=0)
     uploaded_by_user = models.ForeignKey(
         "accounts.User",
         on_delete=models.SET_NULL,

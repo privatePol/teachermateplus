@@ -1,6 +1,7 @@
 from django.db import models
 
 from apps.core.models import TimeStampedModel
+from apps.core.upload_paths import import_source_upload_path
 
 
 class ImportBatch(TimeStampedModel):
@@ -45,7 +46,7 @@ class ImportBatch(TimeStampedModel):
         null=True,
     )
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.VALIDATED)
-    source_file = models.FileField(upload_to="imports/%Y/%m/", blank=True, null=True)
+    source_file = models.FileField(upload_to=import_source_upload_path, blank=True, null=True)
     original_filename = models.CharField(max_length=255, blank=True, null=True)
     expected_headers_json = models.JSONField(default=list)
     actual_headers_json = models.JSONField(default=list)

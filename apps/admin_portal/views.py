@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import csv
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
@@ -17,7 +18,7 @@ from django.core.paginator import Paginator
 from django.db.models import Avg, Count, Max, Prefetch, Q, Sum
 from io import BytesIO
 
-from django.http import FileResponse, HttpResponseForbidden
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -74,6 +75,7 @@ from apps.admin_portal.forms import (
 )
 from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
 from apps.admin_portal.services import AdminScopeService, model_before_after
+from apps.admin_portal.grade_distribution import GradeDistributionMonitorService
 from apps.academics.models import (
     AcademicYear,
     ActiveGradingPeriodSetting,
@@ -100,6 +102,7 @@ from apps.grading.models import (
     CourseTemplateAssignment,
     FacultyFinalClearanceReport,
     GradeActivity,
+    GradeCorrectionAttachment,
     GradeCorrectionApprovalStep,
     GradeCorrectionRequest,
     GradeSubmission,
@@ -206,7 +209,11 @@ def _style_form(form):
 
 def _get_page(request, queryset, per_page=20):
     paginator = Paginator(queryset, per_page)
-    return paginator.get_page(request.GET.get("page", 1))
+    page_obj = paginator.get_page(request.GET.get("page", 1))
+    query_params = request.GET.copy()
+    query_params.pop("page", None)
+    page_obj.querystring = query_params.urlencode()
+    return page_obj
 
 
 def _safe_int(value):
@@ -1856,6 +1863,80 @@ def grading_analytics_view(request):
 
 
 @portal_required("ADMIN")
+@permission_required("grade_distribution_monitor.read")
+def grade_distribution_monitor_view(request):
+    context = GradeDistributionMonitorService.build_context(request)
+    if request.GET.get("export") == "csv":
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="grade_distribution_monitor.csv"'
+        writer = csv.writer(response)
+        writer.writerow(
+            [
+                "Faculty",
+                "Campus",
+                "Department",
+                "Course",
+                "Section",
+                "Term",
+                "Period",
+                "Level",
+                "Activity",
+                "Graded Count",
+                "Class Average",
+                "90-100 %",
+                "80-89 %",
+                "75-79 %",
+                "Below Passing %",
+                "Exact 100 %",
+                "Highest",
+                "Lowest",
+                "Spread",
+                "Department Average",
+                "Subject Average",
+                "Flags",
+            ]
+        )
+        for row in context["rows"]:
+            writer.writerow(
+                [
+                    row["faculty_name"],
+                    row["campus"],
+                    row["department"],
+                    f'{row["course_code"]} - {row["course_title"]}',
+                    row["section"],
+                    f'{row["school_year"]} / {row["term"]}',
+                    row["period"],
+                    row["level_label"],
+                    row["activity_title"],
+                    row["graded_count"],
+                    row["average"] or "",
+                    row["high_pct"],
+                    row["band_80_89_pct"],
+                    row["band_75_79_pct"],
+                    row["below_passing_pct"],
+                    row["exact_100_pct"],
+                    row["highest"] or "",
+                    row["lowest"] or "",
+                    row["spread"] or "",
+                    row["department_average"] or "",
+                    row["subject_average"] or "",
+                    ", ".join(flag["label"] for flag in row["flags"]),
+                ]
+            )
+        return response
+
+    paginator = Paginator(context["rows"], 25)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+    context["page_obj"] = page_obj
+    context["rows"] = page_obj.object_list
+    context["page_query"] = page_query.urlencode()
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/grade_distribution_monitor.html", context)
+
+
+@portal_required("ADMIN")
 def admin_guide_view(request):
     context = {
         "title": "Admin Portal User Guide",
@@ -2678,6 +2759,17 @@ def configurable_features_settings_view(request):
             default=False,
         )
     )
+    current_grade_distribution_settings = GradeDistributionMonitorService._threshold_settings(request)
+    current_grade_distribution_audit_settings = {
+        "high_grade_band_min": str(current_grade_distribution_settings["high_grade_band_min"]),
+        "high_grade_band_max": str(current_grade_distribution_settings["high_grade_band_max"]),
+        "high_grade_concentration_threshold_percent": str(
+            current_grade_distribution_settings["high_grade_concentration_threshold_percent"]
+        ),
+        "exact_100_threshold_percent": str(current_grade_distribution_settings["exact_100_threshold_percent"]),
+        "low_variation_threshold": str(current_grade_distribution_settings["low_variation_threshold"]),
+        "minimum_student_count_for_flag": int(current_grade_distribution_settings["minimum_student_count_for_flag"]),
+    }
 
     form = ConfigurableFeatureSettingForm(
         request.POST or None,
@@ -2704,6 +2796,18 @@ def configurable_features_settings_view(request):
                 code__in=current_submission_non_compliance_head_role_codes
             ),
             "submission_non_compliance_hr_recipients": ", ".join(current_submission_non_compliance_hr_recipients),
+            "grade_distribution_high_grade_band_min": current_grade_distribution_settings["high_grade_band_min"],
+            "grade_distribution_high_grade_band_max": current_grade_distribution_settings["high_grade_band_max"],
+            "grade_distribution_high_grade_concentration_threshold_percent": current_grade_distribution_settings[
+                "high_grade_concentration_threshold_percent"
+            ],
+            "grade_distribution_exact_100_threshold_percent": current_grade_distribution_settings[
+                "exact_100_threshold_percent"
+            ],
+            "grade_distribution_low_variation_threshold": current_grade_distribution_settings["low_variation_threshold"],
+            "grade_distribution_minimum_student_count_for_flag": current_grade_distribution_settings[
+                "minimum_student_count_for_flag"
+            ],
             "enrollment_ownership_mode": current_enrollment_ownership_mode,
             "class_master_list_term": selected_term.id if selected_term else None,
             "class_master_list_faculty": selected_faculty.id if selected_faculty else None,
@@ -2921,6 +3025,48 @@ def configurable_features_settings_view(request):
             is_active=True,
         )
         SystemSettingService.set(
+            GradeDistributionMonitorService.SETTING_KEYS["high_grade_band_min"],
+            str(form.cleaned_data["grade_distribution_high_grade_band_min"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            GradeDistributionMonitorService.SETTING_KEYS["high_grade_band_max"],
+            str(form.cleaned_data["grade_distribution_high_grade_band_max"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            GradeDistributionMonitorService.SETTING_KEYS["high_grade_concentration_threshold_percent"],
+            str(form.cleaned_data["grade_distribution_high_grade_concentration_threshold_percent"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            GradeDistributionMonitorService.SETTING_KEYS["exact_100_threshold_percent"],
+            str(form.cleaned_data["grade_distribution_exact_100_threshold_percent"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            GradeDistributionMonitorService.SETTING_KEYS["low_variation_threshold"],
+            str(form.cleaned_data["grade_distribution_low_variation_threshold"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            GradeDistributionMonitorService.SETTING_KEYS["minimum_student_count_for_flag"],
+            int(form.cleaned_data["grade_distribution_minimum_student_count_for_flag"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
             EnrollmentService.MODE_KEY,
             str(form.cleaned_data["enrollment_ownership_mode"]),
             tenant_id=tenant_id,
@@ -3105,6 +3251,7 @@ def configurable_features_settings_view(request):
                 "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
                 "submission_non_compliance_head_role_codes": current_submission_non_compliance_head_role_codes,
                 "submission_non_compliance_hr_recipients": current_submission_non_compliance_hr_recipients,
+                "grade_distribution_settings": current_grade_distribution_audit_settings,
                 "enrollment_ownership_mode": current_enrollment_ownership_mode,
                 "enrollment_ownership_mode_by_offering": current_enrollment_override_map,
                 "login_lockout_enabled": current_login_lockout_enabled,
@@ -3162,6 +3309,20 @@ def configurable_features_settings_view(request):
                 ),
                 "submission_non_compliance_head_role_codes": selected_submission_non_compliance_head_role_codes,
                 "submission_non_compliance_hr_recipients": selected_submission_non_compliance_hr_recipients,
+                "grade_distribution_settings": {
+                    "high_grade_band_min": str(form.cleaned_data["grade_distribution_high_grade_band_min"]),
+                    "high_grade_band_max": str(form.cleaned_data["grade_distribution_high_grade_band_max"]),
+                    "high_grade_concentration_threshold_percent": str(
+                        form.cleaned_data["grade_distribution_high_grade_concentration_threshold_percent"]
+                    ),
+                    "exact_100_threshold_percent": str(
+                        form.cleaned_data["grade_distribution_exact_100_threshold_percent"]
+                    ),
+                    "low_variation_threshold": str(form.cleaned_data["grade_distribution_low_variation_threshold"]),
+                    "minimum_student_count_for_flag": int(
+                        form.cleaned_data["grade_distribution_minimum_student_count_for_flag"]
+                    ),
+                },
                 "enrollment_ownership_mode": str(form.cleaned_data["enrollment_ownership_mode"]),
                 "enrollment_ownership_mode_by_offering": updated_enrollment_override_map,
                 "selected_class_master_list_term": selected_class_override_term.code if selected_class_override_term else None,
@@ -3223,6 +3384,12 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
                     FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY,
                     FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY,
+                    GradeDistributionMonitorService.SETTING_KEYS["high_grade_band_min"],
+                    GradeDistributionMonitorService.SETTING_KEYS["high_grade_band_max"],
+                    GradeDistributionMonitorService.SETTING_KEYS["high_grade_concentration_threshold_percent"],
+                    GradeDistributionMonitorService.SETTING_KEYS["exact_100_threshold_percent"],
+                    GradeDistributionMonitorService.SETTING_KEYS["low_variation_threshold"],
+                    GradeDistributionMonitorService.SETTING_KEYS["minimum_student_count_for_flag"],
                     EnrollmentService.MODE_KEY,
                     EnrollmentService.MODE_OVERRIDE_MAP_KEY,
                     FeatureSettingsService.LOGIN_LOCKOUT_ENABLED_KEY,
@@ -4793,10 +4960,17 @@ def term_list_view(request):
         queryset = queryset.filter(tenant_id=request.GET.get("tenant_id"))
     if request.GET.get("academic_year_id"):
         queryset = queryset.filter(academic_year_id=request.GET.get("academic_year_id"))
+    if request.GET.get("term_type"):
+        queryset = queryset.filter(term_type=request.GET.get("term_type"))
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {
+        "page_obj": _get_page(request, queryset),
+        "q": q,
+        "term_type": request.GET.get("term_type", ""),
+        "term_type_choices": Term.TermType.choices,
+    }
     context.update(_scope_context(request))
     context["academic_years"] = AdminScopeService.scoped_academic_years(request)
     return render(request, "admin_portal/academics/term_list.html", context)
@@ -6738,7 +6912,13 @@ def _ensure_template_draft_access_or_forbidden(request, template, back_route: st
 @portal_required("ADMIN")
 @permission_required("grading_templates.read")
 def grading_template_list_view(request):
-    queryset = AdminScopeService.scoped_grading_templates(request).annotate(period_count=Count("periods"))
+    queryset = AdminScopeService.scoped_grading_templates(request).prefetch_related(
+        Prefetch(
+            "periods",
+            queryset=GradingTemplatePeriod.objects.filter(is_active=True).order_by("sequence_no", "id"),
+            to_attr="active_periods",
+        )
+    ).annotate(period_count=Count("periods"))
     if request.GET.get("tenant_id"):
         queryset = queryset.filter(tenant_id=request.GET.get("tenant_id"))
     if request.GET.get("published") == "yes":
@@ -6754,6 +6934,7 @@ def grading_template_list_view(request):
     page_obj = _get_page(request, queryset)
     current_campus_id = getattr(request, "scope", {}).get("campus_id")
     for row in page_obj:
+        row.active_period_codes = [period.code for period in getattr(row, "active_periods", [])]
         current_approval_step = TemplateGovernanceWorkflowService.get_current_approval_step(template=row)
         row.current_approval_step = current_approval_step
         row.current_approval_step_label = current_approval_step.step_label if current_approval_step else ""
@@ -7074,7 +7255,13 @@ def grading_template_create_view(request):
         )
         messages.success(request, "Grading template created.")
         return _redirect_back_or_default(request, "admin_portal:grading_template_list")
-    context = {"form": form, "title": "Create Grading Template"}
+    context = {
+        "form": form,
+        "title": "Create Grading Template",
+        "form_extra_template": "admin_portal/grading/template_period_code_reference.html",
+        "template_obj": None,
+        "template_periods": [],
+    }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
 
@@ -7131,7 +7318,13 @@ def grading_template_update_view(request, template_id: int):
         else:
             messages.success(request, "Grading template updated.")
         return _redirect_back_or_default(request, "admin_portal:grading_template_list")
-    context = {"form": form, "title": f"Edit Grading Template: {row.code}"}
+    context = {
+        "form": form,
+        "title": f"Edit Grading Template: {row.code}",
+        "form_extra_template": "admin_portal/grading/template_period_code_reference.html",
+        "template_obj": row,
+        "template_periods": list(row.periods.order_by("sequence_no", "id")),
+    }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
 
@@ -8031,6 +8224,8 @@ def tenant_grading_profile_list_view(request):
         queryset = queryset.filter(tenant_id=request.GET.get("tenant_id"))
     if request.GET.get("campus_id"):
         queryset = queryset.filter(campus_id=request.GET.get("campus_id"))
+    if request.GET.get("term_type"):
+        queryset = queryset.filter(term_type=request.GET.get("term_type"))
     if request.GET.get("active") in {"1", "0"}:
         queryset = queryset.filter(is_active=request.GET.get("active") == "1")
     q = request.GET.get("q", "").strip()
@@ -8047,6 +8242,8 @@ def tenant_grading_profile_list_view(request):
         "page_obj": _get_page(request, queryset),
         "q": q,
         "active": request.GET.get("active", ""),
+        "term_type": request.GET.get("term_type", ""),
+        "term_type_choices": TenantGradingProfile.TermType.choices,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/tenant_grading_profile_list.html", context)
@@ -8600,6 +8797,12 @@ def grading_period_lock_reopen_view(request, lock_id: int):
 @permission_required("grade_submissions.read")
 def overdue_unsubmitted_report_view(request):
     now = timezone.now()
+    accepted_assignment_filter = {
+        "faculty_assignments__is_active": True,
+        "faculty_assignments__response_status": FacultyAssignment.ResponseStatus.ACCEPTED,
+        "faculty_assignments__accepted_at__isnull": False,
+        "faculty_assignments__faculty_user__is_active": True,
+    }
     locks_qs = AdminScopeService.scoped_grading_period_locks(request).filter(
         is_active=True,
         deadline_at__isnull=False,
@@ -8651,7 +8854,8 @@ def overdue_unsubmitted_report_view(request):
                     academic_year_id=lock.academic_year_id,
                     term_id=lock.term_id,
                     is_active=True,
-                )
+                    **accepted_assignment_filter,
+                ).distinct()
             )
         for offering in offerings_by_scope[scope_key]:
             target_key = (offering.id, period_key)
@@ -8661,8 +8865,9 @@ def overdue_unsubmitted_report_view(request):
         offering_ids = {offering_id for offering_id, _ in lock_targets.keys()}
         offerings = list(
             AdminScopeService.scoped_course_offerings(request)
-            .filter(id__in=offering_ids)
+            .filter(id__in=offering_ids, **accepted_assignment_filter)
             .select_related("tenant", "campus", "academic_year", "term", "course", "section")
+            .distinct()
         )
         offerings_map = {row.id: row for row in offerings}
     else:
@@ -8672,6 +8877,8 @@ def overdue_unsubmitted_report_view(request):
         FacultyAssignment.objects.filter(
             offering_id__in=list(offerings_map.keys()),
             is_active=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at__isnull=False,
             faculty_user__is_active=True,
         )
         .select_related("faculty_user")
@@ -8736,13 +8943,6 @@ def overdue_unsubmitted_report_view(request):
 
         delta = now - lock.deadline_at if lock.deadline_at else None
         overdue_hours = int(delta.total_seconds() // 3600) if delta else 0
-        missing_records = None
-        if template_period:
-            readiness = GradingGovernanceService.evaluate_submission_readiness(
-                offering=offering,
-                template_period=template_period,
-            )
-            missing_records = readiness["students_missing_any_grade"]
         report_rows.append(
             {
                 "lock_id": lock.id,
@@ -8761,7 +8961,7 @@ def overdue_unsubmitted_report_view(request):
                 "submitted_at": submission.submitted_at if submission else None,
                 "skip_reason": skip_reason,
                 "overdue_hours": overdue_hours,
-                "missing_records": missing_records,
+                "missing_records": None,
                 "compliance_stage": "NON_COMPLIANT",
                 "offering_id": offering.id,
                 "template_period_id": template_period.id if template_period else None,
@@ -8813,8 +9013,30 @@ def overdue_unsubmitted_report_view(request):
         "open_overdue_unsubmitted": sum(1 for row in report_rows if row["lock_state"] == "OPEN_OVERDUE"),
         "non_compliant": sum(1 for row in report_rows if row["compliance_stage"] == "NON_COMPLIANT"),
     }
+    page_obj = _get_page(request, report_rows, per_page=30)
+    page_offering_ids = {row["offering_id"] for row in page_obj.object_list if row.get("template_period_id")}
+    page_period_ids = {row["template_period_id"] for row in page_obj.object_list if row.get("template_period_id")}
+    page_offerings = {
+        offering.id: offering
+        for offering in AdminScopeService.scoped_course_offerings(request)
+        .filter(id__in=page_offering_ids)
+        .select_related("tenant", "campus", "academic_year", "term", "course", "section")
+    }
+    page_periods = GradingTemplatePeriod.objects.in_bulk(page_period_ids)
+    for row in page_obj.object_list:
+        template_period_id = row.get("template_period_id")
+        offering = page_offerings.get(row["offering_id"])
+        template_period = page_periods.get(template_period_id)
+        if not offering or not template_period:
+            continue
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=offering,
+            template_period=template_period,
+        )
+        row["missing_records"] = readiness["students_missing_any_grade"]
+
     context = {
-        "page_obj": _get_page(request, report_rows, per_page=30),
+        "page_obj": page_obj,
         "summary": summary,
         "q": request.GET.get("q", ""),
         "period_code": request.GET.get("period_code", ""),
@@ -8840,7 +9062,11 @@ def grade_submission_list_view(request):
             Q(offering__course__code__icontains=q)
             | Q(offering__section__code__icontains=q)
             | Q(template_period__code__icontains=q)
+            | Q(offering__faculty_assignments__faculty_user__first_name__icontains=q)
+            | Q(offering__faculty_assignments__faculty_user__last_name__icontains=q)
+            | Q(offering__faculty_assignments__faculty_user__username__icontains=q)
         )
+    queryset = queryset.distinct()
     now = timezone.now()
     tenant_id = getattr(request, "scope", {}).get("tenant_id")
     campus_id = getattr(request, "scope", {}).get("campus_id")
@@ -8863,6 +9089,23 @@ def grade_submission_list_view(request):
         campus_id=campus_id,
     )
     page_obj = _get_page(request, queryset)
+    page_offering_ids = {row.offering_id for row in page_obj.object_list}
+    assignment_rows = (
+        FacultyAssignment.objects.filter(
+            offering_id__in=page_offering_ids,
+            is_active=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at__isnull=False,
+            faculty_user__is_active=True,
+        )
+        .select_related("faculty_user")
+        .order_by("offering_id", "-is_primary", "faculty_user__last_name", "faculty_user__first_name", "id")
+    )
+    faculty_names_by_offering = {}
+    for assignment in assignment_rows:
+        faculty_names_by_offering.setdefault(assignment.offering_id, []).append(
+            assignment.faculty_user.full_name or assignment.faculty_user.username
+        )
     for row in page_obj.object_list:
         lock = GradingGovernanceService.resolve_lock(
             offering=row.offering,
@@ -8878,6 +9121,7 @@ def grade_submission_list_view(request):
             and row.status == GradeSubmission.Status.SUBMITTED
             and row.pending_reopen_request is None
         )
+        row.faculty_names = faculty_names_by_offering.get(row.offering_id, [])
 
     context = {
         "page_obj": page_obj,
@@ -9244,6 +9488,21 @@ def grade_correction_request_official_report_view(request, request_id: int):
 
     pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=correction_request)
     filename = _official_correction_report_filename(correction_request)
+    AuditService.log_event(
+        action="DOWNLOAD_CORRECTION_OFFICIAL_REPORT",
+        portal="ADMIN",
+        entity_type="GradeCorrectionRequest",
+        entity_id=correction_request.id,
+        actor=request.user,
+        tenant=correction_request.tenant,
+        campus=correction_request.campus,
+        metadata={
+            "filename": filename,
+            "content_type": "application/pdf",
+            "status": correction_request.status,
+        },
+        request=request,
+    )
     return FileResponse(
         BytesIO(pdf_bytes),
         as_attachment=False,
@@ -9251,3 +9510,43 @@ def grade_correction_request_official_report_view(request, request_id: int):
         content_type="application/pdf",
     )
 
+
+@portal_required("ADMIN")
+@permission_required("corrections.review")
+def grade_correction_attachment_download_view(request, request_id: int, attachment_id: int):
+    correction_request = get_object_or_404(
+        AdminScopeService.scoped_grade_correction_requests(request),
+        id=request_id,
+    )
+    attachment = get_object_or_404(
+        GradeCorrectionAttachment.objects.filter(correction_request=correction_request),
+        id=attachment_id,
+    )
+    try:
+        file_handle = attachment.file.open("rb")
+    except FileNotFoundError as exc:
+        raise Http404("Attachment file was not found.") from exc
+
+    AuditService.log_event(
+        action="DOWNLOAD_CORRECTION_ATTACHMENT",
+        portal="ADMIN",
+        entity_type="GradeCorrectionAttachment",
+        entity_id=attachment.id,
+        actor=request.user,
+        tenant=correction_request.tenant,
+        campus=correction_request.campus,
+        metadata={
+            "correction_request_id": correction_request.id,
+            "original_filename": attachment.original_filename,
+            "stored_filename": attachment.file.name,
+            "content_type": attachment.content_type,
+            "file_size_bytes": attachment.file_size_bytes,
+        },
+        request=request,
+    )
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=attachment.original_filename or "correction-attachment",
+        content_type=attachment.content_type or "application/octet-stream",
+    )

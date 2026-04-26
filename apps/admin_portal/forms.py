@@ -577,7 +577,17 @@ class AcademicYearForm(forms.ModelForm):
 class TermForm(forms.ModelForm):
     class Meta:
         model = Term
-        fields = ["tenant", "academic_year", "code", "name", "sequence_no", "start_date", "end_date", "is_active"]
+        fields = [
+            "tenant",
+            "academic_year",
+            "code",
+            "name",
+            "term_type",
+            "sequence_no",
+            "start_date",
+            "end_date",
+            "is_active",
+        ]
 
     def __init__(self, *args, tenant_queryset=None, academic_year_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -587,6 +597,9 @@ class TermForm(forms.ModelForm):
             self.fields["academic_year"].queryset = academic_year_queryset
         self.fields["code"].help_text = "Use short term code used in imports (example: 1ST, 2ND)."
         self.fields["name"].help_text = "Readable label (example: 1st Semester 2025-2026)."
+        self.fields["term_type"].help_text = (
+            "Classify the term so grading profiles can apply different rules for regular, summer, or special terms."
+        )
         _enforce_active_reference_choices(self)
 
     def clean(self):
@@ -1444,6 +1457,7 @@ class TenantGradingProfileForm(forms.ModelForm):
             "program",
             "course",
             "course_type",
+            "term_type",
             "profile_code",
             "profile_name",
             "grading_template",
@@ -1502,6 +1516,11 @@ class TenantGradingProfileForm(forms.ModelForm):
         )
         self.fields["course_type"].help_text = (
             "Optional fallback by course type. Use this when several courses share the same course-type rule instead of selecting one exact course."
+        )
+        self.fields["term_type"].label = "Applicable Term Type"
+        self.fields["term_type"].help_text = (
+            "Leave blank to apply to all terms. Select a value to restrict this profile to a specific term type "
+            "(e.g., Summer)."
         )
         self.fields["profile_code"].help_text = (
             "Short unique code for this grading profile, used as the admin reference identifier."
@@ -1606,6 +1625,7 @@ class TenantGradingProfileForm(forms.ModelForm):
         if course and course_type:
             raise forms.ValidationError("Choose either course-specific or course_type fallback, not both.")
         cleaned["course_type"] = course_type or None
+        cleaned["term_type"] = (cleaned.get("term_type") or "").strip() or None
 
         passing_threshold = cleaned.get("passing_grade_threshold")
         if passing_threshold is not None and (passing_threshold <= 0 or passing_threshold > 100):
@@ -1747,12 +1767,12 @@ class TenantTermGradingPeriodForm(forms.ModelForm):
 class ActiveGradingPeriodSettingForm(forms.Form):
     campus = forms.ModelChoiceField(
         queryset=Campus.objects.none(),
-        required=True,
+        required=False,
         label="Campus",
     )
     term = forms.ModelChoiceField(
         queryset=Term.objects.none(),
-        required=True,
+        required=False,
         label="Term",
     )
     period = forms.ModelChoiceField(
@@ -1986,6 +2006,51 @@ class ConfigurableFeatureSettingForm(forms.Form):
         label="HR escalation recipient email(s)",
         widget=forms.Textarea(attrs={"rows": 2}),
         help_text="Separate multiple HR email addresses with commas or new lines. These recipients are used at escalation stage only.",
+    )
+    grade_distribution_high_grade_band_min = forms.DecimalField(
+        required=False,
+        min_value=0,
+        max_value=100,
+        decimal_places=2,
+        label="High grade band minimum",
+        help_text="Lowest grade included in the high-grade concentration band. Default: 90.",
+    )
+    grade_distribution_high_grade_band_max = forms.DecimalField(
+        required=False,
+        min_value=0,
+        max_value=100,
+        decimal_places=2,
+        label="High grade band maximum",
+        help_text="Highest grade included in the high-grade concentration band. Default: 100.",
+    )
+    grade_distribution_high_grade_concentration_threshold_percent = forms.DecimalField(
+        required=False,
+        min_value=0,
+        max_value=100,
+        decimal_places=2,
+        label="High grade concentration threshold (%)",
+        help_text="Percent of graded students in the high-grade band before a row is marked for review. Default: 75.",
+    )
+    grade_distribution_exact_100_threshold_percent = forms.DecimalField(
+        required=False,
+        min_value=0,
+        max_value=100,
+        decimal_places=2,
+        label="Exact 100 threshold (%)",
+        help_text="Percent of exact 100 grades before a row is marked for review. Default: 30.",
+    )
+    grade_distribution_low_variation_threshold = forms.DecimalField(
+        required=False,
+        min_value=0,
+        decimal_places=2,
+        label="Low variation threshold",
+        help_text="Grade spread at or below this value is marked as low variation. Default: 5.",
+    )
+    grade_distribution_minimum_student_count_for_flag = forms.IntegerField(
+        required=False,
+        min_value=1,
+        label="Minimum student count for review flags",
+        help_text="Rows below this count show Small Sample instead of review flags. Default: 10.",
     )
     enrollment_ownership_mode = forms.ChoiceField(
         required=True,
@@ -2281,6 +2346,24 @@ class ConfigurableFeatureSettingForm(forms.Form):
             cleaned["faculty_quick_tour_enabled"] = False
         if not cleaned.get("submission_non_compliance_notice_enabled"):
             cleaned["submission_non_compliance_notice_enabled"] = False
+        grade_distribution_defaults = {
+            "grade_distribution_high_grade_band_min": 90,
+            "grade_distribution_high_grade_band_max": 100,
+            "grade_distribution_high_grade_concentration_threshold_percent": 75,
+            "grade_distribution_exact_100_threshold_percent": 30,
+            "grade_distribution_low_variation_threshold": 5,
+            "grade_distribution_minimum_student_count_for_flag": 10,
+        }
+        for field_name, default_value in grade_distribution_defaults.items():
+            if cleaned.get(field_name) is None:
+                cleaned[field_name] = default_value
+        high_min = cleaned.get("grade_distribution_high_grade_band_min")
+        high_max = cleaned.get("grade_distribution_high_grade_band_max")
+        if high_min is not None and high_max is not None and high_min > high_max:
+            self.add_error(
+                "grade_distribution_high_grade_band_min",
+                "High grade band minimum cannot be greater than the maximum.",
+            )
         if not cleaned.get("enrollment_ownership_mode"):
             cleaned["enrollment_ownership_mode"] = EnrollmentService.ADMIN_ONLY
         if not cleaned.get("class_master_list_override_mode"):

@@ -14,16 +14,17 @@ def portal_menu(request):
         return {"current_portal": portal, "portal_menu": [], "effective_permissions": set()}
 
     scope = getattr(request, "scope", {})
+    permissions = PermissionService.get_effective_permission_codes(
+        request.user,
+        tenant_id=scope.get("tenant_id"),
+        campus_id=scope.get("campus_id"),
+    )
     menu = MenuService.get_menu_tree(
         request.user,
         portal=portal,
         tenant_id=scope.get("tenant_id"),
         campus_id=scope.get("campus_id"),
-    )
-    permissions = PermissionService.get_effective_permission_codes(
-        request.user,
-        tenant_id=scope.get("tenant_id"),
-        campus_id=scope.get("campus_id"),
+        effective_codes=permissions,
     )
     faculty_quick_tour_enabled = False
     if portal == "FACULTY":

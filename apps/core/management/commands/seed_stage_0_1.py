@@ -24,6 +24,7 @@ class Command(BaseCommand):
         ("faculty_portal.access", "faculty_portal", "access"),
         ("dashboard.read", "dashboard", "read"),
         ("grading_analytics.read", "grading_analytics", "read"),
+        ("grade_distribution_monitor.read", "grade_distribution_monitor", "read"),
         ("faculty_analytics.read", "faculty_analytics", "read"),
         ("users.read", "users", "read"),
         ("users.create", "users", "create"),
@@ -654,6 +655,15 @@ class Command(BaseCommand):
                 "admin_portal:grading_analytics",
                 75,
                 "grading_analytics.read",
+            ),
+            (
+                "ADMIN",
+                "GRADE_DISTRIBUTION_MONITOR",
+                groups["GRADING"],
+                "Grade Distribution Monitor",
+                "admin_portal:grade_distribution_monitor",
+                78,
+                "grade_distribution_monitor.read",
             ),
             (
                 "ADMIN",

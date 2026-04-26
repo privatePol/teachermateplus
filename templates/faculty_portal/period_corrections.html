@@ -125,7 +125,9 @@
             {% if req.attachments.all %}
               <strong>Attachments:</strong>
               {% for a in req.attachments.all %}
-                <a href="{{ a.file.url }}" target="_blank">{{ a.file.name }}</a>{% if not forloop.last %}, {% endif %}
+                <a
+                  href="{% url 'faculty_portal:period_correction_attachment_download' offering.id period.id req.id a.id %}"
+                >{{ a.original_filename|default:a.file.name }}</a>{% if not forloop.last %}, {% endif %}
               {% endfor %}
             {% endif %}
           </td>

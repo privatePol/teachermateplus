@@ -22,10 +22,16 @@ class AcademicYear(TimeStampedModel, ActivatableModel):
 
 
 class Term(TimeStampedModel, ActivatableModel):
+    class TermType(models.TextChoices):
+        REGULAR = "REGULAR", "Regular"
+        SUMMER = "SUMMER", "Summer"
+        SPECIAL = "SPECIAL", "Special"
+
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="terms")
     academic_year = models.ForeignKey("academics.AcademicYear", on_delete=models.PROTECT, related_name="terms")
     code = models.CharField(max_length=50)
     name = models.CharField(max_length=150)
+    term_type = models.CharField(max_length=20, choices=TermType.choices, default=TermType.REGULAR)
     sequence_no = models.PositiveIntegerField(default=1)
     start_date = models.DateField(blank=True, null=True)
     end_date = models.DateField(blank=True, null=True)
@@ -189,6 +195,10 @@ class CourseOffering(TimeStampedModel, ActivatableModel):
     class Meta:
         db_table = "course_offerings"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "term", "status", "is_active"], name="idx_offer_scope_status"),
+            models.Index(fields=["tenant", "campus", "department", "term"], name="idx_offer_dept_term"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["tenant", "campus", "department", "term", "course", "section"],
@@ -253,6 +263,10 @@ class FacultyAssignment(TimeStampedModel, ActivatableModel):
     class Meta:
         db_table = "faculty_assignments"
         ordering = ["-assigned_at"]
+        indexes = [
+            models.Index(fields=["faculty_user", "is_active", "response_status"], name="idx_fac_assign_user_status"),
+            models.Index(fields=["tenant", "campus", "is_active"], name="idx_fac_assign_scope"),
+        ]
         constraints = [
             models.UniqueConstraint(fields=["offering", "faculty_user"], name="uq_faculty_assignments_offering_user"),
         ]

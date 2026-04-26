@@ -651,6 +651,74 @@
     </div>
   </div>
 
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-distribution" aria-expanded="false" aria-controls="feature-card-grade-distribution">
+      <strong>Faculty Grade Distribution Monitor</strong>
+      <span class="toggle-indicator" aria-hidden="true">âŒ„</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-distribution" aria-expanded="false" aria-controls="feature-card-grade-distribution">
+      <span class="settings-card-summary-title">Faculty Grade Distribution Monitor</span>
+      <span class="settings-card-summary-text">Set neutral review thresholds for high-grade concentration, exact 100 rates, low variation, and small samples.</span>
+    </button>
+    <div id="feature-card-grade-distribution" class="collapse">
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.grade_distribution_high_grade_band_min.id_for_label }}">{{ form.grade_distribution_high_grade_band_min.label }}</label>
+          {{ form.grade_distribution_high_grade_band_min }}
+          {% if form.grade_distribution_high_grade_band_min.help_text %}
+          <div class="form-text">{{ form.grade_distribution_high_grade_band_min.help_text }}</div>
+          {% endif %}
+          {% for error in form.grade_distribution_high_grade_band_min.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.grade_distribution_high_grade_band_max.id_for_label }}">{{ form.grade_distribution_high_grade_band_max.label }}</label>
+          {{ form.grade_distribution_high_grade_band_max }}
+          {% if form.grade_distribution_high_grade_band_max.help_text %}
+          <div class="form-text">{{ form.grade_distribution_high_grade_band_max.help_text }}</div>
+          {% endif %}
+          {% for error in form.grade_distribution_high_grade_band_max.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.grade_distribution_high_grade_concentration_threshold_percent.id_for_label }}">{{ form.grade_distribution_high_grade_concentration_threshold_percent.label }}</label>
+          {{ form.grade_distribution_high_grade_concentration_threshold_percent }}
+          {% if form.grade_distribution_high_grade_concentration_threshold_percent.help_text %}
+          <div class="form-text">{{ form.grade_distribution_high_grade_concentration_threshold_percent.help_text }}</div>
+          {% endif %}
+          {% for error in form.grade_distribution_high_grade_concentration_threshold_percent.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.grade_distribution_exact_100_threshold_percent.id_for_label }}">{{ form.grade_distribution_exact_100_threshold_percent.label }}</label>
+          {{ form.grade_distribution_exact_100_threshold_percent }}
+          {% if form.grade_distribution_exact_100_threshold_percent.help_text %}
+          <div class="form-text">{{ form.grade_distribution_exact_100_threshold_percent.help_text }}</div>
+          {% endif %}
+          {% for error in form.grade_distribution_exact_100_threshold_percent.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.grade_distribution_low_variation_threshold.id_for_label }}">{{ form.grade_distribution_low_variation_threshold.label }}</label>
+          {{ form.grade_distribution_low_variation_threshold }}
+          {% if form.grade_distribution_low_variation_threshold.help_text %}
+          <div class="form-text">{{ form.grade_distribution_low_variation_threshold.help_text }}</div>
+          {% endif %}
+          {% for error in form.grade_distribution_low_variation_threshold.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.grade_distribution_minimum_student_count_for_flag.id_for_label }}">{{ form.grade_distribution_minimum_student_count_for_flag.label }}</label>
+          {{ form.grade_distribution_minimum_student_count_for_flag }}
+          {% if form.grade_distribution_minimum_student_count_for_flag.help_text %}
+          <div class="form-text">{{ form.grade_distribution_minimum_student_count_for_flag.help_text }}</div>
+          {% endif %}
+          {% for error in form.grade_distribution_minimum_student_count_for_flag.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+      <div class="alert alert-light border small mb-0 mt-3">
+        These settings only control review indicators on the read-only monitor. They do not change grade computation, submissions, locks, or correction workflows.
+      </div>
+    </div>
+    </div>
+  </div>
+
   <div class="card border-0 shadow-sm settings-card settings-anchor-card is-collapsed" id="class-master-list-ownership-card">
     <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-class-master-list" aria-expanded="false" aria-controls="feature-card-class-master-list">
       <strong>Class Master List Ownership</strong>

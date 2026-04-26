@@ -2929,6 +2929,8 @@ class FacultyGradingService:
     @classmethod
     def resolve_grading_profile_for_offering(cls, offering):
         course_type = (offering.course.course_type or "").strip()
+        offering_term = getattr(offering, "term", None)
+        term_type = (getattr(offering_term, "term_type", "") or "").strip()
         # Offerings may be shared/open and keep program null; in that case fall back to section program.
         effective_program_id = offering.program_id
         if not effective_program_id and offering.section_id:
@@ -2948,6 +2950,7 @@ class FacultyGradingService:
             .filter(Q(department_id=offering.department_id) | Q(department__isnull=True))
             .filter(Q(program_id=effective_program_id) | Q(program__isnull=True))
             .filter(Q(course_id=offering.course_id) | Q(course__isnull=True))
+            .filter(Q(term_type=term_type) | Q(term_type__isnull=True) | Q(term_type=""))
             .filter(Q(effective_from_term_id=offering.term_id) | Q(effective_from_term__isnull=True))
             .select_related("grading_template")
         )
@@ -2969,6 +2972,7 @@ class FacultyGradingService:
                 1 if profile.program_id else 0,
                 1 if profile.department_id else 0,
                 1 if profile.campus_id else 0,
+                1 if term_type and (profile.term_type or "").strip() == term_type else 0,
                 1 if profile.effective_from_term_id else 0,
             )
 
@@ -2981,6 +2985,7 @@ class FacultyGradingService:
                 -score[3],
                 -score[4],
                 -score[5],
+                -score[6],
                 profile.priority,
                 0 if profile.is_default else 1,
                 -profile.id,

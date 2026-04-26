@@ -27,6 +27,10 @@
     </form>
   </div>
 </div>
+{% block form_extra %}{% endblock %}
+{% if form_extra_template %}
+  {% include form_extra_template %}
+{% endif %}
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const parentForms = new Set();

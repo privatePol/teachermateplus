@@ -33,6 +33,7 @@ from .views import (
     course_template_assignment_update_view,
     dashboard_view,
     admin_guide_view,
+    grade_distribution_monitor_view,
     grading_analytics_view,
     grade_prediction_monitor_view,
     department_create_view,
@@ -58,6 +59,7 @@ from .views import (
     grade_submission_reopen_request_list_view,
     grade_submission_reopen_request_review_view,
     grade_correction_request_list_view,
+    grade_correction_attachment_download_view,
     grade_correction_request_official_report_view,
     grade_correction_request_review_view,
     grading_template_create_view,
@@ -142,6 +144,11 @@ urlpatterns = [
     path("api/sis/periodic-grades/", sis_periodic_grades_api_view, name="sis_periodic_grades_api_alias"),
     path("admin-portal/dashboard/", dashboard_view, name="dashboard"),
     path("admin-portal/grading/analytics/", grading_analytics_view, name="grading_analytics"),
+    path(
+        "admin-portal/grading/grade-distribution-monitor/",
+        grade_distribution_monitor_view,
+        name="grade_distribution_monitor",
+    ),
     path("admin-portal/guide/", admin_guide_view, name="guide"),
     path(
         "admin-portal/tools/template-governance/",
@@ -494,6 +501,11 @@ urlpatterns = [
         "admin-portal/grading/corrections/<int:request_id>/official-report/",
         grade_correction_request_official_report_view,
         name="grade_correction_request_official_report",
+    ),
+    path(
+        "admin-portal/grading/corrections/<int:request_id>/attachments/<int:attachment_id>/download/",
+        grade_correction_attachment_download_view,
+        name="grade_correction_attachment_download",
     ),
     path("admin-portal/imports/batches/", import_batch_list_view, name="import_batch_list"),
     path(

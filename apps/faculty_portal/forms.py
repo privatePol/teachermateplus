@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation
 from django import forms
 
 from apps.academics.models import CourseOffering
+from apps.core.services.uploads import UploadValidationService
 from apps.enrollment.models import Enrollment
 from apps.grading.models import (
     GradeActivity,
@@ -207,6 +208,13 @@ class GradeCorrectionRequestForm(forms.Form):
         self.fields["students"].widget.attrs.update({"class": "form-select", "size": 12})
         self.fields["justification"].widget.attrs["class"] = "form-control"
         self.fields["attachment"].widget.attrs["class"] = "form-control"
+
+    def clean_attachment(self):
+        attachment = self.cleaned_data.get("attachment")
+        if not attachment:
+            return attachment
+        self.cleaned_data["attachment_validation"] = UploadValidationService.validate_correction_attachment(attachment)
+        return attachment
 
     @staticmethod
     def _format_decimal(value):

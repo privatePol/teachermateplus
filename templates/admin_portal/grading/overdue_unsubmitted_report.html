@@ -1,6 +1,48 @@
 {% extends "admin_portal/base.html" %}
 
 {% block admin_content %}
+<style>
+  .report-loading-overlay {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.78);
+    bottom: 0;
+    display: none;
+    justify-content: center;
+    left: 0;
+    position: fixed;
+    right: 0;
+    top: 0;
+    z-index: 1080;
+  }
+  .report-loading-overlay.is-visible {
+    display: flex;
+  }
+  .report-loading-panel {
+    background: #fff;
+    border: 1px solid rgba(25, 70, 42, 0.14);
+    border-radius: 8px;
+    box-shadow: 0 18px 40px rgba(21, 48, 31, 0.18);
+    max-width: 360px;
+    padding: 1.1rem;
+    width: calc(100% - 2rem);
+  }
+  .report-loading-bar {
+    height: 4px;
+    overflow: hidden;
+  }
+</style>
+<div class="report-loading-overlay" id="reportLoadingOverlay" aria-live="polite" aria-hidden="true">
+  <div class="report-loading-panel">
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <div class="spinner-border spinner-border-sm text-success" role="status" aria-hidden="true"></div>
+      <strong>Loading report</strong>
+    </div>
+    <div class="progress report-loading-bar" role="progressbar" aria-label="Loading report">
+      <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="width: 100%"></div>
+    </div>
+  </div>
+</div>
+
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
   <h2 class="h5 mb-0">Non-Compliance on Periodic Grades Submission</h2>
   <div class="d-flex flex-wrap gap-2">
@@ -44,7 +86,7 @@
   </div>
 </div>
 
-<form class="row g-2 mb-3">
+<form class="row g-2 mb-3" id="overdueFilterForm">
   <div class="col-md-2">
     <select class="form-select" name="campus_id">
       <option value="">All Campuses</option>
@@ -76,7 +118,7 @@
     <input class="form-control" name="q" value="{{ q }}" placeholder="Campus/course/section/faculty">
   </div>
   <div class="col-md-1">
-    <button class="btn btn-outline-secondary w-100">Filter</button>
+    <button class="btn btn-outline-secondary w-100" type="submit">Filter</button>
   </div>
 </form>
 
@@ -163,4 +205,21 @@
   </div>
   <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
 </div>
+<script>
+  (function () {
+    const overlay = document.getElementById("reportLoadingOverlay");
+    const showLoading = function () {
+      if (!overlay) return;
+      overlay.classList.add("is-visible");
+      overlay.setAttribute("aria-hidden", "false");
+    };
+    const form = document.getElementById("overdueFilterForm");
+    if (form) {
+      form.addEventListener("submit", showLoading);
+    }
+    document.querySelectorAll(".card-footer .pagination a.page-link").forEach(function (link) {
+      link.addEventListener("click", showLoading);
+    });
+  })();
+</script>
 {% endblock %}

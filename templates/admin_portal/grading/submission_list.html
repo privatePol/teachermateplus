@@ -32,7 +32,7 @@
     </select>
   </div>
   <div class="col-md-4">
-    <input class="form-control" name="q" value="{{ q }}" placeholder="Course/section/period">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Course/section/period/faculty">
   </div>
   <div class="col-md-2">
     <button class="btn btn-outline-secondary w-100">Filter</button>
@@ -46,6 +46,7 @@
           <th>Term</th>
           <th>Course</th>
           <th>Section</th>
+          <th>Faculty</th>
           <th>Period</th>
           <th>Deadline</th>
           <th>Status</th>
@@ -59,6 +60,13 @@
           <td>{{ row.offering.term.name|default:row.offering.term.code }}</td>
           <td>{{ row.offering.course.title }} <span class="text-muted">({{ row.offering.course.code }})</span></td>
           <td>{{ row.offering.section.name|default:row.offering.section.code }}</td>
+          <td>
+            {% for faculty_name in row.faculty_names %}
+              <div>{{ faculty_name }}</div>
+            {% empty %}
+              <span class="text-muted">No accepted faculty</span>
+            {% endfor %}
+          </td>
           <td>{{ row.template_period.name|default:row.template_period.code }}</td>
           <td>
             {% if row.revert_deadline_at %}
@@ -90,7 +98,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="8" class="text-center text-muted py-4">No submissions found.</td></tr>
+        <tr><td colspan="9" class="text-center text-muted py-4">No submissions found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

@@ -93,6 +93,7 @@ class TenantGradingProfileFormTests(TestCase):
                 "program": self.program.id,
                 "course": "",
                 "course_type": "",
+                "term_type": TenantGradingProfile.TermType.SUMMER,
                 "profile_code": "PROFILE1",
                 "profile_name": "Weighted Profile",
                 "grading_template": self.template.id,
@@ -114,6 +115,7 @@ class TenantGradingProfileFormTests(TestCase):
             profile.final_grade_formula_mode,
             TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
         )
+        self.assertEqual(profile.term_type, TenantGradingProfile.TermType.SUMMER)
         self.assertEqual(
             profile.final_grade_formula_json,
             {

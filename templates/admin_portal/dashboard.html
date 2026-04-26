@@ -485,6 +485,9 @@
           {% if "grading_analytics.read" in effective_permissions %}
           <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:grading_analytics' %}">Grading Analytics</a></div>
           {% endif %}
+          {% if "grade_distribution_monitor.read" in effective_permissions %}
+          <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:grade_distribution_monitor' %}">Grade Distribution Monitor</a></div>
+          {% endif %}
             {% if has_faculty_assignments_read %}
             <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_assignment_dashboard' %}">Assignment Dashboard</a></div>
             <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_activity_monitor' %}">Faculty Activity Monitor</a></div>

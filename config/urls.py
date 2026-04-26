@@ -12,3 +12,6 @@ urlpatterns = [
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+if getattr(settings, "DEBUG_TOOLBAR_ENABLED", False):
+    urlpatterns.append(path("__debug__/", include("debug_toolbar.urls")))

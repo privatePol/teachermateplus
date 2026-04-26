@@ -15,9 +15,17 @@ env/
 db.sqlite3
 staticfiles/
 media/uploads/
+media/imports/
+media/correction_attachments/
+media/private/
+media/reports/
 *_bundle.json
 *.sqlite3.backup.*
 *.sql
+*.sql.gz
+*.enc
+*.gpg
+backups/
 
 # Environment / secrets
 .env

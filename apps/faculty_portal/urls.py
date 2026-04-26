@@ -29,6 +29,7 @@ from .views import (
     period_attendance_view,
     period_prediction_view,
     period_prediction_guide_view,
+    period_correction_attachment_download_view,
     period_correction_official_report_view,
     period_correction_finalize_view,
     period_corrections_view,
@@ -135,6 +136,11 @@ urlpatterns = [
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/corrections/<int:request_id>/finalize/",
         period_correction_finalize_view,
         name="period_correction_finalize",
+    ),
+    path(
+        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/corrections/<int:request_id>/attachments/<int:attachment_id>/download/",
+        period_correction_attachment_download_view,
+        name="period_correction_attachment_download",
     ),
     path(
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/corrections/<int:request_id>/official-report/",

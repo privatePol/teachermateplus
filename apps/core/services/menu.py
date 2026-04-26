@@ -3,6 +3,8 @@ from __future__ import annotations
 from django.urls import NoReverseMatch, reverse
 
 from apps.core.services.permissions import PermissionService
+from django.db.models import Prefetch
+
 from apps.navigation.models import MenuGroup, MenuItem
 
 
@@ -17,19 +19,33 @@ class MenuService:
             return "#"
 
     @classmethod
-    def get_menu_tree(cls, user, portal: str, tenant_id: int | None = None, campus_id: int | None = None):
+    def get_menu_tree(
+        cls,
+        user,
+        portal: str,
+        tenant_id: int | None = None,
+        campus_id: int | None = None,
+        effective_codes=None,
+    ):
+        item_queryset = (
+            MenuItem.objects.filter(is_active=True)
+            .select_related("parent")
+            .prefetch_related("menuitempermission_set__permission")
+            .order_by("sort_order", "id")
+        )
         groups = (
             MenuGroup.objects.filter(portal=portal, is_active=True)
             .order_by("sort_order", "id")
-            .prefetch_related("items__menuitempermission_set__permission", "items__parent")
+            .prefetch_related(Prefetch("items", queryset=item_queryset, to_attr="active_items"))
         )
-        effective_codes = PermissionService.get_effective_permission_codes(
-            user, tenant_id=tenant_id, campus_id=campus_id
-        )
+        if effective_codes is None:
+            effective_codes = PermissionService.get_effective_permission_codes(
+                user, tenant_id=tenant_id, campus_id=campus_id
+            )
 
         output = []
         for group in groups:
-            items = list(group.items.filter(is_active=True).order_by("sort_order", "id"))
+            items = list(getattr(group, "active_items", []))
             item_map = {}
             for item in items:
                 required_codes = set(

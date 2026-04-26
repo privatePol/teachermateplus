@@ -930,6 +930,34 @@ class FinalGradeFormulaTests(TestCase):
             is_finalized=True,
         )
 
+    def _create_profile(self, *, code, term_type=None, priority=100, course=None, is_default=False):
+        return TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            course=course,
+            term_type=term_type,
+            profile_code=code,
+            profile_name=code,
+            grading_template=self.template,
+            priority=priority,
+            is_default=is_default,
+            is_active=True,
+        )
+
+    def _create_offering_for_term(self, term):
+        return CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=term,
+            course=self.course,
+            section=self.section,
+        )
+
     def test_default_final_grade_averages_all_active_periods(self):
         self._create_period_grade(self.prelim, "92.00")
         self._create_period_grade(self.midterm, "88.00")
@@ -975,6 +1003,111 @@ class FinalGradeFormulaTests(TestCase):
 
         final_grade = StudentFinalGrade.objects.get(offering=self.offering, student=self.student)
         self.assertEqual(final_grade.final_grade, Decimal("36.00"))
+
+    def test_regular_term_selects_regular_profile_over_general_profile(self):
+        fallback = self._create_profile(code="GENERAL", priority=1, is_default=True)
+        regular = self._create_profile(
+            code="REGULAR",
+            term_type=TenantGradingProfile.TermType.REGULAR,
+            priority=100,
+        )
+
+        resolved = FacultyGradingService.resolve_grading_profile_for_offering(self.offering)
+
+        self.assertEqual(resolved, regular)
+        self.assertNotEqual(resolved, fallback)
+
+    def test_summer_term_selects_summer_profile_over_general_profile(self):
+        summer_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="SUMMER",
+            name="Summer",
+            term_type=Term.TermType.SUMMER,
+            sequence_no=3,
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 5, 31),
+        )
+        summer_offering = self._create_offering_for_term(summer_term)
+        fallback = self._create_profile(code="GENERAL", priority=1, is_default=True)
+        summer = self._create_profile(
+            code="SUMMER-PROFILE",
+            term_type=TenantGradingProfile.TermType.SUMMER,
+            priority=100,
+        )
+
+        resolved = FacultyGradingService.resolve_grading_profile_for_offering(summer_offering)
+
+        self.assertEqual(resolved, summer)
+        self.assertNotEqual(resolved, fallback)
+
+    def test_profile_resolution_falls_back_to_general_when_no_term_type_matches(self):
+        summer_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="SUMMER",
+            name="Summer",
+            term_type=Term.TermType.SUMMER,
+            sequence_no=3,
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 5, 31),
+        )
+        summer_offering = self._create_offering_for_term(summer_term)
+        fallback = self._create_profile(code="GENERAL", priority=100, is_default=True)
+        self._create_profile(
+            code="REGULAR",
+            term_type=TenantGradingProfile.TermType.REGULAR,
+            priority=1,
+        )
+
+        resolved = FacultyGradingService.resolve_grading_profile_for_offering(summer_offering)
+
+        self.assertEqual(resolved, fallback)
+
+    def test_profile_specificity_still_overrides_term_type(self):
+        summer_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="SUMMER",
+            name="Summer",
+            term_type=Term.TermType.SUMMER,
+            sequence_no=3,
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 5, 31),
+        )
+        summer_offering = self._create_offering_for_term(summer_term)
+        summer = self._create_profile(
+            code="SUMMER-PROFILE",
+            term_type=TenantGradingProfile.TermType.SUMMER,
+            priority=1,
+        )
+        course_specific = self._create_profile(
+            code="COURSE-SPECIFIC",
+            course=self.course,
+            priority=100,
+        )
+
+        resolved = FacultyGradingService.resolve_grading_profile_for_offering(summer_offering)
+
+        self.assertEqual(resolved, course_specific)
+        self.assertNotEqual(resolved, summer)
+
+    def test_profile_priority_still_applies_with_same_specificity(self):
+        slower = self._create_profile(
+            code="REGULAR-SLOWER",
+            term_type=TenantGradingProfile.TermType.REGULAR,
+            priority=20,
+        )
+        faster = self._create_profile(
+            code="REGULAR-FASTER",
+            term_type=TenantGradingProfile.TermType.REGULAR,
+            priority=10,
+        )
+
+        resolved = FacultyGradingService.resolve_grading_profile_for_offering(self.offering)
+
+        self.assertEqual(resolved, faster)
+        self.assertNotEqual(resolved, slower)
 
     def test_passing_threshold_falls_back_to_template_threshold(self):
         self.template.passing_grade_threshold = Decimal("80.00")

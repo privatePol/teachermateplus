@@ -333,7 +333,7 @@
               <tr>
                 <td>Academic Years and Terms</td>
                 <td><strong>Admin Portal -> Academics -> Academic Years / Terms</strong></td>
-                <td>Define the academic calendar used by offerings, enrollment, grading, and submission governance.</td>
+                <td>Define the academic calendar used by offerings, enrollment, grading, and submission governance. Mark each term as Regular, Summer, or Special so term-type grading profiles can resolve the correct final-grade rule.</td>
               </tr>
               <tr>
                 <td>Courses and Sections</td>
@@ -354,6 +354,11 @@
                 <td>Course Template Assignment</td>
                 <td><strong>Admin Portal -> Grading -> Course Template Assignments</strong></td>
                 <td>Assign the correct grading template to course masters. Bulk assignment can now be used when many courses share the same template.</td>
+              </tr>
+              <tr>
+                <td>Tenant Grading Profiles</td>
+                <td><strong>Admin Portal -> Grading -> Tenant Grading Profiles</strong></td>
+                <td>Configure profile scope, template, passing threshold, and final-grade formula. Leave Applicable Term Type blank for all terms, or choose Summer/Special when a different reusable formula should apply to that term type.</td>
               </tr>
               <tr>
                 <td>Template Coverage Check</td>
@@ -659,7 +664,7 @@
           <ol class="guide-steps">
             <li>Create the needed <strong>Period Lock</strong> row first, with the correct campus, term, and the actual <strong>grading period code used by the template</strong> plus the intended deadline.</li>
             <li>Use <strong>Grade Submissions</strong> to monitor open classes as the deadline approaches and follow up on rows that are still pending.</li>
-            <li>After deadline, use <strong>Non-Compliance on Periodic Grades Submission</strong> to see which faculty members still have overdue unsubmitted grade books for each grading period.</li>
+            <li>After deadline, use <strong>Non-Compliance on Periodic Grades Submission</strong> to see accepted faculty assignments that still have overdue unsubmitted grade books for each grading period.</li>
             <li>Unsubmitted overdue grade books remain open until the faculty submits them. The deadline acts as a compliance checkpoint, not an automatic encoding shutdown.</li>
             <li>Use correction workflow only for already submitted grade books that need changes. Do not use deadline policy to force reopen for unfinished but unsubmitted encoding.</li>
           </ol>
@@ -915,6 +920,19 @@
             <li>Prediction uses the same grading template path as the official computation engine, but it never writes to the gradebook.</li>
             <li>Refresh the prediction snapshot after major score changes when you need an updated projection immediately.</li>
           </ul>
+          <div class="guide-subhead">Faculty Grade Distribution Monitor</div>
+          <ol class="guide-steps">
+            <li>Grant authorized academic leaders the <code>grade_distribution_monitor.read</code> permission through Roles or direct user permissions.</li>
+            <li>Open <strong>Configuration Management</strong>, then set the <strong>Faculty Grade Distribution Monitor</strong> thresholds for high-grade bands, exact 100 rates, low variation, and small sample size.</li>
+            <li>Open <strong>Grade Distribution Monitor</strong> from the Admin Dashboard quick actions or the Grading menu.</li>
+            <li>Filter by tenant scope, campus, department, academic year, term, faculty, course, class, period, component, or sub-component as needed.</li>
+            <li>Use <strong>Period Grades</strong> to review official stored period-grade distribution, or <strong>Activity Scores</strong> to review encoded activity-score patterns.</li>
+            <li>Review the neutral status badges: <strong>High Grade Concentration</strong>, <strong>High Perfect Score Rate</strong>, <strong>Low Grade Variation</strong>, <strong>Small Sample</strong>, and <strong>Incomplete Data</strong>.</li>
+            <li>Use <strong>Export CSV</strong> when a meeting or review needs an aggregated copy of the scoped results.</li>
+          </ol>
+          <div class="guide-note">
+            This monitor is read-only and uses aggregated data by default. It is intended for academic review and informed follow-up, not automatic disciplinary action.
+          </div>
           <div class="guide-subhead">Submission Non-Compliance Notices</div>
           <ol class="guide-steps">
             <li>Open <strong>Configuration Management</strong>, then find the <strong>Submission Non-Compliance Notices</strong> card.</li>
@@ -952,6 +970,7 @@
               <li>Open <strong>Faculty Final Clearance</strong> once final submissions are complete to preview which assigned classes are already complete or still incomplete per faculty member, and to verify already generated official clearance reports.</li>
               <li>Faculty generates the official clearance in the Faculty Portal. Authorized personnel may verify a printed copy either by scanning the printed QR code or by entering the printed <strong>Reference No.</strong> and <strong>Verification Code</strong> in the Admin Portal verification lookup.</li>
               <li><strong>Configuration Management</strong> now includes a <strong>User Signatures</strong> card so NCBA can decide whether encrypted account signatures are allowed at all, and whether they may appear on Faculty Final Clearance and Correction Official Report PDFs.</li>
+              <li>Sensitive correction attachments and official correction reports open through authenticated EduGradesPro views and are recorded in audit logs. IT must still ensure protected media folders are not directly exposed by the production web server.</li>
               <li>Review audit logs and analytics before final release/export.</li>
             </ul>
         </div>

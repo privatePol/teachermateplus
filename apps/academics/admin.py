@@ -12,9 +12,9 @@ class AcademicYearAdmin(admin.ModelAdmin):
 
 @admin.register(Term)
 class TermAdmin(admin.ModelAdmin):
-    list_display = ("tenant", "academic_year", "code", "name", "sequence_no", "is_active")
+    list_display = ("tenant", "academic_year", "code", "name", "term_type", "sequence_no", "is_active")
     search_fields = ("code", "name")
-    list_filter = ("tenant", "academic_year", "is_active")
+    list_filter = ("tenant", "academic_year", "term_type", "is_active")
 
 
 @admin.register(Course)

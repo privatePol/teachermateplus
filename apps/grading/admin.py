@@ -95,6 +95,7 @@ class TenantGradingProfileAdmin(admin.ModelAdmin):
         "program",
         "course",
         "course_type",
+        "term_type",
         "grading_template",
         "priority",
         "passing_grade_threshold",
@@ -102,7 +103,7 @@ class TenantGradingProfileAdmin(admin.ModelAdmin):
         "is_active",
     )
     search_fields = ("profile_code", "profile_name", "course__code", "course_type", "grading_template__code")
-    list_filter = ("tenant", "campus", "is_default", "is_active")
+    list_filter = ("tenant", "campus", "term_type", "is_default", "is_active")
 
 
 @admin.register(CourseBaseValueOverride)
@@ -232,8 +233,12 @@ class GradeCorrectionRequestItemAdmin(admin.ModelAdmin):
 
 @admin.register(GradeCorrectionAttachment)
 class GradeCorrectionAttachmentAdmin(admin.ModelAdmin):
-    list_display = ("correction_request", "file", "uploaded_by_user", "created_at")
-    search_fields = ("correction_request__offering__course__code", "uploaded_by_user__username")
+    list_display = ("correction_request", "original_filename", "content_type", "file_size_bytes", "uploaded_by_user", "created_at")
+    search_fields = (
+        "correction_request__offering__course__code",
+        "original_filename",
+        "uploaded_by_user__username",
+    )
 
 
 @admin.register(GradeCorrectionUnlockWindow)

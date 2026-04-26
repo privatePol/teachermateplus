@@ -1,3 +1,4 @@
+import importlib.util
 import os
 from pathlib import Path
 
@@ -34,6 +35,14 @@ INSTALLED_APPS = [
     "apps.faculty_portal.apps.FacultyPortalConfig",
 ]
 
+DEBUG_TOOLBAR_ENABLED = (
+    DEBUG
+    and os.getenv("DJANGO_DEBUG_TOOLBAR", "False").lower() == "true"
+    and importlib.util.find_spec("debug_toolbar") is not None
+)
+if DEBUG_TOOLBAR_ENABLED:
+    INSTALLED_APPS.append("debug_toolbar")
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -46,6 +55,9 @@ MIDDLEWARE = [
     "apps.core.middleware.PortalAccessMiddleware",
     "apps.core.middleware.PostLoginSecurityMiddleware",
 ]
+if DEBUG_TOOLBAR_ENABLED:
+    MIDDLEWARE.insert(0, "debug_toolbar.middleware.DebugToolbarMiddleware")
+    INTERNAL_IPS = [ip.strip() for ip in os.getenv("DJANGO_INTERNAL_IPS", "127.0.0.1").split(",") if ip.strip()]
 
 ROOT_URLCONF = "config.urls"
 
@@ -108,6 +120,13 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+CACHES = {
+    "default": {
+        "BACKEND": os.getenv("DJANGO_CACHE_BACKEND", "django.core.cache.backends.locmem.LocMemCache"),
+        "LOCATION": os.getenv("DJANGO_CACHE_LOCATION", "edugradespro-local"),
+    }
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.User"

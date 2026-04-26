@@ -76,7 +76,16 @@
           <td>{{ row.name }}</td>
           <td>{{ row.default_base_value }}</td>
           <td>{{ row.passing_grade_threshold|default:"Tenant/Profile Default" }}</td>
-          <td>{{ row.period_count }}</td>
+          <td>
+            <div>{{ row.period_count }}</div>
+            {% if row.active_period_codes %}
+              <div class="small text-muted">
+                {% for code in row.active_period_codes %}
+                  <code>{{ code }}</code>{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+              </div>
+            {% endif %}
+          </td>
           <td>
             {% if row.is_published %}
               <span class="badge text-bg-success">Published</span>

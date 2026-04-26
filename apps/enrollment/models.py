@@ -45,6 +45,11 @@ class Enrollment(TimeStampedModel, ActivatableModel):
     class Meta:
         db_table = "enrollments"
         ordering = ["student__last_name", "student__first_name", "student__student_no"]
+        indexes = [
+            models.Index(fields=["course_offering", "is_active", "enrollment_status"], name="idx_enroll_offering_status"),
+            models.Index(fields=["tenant", "campus", "academic_year", "term", "is_active"], name="idx_enroll_scope_term"),
+            models.Index(fields=["student", "is_active", "enrollment_status"], name="idx_enroll_student_status"),
+        ]
         constraints = [
             models.UniqueConstraint(fields=["course_offering", "student"], name="uq_enrollments_offering_student"),
         ]

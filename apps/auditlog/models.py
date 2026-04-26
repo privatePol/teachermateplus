@@ -37,6 +37,11 @@ class AuditLog(models.Model):
     class Meta:
         db_table = "audit_logs"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "created_at"], name="idx_audit_scope_created"),
+            models.Index(fields=["actor_user", "portal", "created_at"], name="idx_audit_actor_portal"),
+            models.Index(fields=["entity_type", "action", "created_at"], name="idx_audit_entity_action"),
+        ]
 
     def __str__(self):
         return f"{self.portal}:{self.action}:{self.entity_type}:{self.entity_id or '-'}"

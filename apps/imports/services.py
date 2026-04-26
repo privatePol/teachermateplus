@@ -1212,6 +1212,12 @@ class BulkImportService:
         content = uploaded_file.read()
         original_filename = uploaded_file.name
         source_file = ContentFile(content, name=original_filename)
+        upload_metadata = {
+            "scope": scope,
+            "original_filename": original_filename,
+            "content_type": (getattr(uploaded_file, "content_type", "") or "").strip(),
+            "file_size_bytes": len(content or b""),
+        }
 
         batch = ImportBatch.objects.create(
             import_type=import_type,
@@ -1223,8 +1229,13 @@ class BulkImportService:
             original_filename=original_filename,
             expected_headers_json=expected_headers,
             actual_headers_json=[],
-            metadata_json={"scope": scope},
+            metadata_json=upload_metadata,
         )
+        batch.metadata_json = {
+            **upload_metadata,
+            "stored_filename": batch.source_file.name,
+        }
+        batch.save(update_fields=["metadata_json", "updated_at"])
 
         try:
             csv_rows = cls._read_csv_from_bytes(content)

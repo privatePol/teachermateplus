@@ -1,0 +1,280 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="h4 mb-1">Faculty Grade Distribution Monitor</h2>
+    <div class="text-muted small">Read-only academic governance view for grading patterns and review indicators.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-success" href="?{{ export_query }}">Export CSV</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-2">
+        <label class="form-label mb-1">Data Level</label>
+        <select class="form-select" name="source">
+          <option value="period" {% if selected.source == "period" %}selected{% endif %}>Period Grades</option>
+          <option value="activity" {% if selected.source == "activity" %}selected{% endif %}>Activity Scores</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Campus</label>
+        <select class="form-select" name="campus_id">
+          <option value="">All Campuses</option>
+          {% for campus in filter_options.campuses %}
+          <option value="{{ campus.id }}" {% if selected.campus_id == campus.id %}selected{% endif %}>{{ campus.code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Department</label>
+        <select class="form-select" name="department_id">
+          <option value="">All Departments</option>
+          {% for department in filter_options.departments %}
+          <option value="{{ department.id }}" {% if selected.department_id == department.id %}selected{% endif %}>{{ department.code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Academic Year</label>
+        <select class="form-select" name="academic_year_id">
+          <option value="">All Years</option>
+          {% for ay in filter_options.academic_years %}
+          <option value="{{ ay.id }}" {% if selected.academic_year_id == ay.id %}selected{% endif %}>{{ ay.code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Term</label>
+        <select class="form-select" name="term_id">
+          <option value="">All Terms</option>
+          {% for term in filter_options.terms %}
+          <option value="{{ term.id }}" {% if selected.term_id == term.id %}selected{% endif %}>{{ term.academic_year.code }} / {{ term.code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Faculty</label>
+        <select class="form-select" name="faculty_id">
+          <option value="">All Faculty</option>
+          {% for faculty in filter_options.faculty %}
+          <option value="{{ faculty.id }}" {% if selected.faculty_id == faculty.id %}selected{% endif %}>
+            {% firstof faculty.get_full_name faculty.username %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label mb-1">Course / Subject</label>
+        <select class="form-select" name="course_id">
+          <option value="">All Courses</option>
+          {% for course in filter_options.courses %}
+          <option value="{{ course.id }}" {% if selected.course_id == course.id %}selected{% endif %}>{{ course.code }} - {{ course.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label mb-1">Class / Offering</label>
+        <select class="form-select" name="offering_id">
+          <option value="">All Classes</option>
+          {% for offering in filter_options.offerings %}
+          <option value="{{ offering.id }}" {% if selected.offering_id == offering.id %}selected{% endif %}>
+            {{ offering.course.code }} / {{ offering.section.code }} / {{ offering.term.code }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Grading Period</label>
+        <select class="form-select" name="period_id">
+          <option value="">All Periods</option>
+          {% for period in filter_options.periods %}
+          <option value="{{ period.id }}" {% if selected.period_id == period.id %}selected{% endif %}>{{ period.template.code }} / {{ period.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Component</label>
+        <select class="form-select" name="component_id">
+          <option value="">All Components</option>
+          {% for component in filter_options.components %}
+          <option value="{{ component.id }}" {% if selected.component_id == component.id %}selected{% endif %}>{{ component.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1">Sub-component</label>
+        <select class="form-select" name="subcomponent_id">
+          <option value="">All Sub-components</option>
+          {% for subcomponent in filter_options.subcomponents %}
+          <option value="{{ subcomponent.id }}" {% if selected.subcomponent_id == subcomponent.id %}selected{% endif %}>{{ subcomponent.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-3 d-flex gap-2">
+        <button class="btn btn-outline-success w-100" type="submit">Apply Filters</button>
+        <a class="btn btn-outline-secondary" href="{% url 'admin_portal:grade_distribution_monitor' %}">Clear</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Classes in Scope</div>
+        <div class="h5 mb-0">{{ summary.offerings }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Rows Reviewed</div>
+        <div class="h5 mb-0">{{ summary.rows }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">For Review</div>
+        <div class="h5 mb-0">{{ summary.review_rows }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Incomplete Data</div>
+        <div class="h5 mb-0">{{ summary.incomplete_rows }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">High Grade Concentration</div>
+        <div class="h5 mb-0">{{ summary.high_concentration_rows }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2 col-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">High Perfect Score Rate</div>
+        <div class="h5 mb-0">{{ summary.high_perfect_rows }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body small text-muted">
+    Review flags are indicators for academic review, not findings of misconduct. Current thresholds:
+    high grade band {{ settings.high_grade_band_min }}-{{ settings.high_grade_band_max }},
+    high grade concentration at {{ settings.high_grade_concentration_threshold_percent }}%,
+    exact 100 rate at {{ settings.exact_100_threshold_percent }}%,
+    low variation at {{ settings.low_variation_threshold }} points,
+    minimum sample {{ settings.minimum_student_count_for_flag }} students.
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white fw-semibold">Grade Distribution Results</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Faculty</th>
+        <th>Class</th>
+        <th>Period / Level</th>
+        <th>Graded</th>
+        <th>Average</th>
+        <th>90-100</th>
+        <th>80-89</th>
+        <th>75-79</th>
+        <th>Below Passing</th>
+        <th>Exact 100</th>
+        <th>Spread</th>
+        <th>Comparison</th>
+        <th>Status</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.faculty_name }}</td>
+        <td>
+          <div class="fw-semibold">{{ row.course_code }} / {{ row.section }}</div>
+          <div class="small text-muted">{{ row.course_title }}</div>
+          <div class="small text-muted">{{ row.campus }} / {{ row.department }} / {{ row.school_year }} {{ row.term }}</div>
+        </td>
+        <td>
+          <div class="fw-semibold">{{ row.period }}</div>
+          <div class="small text-muted">{{ row.level_label }}{% if row.component %} / {{ row.component }}{% endif %}{% if row.subcomponent %} / {{ row.subcomponent }}{% endif %}</div>
+          {% if row.activity_title %}<div class="small text-muted">{{ row.activity_title }}</div>{% endif %}
+        </td>
+        <td>{{ row.graded_count }}{% if row.active_count %}<span class="text-muted"> / {{ row.active_count }}</span>{% endif %}</td>
+        <td>{% if row.average is not None %}{{ row.average|floatformat:2 }}{% else %}-{% endif %}</td>
+        <td>
+          <div class="small fw-semibold">{{ row.high_pct }}%</div>
+          <div class="progress" style="height: 5px;"><div class="progress-bar bg-success" style="width: {{ row.high_pct }}%"></div></div>
+        </td>
+        <td>{{ row.band_80_89_pct }}%</td>
+        <td>{{ row.band_75_79_pct }}%</td>
+        <td>{{ row.below_passing_pct }}%</td>
+        <td>{{ row.exact_100_pct }}%</td>
+        <td>
+          {% if row.spread is not None %}{{ row.spread|floatformat:2 }}{% else %}-{% endif %}
+          <div class="small text-muted">
+            {% if row.lowest is not None and row.highest is not None %}{{ row.lowest|floatformat:2 }} - {{ row.highest|floatformat:2 }}{% endif %}
+          </div>
+        </td>
+        <td>
+          <div class="small">Dept: {% if row.department_average is not None %}{{ row.department_average|floatformat:2 }}{% else %}-{% endif %}</div>
+          <div class="small text-muted">Subject: {% if row.subject_average is not None %}{{ row.subject_average|floatformat:2 }}{% else %}-{% endif %}</div>
+        </td>
+        <td>
+          <div class="d-flex flex-wrap gap-1">
+            {% for flag in row.flags %}
+            <span class="badge {{ flag.class }}">{{ flag.label }}</span>
+            {% endfor %}
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="13" class="text-center text-muted py-4">No grade distribution data is available for the selected filters.</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+    <div class="small text-muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+    <div class="btn-group btn-group-sm">
+      {% if page_obj.has_previous %}
+      <a class="btn btn-outline-secondary" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+      {% else %}
+      <span class="btn btn-outline-secondary disabled">Previous</span>
+      {% endif %}
+      {% if page_obj.has_next %}
+      <a class="btn btn-outline-secondary" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+      {% else %}
+      <span class="btn btn-outline-secondary disabled">Next</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

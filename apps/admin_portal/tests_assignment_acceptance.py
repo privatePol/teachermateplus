@@ -1086,3 +1086,95 @@ class AdminNonComplianceMonitorTests(TestCase):
         self.assertContains(response, "Warning")
         self.assertContains(response, "Escalate non-compliance")
         self.assertNotContains(response, "Review Request")
+
+    def test_non_compliance_report_excludes_unaccepted_faculty_assignments(self):
+        unaccepted_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIT-1B",
+            name="BSIT 1B",
+        )
+        unaccepted_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=unaccepted_section,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=unaccepted_offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+            response_status=FacultyAssignment.ResponseStatus.PENDING,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("admin_portal:overdue_unsubmitted_report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "BSIT-1A")
+        self.assertNotContains(response, "BSIT-1B")
+
+    def test_non_compliance_pagination_preserves_filters(self):
+        for index in range(31):
+            section = Section.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                program=self.program,
+                code=f"BSIT-P{index:02d}",
+                name=f"BSIT P{index:02d}",
+            )
+            offering = CourseOffering.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                program=self.program,
+                academic_year=self.academic_year,
+                term=self.term,
+                course=self.course,
+                section=section,
+            )
+            FacultyAssignment.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=offering,
+                faculty_user=self.faculty_user,
+                is_primary=True,
+                accepted_at=timezone.now(),
+                accepted_by=self.faculty_user,
+                response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(
+            reverse("admin_portal:overdue_unsubmitted_report"),
+            {"q": "late_faculty", "period_code": "PRELIM"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "q=late_faculty&amp;period_code=PRELIM&amp;page=2")
+
+    def test_grade_submission_list_shows_faculty_name_and_searches_faculty(self):
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            status=GradeSubmission.Status.DRAFT,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("admin_portal:grade_submission_list"), {"q": "late_faculty"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Faculty")
+        self.assertContains(response, self.faculty_user.full_name or self.faculty_user.username)
+        self.assertContains(response, "A132-ITAPPS")

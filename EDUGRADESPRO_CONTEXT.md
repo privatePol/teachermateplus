@@ -20,6 +20,11 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - Role creation now supports optional permission-copying from an existing role before final permission fine-tuning.
 - Role management now also supports editing existing roles, including activation/deactivation from the Admin UI.
 - Role assignment scope now supports department-level granularity (`tenant + campus + department`) for governance use cases such as AC/Dean monitoring boundaries.
+- Application-level data-at-rest protections now include authenticated correction-attachment download views, upload validation, randomized stored filenames for correction attachments and import source files, and audit logging for sensitive upload/download/signature-preview/report-download events.
+- Server-side data-at-rest work remains an IT responsibility; `docs/DATA_AT_REST_PROTECTION_GUIDE.md` documents the manual checklist for disk encryption, direct media serving restrictions, database users, firewall, backups, and OS permissions.
+- Application-level performance improvements now include request-level permission reuse for portal menu rendering, optimized Faculty Dashboard aggregate counts, targeted summary-page recomputation for missing rows only, focused composite indexes for common scope/status/gradebook filters, environment-driven Django cache settings, and optional dev-only Debug Toolbar wiring. See `docs/performance_optimization.md`.
+- The Admin `Non-Compliance on Periodic Grades Submission` monitor lists overdue unsubmitted classes only when the faculty assignment has already been accepted. Pagination preserves filters, and missing-record counts are computed for visible page rows to keep large reports responsive.
+- The Admin `Grade Submissions` list includes accepted faculty names and can be searched by faculty name or username in addition to course, section, and period.
 - Organization: tenants, campuses, departments, programs
 - Academics: academic years, terms, courses, sections, offerings, faculty assignments, students
 - Faculty assignments now carry acknowledgment fields (`accepted_at`, `accepted_by`) so admin can track whether the faculty member already accepted the load.
@@ -131,6 +136,12 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - the Faculty Portal shows an overdue / non-compliance warning
   - authorized academic users review overdue classes from the admin non-compliance list instead of through late-completion access requests
 - Grade correction remains reserved for already submitted grade books that need changes; overdue but unsubmitted grade books do not use reopen/late-completion workflow.
+- Admin Portal now includes a read-only `Faculty Grade Distribution Monitor` for configured academic governance users with `grade_distribution_monitor.read`.
+  - The monitor aggregates stored period grades or stored activity computed scores by scoped faculty/class/period/activity context.
+  - It uses neutral indicators only: `High Grade Concentration`, `High Perfect Score Rate`, `Low Grade Variation`, `Small Sample`, and `Incomplete Data`.
+  - Its thresholds are tenant-level settings exposed in `Configuration Management -> Faculty Grade Distribution Monitor`.
+  - It does not recalculate grades, change templates, expose student-level drilldown, or modify submissions/enrollments/assignments.
+  - All rows are limited through the existing Admin scope service for tenant, campus, department, academic year, term, course, offering, and faculty access.
 - Faculty period Summary pages now present submission readiness through colored metric cards instead of a single inline text line, including counts for `ACTIVE`, complete records, missing records, coverage, `DRP`, `W`, and `INC`.
 - Summary pass/fail interpretation uses the current grading threshold resolved by `FacultyGradingService.resolve_passing_threshold(offering)`:
   - profile-level `TenantGradingProfile.passing_grade_threshold`
@@ -141,6 +152,11 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - Final-grade formula now also supports layered profile governance:
   - `TenantGradingProfile.final_grade_formula_mode = AVERAGE_ACTIVE_PERIODS` keeps the default NCBA-style rule of averaging all active grading periods from the matched template
   - `TenantGradingProfile.final_grade_formula_mode = WEIGHTED_PERIODS` lets a tenant define explicit period weights through `final_grade_formula_json`
+  - Academic `Term.term_type` classifies terms as `REGULAR`, `SUMMER`, or `SPECIAL`
+  - `TenantGradingProfile.term_type` optionally restricts a profile to one term type; blank/null remains the all-terms fallback for backward compatibility
+  - Profile resolution still prioritizes scope specificity first (`course -> course type -> program -> department -> campus`), then matching `term_type`, then exact `effective_from_term`, then priority/default/id
+  - Operational note: existing terms default to `REGULAR`; admins must mark Summer terms as `SUMMER` before Summer-specific grading profiles will match
+  - Detailed operational setup is documented in `docs/TENANT_GRADING_PROFILE_SETUP_GUIDE.md`, including NCBA regular templates, Summer profile formula setup, and Taytay-only template scoping
   - example weighted profile payload:
     - `{"period_weights": [{"period_code": "PRELIM", "weight": "20.00"}, {"period_code": "MIDTERM", "weight": "20.00"}, {"period_code": "PREFINAL", "weight": "20.00"}, {"period_code": "FINAL", "weight": "40.00"}]}`
   - the Admin form for Tenant Grading Profiles now includes field-by-field help text so tenant, campus, department, program, course, base value, passing threshold, formula mode, weights, priority, and effective term are easier to understand during setup

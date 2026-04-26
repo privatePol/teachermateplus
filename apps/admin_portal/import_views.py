@@ -205,6 +205,9 @@ def import_upload_view(request, import_slug: str):
                 "valid_rows": batch.valid_rows,
                 "invalid_rows": batch.invalid_rows,
                 "filename": batch.original_filename,
+                "stored_filename": batch.source_file.name if batch.source_file else "",
+                "content_type": (batch.metadata_json or {}).get("content_type", ""),
+                "file_size_bytes": (batch.metadata_json or {}).get("file_size_bytes", 0),
             },
             request=request,
         )

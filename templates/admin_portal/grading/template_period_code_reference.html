@@ -1,0 +1,50 @@
+<div class="card border-0 shadow-sm mt-3">
+  <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <div>
+      <div class="fw-semibold">Active Template Period Codes</div>
+      <div class="small text-muted">Use these exact codes in Tenant Grading Profile period weights.</div>
+    </div>
+    {% if template_obj %}
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:grading_template_builder' template_obj.id %}">Open Builder</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_period_list' %}?template_id={{ template_obj.id }}">Manage Periods</a>
+      </div>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    {% if template_periods %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Name</th>
+              <th>Sequence</th>
+              <th>Active</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for period in template_periods %}
+            <tr>
+              <td><code>{{ period.code }}</code></td>
+              <td>{{ period.name }}</td>
+              <td>{{ period.sequence_no }}</td>
+              <td>
+                {% if period.is_active %}
+                  <span class="badge text-bg-success">Active</span>
+                {% else %}
+                  <span class="badge text-bg-warning text-dark">Inactive</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-muted">
+        No template periods are defined yet. Save the template, then open Builder or Manage Periods to add period codes such as <code>PRELIM</code>, <code>MIDTERM</code>, <code>PREFINAL</code>, and <code>FINAL</code>.
+      </div>
+    {% endif %}
+  </div>
+</div>

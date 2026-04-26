@@ -32,6 +32,9 @@ class Student(TimeStampedModel, ActivatableModel):
     class Meta:
         db_table = "students"
         ordering = ["last_name", "first_name", "student_no"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "department", "is_active", "status"], name="idx_students_scope_status"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["tenant", "campus", "student_no"],

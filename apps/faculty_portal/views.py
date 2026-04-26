@@ -8,7 +8,7 @@ from django.contrib import messages
 from django import forms as django_forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Avg, Count, Prefetch, Q
-from django.http import FileResponse, JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -904,21 +904,17 @@ def dashboard_view(request):
     dashboard_now = timezone.now()
 
     if active_offering_ids:
-        dropped_students = Enrollment.objects.filter(
+        enrollment_status_counts = Enrollment.objects.filter(
             course_offering_id__in=active_offering_ids,
             is_active=True,
-            enrollment_status=Enrollment.Status.DRP,
-        ).count()
-        withdrawn_students = Enrollment.objects.filter(
-            course_offering_id__in=active_offering_ids,
-            is_active=True,
-            enrollment_status=Enrollment.Status.W,
-        ).count()
-        incomplete_students = Enrollment.objects.filter(
-            course_offering_id__in=active_offering_ids,
-            is_active=True,
-            enrollment_status=Enrollment.Status.INC,
-        ).count()
+        ).aggregate(
+            dropped=Count("id", filter=Q(enrollment_status=Enrollment.Status.DRP)),
+            withdrawn=Count("id", filter=Q(enrollment_status=Enrollment.Status.W)),
+            incomplete=Count("id", filter=Q(enrollment_status=Enrollment.Status.INC)),
+        )
+        dropped_students = enrollment_status_counts.get("dropped") or 0
+        withdrawn_students = enrollment_status_counts.get("withdrawn") or 0
+        incomplete_students = enrollment_status_counts.get("incomplete") or 0
         active_enrollments = list(
             Enrollment.objects.filter(
                 course_offering_id__in=active_offering_ids,
@@ -1009,7 +1005,7 @@ def dashboard_view(request):
     )
 
     stats = {
-        "assigned_courses": offerings_qs.count(),
+        "assigned_courses": len(active_offerings) + len(archived_offerings),
         "active_classes": len(active_offerings),
         "archived_classes": len(archived_offerings),
         "active_enrollments": active_enrollments_count,
@@ -2608,6 +2604,21 @@ def period_final_clearance_view(request, offering_id: int, period_id: int):
         )
         filename = _faculty_final_clearance_report_filename(report_obj)
         pdf_bytes = FacultyFinalClearanceReportService.build_pdf_bytes(report_obj=report_obj)
+        AuditService.log_event(
+            action="DOWNLOAD",
+            portal="FACULTY",
+            entity_type="FacultyFinalClearanceReport",
+            entity_id=report_obj.id,
+            actor=request.user,
+            tenant=report_obj.tenant,
+            campus=report_obj.campus,
+            metadata={
+                "reference_no": report_obj.reference_no,
+                "filename": filename,
+                "content_type": "application/pdf",
+            },
+            request=request,
+        )
         return FileResponse(
             BytesIO(pdf_bytes),
             as_attachment=False,
@@ -2685,11 +2696,15 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         )
         selected_detail_id = str(editing_activity.template_detail_id) if editing_activity.template_detail_id else None
 
+    subcomponents = list(subcomponent_qs)
+    details = list(detail_qs)
+    component_ids_with_subcomponents = {subcomponent.template_component_id for subcomponent in subcomponents}
+    subcomponent_ids_with_details = {detail.template_subcomponent_id for detail in details}
     component_option_data = [
         {
             "id": str(component.id),
             "name": component.name,
-            "has_subcomponents": subcomponent_qs.filter(template_component_id=component.id).exists(),
+            "has_subcomponents": component.id in component_ids_with_subcomponents,
         }
         for component in component_qs
     ]
@@ -2698,9 +2713,9 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
             "id": str(subcomponent.id),
             "name": subcomponent.name,
             "component_id": str(subcomponent.template_component_id),
-            "has_details": detail_qs.filter(template_subcomponent_id=subcomponent.id).exists(),
+            "has_details": subcomponent.id in subcomponent_ids_with_details,
         }
-        for subcomponent in subcomponent_qs
+        for subcomponent in subcomponents
     ]
     detail_option_data = [
         {
@@ -2708,7 +2723,7 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
             "name": detail.name,
             "subcomponent_id": str(detail.template_subcomponent_id),
         }
-        for detail in detail_qs
+        for detail in details
     ]
 
     if request.method == "POST" and form.is_valid():
@@ -3207,53 +3222,73 @@ def period_summary_view(request, offering_id: int, period_id: int):
     )
 
     state = _period_edit_state(offering, period)
-    if state["is_editable"]:
-        summary = FacultyGradingService.recompute_period_summary(
-            user=request.user,
-            offering=offering,
-            template_period=period,
-            audit_portal="FACULTY",
-        )
-        AuditService.log_event(
-            action="COMPUTE",
-            portal="FACULTY",
-            entity_type="PeriodSummary",
-            entity_id=f"{offering.id}:{period.id}",
-            actor=request.user,
-            tenant=offering.tenant,
-            campus=offering.campus,
-            metadata={"offering_id": offering.id, "period_id": period.id},
-            request=request,
-        )
-    else:
-        period_rows = list(
+    def _stored_period_summary():
+        period_enrollments = list(
             Enrollment.objects.filter(course_offering_id=offering.id, is_active=True).select_related("student")
         )
         component_codes = [
             c.code for c in period.components.filter(is_active=True).order_by("sort_order", "id")
         ]
-        grade_map = {
+        stored_grade_map = {
             row.student_id: row
             for row in StudentPeriodGrade.objects.filter(offering_id=offering.id, template_period_id=period.id)
         }
-        rows = []
-        for enrollment in period_rows:
-            p = grade_map.get(enrollment.student_id)
-            rows.append(
+        summary_rows = []
+        missing_student_ids = []
+        for enrollment in period_enrollments:
+            period_grade_row = stored_grade_map.get(enrollment.student_id)
+            if period_grade_row is None:
+                missing_student_ids.append(enrollment.student_id)
+            summary_rows.append(
                 {
                     "student": enrollment.student,
                     "enrollment_status": enrollment.enrollment_status,
                     "component_scores": {},
-                    "class_standing": p.class_standing_grade if p else None,
-                    "exam_grade": p.exam_grade if p else None,
-                    "period_grade": p.period_grade if p else None,
+                    "class_standing": period_grade_row.class_standing_grade if period_grade_row else None,
+                    "exam_grade": period_grade_row.exam_grade if period_grade_row else None,
+                    "period_grade": period_grade_row.period_grade if period_grade_row else None,
                 }
             )
-        summary = {
-            "rows": rows,
-            "component_codes": component_codes,
-            "base_value": FacultyGradingService.resolve_base_value(offering, template),
+        return {
+            "summary": {
+                "rows": summary_rows,
+                "component_codes": component_codes,
+                "base_value": FacultyGradingService.resolve_base_value(offering, template),
+            },
+            "missing_student_ids": missing_student_ids,
         }
+
+    stored_summary_payload = _stored_period_summary()
+    if state["is_editable"]:
+        missing_student_ids = stored_summary_payload["missing_student_ids"]
+        if missing_student_ids:
+            FacultyGradingService.recompute_period_summary_for_students(
+                user=request.user,
+                offering=offering,
+                template_period=period,
+                student_ids=missing_student_ids,
+                audit_portal="FACULTY",
+            )
+            AuditService.log_event(
+                action="COMPUTE",
+                portal="FACULTY",
+                entity_type="PeriodSummary",
+                entity_id=f"{offering.id}:{period.id}",
+                actor=request.user,
+                tenant=offering.tenant,
+                campus=offering.campus,
+                metadata={
+                    "offering_id": offering.id,
+                    "period_id": period.id,
+                    "recomputed_student_count": len(missing_student_ids),
+                    "scope": "missing_students",
+                },
+                request=request,
+            )
+            stored_summary_payload = _stored_period_summary()
+        summary = stored_summary_payload["summary"]
+    else:
+        summary = stored_summary_payload["summary"]
     activities = list(
         GradeActivity.objects.filter(
             offering_id=offering.id,
@@ -4156,10 +4191,31 @@ def period_corrections_view(request, offering_id: int, period_id: int):
             else:
                 attachment = form.cleaned_data.get("attachment")
                 if attachment:
-                    GradeCorrectionAttachment.objects.create(
+                    attachment_validation = form.cleaned_data.get("attachment_validation")
+                    correction_attachment = GradeCorrectionAttachment.objects.create(
                         correction_request=correction,
                         file=attachment,
                         uploaded_by_user=request.user,
+                        original_filename=attachment_validation.original_filename if attachment_validation else attachment.name,
+                        content_type=attachment_validation.content_type if attachment_validation else getattr(attachment, "content_type", ""),
+                        file_size_bytes=attachment_validation.file_size_bytes if attachment_validation else getattr(attachment, "size", 0),
+                    )
+                    AuditService.log_event(
+                        action="UPLOAD_CORRECTION_ATTACHMENT",
+                        portal="FACULTY",
+                        entity_type="GradeCorrectionAttachment",
+                        entity_id=correction_attachment.id,
+                        actor=request.user,
+                        tenant=offering.tenant,
+                        campus=offering.campus,
+                        after_data={
+                            "correction_request_id": correction.id,
+                            "original_filename": correction_attachment.original_filename,
+                            "stored_filename": correction_attachment.file.name,
+                            "content_type": correction_attachment.content_type,
+                            "file_size_bytes": correction_attachment.file_size_bytes,
+                        },
+                        request=request,
                     )
                 notification_result = CorrectionNotificationService.send_correction_submission_approval_notifications(
                     request_obj=correction
@@ -4305,6 +4361,65 @@ def period_corrections_view(request, offering_id: int, period_id: int):
     }
     return render(request, "faculty_portal/period_corrections.html", context)
 
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def period_correction_attachment_download_view(request, offering_id: int, period_id: int, request_id: int, attachment_id: int):
+    assignment = _find_faculty_assignment(request.user, offering_id)
+    if assignment and not assignment.is_accepted:
+        messages.error(request, "Please accept this faculty assignment first before opening the class.")
+        return redirect("faculty_portal:my_courses")
+
+    offering, _template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
+    if period is None:
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    correction_request = get_object_or_404(
+        GradeCorrectionRequest.objects.filter(
+            offering_id=offering.id,
+            template_period_id=period.id,
+            requested_by_user=request.user,
+        ),
+        id=request_id,
+    )
+    attachment = get_object_or_404(
+        GradeCorrectionAttachment.objects.filter(correction_request=correction_request),
+        id=attachment_id,
+    )
+    try:
+        file_handle = attachment.file.open("rb")
+    except FileNotFoundError as exc:
+        raise Http404("Attachment file was not found.") from exc
+
+    AuditService.log_event(
+        action="DOWNLOAD_CORRECTION_ATTACHMENT",
+        portal="FACULTY",
+        entity_type="GradeCorrectionAttachment",
+        entity_id=attachment.id,
+        actor=request.user,
+        tenant=offering.tenant,
+        campus=offering.campus,
+        metadata={
+            "correction_request_id": correction_request.id,
+            "original_filename": attachment.original_filename,
+            "stored_filename": attachment.file.name,
+            "content_type": attachment.content_type,
+            "file_size_bytes": attachment.file_size_bytes,
+        },
+        request=request,
+    )
+    return FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=attachment.original_filename or "correction-attachment",
+        content_type=attachment.content_type or "application/octet-stream",
+    )
+
 @portal_required("FACULTY")
 @permission_required("corrections.create")
 def period_correction_finalize_view(request, offering_id: int, period_id: int, request_id: int):
@@ -4434,6 +4549,21 @@ def period_correction_official_report_view(request, offering_id: int, period_id:
 
     pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=correction_request)
     filename = _official_correction_report_filename(correction_request)
+    AuditService.log_event(
+        action="DOWNLOAD_CORRECTION_OFFICIAL_REPORT",
+        portal="FACULTY",
+        entity_type="GradeCorrectionRequest",
+        entity_id=correction_request.id,
+        actor=request.user,
+        tenant=correction_request.tenant,
+        campus=correction_request.campus,
+        metadata={
+            "filename": filename,
+            "content_type": "application/pdf",
+            "status": correction_request.status,
+        },
+        request=request,
+    )
     return FileResponse(
         BytesIO(pdf_bytes),
         as_attachment=False,

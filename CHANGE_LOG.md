@@ -7,6 +7,32 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Faculty grade distribution monitoring:
+  - added a read-only Admin Portal dashboard for authorized academic leaders to review grade distribution by faculty, class, grading period, and activity-score level
+  - added configurable RBAC permission `grade_distribution_monitor.read` plus a seeded Grading menu item and Dashboard quick action
+  - `Configuration Management` now exposes tenant-level thresholds for high-grade band, high-grade concentration, exact 100 rate, low variation, and minimum sample size
+  - the monitor shows neutral review indicators such as `High Grade Concentration`, `High Perfect Score Rate`, `Low Grade Variation`, `Small Sample`, and `Incomplete Data`
+  - filters respect tenant, campus, department, academic year, term, faculty, course, class/offering, grading period, component, and sub-component scope
+  - CSV export uses the same scoped, aggregated data and does not expose student-level grade details
+- Application-level data-at-rest hardening:
+  - correction attachments now use authenticated Faculty/Admin download views instead of direct media links
+  - correction attachment uploads and CSV import uploads now use validation and randomized stored filenames
+  - upload/download/signature-preview/report-download audit events now capture sensitive file access metadata
+  - added backup/encryption helper scripts under `scripts/` and a manual IT checklist in `docs/DATA_AT_REST_PROTECTION_GUIDE.md`
+- Application-level performance improvements:
+  - portal menu rendering now reuses the request's effective permission set and prefetches active menu items with permission requirements
+  - Faculty Dashboard enrollment status cards now use aggregate counts and avoid an extra assigned-course count query
+  - Faculty activity setup avoids component/subcomponent `exists()` checks inside loops
+  - Faculty Summary now recomputes only missing student period rows on page load instead of recomputing the entire period when stored rows already exist
+  - added targeted composite indexes for high-traffic dashboard, gradebook, submission, correction, enrollment, student, and audit-log filters
+  - added environment-driven Django cache settings, optional dev-only Debug Toolbar wiring, and `docs/performance_optimization.md`
+- Submission non-compliance monitor refinements:
+  - overdue/unsubmitted reporting now lists only classes with accepted faculty assignments
+  - report pagination now preserves active filters
+  - the report now shows a loading overlay when applying filters or changing pages
+  - missing-record counts are calculated only for the visible page rows to reduce large-report load time
+- Grade submission monitoring:
+  - the Admin Grade Submissions list now includes accepted faculty names and supports faculty-name search
 - Grading engine production-readiness improvements:
   - `GradingTemplateComponent.is_exam_component` now marks the official exam bucket structurally, replacing component-code string matching for exam/class-standing separation
   - existing components whose code or name contains `EXAM` are migrated into the new exam flag so current templates keep their intended behavior
@@ -45,6 +71,11 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - default mode keeps the current NCBA-style behavior by averaging all active grading periods of the matched template
   - weighted mode lets other tenants define specific period weights such as `PRELIM=20`, `MIDTERM=20`, `PREFINAL=20`, `FINAL=40`
   - the Tenant Grading Profile form now explains each scope field and formula field directly in the UI so admins can understand what each textbox or selector controls before saving
+- Term-type grading profile applicability:
+  - academic terms can now be classified as `Regular`, `Summer`, or `Special`
+  - Tenant Grading Profiles can optionally target one term type while blank term type remains the backward-compatible all-terms fallback
+  - grading profile resolution now prefers a matching term type over a blank term type within the existing specificity and priority rules, enabling reusable Summer grading formulas without per-term profile setup
+  - added `docs/TENANT_GRADING_PROFILE_SETUP_GUIDE.md` for operational setup of templates, course assignments, regular profiles, Summer profiles, and Taytay-only templates
 - Template-level threshold governance:
   - `Grading Template` now supports its own optional `passing_grade_threshold`
   - passing-threshold resolution now follows `Tenant Grading Profile -> Grading Template -> tenant PASSING_GRADE_THRESHOLD -> 75.00`
