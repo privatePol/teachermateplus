@@ -5,8 +5,16 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
+
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-this-in-production")
-DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
+DEBUG = env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if h.strip()]
 
 INSTALLED_APPS = [
@@ -37,7 +45,7 @@ INSTALLED_APPS = [
 
 DEBUG_TOOLBAR_ENABLED = (
     DEBUG
-    and os.getenv("DJANGO_DEBUG_TOOLBAR", "False").lower() == "true"
+    and env_bool("DJANGO_DEBUG_TOOLBAR", False)
     and importlib.util.find_spec("debug_toolbar") is not None
 )
 if DEBUG_TOOLBAR_ENABLED:
@@ -141,20 +149,20 @@ EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
-EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "False").lower() == "true"
-EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False").lower() == "true"
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", False)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10"))
 SIS_API_TOKEN = os.getenv("SIS_API_TOKEN", "")
 PRIVACY_CONSENT_VERSION = os.getenv("PRIVACY_CONSENT_VERSION", "2026-03")
-ENFORCE_SINGLE_DEVICE_SESSION = os.getenv("ENFORCE_SINGLE_DEVICE_SESSION", "True").lower() == "true"
+ENFORCE_SINGLE_DEVICE_SESSION = env_bool("ENFORCE_SINGLE_DEVICE_SESSION", True)
 
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_AGE = int(os.getenv("DJANGO_SESSION_TIMEOUT_SECONDS", "3600"))
-SESSION_SAVE_EVERY_REQUEST = os.getenv("DJANGO_SESSION_SAVE_EVERY_REQUEST", "True").lower() == "true"
-SESSION_EXPIRE_AT_BROWSER_CLOSE = os.getenv("DJANGO_SESSION_EXPIRE_AT_BROWSER_CLOSE", "False").lower() == "true"
+SESSION_SAVE_EVERY_REQUEST = env_bool("DJANGO_SESSION_SAVE_EVERY_REQUEST", True)
+SESSION_EXPIRE_AT_BROWSER_CLOSE = env_bool("DJANGO_SESSION_EXPIRE_AT_BROWSER_CLOSE", False)
 X_FRAME_OPTIONS = "DENY"
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
