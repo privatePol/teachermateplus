@@ -215,6 +215,58 @@ class FacultyReminderServiceTests(TestCase):
         self.assertEqual(reminder.period_label, "Prelim")
         self.assertTrue(reminder.send_email)
 
+    def test_sync_activity_reminder_dedupes_existing_activity_reminders(self):
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=self.component,
+            title="Quiz Duplicate",
+            total_score="50.00",
+            activity_date=timezone.localdate() + timedelta(days=2),
+            created_by_user=self.user,
+            is_active=True,
+        )
+        FacultyReminder.objects.bulk_create(
+            [
+                FacultyReminder(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    faculty_user=self.user,
+                    offering=self.offering,
+                    grade_activity=activity,
+                    reminder_type=FacultyReminder.ReminderType.ACTIVITY_PREPARATION,
+                    title="Duplicate Reminder 1",
+                    remind_at=timezone.now() + timedelta(hours=1),
+                    send_email=True,
+                    created_by=self.user,
+                ),
+                FacultyReminder(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    faculty_user=self.user,
+                    offering=self.offering,
+                    grade_activity=activity,
+                    reminder_type=FacultyReminder.ReminderType.ACTIVITY_PREPARATION,
+                    title="Duplicate Reminder 2",
+                    remind_at=timezone.now() + timedelta(hours=2),
+                    send_email=True,
+                    created_by=self.user,
+                ),
+            ]
+        )
+
+        reminder = FacultyReminderService.sync_activity_reminder(
+            activity=activity,
+            faculty_user=self.user,
+            created_by=self.user,
+        )
+
+        self.assertIsNotNone(reminder)
+        self.assertEqual(FacultyReminder.objects.filter(grade_activity=activity).count(), 1)
+        self.assertEqual(FacultyReminder.objects.filter(grade_activity__isnull=True, is_active=False).count(), 1)
+
     def test_sync_activity_reminder_cancels_when_activity_is_no_longer_future(self):
         activity = GradeActivity.objects.create(
             tenant=self.tenant,

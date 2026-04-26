@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models import Q
+from django.core.exceptions import ValidationError
 
 from apps.core.models import TimeStampedModel
 
@@ -70,13 +70,6 @@ class FacultyReminder(TimeStampedModel):
     class Meta:
         db_table = "faculty_reminders"
         ordering = ["completed_at", "snoozed_until", "remind_at", "-created_at"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["grade_activity"],
-                condition=Q(grade_activity__isnull=False),
-                name="uq_faculty_reminder_grade_activity",
-            ),
-        ]
         indexes = [
             models.Index(fields=["tenant", "faculty_user", "remind_at"], name="idx_faculty_reminder_scope"),
             models.Index(fields=["tenant", "faculty_user", "completed_at"], name="idx_faculty_reminder_done"),
@@ -88,6 +81,20 @@ class FacultyReminder(TimeStampedModel):
     @property
     def is_completed(self):
         return self.completed_at is not None
+
+    def clean(self):
+        super().clean()
+        if not self.grade_activity_id:
+            return
+        duplicate_qs = FacultyReminder.objects.filter(grade_activity_id=self.grade_activity_id)
+        if self.pk:
+            duplicate_qs = duplicate_qs.exclude(pk=self.pk)
+        if duplicate_qs.exists():
+            raise ValidationError({"grade_activity": "A reminder already exists for this grade activity."})
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
 
 
 class FacultyMemo(TimeStampedModel):

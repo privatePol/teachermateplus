@@ -1,32 +1,230 @@
 {% extends "admin_portal/base.html" %}
 
 {% block admin_content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="h5 mb-0">Role Permissions: {{ role.code }}</h2>
+<style>
+  .permission-toolbar {
+    position: sticky;
+    top: 0.75rem;
+    z-index: 5;
+  }
+  .permission-card {
+    border: 1px solid #dde7dc;
+    border-radius: 0.75rem;
+    background: #ffffff;
+  }
+  .permission-card-header {
+    border-bottom: 1px solid #edf2ec;
+    background: #f8fbf8;
+    border-radius: 0.75rem 0.75rem 0 0;
+  }
+  .permission-row {
+    border: 1px solid #edf2ec;
+    border-radius: 0.65rem;
+    background: #ffffff;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .permission-row:hover {
+    border-color: #b8cfbb;
+    background: #fbfdfb;
+  }
+  .permission-row.is-selected {
+    border-color: #8abd8b;
+    background: #f2fbf2;
+  }
+  .permission-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.86rem;
+  }
+  .permission-savebar {
+    position: sticky;
+    bottom: 0;
+    z-index: 6;
+    background: rgba(246, 248, 244, 0.96);
+    border-top: 1px solid #dbe6d9;
+    backdrop-filter: blur(6px);
+  }
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+  <div>
+    <h2 class="h5 mb-1">Role Permissions: {{ role.code }}</h2>
+    <div class="text-muted small">{{ role.name }} | Choose only the permissions this role truly needs.</div>
+  </div>
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:role_list' %}">Back to Roles</a>
 </div>
-<div class="card border-0 shadow-sm">
-  <div class="card-body">
-    <form method="post">
-      {% csrf_token %}
-      {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
-      {% for module, perms in permissions_by_module.items %}
-        <div class="border rounded p-3 mb-3">
-          <div class="fw-semibold text-uppercase small mb-2">{{ module }}</div>
-          <div class="row">
-            {% for perm in perms %}
-              <div class="col-md-4">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="permissions" value="{{ perm.id }}" id="perm_{{ perm.id }}" {% if perm.id in form.fields.permissions.initial %}checked{% endif %}>
-                  <label class="form-check-label" for="perm_{{ perm.id }}">{{ perm.code }}</label>
-                </div>
-              </div>
-            {% endfor %}
-          </div>
+
+<form method="post" id="role-permissions-form">
+  {% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+
+  <div class="card border-0 shadow-sm permission-toolbar mb-3">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-lg-5">
+          <label class="form-label mb-1" for="permission-search">Search Permissions</label>
+          <input class="form-control" id="permission-search" type="search" placeholder="Search by code, module, action, or explanation">
         </div>
-      {% endfor %}
-      <button class="btn btn-primary" type="submit">Save Permissions</button>
-    </form>
+        <div class="col-lg-3">
+          <div class="text-muted small mb-1">Selected</div>
+          <div class="fw-semibold"><span id="selected-count">{{ selected_permission_count }}</span> of {{ total_permission_count }} permissions</div>
+        </div>
+        <div class="col-lg-4 d-flex flex-wrap gap-2 justify-content-lg-end">
+          <button class="btn btn-outline-secondary" type="button" id="show-selected-toggle" data-active="0">Show Selected Only</button>
+          <button class="btn btn-outline-success" type="submit">Save Permissions</button>
+        </div>
+      </div>
+      <div class="alert alert-light border small mb-0 mt-3">
+        Tip: use module buttons to select or clear a whole area, then fine-tune individual permissions. Changes are saved only when you click <strong>Save Permissions</strong>.
+      </div>
+    </div>
   </div>
-</div>
+
+  {% for module in permissions_by_module %}
+  <section class="permission-card mb-3" data-module-card data-module="{{ module.label|lower }}">
+    <div class="permission-card-header p-3">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <div class="fw-semibold">{{ module.label }}</div>
+          <div class="small text-muted"><span data-module-selected>{{ module.selected_count }}</span> of {{ module.total_count }} selected</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <button class="btn btn-sm btn-outline-success" type="button" data-module-select="{{ module.dom_id }}">Select Module</button>
+          <button class="btn btn-sm btn-outline-secondary" type="button" data-module-clear="{{ module.dom_id }}">Clear Module</button>
+        </div>
+      </div>
+    </div>
+    <div class="p-3">
+      <div class="row g-2" id="{{ module.dom_id }}">
+        {% for perm in module.permissions %}
+        <div class="col-xl-4 col-lg-6 permission-item"
+             data-permission-item
+             data-search="{{ module.label|lower }} {{ perm.code|lower }} {{ perm.action_label|lower }} {{ perm.description|lower }}">
+          <label class="permission-row d-flex align-items-start gap-2 p-3 h-100 {% if perm.is_selected %}is-selected{% endif %}" for="perm_{{ perm.id }}">
+            <input class="form-check-input mt-1 permission-checkbox" type="checkbox" name="permissions" value="{{ perm.id }}" id="perm_{{ perm.id }}" {% if perm.is_selected %}checked{% endif %}>
+            <span class="flex-grow-1">
+              <span class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                <span class="badge {{ perm.badge_class }}">{{ perm.action_label }}</span>
+                <span class="permission-code">{{ perm.code }}</span>
+              </span>
+              <span class="d-block small text-muted">{{ perm.description }}</span>
+            </span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+
+  <div class="permission-savebar p-3 mt-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div class="small text-muted">
+        Selected permissions: <strong id="selected-count-bottom">{{ selected_permission_count }}</strong>.
+        Review carefully before saving role access.
+      </div>
+      <button class="btn btn-primary" type="submit">Save Permissions</button>
+    </div>
+  </div>
+</form>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("role-permissions-form");
+    const searchInput = document.getElementById("permission-search");
+    const selectedCount = document.getElementById("selected-count");
+    const selectedCountBottom = document.getElementById("selected-count-bottom");
+    const showSelectedToggle = document.getElementById("show-selected-toggle");
+    const checkboxes = Array.from(document.querySelectorAll(".permission-checkbox"));
+
+    function updateCounts() {
+      const selected = checkboxes.filter((checkbox) => checkbox.checked).length;
+      selectedCount.textContent = selected;
+      selectedCountBottom.textContent = selected;
+      document.querySelectorAll("[data-module-card]").forEach((card) => {
+        const moduleBoxes = Array.from(card.querySelectorAll(".permission-checkbox"));
+        const moduleSelected = moduleBoxes.filter((checkbox) => checkbox.checked).length;
+        const target = card.querySelector("[data-module-selected]");
+        if (target) target.textContent = moduleSelected;
+      });
+    }
+
+    function syncRowState() {
+      checkboxes.forEach((checkbox) => {
+        const row = checkbox.closest(".permission-row");
+        if (row) row.classList.toggle("is-selected", checkbox.checked);
+      });
+    }
+
+    function applyFilter() {
+      const query = (searchInput.value || "").trim().toLowerCase();
+      const selectedOnly = showSelectedToggle.dataset.active === "1";
+      document.querySelectorAll("[data-permission-item]").forEach((item) => {
+        const checkbox = item.querySelector(".permission-checkbox");
+        const matchesQuery = !query || (item.dataset.search || "").includes(query);
+        const matchesSelected = !selectedOnly || (checkbox && checkbox.checked);
+        item.classList.toggle("d-none", !(matchesQuery && matchesSelected));
+      });
+      document.querySelectorAll("[data-module-card]").forEach((card) => {
+        const visibleItems = card.querySelectorAll("[data-permission-item]:not(.d-none)");
+        card.classList.toggle("d-none", visibleItems.length === 0);
+      });
+    }
+
+    checkboxes.forEach((checkbox) => {
+      checkbox.addEventListener("change", function () {
+        syncRowState();
+        updateCounts();
+        applyFilter();
+      });
+    });
+
+    document.querySelectorAll("[data-module-select]").forEach((button) => {
+      button.addEventListener("click", function () {
+        const target = document.getElementById(button.dataset.moduleSelect);
+        if (!target) return;
+        target.querySelectorAll(".permission-checkbox").forEach((checkbox) => {
+          checkbox.checked = true;
+        });
+        syncRowState();
+        updateCounts();
+        applyFilter();
+      });
+    });
+
+    document.querySelectorAll("[data-module-clear]").forEach((button) => {
+      button.addEventListener("click", function () {
+        const target = document.getElementById(button.dataset.moduleClear);
+        if (!target) return;
+        target.querySelectorAll(".permission-checkbox").forEach((checkbox) => {
+          checkbox.checked = false;
+        });
+        syncRowState();
+        updateCounts();
+        applyFilter();
+      });
+    });
+
+    searchInput.addEventListener("input", applyFilter);
+    showSelectedToggle.addEventListener("click", function () {
+      const isActive = showSelectedToggle.dataset.active === "1";
+      showSelectedToggle.dataset.active = isActive ? "0" : "1";
+      showSelectedToggle.classList.toggle("btn-success", !isActive);
+      showSelectedToggle.classList.toggle("btn-outline-secondary", isActive);
+      showSelectedToggle.textContent = isActive ? "Show Selected Only" : "Showing Selected";
+      applyFilter();
+    });
+
+    form.addEventListener("reset", function () {
+      window.setTimeout(function () {
+        syncRowState();
+        updateCounts();
+        applyFilter();
+      }, 0);
+    });
+
+    syncRowState();
+    updateCounts();
+    applyFilter();
+  });
+</script>
 {% endblock %}

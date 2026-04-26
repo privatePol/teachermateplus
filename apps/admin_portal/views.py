@@ -4718,11 +4718,122 @@ def role_permissions_view(request, role_id: int):
         messages.success(request, "Role permissions updated.")
         return _redirect_back_or_default(request, "admin_portal:role_list")
 
-    permissions_by_module = {}
-    for perm in Permission.objects.filter(is_active=True).order_by("module", "action", "code"):
-        permissions_by_module.setdefault(perm.module, []).append(perm)
+    def _title(value):
+        return str(value or "").replace("_", " ").replace(".", " ").title()
 
-    context = {"role": role, "form": form, "permissions_by_module": permissions_by_module}
+    def _permission_label(permission):
+        action_labels = {
+            "access": "Access",
+            "approve": "Approve",
+            "create": "Create",
+            "delete": "Delete",
+            "import": "Import",
+            "lock": "Lock",
+            "publish": "Publish",
+            "read": "View",
+            "reopen": "Reopen",
+            "review": "Review",
+            "submit_for_approval": "Submit for Approval",
+            "update": "Edit",
+            "revert_before_deadline": "Revert Before Deadline",
+        }
+        return action_labels.get(permission.action, _title(permission.action))
+
+    def _permission_description(permission):
+        module_label = _title(permission.module)
+        specific = {
+            "admin_portal.access": "Allows the user to sign in to the Admin Portal.",
+            "faculty_portal.access": "Allows the user to sign in to the Faculty Portal.",
+            "dashboard.read": "Allows viewing dashboard summaries and quick actions.",
+            "grading_analytics.read": "Allows viewing admin grading analytics.",
+            "grade_distribution_monitor.read": "Allows viewing faculty grade distribution monitoring reports.",
+            "faculty_analytics.read": "Allows viewing faculty-side analytics.",
+            "system_settings.update": "Allows changing tenant/system configuration settings.",
+            "menus.update": "Allows changing portal navigation menu setup.",
+            "audit_logs.read": "Allows viewing audit trail records.",
+            "corrections.create": "Allows faculty to file grade correction petitions.",
+            "corrections.review": "Allows reviewing grade correction petitions.",
+            "grade_submissions.reopen": "Allows reopening submitted grade records when policy permits.",
+            "grade_submissions.revert_before_deadline": "Allows reverting a submission before the deadline.",
+            "grading_periods.lock": "Allows closing or locking grading periods.",
+            "grading_periods.reopen": "Allows reopening locked grading periods.",
+            "template_hotfixes.review": "Allows reviewing grading template hotfix requests.",
+        }
+        if permission.code in specific:
+            return specific[permission.code]
+        action_templates = {
+            "access": f"Allows access to {module_label}.",
+            "approve": f"Allows approving {module_label} records or workflows.",
+            "create": f"Allows adding new {module_label} records.",
+            "delete": f"Allows deleting or removing {module_label} records when available.",
+            "import": f"Allows importing {module_label} records from a file.",
+            "lock": f"Allows locking {module_label}.",
+            "publish": f"Allows publishing {module_label}.",
+            "read": f"Allows viewing {module_label} records and pages.",
+            "reopen": f"Allows reopening {module_label} records when policy permits.",
+            "review": f"Allows reviewing {module_label} requests or workflows.",
+            "submit_for_approval": f"Allows submitting {module_label} for approval.",
+            "update": f"Allows editing existing {module_label} records.",
+            "revert_before_deadline": f"Allows reverting {module_label} before the configured deadline.",
+        }
+        return action_templates.get(permission.action, permission.description or f"Allows {_title(permission.action)} on {module_label}.")
+
+    action_badge_classes = {
+        "access": "text-bg-dark",
+        "approve": "text-bg-primary",
+        "create": "text-bg-success",
+        "delete": "text-bg-danger",
+        "import": "text-bg-info",
+        "lock": "text-bg-warning",
+        "publish": "text-bg-primary",
+        "read": "text-bg-secondary",
+        "reopen": "text-bg-warning",
+        "review": "text-bg-info",
+        "submit_for_approval": "text-bg-primary",
+        "update": "text-bg-success",
+        "revert_before_deadline": "text-bg-warning",
+    }
+    if request.method == "POST":
+        selected_permission_ids = {int(value) for value in request.POST.getlist("permissions") if str(value).isdigit()}
+    else:
+        selected_permission_ids = set(role.role_permissions.values_list("permission_id", flat=True))
+
+    permissions_by_module = []
+    module_groups = {}
+    for perm in Permission.objects.filter(is_active=True).order_by("module", "action", "code"):
+        module_groups.setdefault(perm.module, []).append(perm)
+    for module, perms in module_groups.items():
+        permission_rows = []
+        for perm in perms:
+            permission_rows.append(
+                {
+                    "id": perm.id,
+                    "code": perm.code,
+                    "action": perm.action,
+                    "action_label": _permission_label(perm),
+                    "badge_class": action_badge_classes.get(perm.action, "text-bg-light"),
+                    "description": _permission_description(perm),
+                    "is_selected": perm.id in selected_permission_ids,
+                }
+            )
+        permissions_by_module.append(
+            {
+                "key": module,
+                "dom_id": f"module_{module.replace('.', '_').replace('-', '_')}",
+                "label": _title(module),
+                "permissions": permission_rows,
+                "selected_count": sum(1 for item in permission_rows if item["is_selected"]),
+                "total_count": len(permission_rows),
+            }
+        )
+
+    context = {
+        "role": role,
+        "form": form,
+        "permissions_by_module": permissions_by_module,
+        "selected_permission_count": len(selected_permission_ids),
+        "total_permission_count": Permission.objects.filter(is_active=True).count(),
+    }
     context.update(_scope_context(request))
     return render(request, "admin_portal/security/role_permissions.html", context)
 

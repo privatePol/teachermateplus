@@ -4,6 +4,7 @@ from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
+from django.db import transaction
 from django.db.models import Q
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -159,7 +160,7 @@ class FacultyReminderService:
     @classmethod
     def cancel_activity_reminder(cls, *, activity, reason: str | None = None, now=None):
         now = now or timezone.now()
-        reminder = FacultyReminder.objects.filter(grade_activity=activity, is_active=True).first()
+        reminder = FacultyReminder.objects.filter(grade_activity=activity, is_active=True).order_by("id").first()
         if reminder is None:
             return None
 
@@ -205,27 +206,51 @@ class FacultyReminderService:
 
         remind_at, due_at = cls._activity_reminder_datetimes(activity_date)
         send_email = FeatureSettingsService.is_faculty_reminder_email_enabled(tenant_id=tenant_id, default=False)
-        reminder, _ = FacultyReminder.objects.update_or_create(
-            grade_activity=activity,
-            defaults={
-                "tenant_id": activity.tenant_id,
-                "campus_id": activity.campus_id,
-                "faculty_user": faculty_user,
-                "offering_id": activity.offering_id,
-                "reminder_type": FacultyReminder.ReminderType.ACTIVITY_PREPARATION,
-                "title": f"Prepare Activity: {activity.title}",
-                "period_label": getattr(activity.template_period, "name", None) or getattr(activity.template_period, "code", None),
-                "notes": cls._activity_reminder_notes(activity),
-                "remind_at": remind_at,
-                "due_at": due_at,
-                "send_email": send_email,
-                "created_by": created_by or faculty_user,
-                "is_active": True,
-                "completed_at": None,
-                "cancelled_at": None,
-                "snoozed_until": None,
-            },
-        )
+        defaults = {
+            "tenant_id": activity.tenant_id,
+            "campus_id": activity.campus_id,
+            "faculty_user": faculty_user,
+            "offering_id": activity.offering_id,
+            "reminder_type": FacultyReminder.ReminderType.ACTIVITY_PREPARATION,
+            "title": f"Prepare Activity: {activity.title}",
+            "period_label": getattr(activity.template_period, "name", None) or getattr(activity.template_period, "code", None),
+            "notes": cls._activity_reminder_notes(activity),
+            "remind_at": remind_at,
+            "due_at": due_at,
+            "send_email": send_email,
+            "created_by": created_by or faculty_user,
+            "is_active": True,
+            "completed_at": None,
+            "cancelled_at": None,
+            "snoozed_until": None,
+        }
+        with transaction.atomic():
+            reminder = (
+                FacultyReminder.objects.select_for_update()
+                .filter(grade_activity=activity)
+                .order_by("id")
+                .first()
+            )
+            if reminder is None:
+                reminder = FacultyReminder.objects.create(grade_activity=activity, **defaults)
+            else:
+                duplicate_reminders = FacultyReminder.objects.filter(grade_activity=activity).exclude(id=reminder.id)
+                if duplicate_reminders.exists():
+                    duplicate_reminders.update(
+                        grade_activity=None,
+                        is_active=False,
+                        cancelled_at=now,
+                        notes="Duplicate activity reminder cancelled during reminder sync.",
+                        updated_at=now,
+                    )
+                for field_name, value in defaults.items():
+                    setattr(reminder, field_name, value)
+                reminder.save(
+                    update_fields=[
+                        *defaults.keys(),
+                        "updated_at",
+                    ]
+                )
         FacultyReminderEmailQueue.objects.filter(
             reminder=reminder,
             status__in=[
