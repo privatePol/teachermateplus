@@ -73,7 +73,11 @@
           <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
           <td class="text-end">
             {% if "reopen_requests.review" in effective_permissions %}
+              {% if row.status == "PENDING" %}
               <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grade_submission_reopen_request_review' row.id %}">Review</a>
+              {% else %}
+              <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grade_submission_reopen_request_review' row.id %}">View</a>
+              {% endif %}
             {% endif %}
           </td>
         </tr>

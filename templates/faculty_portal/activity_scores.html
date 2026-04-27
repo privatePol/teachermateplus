@@ -84,10 +84,12 @@
   {% endif %}
 </div>
 
+{% if is_editable %}
 <div class="alert alert-secondary small">
   Enter a score only for students you want to record now. Leave the field blank to keep the student unencoded.
   If you clear an already saved score and click Save Scores, EduGradesPro will remove that saved score from this activity.
 </div>
+{% endif %}
 
 {% if is_correction_active %}
 <div class="alert alert-warning">
@@ -96,10 +98,16 @@
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">View request</a>
   {% endif %}
 </div>
+{% elif is_locked %}
+<div class="alert alert-danger">
+  {% if is_auto_locked_reopened_after_deadline %}
+    This period is locked because the reopened gradebook was not resubmitted before the deadline. Score editing is disabled; go to Summary to finalize and resubmit the existing records.
+  {% else %}
+    This period is locked by admin. Score editing is disabled.
+  {% endif %}
+</div>
 {% elif is_submitted %}
 <div class="alert alert-info">This period is already submitted. Score editing is disabled.</div>
-{% elif is_locked %}
-<div class="alert alert-danger">This period is locked by admin. Score editing is disabled.</div>
 {% endif %}
 
 <form method="post" novalidate id="activity-scores-form">
@@ -145,8 +153,9 @@
                   max="{{ score_input_max }}"
                   class="form-control form-control-sm"
                   name="raw_{{ row.enrollment.student_id }}"
-                  value="{% if row.score %}{{ row.score.raw_score }}{% endif %}"
+                  value="{% if row.score %}{{ row.score.raw_score }}{% else %}0{% endif %}"
                   placeholder="{% if score_input_mode == 'RAW_BASE50' %}0 to {{ activity.total_score }}{% else %}0 to 100{% endif %}"
+                  {% if not is_editable %}disabled{% endif %}
                 >
               {% else %}
                 <input class="form-control form-control-sm" value="N/A" disabled>

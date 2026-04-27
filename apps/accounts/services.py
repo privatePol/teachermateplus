@@ -12,17 +12,194 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
+from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
 from PIL import Image
 
-from apps.accounts.models import LoginOtpChallenge, PortalLoginLockoutState, UserSignatureCredential, UserSignatureUsageLog
+from apps.accounts.models import (
+    LoginOtpChallenge,
+    PortalLoginLockoutState,
+    UserDeactivationSchedule,
+    UserSignatureCredential,
+    UserSignatureUsageLog,
+)
 from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
 
 User = get_user_model()
+
+
+class UserDeactivationService:
+    @staticmethod
+    def _clear_user_sessions(*, user) -> int:
+        deleted = 0
+        for session in Session.objects.filter(expire_date__gte=timezone.now()):
+            try:
+                data = session.get_decoded()
+            except Exception:
+                continue
+            if str(data.get("_auth_user_id")) != str(user.id):
+                continue
+            session.delete()
+            deleted += 1
+        return deleted
+
+    @classmethod
+    def schedule(
+        cls,
+        *,
+        user,
+        scheduled_for,
+        actor,
+        reason: str | None = None,
+        request=None,
+    ) -> UserDeactivationSchedule:
+        if user.is_superuser:
+            raise ValidationError("Superuser accounts cannot be scheduled for deactivation.")
+        if not user.is_active:
+            raise ValidationError("This account is already inactive.")
+        if scheduled_for <= timezone.now():
+            raise ValidationError("Choose a future deactivation date and time.")
+
+        pending = UserDeactivationSchedule.objects.filter(
+            user=user,
+            status=UserDeactivationSchedule.Status.PENDING,
+        )
+        before_rows = [
+            {
+                "id": row.id,
+                "scheduled_for": row.scheduled_for,
+                "reason": row.reason,
+            }
+            for row in pending
+        ]
+        pending.update(
+            status=UserDeactivationSchedule.Status.CANCELLED,
+            cancelled_by_user=actor,
+            cancelled_at=timezone.now(),
+        )
+        schedule = UserDeactivationSchedule.objects.create(
+            user=user,
+            scheduled_for=scheduled_for,
+            reason=(reason or "").strip() or None,
+            scheduled_by_user=actor,
+            status=UserDeactivationSchedule.Status.PENDING,
+        )
+        AuditService.log_event(
+            action="SCHEDULE_DEACTIVATION",
+            portal="ADMIN",
+            entity_type="UserDeactivationSchedule",
+            entity_id=schedule.id,
+            actor=actor,
+            tenant=getattr(user, "default_tenant_id", None),
+            campus=getattr(user, "default_campus_id", None),
+            before_data={"cancelled_pending": before_rows},
+            after_data={
+                "user_id": user.id,
+                "username": user.username,
+                "scheduled_for": schedule.scheduled_for,
+                "reason": schedule.reason,
+            },
+            request=request,
+        )
+        return schedule
+
+    @classmethod
+    def cancel(cls, *, schedule: UserDeactivationSchedule, actor, request=None) -> UserDeactivationSchedule:
+        if schedule.status != UserDeactivationSchedule.Status.PENDING:
+            raise ValidationError("Only pending deactivation schedules can be cancelled.")
+        before = {
+            "status": schedule.status,
+            "scheduled_for": schedule.scheduled_for,
+            "reason": schedule.reason,
+        }
+        schedule.status = UserDeactivationSchedule.Status.CANCELLED
+        schedule.cancelled_by_user = actor
+        schedule.cancelled_at = timezone.now()
+        schedule.save(update_fields=["status", "cancelled_by_user", "cancelled_at", "updated_at"])
+        AuditService.log_event(
+            action="CANCEL_DEACTIVATION",
+            portal="ADMIN",
+            entity_type="UserDeactivationSchedule",
+            entity_id=schedule.id,
+            actor=actor,
+            tenant=getattr(schedule.user, "default_tenant_id", None),
+            campus=getattr(schedule.user, "default_campus_id", None),
+            before_data=before,
+            after_data={
+                "status": schedule.status,
+                "cancelled_at": schedule.cancelled_at,
+                "cancelled_by_user_id": getattr(actor, "id", None),
+            },
+            request=request,
+        )
+        return schedule
+
+    @classmethod
+    def apply_due(cls, *, at=None, actor=None, limit: int | None = None, dry_run: bool = False):
+        now = at or timezone.now()
+        due_qs = (
+            UserDeactivationSchedule.objects.select_related("user", "user__default_tenant", "user__default_campus")
+            .filter(status=UserDeactivationSchedule.Status.PENDING, scheduled_for__lte=now, user__is_active=True)
+            .order_by("scheduled_for", "id")
+        )
+        if limit is not None:
+            due_qs = due_qs[:limit]
+        rows = []
+        for schedule in list(due_qs):
+            user = schedule.user
+            row = {
+                "schedule_id": schedule.id,
+                "user_id": user.id,
+                "username": user.username,
+                "scheduled_for": schedule.scheduled_for,
+                "dry_run": dry_run,
+            }
+            rows.append(row)
+            if dry_run:
+                continue
+
+            before_user = {
+                "id": user.id,
+                "username": user.username,
+                "is_active": user.is_active,
+            }
+            user.is_active = False
+            user.save(update_fields=["is_active", "updated_at"])
+            session_count = cls._clear_user_sessions(user=user)
+            schedule.status = UserDeactivationSchedule.Status.APPLIED
+            schedule.applied_by_user = actor
+            schedule.applied_at = now
+            schedule.save(update_fields=["status", "applied_by_user", "applied_at", "updated_at"])
+            row["cleared_session_count"] = session_count
+            AuditService.log_event(
+                action="APPLY_DEACTIVATION",
+                portal="SYSTEM" if actor is None else "ADMIN",
+                entity_type="User",
+                entity_id=user.id,
+                actor=actor,
+                tenant=getattr(user, "default_tenant_id", None),
+                campus=getattr(user, "default_campus_id", None),
+                before_data=before_user,
+                after_data={
+                    "id": user.id,
+                    "username": user.username,
+                    "is_active": user.is_active,
+                    "schedule_id": schedule.id,
+                    "applied_at": schedule.applied_at,
+                    "cleared_session_count": session_count,
+                },
+                metadata={"mode": "SCHEDULED_USER_DEACTIVATION"},
+            )
+        return {
+            "checked_at": now,
+            "count": len(rows),
+            "dry_run": dry_run,
+            "rows": rows,
+        }
 
 
 @dataclass

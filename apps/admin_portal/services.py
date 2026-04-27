@@ -201,9 +201,11 @@ class AdminScopeService:
 
     @staticmethod
     def scoped_students(request):
+        tenants, campuses, departments = AdminScopeService._scoped_tenant_campus_department_ids(request)
         programs = AdminScopeService.scoped_programs(request).values_list("id", flat=True)
         queryset = (
-            Student.objects.filter(models.Q(program_id__in=programs) | models.Q(program__isnull=True))
+            Student.objects.filter(tenant_id__in=tenants, campus_id__in=campuses, department_id__in=departments)
+            .filter(models.Q(program_id__in=programs) | models.Q(program__isnull=True))
             .select_related("tenant", "campus", "department", "program")
             .order_by("last_name", "first_name")
         )

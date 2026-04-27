@@ -1,0 +1,181 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .faculty-deactivation-hero {
+    border-radius: 1rem;
+    padding: 1.15rem;
+    margin-bottom: 1rem;
+    background:
+      radial-gradient(circle at 90% 14%, rgba(255, 205, 89, 0.36), transparent 25%),
+      linear-gradient(135deg, #0f5132 0%, #13795b 52%, #f4b942 100%);
+    color: #ffffff;
+    box-shadow: 0 18px 34px rgba(13, 71, 45, 0.16);
+  }
+  .faculty-deactivation-hero h2 {
+    font-size: 1.35rem;
+    font-weight: 800;
+    margin-bottom: 0.35rem;
+  }
+  .faculty-deactivation-hero p {
+    color: rgba(255, 255, 255, 0.86);
+    margin-bottom: 0;
+    max-width: 820px;
+  }
+  .deactivation-card {
+    border: 0;
+    border-radius: 1rem;
+    box-shadow: 0 14px 28px rgba(18, 52, 31, 0.08);
+  }
+  .deactivation-section-title {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-bottom: 0.3rem;
+  }
+  .deactivation-section-note {
+    color: #607667;
+    font-size: 0.92rem;
+  }
+  .deactivation-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.28rem 0.62rem;
+    font-size: 0.78rem;
+    font-weight: 800;
+    background: #fff5cf;
+    color: #725b07;
+  }
+</style>
+
+<div class="faculty-deactivation-hero">
+  <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
+    <div>
+      <h2>Faculty Account Deactivation</h2>
+      <p>
+        Schedule faculty accounts for automatic deactivation. The account remains active until the scheduled job runs on
+        or after the selected date and time.
+      </p>
+    </div>
+    <a class="btn btn-light btn-sm" href="{% url 'admin_portal:user_list' %}">Back to Users</a>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card deactivation-card">
+      <div class="card-body">
+        <div class="deactivation-section-title">Schedule Deactivation</div>
+        <div class="deactivation-section-note mb-3">
+          {{ faculty_count }} active faculty account{{ faculty_count|pluralize }} are visible in your current scope.
+        </div>
+        <form method="post">
+          {% csrf_token %}
+          {% for field in form %}
+            <div class="mb-3">
+              <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+              {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          {% endfor %}
+          {% if form.non_field_errors %}
+            <div class="alert alert-danger py-2">{{ form.non_field_errors }}</div>
+          {% endif %}
+          <button class="btn btn-danger" type="submit">Schedule Deactivation</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="card deactivation-card mb-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between gap-2 flex-wrap align-items-start mb-3">
+          <div>
+            <div class="deactivation-section-title">Pending Schedules</div>
+            <div class="deactivation-section-note">These accounts will be deactivated by the cron job when due.</div>
+          </div>
+          <span class="deactivation-pill">{{ pending_schedules|length }} Pending</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Faculty</th>
+                <th>Scope</th>
+                <th>Deactivate On</th>
+                <th>Scheduled By</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for schedule in pending_schedules %}
+              <tr>
+                <td>
+                  <strong>{{ schedule.user.full_name }}</strong>
+                  <div class="text-muted small">{{ schedule.user.username }} / {{ schedule.user.email }}</div>
+                  {% if schedule.reason %}<div class="small mt-1">{{ schedule.reason }}</div>{% endif %}
+                </td>
+                <td>
+                  {{ schedule.user.default_tenant.code|default:"-" }} /
+                  {{ schedule.user.default_campus.code|default:"-" }}
+                </td>
+                <td>{{ schedule.scheduled_for|date:"Y-m-d H:i" }}</td>
+                <td>{{ schedule.scheduled_by_user.username|default:"-" }}</td>
+                <td class="text-end">
+                  <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="cancel">
+                    <input type="hidden" name="schedule_id" value="{{ schedule.id }}">
+                    <button class="btn btn-sm btn-outline-danger" type="submit">Cancel</button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="text-center text-muted py-4">No pending faculty deactivation schedules.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card deactivation-card">
+      <div class="card-body">
+        <div class="deactivation-section-title">Recent Completed / Cancelled</div>
+        <div class="table-responsive mt-3">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Faculty</th>
+                <th>Scheduled For</th>
+                <th>Status</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for schedule in recent_schedules %}
+              <tr>
+                <td>{{ schedule.user.full_name }} <span class="text-muted small">({{ schedule.user.username }})</span></td>
+                <td>{{ schedule.scheduled_for|date:"Y-m-d H:i" }}</td>
+                <td>
+                  {% if schedule.status == "APPLIED" %}
+                    <span class="badge text-bg-success">Applied</span>
+                  {% else %}
+                    <span class="badge text-bg-secondary">Cancelled</span>
+                  {% endif %}
+                </td>
+                <td>{{ schedule.updated_at|date:"Y-m-d H:i" }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="4" class="text-center text-muted py-4">No completed or cancelled schedules yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

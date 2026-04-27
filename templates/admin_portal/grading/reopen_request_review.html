@@ -39,6 +39,11 @@
     <div class="card border-0 shadow-sm">
       <div class="card-header bg-white"><strong>Review Action</strong></div>
       <div class="card-body">
+        {% if not can_review_request %}
+        <div class="alert alert-info mb-0">
+          This reopen request has already been reviewed and cannot be submitted again.
+        </div>
+        {% else %}
         <form method="post" novalidate>
           {% csrf_token %}
           {% if form.non_field_errors %}
@@ -54,6 +59,7 @@
           {% endfor %}
           <button class="btn btn-primary" type="submit">Submit Review</button>
         </form>
+        {% endif %}
       </div>
     </div>
   </div>

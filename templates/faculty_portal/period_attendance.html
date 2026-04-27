@@ -17,6 +17,14 @@
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">View request</a>
   {% endif %}
 </div>
+{% elif is_locked %}
+<div class="alert alert-danger">
+  {% if is_auto_locked_reopened_after_deadline %}
+    This period is locked because the reopened gradebook was not resubmitted before the deadline. Attendance editing is disabled; go to Summary to finalize and resubmit the existing records.
+  {% else %}
+    This period is locked by admin. Attendance editing is disabled.
+  {% endif %}
+</div>
 {% elif is_non_compliant %}
 <div class="alert alert-danger">
   Submission deadline already passed. You may continue encoding and submit as soon as possible, but this class is already listed in the non-compliance monitor.
@@ -28,8 +36,6 @@
 </div>
 {% elif is_submitted %}
 <div class="alert alert-info">This period is already submitted. Attendance editing is disabled.</div>
-{% elif is_locked %}
-<div class="alert alert-danger">This period is locked by admin. Attendance editing is disabled.</div>
 {% endif %}
 
 <div class="card border-0 shadow-sm mb-3">

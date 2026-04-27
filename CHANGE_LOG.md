@@ -6,7 +6,35 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 
 ## [Unreleased]
 
+### Changed
+- Faculty activity score entry now treats blank active-student raw score cells as `0` when saving, and new score sheets display `0` by default so activity averages include every saved activity instead of ignoring blank rows.
+- Admin student scoping now keeps programless students constrained by accessible tenant, campus, and department scope instead of treating blank program as globally visible.
+- Enrollment updates now reject student/offering tenant or campus mismatches, matching the validation already applied during enrollment creation.
+- Faculty period submission now blocks when active non-attendance grading template components, subcomponents, or details have no corresponding activity.
+- Reopen request review now handles already-approved or rejected requests gracefully instead of raising a validation error on duplicate/stale review submissions.
+- Faculty Final-period Summary now omits the separate exam-component column and keeps the final-period result in the period grade column such as `FX Grade`.
+- Faculty Summary of Grades is now hidden from view/print until the gradebook is submitted; submitted gradebooks may be self-reopened by faculty only before the deadline, and expired reopened gradebooks are auto-locked instead of auto-submitted. Faculty grading pages and My Classes now also apply that expired-reopened lock immediately after an admin moves the deadline into the past, without waiting for the scheduled command.
+- Official stored grading outputs are now whole-number grades: class standing, exam, period grades such as PRELIM/MIDTERM/PRE-FINAL/FINAL, and FINAL GRADE are rounded with `ROUND_HALF_UP` while raw/activity scores keep decimal precision.
+- Expired reopened gradebooks now lock score/activity/attendance editing but still allow faculty to finalize and resubmit the existing records from Summary; the temporary auto-lock is cleared after resubmission so the period returns to normal submitted state.
+- Faculty Dashboard Priority Actions now includes expired reopened gradebooks as a high-priority resubmission task, with a direct link to the Summary page.
+- Faculty Dashboard no longer shows the embedded Students At Risk container; Priority Actions now uses the full command area.
+- Faculty My Classes now reports class size from active grading students only, so dropped, withdrawn, incomplete, or inactive enrollments do not inflate the card count.
+- Admin Period Locks now default to active rules only, include an Active/Inactive filter and Rule State column, label inactive rules as ignored, and explain Lock, Scope, and Active behavior directly on the list and form.
+- Configuration Management now includes a Faculty DRP cutoff under Class Master List Ownership; by default assigned faculty may newly mark students as `DRP` through Pre-Final, but not once the active grading period has advanced to Final.
+- Student At-Risk Monitor now shows a simple period-use guide and focuses faculty review on the current active period when configured; final-grade projection remains on the detailed prediction page.
+- Grade Prediction risk status now treats students as at risk when either the selected period estimate or the possible final grade is below the passing threshold, so a strong current-period grade no longer hides final-grade risk.
+- Active Grading Period guide text now states that deadline-driven auto-advance moves forward only and does not roll back automatically when a deadline is edited afterward.
+- Faculty Portal formal manual copy has been rewritten in simpler, more natural language while keeping the same guide structure and policy coverage.
+- Faculty Portal main guide copy has also been rewritten in simpler, more natural faculty-facing language while keeping the same anchors and help sections.
+- Faculty Portal main guide navigation has been reorganized into grouped topic cards so faculty can jump by task without scanning a cluttered list of links.
+- Faculty Portal manual navigation has also been reorganized into grouped topic cards for easier scanning and less visual clutter.
+- Faculty Portal guide and formal manual have been visually refreshed with a stronger green/teal/gold theme, animated cards, target highlighting, and bottom-left Back to top links.
+- Faculty Dashboard has been redesigned for easier reading and navigation with a stronger hero, quick shortcut cards, a two-column priority/action area, and a privacy-safe at-risk student preview.
+- Admin Portal guide has been redesigned as a polished workstream hub with a stronger hero, an operating-path card, grouped navigation, target highlighting, and a fixed Back to top link.
+- Admin Portal now includes a Faculty Deactivation page where authorized admins can schedule or cancel future faculty account deactivations, backed by the `apply_scheduled_user_deactivations` management command for cron processing.
+
 ### Added
+- Production settings now fail startup when `DJANGO_SECRET_KEY` is missing or still uses the development fallback value.
 - Faculty grade distribution monitoring:
   - added a read-only Admin Portal dashboard for authorized academic leaders to review grade distribution by faculty, class, grading period, and activity-score level
   - added configurable RBAC permission `grade_distribution_monitor.read` plus a seeded Grading menu item and Dashboard quick action
@@ -628,9 +656,9 @@ For every merged change:
 - Faculty Final Clearance PDF tables now use a softer slate header tint and lighter grid lines so the printed report reads more like a formal clearance document and less like a spreadsheet export.
 - Faculty Final Clearance PDF now includes a QR code in the control section. When `SITE_URL` is configured, the QR opens the Admin Portal verification lookup with the printed reference and verification codes prefilled; otherwise it stores a manual verification payload.
 - Faculty Portal class list now shows `WITHDRAWN` instead of the short `W` label in the status legend, status badges, and status dropdown, while keeping the stored enrollment code unchanged.
-- Grading deadline governance now supports a three-step operational flow: normal encoding until deadline, an optional `Grace / Completion Window` from Period Locks, and a governed `Late Completion Request` after grace expires instead of misusing grade correction for unfinished encoding.
-- Faculty Portal period cards plus Activities, Attendance, and Summary pages now show the current completion-window state directly, including `Grace / Completion Window`, `Late Completion Pending`, `Late Completion Access`, and `Non-Compliant` messaging with the right next action.
-- Faculty can now file a `Late Completion Request` after grace expires, while authorized Admin users can review, approve, reject, and time-box the late-access window from a dedicated request-review screen.
-- Admin Portal overdue grade-submission reporting is now framed as `Non-Compliance on Periodic Grades Submission`, with summary cards for within-grace classes, pending late requests, active late access, and non-compliant rows.
-- Period Lock setup now includes an optional `Grace / Completion Cutoff`, making the formal submission deadline and the final grace-window cutoff visible and distinct in governance screens.
+- Grading deadline governance now follows the simplified NCBA compliance policy: normal encoding continues until faculty submission, even after the configured deadline.
+- Faculty Portal period cards plus Activities, Attendance, and Summary pages now show overdue/non-compliant messaging without sending unsubmitted gradebooks into late-completion access requests.
+- Overdue unsubmitted gradebooks are monitored from `Non-Compliance on Periodic Grades Submission`; grade correction remains reserved for already submitted gradebooks that need approved changes.
+- Admin Portal overdue grade-submission reporting is now framed as `Non-Compliance on Periodic Grades Submission`, with rows focused on deadline status, accepted faculty assignments, and missing-record readiness.
+- Period Lock setup uses the formal submission deadline as a compliance checkpoint and reminder trigger; it does not create a separate grace/completion cutoff workflow.
 - Admin Portal `Create/Edit Period Lock` now sorts the `Course Offering` list by course title and turns that field into an editable combobox-style picker so admins can type to search offerings directly.

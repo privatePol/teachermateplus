@@ -19,6 +19,30 @@ This document is generated from the current Django model registry so it reflects
 
 ## `accounts`
 
+### `login_otp_challenges`
+
+- **Model:** `accounts.LoginOtpChallenge`
+- **Purpose:** EduGradesPro application table.
+
+**Relationships**
+- `user` -> `users` (`accounts.User`)
+
+**Unique / Structural Notes**
+- No explicit unique constraint metadata beyond primary keys and field-level `unique=True` flags.
+
+| Field | Django Type | Null | Blank | PK | Relationship | Explanation |
+|---|---|---:|---:|---:|---|---|
+| `id` | `BigAutoField` | `No` | `Yes` | `Yes` | - | Primary key for the table. |
+| `user` | `ForeignKey` | `No` | `No` | `No` | `users` (`accounts.User`) | Related user account. |
+| `portal_code` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `code_hash` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `sent_to_email` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `expires_at` | `DateTimeField` | `No` | `No` | `No` | - | Date/time value used by the workflow or record. |
+| `consumed_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
+| `attempt_count` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
+| `last_attempt_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
+| `created_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was created. |
+
 ### `portal_login_lockout_states`
 
 - **Model:** `accounts.PortalLoginLockoutState`
@@ -43,6 +67,62 @@ This document is generated from the current Django model registry so it reflects
 | `last_ip` | `GenericIPAddressField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
 | `created_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was created. |
 | `updated_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was last updated. |
+
+### `user_signature_credentials`
+
+- **Model:** `accounts.UserSignatureCredential`
+- **Purpose:** Encrypted account-level signature image credential for approved printable documents.
+
+**Relationships**
+- `user` -> `users` (`accounts.User`)
+- `uploaded_by_user` -> `users` (`accounts.User`)
+
+**Unique / Structural Notes**
+- No explicit unique constraint metadata beyond primary keys and field-level `unique=True` flags.
+
+| Field | Django Type | Null | Blank | PK | Relationship | Explanation |
+|---|---|---:|---:|---:|---|---|
+| `id` | `BigAutoField` | `No` | `Yes` | `Yes` | - | Primary key for the table. |
+| `user` | `OneToOneField` | `No` | `No` | `No` | `users` (`accounts.User`) | Related user account. |
+| `encrypted_blob` | `BinaryField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
+| `encryption_nonce` | `BinaryField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
+| `original_filename` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `mime_type` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `image_format` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `image_width` | `PositiveIntegerField` | `Yes` | `Yes` | `No` | - | Numeric value used by the workflow or computation. |
+| `image_height` | `PositiveIntegerField` | `Yes` | `Yes` | `No` | - | Numeric value used by the workflow or computation. |
+| `file_size_bytes` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
+| `content_sha256` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `uploaded_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
+| `uploaded_by_user` | `ForeignKey` | `Yes` | `Yes` | `No` | `users` (`accounts.User`) | Foreign-key reference to `accounts.User`. |
+| `last_used_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
+| `is_enabled` | `BooleanField` | `No` | `No` | `No` | - | Boolean flag used by the workflow or record. |
+| `created_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was created. |
+| `updated_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was last updated. |
+
+### `user_signature_usage_logs`
+
+- **Model:** `accounts.UserSignatureUsageLog`
+- **Purpose:** Audit trail for stored signature placement on official generated documents.
+
+**Relationships**
+- `user` -> `users` (`accounts.User`)
+- `actor` -> `users` (`accounts.User`)
+
+**Unique / Structural Notes**
+- No explicit unique constraint metadata beyond primary keys and field-level `unique=True` flags.
+
+| Field | Django Type | Null | Blank | PK | Relationship | Explanation |
+|---|---|---:|---:|---:|---|---|
+| `id` | `BigAutoField` | `No` | `Yes` | `Yes` | - | Primary key for the table. |
+| `user` | `ForeignKey` | `No` | `No` | `No` | `users` (`accounts.User`) | Related user account. |
+| `document_type` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `document_reference` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `usage_role` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `portal_code` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `actor` | `ForeignKey` | `Yes` | `Yes` | `No` | `users` (`accounts.User`) | Foreign-key reference to `accounts.User`. |
+| `used_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
+| `metadata_json` | `JSONField` | `Yes` | `Yes` | `No` | - | Flexible JSON payload for extra metadata. |
 
 ### `users`
 
@@ -76,6 +156,7 @@ This document is generated from the current Django model registry so it reflects
 | `is_active` | `BooleanField` | `No` | `No` | `No` | - | Active/inactive flag used for soft operational control. |
 | `is_staff` | `BooleanField` | `No` | `No` | `No` | - | Boolean flag used by the workflow or record. |
 | `must_change_password` | `BooleanField` | `No` | `No` | `No` | - | Boolean flag used by the workflow or record. |
+| `faculty_quick_tour_disabled` | `BooleanField` | `No` | `No` | `No` | - | Boolean flag used by the workflow or record. |
 | `privacy_consent_version` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `privacy_consent_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
 | `privacy_consent_ip` | `GenericIPAddressField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
@@ -646,6 +727,7 @@ This document is generated from the current Django model registry so it reflects
 | `academic_year` | `ForeignKey` | `No` | `No` | `No` | `academic_years` (`academics.AcademicYear`) | Academic year for the record. |
 | `code` | `CharField` | `No` | `No` | `No` | - | Short code used as an operational identifier. |
 | `name` | `CharField` | `No` | `No` | `No` | - | Human-readable name or label. |
+| `term_type` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
 | `sequence_no` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
 | `start_date` | `DateField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
 | `end_date` | `DateField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
@@ -859,6 +941,42 @@ This document is generated from the current Django model registry so it reflects
 | `grading_template` | `ForeignKey` | `No` | `No` | `No` | `grading_templates` (`grading.GradingTemplate`) | Foreign-key reference to `grading.GradingTemplate`. |
 | `effective_from_term` | `ForeignKey` | `Yes` | `Yes` | `No` | `terms` (`academics.Term`) | Foreign-key reference to `academics.Term`. |
 
+### `faculty_final_clearance_reports`
+
+- **Model:** `grading.FacultyFinalClearanceReport`
+- **Purpose:** EduGradesPro application table.
+
+**Relationships**
+- `tenant` -> `tenants` (`tenants.Tenant`)
+- `campus` -> `campuses` (`tenants.Campus`)
+- `academic_year` -> `academic_years` (`academics.AcademicYear`)
+- `term` -> `terms` (`academics.Term`)
+- `faculty_user` -> `users` (`accounts.User`)
+- `generated_by_user` -> `users` (`accounts.User`)
+
+**Unique / Structural Notes**
+- No explicit unique constraint metadata beyond primary keys and field-level `unique=True` flags.
+
+| Field | Django Type | Null | Blank | PK | Relationship | Explanation |
+|---|---|---:|---:|---:|---|---|
+| `id` | `BigAutoField` | `No` | `Yes` | `Yes` | - | Primary key for the table. |
+| `created_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was created. |
+| `updated_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was last updated. |
+| `tenant` | `ForeignKey` | `No` | `No` | `No` | `tenants` (`tenants.Tenant`) | Owning tenant scope for the record. |
+| `campus` | `ForeignKey` | `No` | `No` | `No` | `campuses` (`tenants.Campus`) | Owning or effective campus scope for the record. |
+| `academic_year` | `ForeignKey` | `No` | `No` | `No` | `academic_years` (`academics.AcademicYear`) | Academic year for the record. |
+| `term` | `ForeignKey` | `No` | `No` | `No` | `terms` (`academics.Term`) | Academic term for the record. |
+| `faculty_user` | `ForeignKey` | `No` | `No` | `No` | `users` (`accounts.User`) | Faculty user assigned to the record. |
+| `generated_by_user` | `ForeignKey` | `Yes` | `Yes` | `No` | `users` (`accounts.User`) | Foreign-key reference to `accounts.User`. |
+| `report_uuid` | `UUIDField` | `No` | `No` | `No` | - | Application field used by EduGradesPro. |
+| `reference_no` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `verification_code` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `clearance_status` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `total_assigned_courses` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
+| `complete_courses` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
+| `incomplete_courses` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
+| `snapshot_json` | `JSONField` | `Yes` | `Yes` | `No` | - | Flexible JSON payload used for variable structured data. |
+
 ### `grade_activities`
 
 - **Model:** `grading.GradeActivity`
@@ -942,6 +1060,9 @@ This document is generated from the current Django model registry so it reflects
 | `updated_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was last updated. |
 | `correction_request` | `ForeignKey` | `No` | `No` | `No` | `grade_correction_requests` (`grading.GradeCorrectionRequest`) | Foreign-key reference to `grading.GradeCorrectionRequest`. |
 | `file` | `FileField` | `No` | `No` | `No` | - | Application field used by EduGradesPro. |
+| `original_filename` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `content_type` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `file_size_bytes` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
 | `uploaded_by_user` | `ForeignKey` | `Yes` | `Yes` | `No` | `users` (`accounts.User`) | Foreign-key reference to `accounts.User`. |
 
 ### `grade_correction_request_items`
@@ -1215,6 +1336,7 @@ This document is generated from the current Django model registry so it reflects
 | `weight_percentage` | `DecimalField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
 | `sort_order` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
 | `score_input_mode` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `is_exam_component` | `BooleanField` | `No` | `No` | `No` | - | Boolean flag used by the workflow or record. |
 
 ### `grading_template_details`
 
@@ -1315,6 +1437,7 @@ This document is generated from the current Django model registry so it reflects
 | `name` | `CharField` | `No` | `No` | `No` | - | Human-readable name or label. |
 | `description` | `TextField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `default_base_value` | `DecimalField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
+| `passing_grade_threshold` | `DecimalField` | `Yes` | `Yes` | `No` | - | Numeric value used by the workflow or computation. |
 | `approval_status` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
 | `approval_requested_by` | `ForeignKey` | `Yes` | `Yes` | `No` | `users` (`accounts.User`) | Foreign-key reference to `accounts.User`. |
 | `approval_requested_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
@@ -1507,11 +1630,14 @@ This document is generated from the current Django model registry so it reflects
 | `program` | `ForeignKey` | `Yes` | `Yes` | `No` | `programs` (`tenants.Program`) | Owning or effective academic program scope for the record. |
 | `course` | `ForeignKey` | `Yes` | `Yes` | `No` | `courses` (`academics.Course`) | Foreign-key reference to `academics.Course`. |
 | `course_type` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `term_type` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `profile_code` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
 | `profile_name` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
 | `grading_template` | `ForeignKey` | `No` | `No` | `No` | `grading_templates` (`grading.GradingTemplate`) | Foreign-key reference to `grading.GradingTemplate`. |
 | `default_base_value` | `DecimalField` | `Yes` | `Yes` | `No` | - | Numeric value used by the workflow or computation. |
 | `passing_grade_threshold` | `DecimalField` | `Yes` | `Yes` | `No` | - | Numeric value used by the workflow or computation. |
+| `final_grade_formula_mode` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `final_grade_formula_json` | `JSONField` | `Yes` | `Yes` | `No` | - | Flexible JSON payload used for variable structured data. |
 | `priority` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
 | `effective_from_term` | `ForeignKey` | `Yes` | `Yes` | `No` | `terms` (`academics.Term`) | Foreign-key reference to `academics.Term`. |
 | `is_default` | `BooleanField` | `No` | `No` | `No` | - | Boolean flag used by the workflow or record. |
@@ -1658,6 +1784,7 @@ This document is generated from the current Django model registry so it reflects
 - `campus` -> `campuses` (`tenants.Campus`)
 - `faculty_user` -> `users` (`accounts.User`)
 - `offering` -> `course_offerings` (`academics.CourseOffering`)
+- `grade_activity` -> `grade_activities` (`grading.GradeActivity`)
 - `created_by` -> `users` (`accounts.User`)
 
 **Unique / Structural Notes**
@@ -1672,6 +1799,7 @@ This document is generated from the current Django model registry so it reflects
 | `campus` | `ForeignKey` | `Yes` | `Yes` | `No` | `campuses` (`tenants.Campus`) | Owning or effective campus scope for the record. |
 | `faculty_user` | `ForeignKey` | `No` | `No` | `No` | `users` (`accounts.User`) | Faculty user assigned to the record. |
 | `offering` | `ForeignKey` | `Yes` | `Yes` | `No` | `course_offerings` (`academics.CourseOffering`) | Related course offering/class record. |
+| `grade_activity` | `ForeignKey` | `Yes` | `Yes` | `No` | `grade_activities` (`grading.GradeActivity`) | Foreign-key reference to `grading.GradeActivity`. |
 | `reminder_type` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
 | `title` | `CharField` | `No` | `No` | `No` | - | Human-readable title. |
 | `period_label` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
@@ -1718,6 +1846,51 @@ This document is generated from the current Django model registry so it reflects
 | `reference_type` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `reference_id` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `metadata_json` | `JSONField` | `Yes` | `Yes` | `No` | - | Flexible JSON payload for extra metadata. |
+
+### `submission_non_compliance_notices`
+
+- **Model:** `notifications.SubmissionNonComplianceNotice`
+- **Purpose:** EduGradesPro application table.
+
+**Relationships**
+- `tenant` -> `tenants` (`tenants.Tenant`)
+- `campus` -> `campuses` (`tenants.Campus`)
+- `department` -> `departments` (`tenants.Department`)
+- `offering` -> `course_offerings` (`academics.CourseOffering`)
+- `template_period` -> `grading_template_periods` (`grading.GradingTemplatePeriod`)
+- `faculty_user` -> `users` (`accounts.User`)
+- `submission` -> `grade_submissions` (`grading.GradeSubmission`)
+
+**Unique / Structural Notes**
+- No explicit unique constraint metadata beyond primary keys and field-level `unique=True` flags.
+
+| Field | Django Type | Null | Blank | PK | Relationship | Explanation |
+|---|---|---:|---:|---:|---|---|
+| `id` | `BigAutoField` | `No` | `Yes` | `Yes` | - | Primary key for the table. |
+| `created_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was created. |
+| `updated_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was last updated. |
+| `tenant` | `ForeignKey` | `No` | `No` | `No` | `tenants` (`tenants.Tenant`) | Owning tenant scope for the record. |
+| `campus` | `ForeignKey` | `No` | `No` | `No` | `campuses` (`tenants.Campus`) | Owning or effective campus scope for the record. |
+| `department` | `ForeignKey` | `Yes` | `Yes` | `No` | `departments` (`tenants.Department`) | Owning or effective department scope for the record. |
+| `offering` | `ForeignKey` | `No` | `No` | `No` | `course_offerings` (`academics.CourseOffering`) | Related course offering/class record. |
+| `template_period` | `ForeignKey` | `No` | `No` | `No` | `grading_template_periods` (`grading.GradingTemplatePeriod`) | Related grading-template period record. |
+| `faculty_user` | `ForeignKey` | `No` | `No` | `No` | `users` (`accounts.User`) | Faculty user assigned to the record. |
+| `submission` | `ForeignKey` | `Yes` | `Yes` | `No` | `grade_submissions` (`grading.GradeSubmission`) | Foreign-key reference to `grading.GradeSubmission`. |
+| `notice_level` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `sequence_no` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
+| `title` | `CharField` | `No` | `No` | `No` | - | Human-readable title. |
+| `message` | `TextField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `deadline_at` | `DateTimeField` | `No` | `No` | `No` | - | Date/time value used by the workflow or record. |
+| `issued_at` | `DateTimeField` | `No` | `No` | `No` | - | Date/time value used by the workflow or record. |
+| `status` | `CharField` | `No` | `No` | `No` | - | Workflow or operational status code. |
+| `resolved_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
+| `resolution_note` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `recipient_emails_json` | `JSONField` | `Yes` | `Yes` | `No` | - | Flexible JSON payload used for variable structured data. |
+| `recipient_roles_json` | `JSONField` | `Yes` | `Yes` | `No` | - | Flexible JSON payload used for variable structured data. |
+| `email_status` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
+| `email_sent_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
+| `email_attempt_count` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
+| `email_error_message` | `TextField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 
 ## `predictions`
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.core.exceptions import PermissionDenied, ValidationError
 
+from apps.academics.services import AcademicGovernanceService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
@@ -10,9 +11,28 @@ from apps.enrollment.models import Enrollment
 class EnrollmentService:
     MODE_KEY = "ENROLLMENT_OWNERSHIP_MODE"
     MODE_OVERRIDE_MAP_KEY = "ENROLLMENT_OWNERSHIP_MODE_BY_OFFERING"
+    FACULTY_DRP_ALLOWED_THROUGH_PERIOD_KEY = "FACULTY_DRP_ALLOWED_THROUGH_PERIOD"
     LEGACY_MODE_KEY = "enrollment_mode"
     ADMIN_ONLY = "ADMIN_ONLY"
     FACULTY_ALLOWED = "FACULTY_ALLOWED"
+    PERIOD_ALWAYS = "ALWAYS"
+    PERIOD_PRELIM = "PRELIM"
+    PERIOD_MIDTERM = "MIDTERM"
+    PERIOD_PREFINAL = "PREFINAL"
+    PERIOD_FINAL = "FINAL"
+
+    FACULTY_DRP_PERIOD_CHOICES = (
+        (PERIOD_MIDTERM, "Through Midterm"),
+        (PERIOD_PREFINAL, "Through Pre-Final"),
+        (PERIOD_FINAL, "Through Final"),
+        (PERIOD_ALWAYS, "Always allow"),
+    )
+    FACULTY_DRP_PERIOD_ORDER = {
+        PERIOD_PRELIM: 1,
+        PERIOD_MIDTERM: 2,
+        PERIOD_PREFINAL: 3,
+        PERIOD_FINAL: 4,
+    }
 
     @classmethod
     def get_enrollment_mode_overrides(cls, tenant_id: int | None) -> dict[str, str]:
@@ -40,6 +60,44 @@ class EnrollmentService:
             if override_mode in {cls.ADMIN_ONLY, cls.FACULTY_ALLOWED}:
                 return override_mode
         return mode
+
+    @classmethod
+    def get_faculty_drp_allowed_through_period(cls, tenant_id: int | None):
+        raw_value = SystemSettingService.get(
+            cls.FACULTY_DRP_ALLOWED_THROUGH_PERIOD_KEY,
+            tenant_id=tenant_id,
+            default=cls.PERIOD_PREFINAL,
+        )
+        normalized = str(raw_value or cls.PERIOD_PREFINAL).strip().upper().replace("-", "").replace("_", "")
+        if normalized == "PREFINAL":
+            return cls.PERIOD_PREFINAL
+        if normalized in {cls.PERIOD_MIDTERM, cls.PERIOD_FINAL, cls.PERIOD_ALWAYS}:
+            return normalized
+        return cls.PERIOD_PREFINAL
+
+    @classmethod
+    def _ensure_faculty_drp_allowed_for_period(cls, *, offering, portal: str):
+        if portal.upper() != Enrollment.SourcePortal.FACULTY:
+            return
+        allowed_through = cls.get_faculty_drp_allowed_through_period(offering.tenant_id)
+        if allowed_through == cls.PERIOD_ALWAYS:
+            return
+        active_setting = AcademicGovernanceService.resolve_active_grading_period(
+            tenant_id=offering.tenant_id,
+            campus_id=offering.campus_id,
+            term_id=offering.term_id,
+        )
+        if not active_setting or not active_setting.period_id:
+            return
+        active_key = AcademicGovernanceService.normalize_period_key(
+            active_setting.period.code or active_setting.period.name
+        )
+        active_order = cls.FACULTY_DRP_PERIOD_ORDER.get(active_key)
+        cutoff_order = cls.FACULTY_DRP_PERIOD_ORDER.get(allowed_through)
+        if active_order and cutoff_order and active_order > cutoff_order:
+            raise ValidationError(
+                "Faculty DRP updates are no longer allowed for this class under the current active grading period."
+            )
 
     @classmethod
     def _is_admin_route_allowed(cls, user, offering, action: str):
@@ -138,6 +196,12 @@ class EnrollmentService:
         offering = enrollment.course_offering
         if not cls.can_update_classlist_status(user=user, offering=offering, portal=portal):
             raise PermissionDenied("You are not allowed to update enrollment for this offering.")
+        if offering.tenant_id != enrollment.student.tenant_id:
+            raise ValidationError("Student and offering tenant mismatch.")
+        if offering.campus_id != enrollment.student.campus_id:
+            raise ValidationError("Student and offering campus mismatch.")
+        if enrollment_status == Enrollment.Status.DRP and enrollment.enrollment_status != Enrollment.Status.DRP:
+            cls._ensure_faculty_drp_allowed_for_period(offering=offering, portal=portal)
 
         enrollment.enrollment_status = enrollment_status
         enrollment.is_active = is_active

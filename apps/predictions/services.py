@@ -72,7 +72,7 @@ class PredictionDirtyQueueService:
 
 
 class PredictionComputationService:
-    COMPUTATION_VERSION = "v2"
+    COMPUTATION_VERSION = "v3"
 
     @staticmethod
     def _round(value: Decimal | None) -> Decimal | None:
@@ -688,6 +688,10 @@ class PredictionComputationService:
                     period_grade=period_scores.worst,
                 )
             )
+            at_risk_flag = bool(current_projection is not None and current_projection < passing_threshold)
+            if current_projected_final_grade is not None and current_projected_final_grade < passing_threshold:
+                at_risk_flag = True
+
             row = PredictionSnapshot.objects.create(
                 tenant_id=offering.tenant_id,
                 campus_id=offering.campus_id,
@@ -707,7 +711,7 @@ class PredictionComputationService:
                     worst_case=period_scores.worst,
                     best_case=period_scores.best,
                 ),
-                at_risk_flag=bool(current_projection is not None and current_projection < passing_threshold),
+                at_risk_flag=at_risk_flag,
                 encoded_item_count=encoded_item_count,
                 expected_item_count=expected_item_count,
                 remaining_item_count=remaining_item_count,

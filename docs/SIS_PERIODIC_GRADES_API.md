@@ -85,9 +85,9 @@ curl -X GET "http://127.0.0.1:8000/api/v1/sis/periodic-grades/?tenant_code=NCBA&
       "student_no": "2025-10606",
       "student_name": "BAUTISTA, KENJIE",
       "student_status": "ACTIVE",
-      "class_standing_grade": "93.05",
-      "exam_grade": "99.50",
-      "period_grade": "95.63",
+      "class_standing_grade": "93",
+      "exam_grade": "100",
+      "period_grade": "96",
       "is_finalized": true,
       "submitted_at": "2026-03-22T13:22:00+08:00",
       "submission_remarks": "Submitted by faculty",
@@ -102,3 +102,4 @@ curl -X GET "http://127.0.0.1:8000/api/v1/sis/periodic-grades/?tenant_code=NCBA&
 
 Only periodic grades tied to a `SUBMITTED` grade submission are returned.
 Draft or reopened-but-not-resubmitted periods are excluded.
+Official class standing, exam, and period grades are rounded to whole numbers using `ROUND_HALF_UP`.

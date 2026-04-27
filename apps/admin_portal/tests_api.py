@@ -261,4 +261,6 @@ class SISPeriodicGradesApiTests(TestCase):
         self.assertEqual(row["campus_code"], self.campus_fairv.code)
         self.assertEqual(row["section_code"], self.section_code)
         self.assertEqual(row["student_no"], self.student_no)
-        self.assertEqual(row["period_grade"], "95.63")
+        self.assertEqual(row["class_standing_grade"], "93")
+        self.assertEqual(row["exam_grade"], "100")
+        self.assertEqual(row["period_grade"], "96")

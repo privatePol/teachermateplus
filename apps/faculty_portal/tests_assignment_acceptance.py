@@ -29,7 +29,9 @@ from apps.grading.models import (
     GradingPeriodLock,
     GradingTemplate,
     GradingTemplateComponent,
+    GradingTemplateDetail,
     GradingTemplatePeriod,
+    GradingTemplateSubcomponent,
     StudentFinalGrade,
     StudentActivityScore,
     StudentPeriodGrade,
@@ -39,7 +41,7 @@ from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
-from apps.grading.services import FacultyGradingService
+from apps.grading.services import FacultyGradingService, GradingGovernanceService
 from apps.tenants.models import Campus, Department, Program, SystemSetting, Tenant
 
 
@@ -388,6 +390,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Student At-Risk Monitor")
+        self.assertContains(response, "Current-period focus")
 
     def test_prediction_guide_includes_methodology_and_column_factors(self):
         self._enable_grade_prediction()
@@ -600,7 +603,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Students currently marked as")
         self.assertContains(response, "INC")
 
-    def test_dashboard_priority_actions_and_at_risk_widgets_show_zero_states(self):
+    def test_dashboard_priority_actions_shows_zero_state_without_at_risk_container(self):
         self._enable_grade_prediction()
         self._accept_assignment()
 
@@ -611,9 +614,8 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Priority Actions")
         self.assertContains(response, "Focus on these first to avoid deadline, submission, and grading issues.")
         self.assertContains(response, "No priority actions right now.")
-        self.assertContains(response, "Students At Risk")
-        self.assertContains(response, "No at-risk students are flagged in your current active classes.")
-        self.assertContains(response, reverse("faculty_portal:student_at_risk_monitor"))
+        self.assertNotContains(response, "Students At Risk")
+        self.assertNotContains(response, "No at-risk students are flagged in your current active classes.")
 
     def test_dashboard_priority_actions_appear_only_when_relevant(self):
         self._accept_assignment()
@@ -687,7 +689,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertNotContains(response, "BSIT-1B")
         self.assertEqual(other_assignment.faculty_user_id, other_faculty.id)
 
-    def test_dashboard_at_risk_preview_shows_only_active_scope_students(self):
+    def test_dashboard_at_risk_priority_action_uses_only_active_scope_students(self):
         self._enable_grade_prediction()
         self._accept_assignment()
         visible_student = self._create_active_student(
@@ -741,9 +743,9 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         response = self.client.get(reverse("faculty_portal:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Visible Learner")
-        self.assertContains(response, "Estimated grade below passing")
-        self.assertContains(response, "At Risk")
+        self.assertContains(response, "1 student is currently at risk this grading period.")
+        self.assertContains(response, "View Students")
+        self.assertNotContains(response, "Visible Learner")
         self.assertNotContains(response, "Hidden Learner")
         self.assertNotContains(response, "2025-RISK-999")
 
@@ -786,6 +788,127 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             response,
             reverse("faculty_portal:activity_scores", args=[self.offering.id, self.prelim.id, activity.id]),
         )
+
+    def test_dashboard_priority_actions_include_locked_reopened_gradebook(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-DASH-LOCK-001",
+            last_name="Dashboard",
+            first_name="Locked",
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            title="Dashboard Locked Activity",
+            total_score=100,
+            created_by_user=self.faculty_user,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("90")}],
+        )
+        lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.prelim.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() + timedelta(days=1),
+            is_locked=False,
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_login(self.faculty_user)
+        self.client.post(
+            reverse("faculty_portal:period_self_reopen", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
+            {"remarks": "Need to revise before cutoff."},
+        )
+        lock.deadline_at = timezone.now() - timedelta(hours=1)
+        lock.save(update_fields=["deadline_at", "updated_at"])
+
+        response = self.client.get(reverse("faculty_portal:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "reopened gradebook")
+        self.assertContains(response, "is locked after the deadline and needs resubmission")
+        self.assertContains(response, "Resubmit Gradebook")
+        self.assertContains(
+            response,
+            reverse("faculty_portal:period_summary", args=[self.offering.id, self.prelim.id]),
+        )
+        content = response.content.decode()
+        self.assertLess(
+            content.index("is locked after the deadline and needs resubmission"),
+            content.index("has missing grades that may affect submission")
+            if "has missing grades that may affect submission" in content
+            else len(content),
+        )
+
+    def test_blank_activity_score_saves_as_zero_and_counts_in_average(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-ZERO-001",
+            last_name="Zero",
+            first_name="Default",
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        first_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            title="Recitation 1",
+            total_score=100,
+            created_by_user=self.faculty_user,
+        )
+        second_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            title="Recitation 2",
+            total_score=100,
+            created_by_user=self.faculty_user,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=first_activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("80")}],
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:activity_scores", args=[self.offering.id, self.prelim.id, second_activity.id])
+        )
+        self.assertContains(response, f'name="raw_{student.id}"')
+        self.assertContains(response, 'value="0"')
+
+        response = self.client.post(
+            reverse("faculty_portal:activity_scores", args=[self.offering.id, self.prelim.id, second_activity.id]),
+            {f"raw_{student.id}": ""},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        score = StudentActivityScore.objects.get(activity=second_activity, student=student, is_active=True)
+        self.assertEqual(score.raw_score, Decimal("0.00"))
+        self.assertEqual(score.computed_score, Decimal("50.00"))
+        period_grade = StudentPeriodGrade.objects.get(offering=self.offering, template_period=self.prelim, student=student)
+        self.assertEqual(period_grade.class_standing_grade, Decimal("70.00"))
 
     def test_dashboard_does_not_leak_cross_tenant_priority_actions(self):
         self._accept_assignment()
@@ -907,6 +1030,24 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             last_name="Pinnacle",
             first_name="Ready",
         )
+        student = Student.objects.get(student_no="2025-PIN-001")
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            student=student,
+            period_grade=Decimal("88.00"),
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
 
         self.client.force_login(self.faculty_user)
         response = self.client.get(
@@ -1023,6 +1164,15 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assignment.accepted_by = self.faculty_user
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
         self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
 
         self.client.force_login(self.faculty_user)
         response = self.client.get(
@@ -1095,6 +1245,15 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assignment.accepted_by = self.faculty_user
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
         self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
 
         self.client.force_login(self.faculty_user)
         response = self.client.get(
@@ -1199,6 +1358,15 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assignment.accepted_by = self.faculty_user
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
         self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
 
         self.client.force_login(self.faculty_user)
         response = self.client.get(
@@ -1209,7 +1377,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "PRELIM Grade", count=1)
         self.assertContains(response, "Passed")
         self.assertContains(response, "Failed")
-        self.assertContains(response, "93.00")
+        self.assertContains(response, "93")
         self.assertNotContains(response, "FINAL GRADE")
 
     def test_final_period_summary_shows_prior_period_grade_columns_and_final_grade(self):
@@ -1292,6 +1460,15 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assignment.accepted_by = self.faculty_user
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
         self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.final,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
 
         self.client.force_login(self.faculty_user)
         response = self.client.get(
@@ -1303,10 +1480,387 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "MIDTERM GRADE")
         self.assertContains(response, "PRE-FINAL GRADE")
         self.assertContains(response, "FINAL GRADE")
-        self.assertContains(response, "81.00")
-        self.assertContains(response, "84.00")
-        self.assertContains(response, "87.00")
-        self.assertContains(response, "63.00")
+        self.assertContains(response, "81")
+        self.assertContains(response, "84")
+        self.assertContains(response, "87")
+        self.assertContains(response, "89")
+        self.assertContains(response, "85")
+
+    def test_final_period_summary_uses_fx_grade_without_extra_exam_column(self):
+        student = self._create_active_student(
+            student_no="2025-FX-001",
+            last_name="Transmuted",
+            first_name="Exam",
+        )
+        exam_component = GradingTemplateComponent.objects.create(
+            template_period=self.final,
+            code="FINAL_EXAM",
+            name="Final Exam",
+            weight_percentage=100,
+            sort_order=1,
+            is_exam_component=True,
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.final,
+            template_component=exam_component,
+            title="Final Exam",
+            total_score=Decimal("100.00"),
+            created_by_user=self.faculty_user,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": "95"}],
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.final,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        self._accept_assignment()
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.final.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "TRANSMUTED FINAL EXAM GRADE")
+        self.assertNotContains(response, ">FINAL EXAM<", html=False)
+        self.assertContains(response, "FINAL Grade")
+        self.assertContains(response, "98")
+
+    def test_period_summary_hides_gradebook_table_until_submitted(self):
+        self._accept_assignment()
+        self._create_active_student(
+            student_no="2025-HIDE-001",
+            last_name="Hidden",
+            first_name="Summary",
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Submit this gradebook to view or print the official Summary of Grades")
+        self.assertNotContains(response, "Print Periodic Grades")
+        self.assertNotContains(response, "<th>Student Name</th>", html=False)
+
+    def test_faculty_can_self_reopen_submitted_gradebook_before_deadline(self):
+        self._accept_assignment()
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.prelim.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() + timedelta(days=1),
+            is_locked=False,
+        )
+        submission = GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
+        )
+        self.assertContains(response, "Reopen Before Deadline")
+        self.assertContains(response, "Justification")
+        self.assertContains(response, "Print Periodic Grades")
+
+        response = self.client.post(
+            reverse("faculty_portal:period_self_reopen", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
+            {"remarks": ""},
+            follow=True,
+        )
+        submission.refresh_from_db()
+        self.assertEqual(submission.status, GradeSubmission.Status.SUBMITTED)
+        self.assertContains(response, "Reopen justification is required.")
+
+        response = self.client.post(
+            reverse("faculty_portal:period_self_reopen", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
+            {"remarks": "Need to review before cutoff."},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        submission.refresh_from_db()
+        self.assertEqual(submission.status, GradeSubmission.Status.REOPENED)
+        self.assertContains(response, "gradebook reopened")
+        self.assertContains(response, "Submit this gradebook to view or print the official Summary of Grades")
+        self.assertNotContains(response, "Print Periodic Grades")
+
+        response = self.client.get(
+            reverse("faculty_portal:period_view_history", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
+        )
+        self.assertContains(response, "Reopen Attempts")
+        self.assertContains(response, "Need to review before cutoff.")
+
+    def test_reopened_gradebook_is_locked_when_admin_moves_deadline_to_past(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-LOCK-001",
+            last_name="Locked",
+            first_name="Submit",
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            title="Locked Resubmit Activity",
+            total_score=100,
+            created_by_user=self.faculty_user,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("90")}],
+        )
+        exam_component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
+        exam_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=exam_component,
+            title="Locked Resubmit Exam",
+            total_score=100,
+            created_by_user=self.faculty_user,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=exam_activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("88")}],
+        )
+        lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.prelim.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() + timedelta(days=1),
+            is_locked=False,
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+
+        self.client.force_login(self.faculty_user)
+        self.client.post(
+            reverse("faculty_portal:period_self_reopen", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
+            {"remarks": "Need to revise one score."},
+        )
+        lock.deadline_at = timezone.now() - timedelta(hours=1)
+        lock.save(update_fields=["deadline_at", "updated_at"])
+
+        response = self.client.get(reverse("faculty_portal:offering_periods", kwargs={"offering_id": self.offering.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            GradingPeriodLock.objects.filter(
+                tenant=self.tenant,
+                campus=self.campus,
+                academic_year=self.academic_year,
+                term=self.term,
+                period_code=self.prelim.code,
+                scope_type=GradingPeriodLock.ScopeType.COURSE,
+                course_offering=self.offering,
+                is_locked=True,
+                is_active=True,
+            ).exists()
+        )
+        self.assertContains(response, "Score editing is disabled; open Summary to finalize and resubmit")
+        self.assertNotContains(response, "This grading period stays open until submitted")
+
+        response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
+        )
+        self.assertContains(response, "Finalize and Submit Prelim Grades")
+        self.assertContains(response, "Score editing is disabled, but you can still finalize and resubmit")
+        self.assertNotContains(response, "Submit this gradebook to view or print the official Summary of Grades")
+
+        response = self.client.post(
+            reverse("faculty_portal:period_submit", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
+            {"confirm_submit": "1", "remarks": "Resubmitting after missed reopen deadline."},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        submission = GradeSubmission.objects.get(offering=self.offering, template_period=self.prelim)
+        self.assertEqual(submission.status, GradeSubmission.Status.SUBMITTED)
+
+    def test_my_courses_locks_reopened_gradebook_when_admin_moves_deadline_to_past(self):
+        self._accept_assignment()
+        lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.prelim.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() + timedelta(days=1),
+            is_locked=False,
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_login(self.faculty_user)
+        self.client.post(
+            reverse("faculty_portal:period_self_reopen", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
+            {"remarks": "Need to revise one score."},
+        )
+        lock.deadline_at = timezone.now() - timedelta(hours=1)
+        lock.save(update_fields=["deadline_at", "updated_at"])
+
+        response = self.client.get(reverse("faculty_portal:my_courses"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            GradingPeriodLock.objects.filter(
+                tenant=self.tenant,
+                campus=self.campus,
+                academic_year=self.academic_year,
+                term=self.term,
+                period_code=self.prelim.code,
+                scope_type=GradingPeriodLock.ScopeType.COURSE,
+                course_offering=self.offering,
+                is_locked=True,
+                is_active=True,
+            ).exists()
+        )
+        self.assertContains(response, "Reopened gradebook locked after deadline")
+        self.assertContains(response, "Score editing is disabled, but the faculty can still resubmit")
+        self.assertNotContains(response, "You may continue encoding and submit as soon as possible")
+
+    def test_locked_reopened_period_pages_use_read_only_messages(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-READONLY-001",
+            last_name="Readonly",
+            first_name="Student",
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            title="Read Only Activity",
+            total_score=100,
+            created_by_user=self.faculty_user,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("90")}],
+        )
+        lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.prelim.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() + timedelta(days=1),
+            is_locked=False,
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_login(self.faculty_user)
+        self.client.post(
+            reverse("faculty_portal:period_self_reopen", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
+            {"remarks": "Need to revise one score."},
+        )
+        lock.deadline_at = timezone.now() - timedelta(hours=1)
+        lock.save(update_fields=["deadline_at", "updated_at"])
+
+        activities_response = self.client.get(
+            reverse("faculty_portal:period_activities", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
+        )
+        self.assertContains(activities_response, "Score editing is disabled; go to Summary to finalize and resubmit")
+        self.assertNotContains(activities_response, "You may continue encoding and submit as soon as possible")
+
+        scores_response = self.client.get(
+            reverse(
+                "faculty_portal:activity_scores",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id, "activity_id": activity.id},
+            )
+        )
+        self.assertContains(scores_response, "Score editing is disabled; go to Summary to finalize and resubmit")
+        self.assertNotContains(scores_response, "Enter a score only for students you want to record now")
+        self.assertContains(scores_response, "disabled")
+
+    def test_my_courses_class_size_counts_active_grading_students_only(self):
+        self._accept_assignment()
+        self._create_active_student(student_no="2025-ACTIVE-001", last_name="Active", first_name="Student")
+        dropped_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-DROP-001",
+            last_name="Dropped",
+            first_name="Student",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=dropped_student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.DRP,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(reverse("faculty_portal:my_courses"))
+
+        self.assertEqual(response.status_code, 200)
+        offering = response.context["grouped_offerings"][0]["offerings"][0]
+        self.assertEqual(offering.enrollment_count, 1)
 
     def test_analytics_uses_template_threshold_when_profile_override_missing(self):
         student_one = Student.objects.create(
@@ -1822,6 +2376,24 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             computed_score="95.00",
             encoded_by_user=self.faculty_user,
         )
+        exam_component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
+        exam_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=exam_component,
+            title="Prelim Exam",
+            total_score=100,
+            activity_date=self.term.start_date,
+        )
+        StudentActivityScore.objects.create(
+            activity=exam_activity,
+            student=student,
+            raw_score="90.00",
+            computed_score="95.00",
+            encoded_by_user=self.faculty_user,
+        )
         self.assignment.accepted_at = timezone.now()
         self.assignment.accepted_by = self.faculty_user
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
@@ -1889,6 +2461,24 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             computed_score="95.00",
             encoded_by_user=self.faculty_user,
         )
+        exam_component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
+        exam_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=exam_component,
+            title="Prelim Exam",
+            total_score=100,
+            activity_date=self.term.start_date,
+        )
+        StudentActivityScore.objects.create(
+            activity=exam_activity,
+            student=student,
+            raw_score="90.00",
+            computed_score="95.00",
+            encoded_by_user=self.faculty_user,
+        )
         self.assignment.accepted_at = timezone.now()
         self.assignment.accepted_by = self.faculty_user
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
@@ -1910,6 +2500,219 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             "Submission blocked: some ACTIVE students still have blank required grade or attendance records.",
         )
         self.assertContains(response, "With complete records:")
+
+    def test_submit_blocks_when_template_component_has_no_activity(self):
+        student = self._create_active_student(
+            student_no="2025-MISS-COMP",
+            last_name="Missing",
+            first_name="Component",
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            title="Class Standing Only",
+            total_score=100,
+            activity_date=self.term.start_date,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("90")}],
+        )
+        self._accept_assignment()
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=self.prelim,
+        )
+        self.assertEqual(readiness["students_missing_any_grade"], 0)
+        self.assertEqual(readiness["missing_template_bucket_count"], 1)
+        self.assertIn("Prelim Exam", [item["label"] for item in readiness["missing_template_items"]])
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse(
+                "faculty_portal:period_submit",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            ),
+            {"confirm_submit": "1"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Submission blocked: grading template requirements are incomplete.")
+        self.assertFalse(GradeSubmission.objects.filter(offering=self.offering, template_period=self.prelim).exists())
+
+    def test_readiness_reports_missing_template_subcomponent_activity(self):
+        period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="SUBCHECK",
+            name="Subcomponent Check",
+            sequence_no=10,
+            weight_percentage=Decimal("100.00"),
+        )
+        component = GradingTemplateComponent.objects.create(
+            template_period=period,
+            code="PERF",
+            name="Performance",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        recitation = GradingTemplateSubcomponent.objects.create(
+            template_component=component,
+            code="REC",
+            name="Recitation",
+            weight_percentage=Decimal("50.00"),
+            sort_order=1,
+        )
+        GradingTemplateSubcomponent.objects.create(
+            template_component=component,
+            code="LAB",
+            name="Laboratory",
+            weight_percentage=Decimal("50.00"),
+            sort_order=2,
+        )
+        student = self._create_active_student(
+            student_no="2025-MISS-SUB",
+            last_name="Missing",
+            first_name="Subcomponent",
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            template_component=component,
+            template_subcomponent=recitation,
+            title="Recitation 1",
+            total_score=100,
+            activity_date=self.term.start_date,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("90")}],
+        )
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["missing_template_bucket_count"], 1)
+        self.assertIn("Performance > Laboratory", [item["label"] for item in readiness["missing_template_items"]])
+
+    def test_readiness_does_not_require_attendance_session_for_template_coverage(self):
+        period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="ATTCHECK",
+            name="Attendance Check",
+            sequence_no=12,
+            weight_percentage=Decimal("100.00"),
+        )
+        component = GradingTemplateComponent.objects.create(
+            template_period=period,
+            code="ATT",
+            name="Attendance",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        GradingTemplateSubcomponent.objects.create(
+            template_component=component,
+            code="ATT",
+            name="Attendance",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_attendance_component=True,
+        )
+        self._create_active_student(
+            student_no="2025-ATT-001",
+            last_name="Attendance",
+            first_name="Only",
+        )
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["expected_template_bucket_count"], 0)
+        self.assertEqual(readiness["missing_template_bucket_count"], 0)
+        self.assertEqual(readiness["missing_template_items"], [])
+
+    def test_readiness_reports_missing_template_detail_activity(self):
+        period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="DETAILCHECK",
+            name="Detail Check",
+            sequence_no=11,
+            weight_percentage=Decimal("100.00"),
+        )
+        component = GradingTemplateComponent.objects.create(
+            template_period=period,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        subcomponent = GradingTemplateSubcomponent.objects.create(
+            template_component=component,
+            code="WRK",
+            name="Written Works",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        quiz = GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="QUIZ",
+            name="Quiz",
+            weight_percentage=Decimal("50.00"),
+            sort_order=1,
+        )
+        GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="ASSIGN",
+            name="Assignment",
+            weight_percentage=Decimal("50.00"),
+            sort_order=2,
+        )
+        student = self._create_active_student(
+            student_no="2025-MISS-DET",
+            last_name="Missing",
+            first_name="Detail",
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            template_component=component,
+            template_subcomponent=subcomponent,
+            template_detail=quiz,
+            title="Quiz 1",
+            total_score=100,
+            activity_date=self.term.start_date,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("90")}],
+        )
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["missing_template_bucket_count"], 1)
+        self.assertIn(
+            "Class Standing > Written Works > Assignment",
+            [item["label"] for item in readiness["missing_template_items"]],
+        )
 
     def test_future_activity_creation_auto_creates_faculty_reminder(self):
         self.assignment.accepted_at = timezone.now()
@@ -2281,6 +3084,83 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "<option value=\"DRP\">DRP</option>", html=True)
         self.assertContains(response, "<option value=\"INC\">INC</option>", html=True)
         self.assertContains(response, "text-bg-warning text-dark")
+
+    def test_faculty_can_mark_student_drp_through_prefinal_by_default(self):
+        self._accept_assignment()
+        prefinal_period = TenantTermGradingPeriod.objects.create(
+            tenant=self.tenant,
+            term=self.term,
+            code="PREFINAL",
+            name="Pre-Final",
+            sequence_no=3,
+        )
+        ActiveGradingPeriodSetting.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            term=self.term,
+            period=prefinal_period,
+            set_by_user=self.faculty_user,
+        )
+        student = self._create_active_student(
+            student_no="2025-DRP-PF",
+            last_name="Allowed",
+            first_name="Drop",
+        )
+        enrollment = Enrollment.objects.get(course_offering=self.offering, student=student)
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+            {
+                "action": "update_status",
+                "enrollment_id": enrollment.id,
+                "enrollment_status": Enrollment.Status.DRP,
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.enrollment_status, Enrollment.Status.DRP)
+
+    def test_faculty_cannot_newly_mark_student_drp_after_prefinal_when_final_is_active(self):
+        self._accept_assignment()
+        final_period = TenantTermGradingPeriod.objects.create(
+            tenant=self.tenant,
+            term=self.term,
+            code="FINAL",
+            name="Final",
+            sequence_no=4,
+        )
+        ActiveGradingPeriodSetting.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            term=self.term,
+            period=final_period,
+            set_by_user=self.faculty_user,
+        )
+        student = self._create_active_student(
+            student_no="2025-DRP-FN",
+            last_name="Blocked",
+            first_name="Drop",
+        )
+        enrollment = Enrollment.objects.get(course_offering=self.offering, student=student)
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+            {
+                "action": "update_status",
+                "enrollment_id": enrollment.id,
+                "enrollment_status": Enrollment.Status.DRP,
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Faculty DRP updates are no longer allowed")
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.enrollment_status, Enrollment.Status.ACTIVE)
 
     def test_period_summary_shows_overdue_notice_without_late_completion_action(self):
         GradingPeriodLock.objects.create(

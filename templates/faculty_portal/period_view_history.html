@@ -14,11 +14,44 @@
 {% include "faculty_portal/partials/period_quick_nav.html" with nav_current="who_viewed" %}
 
 <div class="alert alert-light border mb-3">
-  This history shows admin-side read-only grade book monitor openings recorded in the audit trail for this class period.
+  This history shows admin-side read-only grade book monitor openings and faculty before-deadline reopen attempts recorded in the audit trail for this class period.
+</div>
+
+<div class="card shadow-sm border-0 mb-3">
+  <div class="card-body">
+    <h3 class="h6 mb-3">Reopen Attempts</h3>
+    {% if reopen_logs %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Reopened At</th>
+              <th>Reopened By</th>
+              <th>Mode</th>
+              <th>Justification</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in reopen_logs %}
+              <tr>
+                <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                <td>{{ log.actor_user.full_name|default:log.actor_user.username|default:"System" }}</td>
+                <td>{{ log.metadata_json.mode|default:"Reopen" }}</td>
+                <td>{{ log.metadata_json.justification|default:"-" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-muted">No reopen attempts have been recorded for this class period yet.</div>
+    {% endif %}
+  </div>
 </div>
 
 <div class="card shadow-sm border-0">
   <div class="card-body">
+    <h3 class="h6 mb-3">Admin Monitor Views</h3>
     {% if view_logs %}
       <div class="table-responsive">
         <table class="table table-sm align-middle">

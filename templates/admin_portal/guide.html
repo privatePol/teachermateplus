@@ -9,17 +9,35 @@
   .admin-guide-wrap {
     max-width: 1200px;
     margin: 0 auto;
+    padding-bottom: 4rem;
   }
   .admin-guide-hero {
-    border-radius: 14px;
-    padding: 1.15rem 1.25rem;
-    background: linear-gradient(120deg, #f4f8f1 0%, #eef6ea 60%, #fbf5da 100%);
+    border-radius: 18px;
+    padding: 1.4rem;
+    background:
+      radial-gradient(circle at top right, rgba(232, 197, 89, 0.22), transparent 30%),
+      linear-gradient(135deg, #f6fbf6 0%, #eef7ef 54%, #fbf4d8 100%);
     border: 1px solid #d8e2d4;
-    margin-bottom: 1rem;
+    box-shadow: 0 18px 34px rgba(18, 56, 34, 0.08);
+    margin-bottom: 1.05rem;
+  }
+  .admin-guide-hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+    gap: 1rem;
+    align-items: stretch;
+  }
+  .admin-guide-eyebrow {
+    color: #6b8372;
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.35rem;
+    text-transform: uppercase;
   }
   .admin-guide-hero h1 {
     margin: 0 0 0.4rem 0;
-    font-size: 1.7rem;
+    font-size: 2rem;
     font-weight: 800;
     color: #1f4b33;
   }
@@ -27,11 +45,49 @@
     margin: 0;
     color: #355847;
   }
+  .admin-guide-hero-card {
+    border: 1px solid rgba(31, 75, 51, 0.12);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.78);
+    padding: 1rem;
+    box-shadow: 0 12px 24px rgba(18, 56, 34, 0.08);
+  }
+  .admin-guide-hero-card-title {
+    color: #1f4b33;
+    font-size: 0.95rem;
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+  }
+  .admin-guide-path {
+    display: grid;
+    gap: 0.45rem;
+  }
+  .admin-guide-path span {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #355847;
+    font-size: 0.88rem;
+    font-weight: 700;
+  }
+  .admin-guide-path b {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background: #1f6a40;
+    color: #fff;
+    font-size: 0.78rem;
+    flex: 0 0 auto;
+  }
   .admin-guide-toc {
-    border-radius: 12px;
+    border-radius: 16px;
     border: 1px solid #d7e0d3;
     background: #ffffff;
-    padding: 0.85rem 1rem;
+    box-shadow: 0 12px 24px rgba(16, 50, 30, 0.06);
+    padding: 1rem;
     margin-bottom: 1rem;
   }
   .admin-guide-toc h2 {
@@ -56,15 +112,70 @@
   .admin-guide-toc a:hover {
     text-decoration: underline;
   }
+  .admin-guide-topic-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.85rem;
+  }
+  .admin-guide-topic-card {
+    border: 1px solid #dfe9e1;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbf8 100%);
+    padding: 0.9rem 0.95rem;
+    min-height: 100%;
+    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  }
+  .admin-guide-topic-card:hover {
+    border-color: #bdd4c1;
+    box-shadow: 0 12px 22px rgba(16, 50, 30, 0.08);
+    transform: translateY(-1px);
+  }
+  .admin-guide-topic-card strong {
+    display: block;
+    color: #173d27;
+    font-size: 0.98rem;
+    margin-bottom: 0.3rem;
+  }
+  .admin-guide-topic-card p {
+    color: #5b7162;
+    font-size: 0.86rem;
+    margin-bottom: 0.65rem;
+  }
+  .admin-guide-topic-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .admin-guide-topic-links a {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    border: 1px solid #dbe6dd;
+    background: #f8fbf8;
+    color: #234b33;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 0.34rem 0.62rem;
+    text-decoration: none;
+  }
+  .admin-guide-topic-links a:hover {
+    background: #eef5ef;
+    text-decoration: none;
+  }
   .guide-section {
     border: 1px solid #d7e0d3;
-    border-radius: 12px;
+    border-radius: 14px;
     background: #ffffff;
-    margin-bottom: 1rem;
+    box-shadow: 0 10px 22px rgba(16, 50, 30, 0.05);
+    margin-bottom: 1.05rem;
     overflow: hidden;
   }
+  .guide-section:target {
+    border-color: #9dbc92;
+    box-shadow: 0 0 0 3px rgba(143, 168, 56, 0.16), 0 12px 24px rgba(16, 50, 30, 0.08);
+  }
   .guide-section-head {
-    padding: 0.85rem 1rem;
+    padding: 0.9rem 1rem;
     background: linear-gradient(120deg, #eff6ec 0%, #f6faef 72%, #faf4d8 100%);
     border-bottom: 1px solid #d7e0d3;
   }
@@ -75,7 +186,7 @@
     font-weight: 800;
   }
   .guide-section-body {
-    padding: 0.95rem 1rem 1rem;
+    padding: 1rem 1.05rem 1.05rem;
   }
   .guide-grid {
     display: grid;
@@ -133,7 +244,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
-    margin-top: 0.35rem;
+    margin-top: 0.9rem;
   }
   .quick-links a {
     border: 1px solid #91b59c;
@@ -147,6 +258,25 @@
   }
   .quick-links a:hover {
     background: #e9f4e7;
+  }
+  .admin-guide-back-top {
+    position: fixed;
+    left: 1.25rem;
+    bottom: 4.25rem;
+    z-index: 30;
+    border: 1px solid #b8d1bd;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #1f4b33;
+    box-shadow: 0 12px 28px rgba(16, 50, 30, 0.18);
+    font-weight: 800;
+    padding: 0.55rem 0.85rem;
+    text-decoration: none;
+  }
+  .admin-guide-back-top:hover {
+    background: #eef7ef;
+    color: #143b25;
+    text-decoration: none;
   }
   .policy-table {
     width: 100%;
@@ -189,64 +319,109 @@
     background: #ffffff;
   }
   @media (max-width: 991.98px) {
+    .admin-guide-hero-grid {
+      grid-template-columns: 1fr;
+    }
     .admin-guide-toc ul {
       columns: 1;
     }
+    .admin-guide-topic-grid {
+      grid-template-columns: 1fr;
+    }
     .guide-grid {
       grid-template-columns: 1fr;
+    }
+    .admin-guide-back-top {
+      left: 0.85rem;
+      bottom: 4.25rem;
     }
   }
 </style>
 {% endblock %}
 
 {% block admin_content %}
-<div class="admin-guide-wrap">
+<div class="admin-guide-wrap" id="top">
   <div class="admin-guide-hero">
-    <h1>Admin Portal User Guide</h1>
-    <p>
-      Practical operations guide for EduGradesPro admin users. This page is arranged by actual admin workflow:
-      setup, governance settings, imports, submission/reopen control, correction handling, and audit monitoring.
-    </p>
-    <div class="quick-links">
-      <a href="{% url 'admin_portal:dashboard' %}">Dashboard</a>
-      <a href="{% url 'admin_portal:user_list' %}">Users</a>
-      <a href="{% url 'admin_portal:login_lockout_list' %}">Login Lockouts</a>
-      <a href="{% url 'admin_portal:import_batch_list' %}">Tools / Imports</a>
-      <a href="{% url 'admin_portal:active_academic_term_settings' %}">Active AY/Term</a>
-      <a href="{% url 'admin_portal:active_grading_period_settings' %}">Active Grading Period</a>
-      <a href="#settings">Grading Template Governance</a>
-      <a href="{% url 'admin_portal:grading_period_lock_list' %}">Period Locks</a>
-      <a href="{% url 'admin_portal:grade_submission_list' %}">Grade Submissions</a>
-      <a href="{% url 'admin_portal:grade_correction_request_list' %}">Correction Requests</a>
-        <a href="{% url 'admin_portal:faculty_gradebook_monitor' %}">Faculty Grade Book Monitor</a>
-        <a href="{% url 'admin_portal:faculty_activity_monitor' %}">Faculty Activity Monitor</a>
-        <a href="{% url 'admin_portal:faculty_final_clearance' %}">Faculty Final Clearance</a>
-        <a href="{% url 'admin_portal:grade_prediction_monitor' %}">Grade Prediction Monitor</a>
-        <a href="{% url 'admin_portal:audit_log_list' %}">Audit Logs</a>
+    <div class="admin-guide-hero-grid">
+      <div>
+        <div class="admin-guide-eyebrow">Admin Operations Guide</div>
+        <h1>Admin Portal User Guide</h1>
+        <p>
+          A practical guide for setup, grading governance, faculty operations, monitoring, security, and end-of-term review.
+          Start with a workstream below, then jump directly to the section or Admin tool you need.
+        </p>
+        <div class="quick-links">
+          <a href="#admin-guide-topics">Choose a Workstream</a>
+          <a href="{% url 'admin_portal:dashboard' %}">Dashboard</a>
+          <a href="{% url 'admin_portal:active_academic_term_settings' %}">Active AY/Term</a>
+          <a href="{% url 'admin_portal:active_grading_period_settings' %}">Active Grading Period</a>
+          <a href="{% url 'admin_portal:grade_submission_list' %}">Grade Submissions</a>
+          <a href="{% url 'admin_portal:audit_log_list' %}">Audit Logs</a>
+        </div>
+      </div>
+      <div class="admin-guide-hero-card">
+        <div class="admin-guide-hero-card-title">Recommended Operating Path</div>
+        <div class="admin-guide-path">
+          <span><b>1</b> Set tenant, campus, active AY, and active term.</span>
+          <span><b>2</b> Complete academic setup and grading-template coverage.</span>
+          <span><b>3</b> Configure deadlines, correction routes, and active period.</span>
+          <span><b>4</b> Monitor submissions, corrections, audit logs, and clearance.</span>
+        </div>
+      </div>
     </div>
   </div>
 
-  <div class="admin-guide-toc">
-    <h2>Guide Contents (by Workstream)</h2>
-    <ul>
-      <li><a href="#quick-start">1. Quick Start Sequence</a></li>
-      <li><a href="#scope">2. Scope Selectors (Tenant/Campus)</a></li>
-      <li><a href="#cfg">3. Configuration Setup</a></li>
-      <li><a href="#grading-template-calculator">3A. Grading Template Testing Calculator</a></li>
-      <li><a href="#records">4. Records Management</a></li>
-      <li><a href="#settings">5. Governance Settings</a></li>
-      <li><a href="#imports">6. Tools and CSV Importing</a></li>
-      <li><a href="#submission">7. Submission and Reopen Control</a></li>
-      <li><a href="#corrections">8. Grade Correction Process (System vs Manual)</a></li>
-      <li><a href="#security">9. Security and User Administration</a></li>
-      <li><a href="#assignment-acceptance">10. Faculty Assignment Acceptance and Monitoring</a></li>
-      <li><a href="#audit">11. Audit and Monitoring</a></li>
-      <li><a href="#ops">12. End-of-Term Checklist</a></li>
-      <li><a href="#policies">13. Policy and Governance Reference</a></li>
-      {% if show_production_incident_response %}
-      <li><a href="#incident-response">14. Production Incident Response</a></li>
-      {% endif %}
-    </ul>
+  <div class="admin-guide-toc" id="admin-guide-topics">
+    <h2>Choose a Workstream</h2>
+    <div class="admin-guide-topic-grid">
+      <div class="admin-guide-topic-card">
+        <strong>Start and Scope</strong>
+        <p>Use these before creating records, importing data, or changing settings.</p>
+        <div class="admin-guide-topic-links">
+          <a href="{% url 'admin_portal:dashboard' %}">Dashboard</a>
+          <a href="#quick-start">Quick Start</a>
+          <a href="#scope">Scope</a>
+          <a href="#cfg">Setup</a>
+          <a href="#records">Records</a>
+        </div>
+      </div>
+      <div class="admin-guide-topic-card">
+        <strong>Grading Setup</strong>
+        <p>Use these for templates, profiles, imports, deadlines, and grading policies.</p>
+        <div class="admin-guide-topic-links">
+          <a href="{% url 'admin_portal:active_grading_period_settings' %}">Active Period</a>
+          <a href="#grading-template-calculator">Calculator</a>
+          <a href="#settings">Governance</a>
+          <a href="#imports">Imports</a>
+          <a href="#policies">Policies</a>
+        </div>
+      </div>
+      <div class="admin-guide-topic-card">
+        <strong>Faculty Operations</strong>
+        <p>Use these for faculty assignments, submissions, reopen, corrections, and clearance.</p>
+        <div class="admin-guide-topic-links">
+          <a href="{% url 'admin_portal:grade_submission_list' %}">Grade Submissions</a>
+          <a href="#assignment-acceptance">Assignments</a>
+          <a href="#submission">Submissions</a>
+          <a href="#corrections">Corrections</a>
+          <a href="#ops">End of Term</a>
+        </div>
+      </div>
+      <div class="admin-guide-topic-card">
+        <strong>Security and Monitoring</strong>
+        <p>Use these for users, audit logs, academic monitoring, and incident response.</p>
+        <div class="admin-guide-topic-links">
+          <a href="{% url 'admin_portal:user_list' %}">Users</a>
+          <a href="{% url 'admin_portal:faculty_deactivation_schedule' %}">Faculty Deactivation</a>
+          <a href="{% url 'admin_portal:audit_log_list' %}">Audit Logs</a>
+          <a href="#security">Security</a>
+          <a href="#audit">Monitoring</a>
+          {% if show_production_incident_response %}
+          <a href="#incident-response">Incidents</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
   </div>
 
   <section class="guide-section" id="quick-start">
@@ -480,7 +655,7 @@
               <tr>
                 <td>Active Grading Period</td>
                 <td><strong>Admin Portal -> Tools -> Active Grading Period</strong></td>
-                <td>Define the canonical period catalog for the selected term, choose the active period per campus, decide whether EduGradesPro should auto-advance after deadline, and control which faculty period card stays open for normal work.</td>
+                <td>Define the canonical period catalog for the selected term, choose the active period per campus, decide whether EduGradesPro should auto-advance after the current active period deadline, and control which faculty period card stays open for normal work. Auto-advance moves forward only; changing a deadline afterward does not move the active period backward.</td>
               </tr>
               <tr>
                 <td>Correction Governance</td>
@@ -505,7 +680,7 @@
               <tr>
                 <td>Optional Workflow Features</td>
                 <td><strong>Admin Portal -> Tools -> Configuration Management</strong></td>
-                <td>Turn optional features on/off such as official correction PDF, registrar auto-email, assignment-primary default behavior, class master list ownership mode for faculty roster maintenance, grade prediction options, login security, and the official-grade release restriction that can delay computed period grades and final grades until after deadline.</td>
+                <td>Turn optional features on/off such as official correction PDF, registrar auto-email, assignment-primary default behavior, class master list ownership mode and Faculty DRP cutoff for roster maintenance, grade prediction options, login security, and the official-grade release restriction that can delay computed period grades and final grades until after deadline.</td>
               </tr>
               <tr>
                 <td>Tenant Grading Formula</td>
@@ -631,12 +806,12 @@
               <tr>
                 <td>Grading Period Locks</td>
                 <td><strong>Admin Portal -> Grading -> Period Locks</strong></td>
-                <td>Set the submission deadline, optional grace/completion cutoff, open/close behavior, and lock coverage per campus, term, and period scope.</td>
+                <td>Set the submission deadline, active rule state, open/locked behavior, and coverage per campus, term, period, or specific course offering.</td>
               </tr>
               <tr>
                 <td>Non-Compliance Monitor</td>
                 <td><strong>Admin Portal -> Grading -> Non-Compliance on Periodic Grades Submission</strong></td>
-                <td>Track overdue class-period rows after deadline, including which ones are still within grace, already non-compliant, or waiting on late-completion review.</td>
+                <td>Track overdue class-period rows after deadline. Unsubmitted gradebooks remain open for faculty encoding, while authorized academic users monitor non-compliance and missing-record readiness here.</td>
               </tr>
               <tr>
                 <td>Grade Submission Status</td>
@@ -663,6 +838,9 @@
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
             <li>Create the needed <strong>Period Lock</strong> row first, with the correct campus, term, and the actual <strong>grading period code used by the template</strong> plus the intended deadline.</li>
+            <li>Use <strong>Scope Type: Campus</strong> when one deadline/lock applies to all classes in the selected campus, term, and period. Use <strong>Scope Type: Course Offering</strong> only when one class needs a different rule; the course-offering rule takes priority for that class.</li>
+            <li>Use <strong>Is locked</strong> only when faculty editing should be disabled for that scope. Leave it unchecked when the rule is only a deadline/reminder/compliance checkpoint.</li>
+            <li>Use <strong>Is active</strong> to enable or disable the rule. Inactive rules stay available for review but are ignored by faculty pages, deadline checks, and scheduled auto-lock processing.</li>
             <li>Use <strong>Grade Submissions</strong> to monitor open classes as the deadline approaches and follow up on rows that are still pending.</li>
             <li>After deadline, use <strong>Non-Compliance on Periodic Grades Submission</strong> to see accepted faculty assignments that still have overdue unsubmitted grade books for each grading period.</li>
             <li>Unsubmitted overdue grade books remain open until the faculty submits them. The deadline acts as a compliance checkpoint, not an automatic encoding shutdown.</li>
@@ -812,6 +990,11 @@
                   <td>Temporarily blocks repeated failed login attempts to reduce password-guessing and brute-force abuse.</td>
                   <td><strong>Admin Portal -> Tools -> Configuration Management -> Login Security</strong> for policy, and <strong>Admin Portal -> Security -> Login Lockouts</strong> for monitoring and manual unlock.</td>
                 </tr>
+                <tr>
+                  <td>Scheduled Faculty Deactivation</td>
+                  <td>Lets an authorized admin set a future date/time when a faculty account should become inactive. The scheduled job applies the deactivation and clears active sessions.</td>
+                  <td><strong>Admin Portal -> Security -> Faculty Deactivation</strong>; schedule <code>manage.py apply_scheduled_user_deactivations</code> in cron.</td>
+                </tr>
             </tbody>
           </table>
           <div class="guide-subhead">Admin Rules</div>
@@ -819,6 +1002,7 @@
             <li>Assign default tenant, campus, and department correctly per user before giving portal access.</li>
             <li>Grant least privilege and role scopes carefully. Role assignments can now be scoped by tenant, campus, and department for AC/Dean governance boundaries.</li>
             <li>For dual-role users (admin + faculty), ensure both portal permissions are assigned.</li>
+            <li>Use scheduled faculty deactivation when a faculty account should remain active until a specific separation, clearance, or end-of-load date.</li>
             <li>If email OTP is enabled, every protected sign-in requires the user's registered email to be present and reachable.</li>
             <li>Recommended login lockout baseline: <strong>5 failed attempts</strong> within <strong>15 minutes</strong>, with a <strong>15-minute</strong> lockout.</li>
           </ul>
@@ -916,7 +1100,9 @@
           <ul class="guide-list">
             <li>Prediction is unofficial and read-only. It must be enabled first in <strong>Configuration Management</strong>.</li>
             <li>Open <strong>Grade Prediction Monitor</strong> to review projected outcomes for the scoped faculty, class, and period.</li>
-            <li>Use the monitor to spot low coverage, at-risk students, and likely grade outcomes before submission deadlines.</li>
+            <li>Use the monitor to spot low coverage, at-risk students, and likely current-period outcomes before submission deadlines.</li>
+            <li>Operational timing: Prelim is early warning, Midterm is the strongest intervention window, Pre-Final is the last follow-up checkpoint, and Final is mostly confirmation.</li>
+            <li>Faculty-side at-risk monitoring focuses on the active grading period when one is configured, while detailed final-grade projection remains available on the prediction detail page.</li>
             <li>Prediction uses the same grading template path as the official computation engine, but it never writes to the gradebook.</li>
             <li>Refresh the prediction snapshot after major score changes when you need an updated projection immediately.</li>
           </ul>
@@ -1090,5 +1276,7 @@
     </div>
   </section>
   {% endif %}
+
+  <a class="admin-guide-back-top" href="#top" aria-label="Back to top">Back to top</a>
 </div>
 {% endblock %}

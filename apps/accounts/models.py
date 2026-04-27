@@ -88,6 +88,58 @@ class User(AbstractBaseUser, PermissionsMixin):
         return name.strip() or self.username
 
 
+class UserDeactivationSchedule(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPLIED = "APPLIED", "Applied"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="deactivation_schedules",
+    )
+    scheduled_for = models.DateTimeField()
+    reason = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    scheduled_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="scheduled_user_deactivations",
+    )
+    cancelled_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="cancelled_user_deactivations",
+    )
+    applied_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="applied_user_deactivations",
+    )
+    cancelled_at = models.DateTimeField(blank=True, null=True)
+    applied_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_deactivation_schedules"
+        ordering = ["scheduled_for", "user__username"]
+        indexes = [
+            models.Index(fields=["status", "scheduled_for"]),
+            models.Index(fields=["user", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username}:{self.status}:{self.scheduled_for:%Y-%m-%d %H:%M}"
+
+
 class UserSignatureCredential(models.Model):
     user = models.OneToOneField(
         "accounts.User",

@@ -9,6 +9,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
+from django.utils import timezone
 
 from apps.academics.models import (
     AcademicYear,
@@ -421,6 +422,47 @@ class UserChangePasswordForm(forms.Form):
         if pw1:
             validate_password(pw1, user=self.user)
         return cleaned
+
+
+class FacultyDeactivationScheduleForm(forms.Form):
+    user = forms.ModelChoiceField(
+        queryset=User.objects.none(),
+        label="Faculty Account",
+        help_text="Select the faculty account that should be deactivated.",
+    )
+    scheduled_for = forms.DateTimeField(
+        label="Deactivate On",
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        help_text="The account will be deactivated when the scheduled job runs on or after this date and time.",
+    )
+    reason = forms.CharField(
+        label="Reason / Remarks",
+        widget=forms.Textarea(attrs={"rows": 3}),
+        required=False,
+        help_text="Optional note for audit and admin reference.",
+    )
+
+    def __init__(self, *args, faculty_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if faculty_queryset is not None:
+            self.fields["user"].queryset = faculty_queryset
+        self.fields["user"].label_from_instance = _faculty_label
+
+    def clean_user(self):
+        user = self.cleaned_data["user"]
+        if user.is_superuser:
+            raise forms.ValidationError("Superuser accounts cannot be scheduled for deactivation.")
+        if not user.is_active:
+            raise forms.ValidationError("This account is already inactive.")
+        return user
+
+    def clean_scheduled_for(self):
+        scheduled_for = self.cleaned_data["scheduled_for"]
+        if timezone.is_naive(scheduled_for):
+            scheduled_for = timezone.make_aware(scheduled_for, timezone.get_current_timezone())
+        if scheduled_for <= timezone.now():
+            raise forms.ValidationError("Choose a future deactivation date and time.")
+        return scheduled_for
 
 
 class UserRoleAssignmentForm(forms.Form):
@@ -1338,6 +1380,17 @@ class GradingPeriodLockForm(forms.ModelForm):
             "Submission deadline for this period scope. Unsubmitted grade books remain open after this timestamp, "
             "but EduGradesPro marks them as overdue for faculty reminder banners and admin non-compliance monitoring."
         )
+        self.fields["scope_type"].help_text = (
+            "Choose Campus to apply the same rule to all course offerings in the selected campus, term, and period. "
+            "Choose Course Offering to override the campus rule for one specific class."
+        )
+        self.fields["is_locked"].help_text = (
+            "When checked, faculty score, activity, and attendance editing is disabled for this rule's scope. "
+            "Leave unchecked when the rule is only setting a submission deadline/reminder."
+        )
+        self.fields["is_active"].help_text = (
+            "When unchecked, this rule is ignored by faculty pages, deadline checks, and auto-lock processing."
+        )
         self.fields["period_code"].help_text = (
             "Choose the actual grading period code used by the grading template, such as PRELIM or GENED_PRELIM. "
             "Do not enter term codes like 2526_2NDSEM."
@@ -2061,6 +2114,12 @@ class ConfigurableFeatureSettingForm(forms.Form):
         ],
         help_text="Controls whether faculty may maintain the class master list for their own assigned classes or whether roster maintenance stays admin-only.",
     )
+    faculty_drp_allowed_through_period = forms.ChoiceField(
+        required=False,
+        label="Faculty DRP allowed through",
+        choices=EnrollmentService.FACULTY_DRP_PERIOD_CHOICES,
+        help_text="Controls the latest active grading period where assigned faculty may newly mark a student as DRP. Default: Through Pre-Final.",
+    )
     class_master_list_term = forms.ModelChoiceField(
         queryset=Term.objects.none(),
         required=False,
@@ -2366,6 +2425,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
             )
         if not cleaned.get("enrollment_ownership_mode"):
             cleaned["enrollment_ownership_mode"] = EnrollmentService.ADMIN_ONLY
+        if not cleaned.get("faculty_drp_allowed_through_period"):
+            cleaned["faculty_drp_allowed_through_period"] = EnrollmentService.PERIOD_PREFINAL
         if not cleaned.get("class_master_list_override_mode"):
             cleaned["class_master_list_override_mode"] = ""
         if not cleaned.get("login_lockout_enabled"):

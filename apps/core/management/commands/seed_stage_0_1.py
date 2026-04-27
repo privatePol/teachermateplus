@@ -361,6 +361,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "FACULTY_DEACTIVATION",
+                groups["SECURITY"],
+                "Faculty Deactivation",
+                "admin_portal:faculty_deactivation_schedule",
+                27,
+                "users.update",
+            ),
+            (
+                "ADMIN",
                 "ROLES",
                 groups["SECURITY"],
                 "Roles",

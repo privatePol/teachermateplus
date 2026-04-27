@@ -302,7 +302,7 @@
                 {% for block in summary_layout.class_standing_blocks %}
                   <th colspan="{{ block.colspan }}" class="band-class-standing">{{ block.label }}</th>
                 {% endfor %}
-                {% for exam in summary_layout.exam_components %}
+                {% for exam in visible_exam_components %}
                   <th rowspan="4" class="band-exam metric-col metric-final">{{ exam.label }}</th>
                 {% endfor %}
                 <th rowspan="4" class="metric-col metric-final">{{ selected_period.name|upper }} Grade</th>
@@ -374,7 +374,7 @@
                   {% endfor %}
                   <td class="metric-col"></td>
                 {% endfor %}
-                {% for exam in summary_layout.exam_components %}
+                {% for exam in visible_exam_components %}
                   <td class="metric-col metric-final">
                     {% if exam.sections and exam.sections.0.activity_columns %}
                       {{ exam.sections.0.activity_columns.0.total_score|default:"" }}

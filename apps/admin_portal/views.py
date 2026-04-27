@@ -25,7 +25,8 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 
-from apps.accounts.models import PortalLoginLockoutState
+from apps.accounts.models import PortalLoginLockoutState, UserDeactivationSchedule
+from apps.accounts.services import UserDeactivationService
 from apps.admin_portal.forms import (
     ActiveAcademicTermSettingForm,
     ActiveGradingPeriodSettingForm,
@@ -43,6 +44,7 @@ from apps.admin_portal.forms import (
     DocumentPrintSettingForm,
     DepartmentForm,
     FacultyAssignmentForm,
+    FacultyDeactivationScheduleForm,
     GradeCorrectionReviewForm,
     GradeSubmissionReopenRequestForm,
     GradeSubmissionReopenReviewForm,
@@ -2671,6 +2673,7 @@ def configurable_features_settings_view(request):
         FeatureSettingsService.get_submission_non_compliance_hr_recipients(tenant_id=tenant_id)
     )
     current_enrollment_ownership_mode = EnrollmentService.get_enrollment_mode(tenant_id)
+    current_faculty_drp_allowed_through_period = EnrollmentService.get_faculty_drp_allowed_through_period(tenant_id)
     current_enrollment_override_map = EnrollmentService.get_enrollment_mode_overrides(tenant_id)
     selected_override_modes = {
         current_enrollment_override_map.get(str(offering.id), "") for offering in selected_offerings
@@ -2809,6 +2812,7 @@ def configurable_features_settings_view(request):
                 "minimum_student_count_for_flag"
             ],
             "enrollment_ownership_mode": current_enrollment_ownership_mode,
+            "faculty_drp_allowed_through_period": current_faculty_drp_allowed_through_period,
             "class_master_list_term": selected_term.id if selected_term else None,
             "class_master_list_faculty": selected_faculty.id if selected_faculty else None,
             "class_master_list_offering": [offering.id for offering in selected_offerings],
@@ -3074,6 +3078,13 @@ def configurable_features_settings_view(request):
             is_active=True,
         )
         SystemSettingService.set(
+            EnrollmentService.FACULTY_DRP_ALLOWED_THROUGH_PERIOD_KEY,
+            str(form.cleaned_data["faculty_drp_allowed_through_period"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
+        SystemSettingService.set(
             EnrollmentService.MODE_OVERRIDE_MAP_KEY,
             updated_enrollment_override_map,
             tenant_id=tenant_id,
@@ -3253,6 +3264,7 @@ def configurable_features_settings_view(request):
                 "submission_non_compliance_hr_recipients": current_submission_non_compliance_hr_recipients,
                 "grade_distribution_settings": current_grade_distribution_audit_settings,
                 "enrollment_ownership_mode": current_enrollment_ownership_mode,
+                "faculty_drp_allowed_through_period": current_faculty_drp_allowed_through_period,
                 "enrollment_ownership_mode_by_offering": current_enrollment_override_map,
                 "login_lockout_enabled": current_login_lockout_enabled,
                 "login_lockout_max_attempts": current_login_lockout_max_attempts,
@@ -3324,6 +3336,7 @@ def configurable_features_settings_view(request):
                     ),
                 },
                 "enrollment_ownership_mode": str(form.cleaned_data["enrollment_ownership_mode"]),
+                "faculty_drp_allowed_through_period": str(form.cleaned_data["faculty_drp_allowed_through_period"]),
                 "enrollment_ownership_mode_by_offering": updated_enrollment_override_map,
                 "selected_class_master_list_term": selected_class_override_term.code if selected_class_override_term else None,
                 "selected_class_master_list_faculty": (
@@ -3391,6 +3404,7 @@ def configurable_features_settings_view(request):
                     GradeDistributionMonitorService.SETTING_KEYS["low_variation_threshold"],
                     GradeDistributionMonitorService.SETTING_KEYS["minimum_student_count_for_flag"],
                     EnrollmentService.MODE_KEY,
+                    EnrollmentService.FACULTY_DRP_ALLOWED_THROUGH_PERIOD_KEY,
                     EnrollmentService.MODE_OVERRIDE_MAP_KEY,
                     FeatureSettingsService.LOGIN_LOCKOUT_ENABLED_KEY,
                     FeatureSettingsService.LOGIN_LOCKOUT_MAX_ATTEMPTS_KEY,
@@ -4363,6 +4377,75 @@ def login_lockout_unlock_view(request, lockout_id: int):
         f"Login lockout cleared for {lockout_state.username} ({lockout_state.portal_code.title()} Portal).",
     )
     return _redirect_back_or_default(request, "admin_portal:login_lockout_list")
+
+
+@portal_required("ADMIN")
+@permission_required("users.update")
+def faculty_deactivation_schedule_view(request):
+    faculty_ids = AdminScopeService.scoped_faculty_users(request)
+    faculty_queryset = (
+        User.objects.filter(id__in=faculty_ids, is_active=True)
+        .select_related("default_tenant", "default_campus", "default_department")
+        .order_by("last_name", "first_name", "username")
+    )
+
+    if request.method == "POST" and request.POST.get("action") == "cancel":
+        schedule = get_object_or_404(
+            UserDeactivationSchedule.objects.select_related("user"),
+            id=request.POST.get("schedule_id"),
+            status=UserDeactivationSchedule.Status.PENDING,
+            user_id__in=faculty_ids,
+        )
+        try:
+            UserDeactivationService.cancel(schedule=schedule, actor=request.user, request=request)
+            messages.success(request, f"Scheduled deactivation cancelled for {schedule.user.username}.")
+        except ValidationError as exc:
+            messages.error(request, str(exc))
+        return redirect("admin_portal:faculty_deactivation_schedule")
+
+    form = FacultyDeactivationScheduleForm(
+        request.POST or None,
+        faculty_queryset=faculty_queryset,
+    )
+    _style_form(form)
+    if request.method == "POST" and request.POST.get("action") != "cancel" and form.is_valid():
+        schedule = UserDeactivationService.schedule(
+            user=form.cleaned_data["user"],
+            scheduled_for=form.cleaned_data["scheduled_for"],
+            actor=request.user,
+            reason=form.cleaned_data.get("reason"),
+            request=request,
+        )
+        messages.success(
+            request,
+            f"{schedule.user.username} will be deactivated on {timezone.localtime(schedule.scheduled_for):%Y-%m-%d %H:%M}.",
+        )
+        return redirect("admin_portal:faculty_deactivation_schedule")
+
+    pending_schedules = (
+        UserDeactivationSchedule.objects.select_related(
+            "user",
+            "user__default_tenant",
+            "user__default_campus",
+            "scheduled_by_user",
+        )
+        .filter(status=UserDeactivationSchedule.Status.PENDING, user_id__in=faculty_ids)
+        .order_by("scheduled_for", "user__username")
+    )
+    recent_schedules = (
+        UserDeactivationSchedule.objects.select_related("user", "scheduled_by_user", "cancelled_by_user", "applied_by_user")
+        .filter(user_id__in=faculty_ids)
+        .exclude(status=UserDeactivationSchedule.Status.PENDING)
+        .order_by("-updated_at")[:15]
+    )
+    context = {
+        "form": form,
+        "pending_schedules": pending_schedules,
+        "recent_schedules": recent_schedules,
+        "faculty_count": faculty_queryset.count(),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/security/faculty_deactivation_schedule.html", context)
 
 
 @portal_required("ADMIN")
@@ -5587,6 +5670,7 @@ def faculty_gradebook_monitor_view(request):
     metric_cards = []
     rows = []
     summary_layout = {"class_standing_blocks": [], "exam_components": []}
+    visible_exam_components = []
     q = request.GET.get("q", "").strip()
     is_masked = _should_mask_gradebook_student_identity(request.user)
     period_state = None
@@ -5674,6 +5758,13 @@ def faculty_gradebook_monitor_view(request):
                     )
                 )
                 summary_layout = _build_summary_layout(selected_period, activities)
+                final_period = (
+                    template.periods.filter(is_active=True).order_by("-sequence_no", "-id").first()
+                    if template is not None
+                    else None
+                )
+                is_final_period_view = bool(final_period is not None and selected_period.id == final_period.id)
+                visible_exam_components = [] if is_final_period_view else summary_layout["exam_components"]
                 score_by_activity = {
                     (score.student_id, score.activity_id): Decimal(score.computed_score)
                     for score in StudentActivityScore.objects.filter(
@@ -5702,7 +5793,7 @@ def faculty_gradebook_monitor_view(request):
                             "display_student_name": _mask_student_name(row["student"]) if is_masked else f"{row['student'].last_name}, {row['student'].first_name}",
                             "enrollment_status": row["enrollment_status"],
                             "class_standing_blocks": summary_values["class_standing_blocks"],
-                            "exam_values": summary_values["exam_values"],
+                            "exam_values": [] if is_final_period_view else summary_values["exam_values"],
                             "period_grade": row["period_grade"],
                             "print_grade_status": (
                                 "PASSED"
@@ -5724,7 +5815,7 @@ def faculty_gradebook_monitor_view(request):
                 table_colspan = (
                     4
                     + sum(block["colspan"] for block in summary_layout["class_standing_blocks"])
-                    + len(summary_layout["exam_components"])
+                    + len(visible_exam_components)
                     + 1
                 )
                 AuditService.log_event(
@@ -5756,6 +5847,7 @@ def faculty_gradebook_monitor_view(request):
         "metric_cards": metric_cards,
         "rows": rows,
         "summary_layout": summary_layout,
+        "visible_exam_components": visible_exam_components,
         "submit_readiness": submit_readiness,
         "q": q,
         "is_masked": is_masked,
@@ -8748,6 +8840,9 @@ def course_base_override_update_view(request, override_id: int):
 @permission_required("grading_periods.read")
 def grading_period_lock_list_view(request):
     queryset = AdminScopeService.scoped_grading_period_locks(request)
+    active_state = request.GET.get("active", "1")
+    if active_state in {"1", "0"}:
+        queryset = queryset.filter(is_active=active_state == "1")
     if request.GET.get("campus_id"):
         queryset = queryset.filter(campus_id=request.GET.get("campus_id"))
     if request.GET.get("term_id"):
@@ -8769,6 +8864,7 @@ def grading_period_lock_list_view(request):
         "page_obj": _get_page(request, queryset),
         "q": q,
         "terms": AdminScopeService.scoped_terms(request),
+        "active_state": active_state,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/period_lock_list.html", context)
@@ -9325,9 +9421,14 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
         AdminScopeService.scoped_grade_submission_reopen_requests(request),
         id=request_id,
     )
+    can_review_request = reopen_request.status == GradeSubmissionReopenRequest.Status.PENDING
+    if request.method == "POST" and not can_review_request:
+        messages.error(request, "Only pending reopen requests can be reviewed.")
+        return _redirect_back_or_default(request, "admin_portal:grade_submission_reopen_request_list")
+
     form = GradeSubmissionReopenReviewForm(request.POST or None)
     _style_form(form)
-    if request.method == "POST" and form.is_valid():
+    if can_review_request and request.method == "POST" and form.is_valid():
         approved = form.cleaned_data["decision"] == GradeSubmissionReopenReviewForm.Decision.APPROVE
         has_force_reopen = PermissionService.has_permission(
             request.user,
@@ -9362,49 +9463,54 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
             if not form.non_field_errors():
                 before_request = model_before_after(reopen_request)
                 before_submission = model_before_after(reopen_request.submission)
-                updated = GradingGovernanceService.review_reopen_request(
-                    request_obj=reopen_request,
-                    reviewer=request.user,
-                    approved=approved,
-                    review_remarks=form.cleaned_data.get("review_remarks"),
-                )
-                AuditService.log_event(
-                    action="APPROVE" if approved else "REJECT",
-                    portal="ADMIN",
-                    entity_type="GradeSubmissionReopenRequest",
-                    entity_id=updated.id,
-                    actor=request.user,
-                    tenant=updated.tenant,
-                    campus=updated.campus,
-                    before_data=before_request,
-                    after_data=model_before_after(updated),
-                    request=request,
-                )
-                if approved:
-                    refreshed_submission = GradeSubmission.objects.get(id=updated.submission_id)
+                try:
+                    updated = GradingGovernanceService.review_reopen_request(
+                        request_obj=reopen_request,
+                        reviewer=request.user,
+                        approved=approved,
+                        review_remarks=form.cleaned_data.get("review_remarks"),
+                    )
+                except ValidationError as exc:
+                    form.add_error(None, "; ".join(exc.messages))
+                else:
                     AuditService.log_event(
-                        action="REOPEN",
+                        action="APPROVE" if approved else "REJECT",
                         portal="ADMIN",
-                        entity_type="GradeSubmission",
-                        entity_id=refreshed_submission.id,
+                        entity_type="GradeSubmissionReopenRequest",
+                        entity_id=updated.id,
                         actor=request.user,
-                        tenant=refreshed_submission.tenant,
-                        campus=refreshed_submission.campus,
-                        before_data=before_submission,
-                        after_data=model_before_after(refreshed_submission),
+                        tenant=updated.tenant,
+                        campus=updated.campus,
+                        before_data=before_request,
+                        after_data=model_before_after(updated),
                         request=request,
                     )
-                messages.success(
-                    request,
-                    "Reopen request approved and submission reopened."
-                    if approved
-                    else "Reopen request rejected.",
-                )
-                return _redirect_back_or_default(request, "admin_portal:grade_submission_reopen_request_list")
+                    if approved:
+                        refreshed_submission = GradeSubmission.objects.get(id=updated.submission_id)
+                        AuditService.log_event(
+                            action="REOPEN",
+                            portal="ADMIN",
+                            entity_type="GradeSubmission",
+                            entity_id=refreshed_submission.id,
+                            actor=request.user,
+                            tenant=refreshed_submission.tenant,
+                            campus=refreshed_submission.campus,
+                            before_data=before_submission,
+                            after_data=model_before_after(refreshed_submission),
+                            request=request,
+                        )
+                    messages.success(
+                        request,
+                        "Reopen request approved and submission reopened."
+                        if approved
+                        else "Reopen request rejected.",
+                    )
+                    return _redirect_back_or_default(request, "admin_portal:grade_submission_reopen_request_list")
     context = {
         "title": f"Review Reopen Request #{reopen_request.id}",
         "form": form,
         "reopen_request": reopen_request,
+        "can_review_request": can_review_request,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/reopen_request_review.html", context)

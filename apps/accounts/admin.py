@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import LoginOtpChallenge, PortalLoginLockoutState, User
+from .models import LoginOtpChallenge, PortalLoginLockoutState, User, UserDeactivationSchedule
 
 
 @admin.register(User)
@@ -70,3 +70,12 @@ class LoginOtpChallengeAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "user__email", "sent_to_email")
     autocomplete_fields = ("user",)
     readonly_fields = ("code_hash", "created_at")
+
+
+@admin.register(UserDeactivationSchedule)
+class UserDeactivationScheduleAdmin(admin.ModelAdmin):
+    list_display = ("user", "scheduled_for", "status", "scheduled_by_user", "applied_at", "cancelled_at")
+    list_filter = ("status", "scheduled_for")
+    search_fields = ("user__username", "user__email", "user__first_name", "user__last_name")
+    autocomplete_fields = ("user", "scheduled_by_user", "cancelled_by_user", "applied_by_user")
+    readonly_fields = ("created_at", "updated_at", "applied_at", "cancelled_at")

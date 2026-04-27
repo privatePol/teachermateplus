@@ -97,6 +97,16 @@ Expected value:
 - earlier interventions
 - better academic support
 
+Recommended timing:
+- Prelim: early warning
+- Midterm: primary intervention period
+- Pre-Final: last follow-up checkpoint
+- Final: confirmation and final review
+
+Current design:
+- the faculty monitor should focus on the current active grading period when configured
+- final-grade projection should remain available in the detailed prediction page, not as the main at-risk monitor table
+
 ### 2.4 Period Lock Countdown
 Purpose:
 - display time remaining before the current submission deadline

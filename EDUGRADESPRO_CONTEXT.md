@@ -22,11 +22,13 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - Role assignment scope now supports department-level granularity (`tenant + campus + department`) for governance use cases such as AC/Dean monitoring boundaries.
 - Application-level data-at-rest protections now include authenticated correction-attachment download views, upload validation, randomized stored filenames for correction attachments and import source files, and audit logging for sensitive upload/download/signature-preview/report-download events.
 - Server-side data-at-rest work remains an IT responsibility; `docs/DATA_AT_REST_PROTECTION_GUIDE.md` documents the manual checklist for disk encryption, direct media serving restrictions, database users, firewall, backups, and OS permissions.
+- Production settings require a non-default `DJANGO_SECRET_KEY`; production startup fails fast if the secret is missing or left at the development fallback.
 - Application-level performance improvements now include request-level permission reuse for portal menu rendering, optimized Faculty Dashboard aggregate counts, targeted summary-page recomputation for missing rows only, focused composite indexes for common scope/status/gradebook filters, environment-driven Django cache settings, and optional dev-only Debug Toolbar wiring. See `docs/performance_optimization.md`.
 - The Admin `Non-Compliance on Periodic Grades Submission` monitor lists overdue unsubmitted classes only when the faculty assignment has already been accepted. Pagination preserves filters, and missing-record counts are computed for visible page rows to keep large reports responsive.
 - The Admin `Grade Submissions` list includes accepted faculty names and can be searched by faculty name or username in addition to course, section, and period.
 - Organization: tenants, campuses, departments, programs
 - Academics: academic years, terms, courses, sections, offerings, faculty assignments, students
+- Admin student scope includes programless students only when their tenant, campus, and department are accessible to the current admin scope.
 - Faculty assignments now carry acknowledgment fields (`accepted_at`, `accepted_by`) so admin can track whether the faculty member already accepted the load.
 - Faculty assignments now also carry instruction/response workflow fields so admin can send notes and faculty can return clarification or decline reasons without leaving the portal.
 - Faculty assignments now also carry response-window fields (`response_due_at`, `last_reminded_at`, `reminder_count`) so pending loads can be reminded and auto-expired when left unanswered.
@@ -35,9 +37,11 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - a dedicated assignment dashboard with campus, department, and faculty rollups.
   - configurable default-primary behavior for newly created faculty assignments, with manual override still available from the assignments list.
 - Enrollment management
+- Enrollment updates enforce the same tenant/campus match between student and offering as enrollment creation, preventing cross-campus or cross-tenant class-list rows.
 - `Tools -> Configuration Management` now includes a more guided `Class Master List Ownership` area:
   - class-level ownership overrides can be filtered by tenant, campus, term, and optional faculty
   - class labels intentionally omit the already selected term/academic year to reduce repetition
+  - the faculty DRP cutoff is configurable; the NCBA default allows assigned faculty to newly mark `DRP` through Pre-Final and blocks new faculty DRP changes once Final is the active grading period
   - a custom multi-class picker and selected-class preview both emphasize faculty names for quicker admin verification
   - the page now keeps focus on the same ownership card when term/faculty filter changes reload the view
   - the configurable-features screen itself now uses collapsible cards with stronger spacing and medium shadow depth so large settings groups are easier to navigate
@@ -48,6 +52,10 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - Grading management:
   - templates
   - template governance workflow (tenant-scoped role matrix for draft, submit, review, publish, and hotfix stages)
+- Faculty activity score sheets default blank active-student raw score cells to `0` and save submitted blanks as zero-score records, ensuring summary averages include every saved activity.
+- Faculty period submission treats the assigned grading template as a required structure: every active non-attendance component, subcomponent, or detail bucket must have at least one activity before submission can proceed.
+- Reopen request review is one-time only for pending requests; duplicate submissions against already-approved or rejected requests are handled with a normal admin message instead of a server error.
+- Faculty can view and print the official Summary of Grades only after submission. Faculty may self-reopen a submitted gradebook before the configured deadline, but the summary/print is hidden again until resubmission; if a reopened gradebook reaches the deadline without resubmission, EduGradesPro auto-locks score/activity/attendance editing while still allowing faculty to finalize and resubmit the existing records from Summary. Faculty grading pages and My Classes also perform this check just-in-time, so a past deadline changed by Admin is enforced on the next faculty page load even before the scheduled command runs.
   - template governance Phase 2 workflow engine:
     - approval workflows now store real step timelines
     - hotfix workflows now store review/apply steps
@@ -64,6 +72,9 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - period locks and deadlines
     - for NCBA's simplified submission policy, the deadline now marks when a class becomes overdue/non-compliant but does not automatically close an unsubmitted grade book
     - unsubmitted grade books remain open until faculty finally submit them
+    - `is_locked` disables faculty score, activity, and attendance editing for the selected period rule scope
+    - `scope_type` controls coverage: `CAMPUS` applies one rule to all matching offerings in the selected campus/term/period, while `COURSE` targets one specific offering and takes priority over the campus rule
+    - inactive period-lock rows are ignored by faculty pages, deadline checks, and auto-lock processing; the Admin Period Locks list defaults to active rows and exposes a rule-state filter for inactive/audit review
     - optional `Submission Non-Compliance Notices` can now be enabled per tenant so EduGradesPro issues staged overdue communications every configured interval until submission
     - the workflow supports `Notice`, `Warning`, and repeated `Escalation` stages, with HR escalation recipients configurable from `Tools -> Configuration Management`
     - faculty can review these communications from the `Faculty Reminder Center`, while admin/governance users can see the latest stage in the overdue non-compliance monitor
@@ -162,9 +173,13 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - the Admin form for Tenant Grading Profiles now includes field-by-field help text so tenant, campus, department, program, course, base value, passing threshold, formula mode, weights, priority, and effective term are easier to understand during setup
 - Official period grades are now visible to faculty by default.
 - When Admin explicitly enables the post-deadline official-grade release restriction, the Summary `Passed` / `Failed` cards follow that same visibility rule so the readiness UI does not bypass the configured governance policy.
-- The Summary snapshot cards now remain visible even when the page is already read-only, so faculty can still review readiness, status counts, and any released pass/fail totals after submission, lock, or active-period closure.
+- The Summary snapshot cards remain visible before submission, but the official gradebook table and print sheet are hidden until submission so unsubmitted EGP records cannot be used as the official AIMS source.
+- Official stored period outputs (`class_standing_grade`, `exam_grade`, `period_grade`) and stored `final_grade` are rounded to whole numbers with `ROUND_HALF_UP`; raw scores, computed activity scores, weights, thresholds, and prediction/intermediate values may still keep decimal precision.
+- A submitted gradebook may be self-reopened by faculty only while the submission deadline has not passed. Reopened gradebooks must be resubmitted before the deadline; otherwise the automated deadline lock disables editing but keeps Summary resubmission available for the existing records. The same lock is applied just-in-time on faculty grading pages and My Classes when Admin changes the deadline to a past date, and the temporary auto-lock is cleared after faculty resubmission.
+- Faculty Dashboard Priority Actions surfaces expired reopened gradebooks as high-priority resubmission tasks, pointing directly to the affected Summary page.
+- Faculty My Classes class-size cards count active grading students only, matching the active student scope used by grade readiness and summaries.
 - The overall `FINAL GRADE` column is shown only on the Final-period Summary page, not on Prelim, Midterm, or Pre-Final.
-- The Final-period Summary page now also includes prior official period-grade columns (`PRELIM GRADE`, `MIDTERM GRADE`, `PRE-FINAL GRADE`) before the Final Exam column.
+- The Final-period Summary page now also includes prior official period-grade columns (`PRELIM GRADE`, `MIDTERM GRADE`, `PRE-FINAL GRADE`) before the final-period grade column such as `FX Grade`.
 - Final-grade computation now uses the full configured active-period count as the divisor; missing later period grades do not reduce the denominator just because only earlier period grades already exist.
 - The Final-period Summary page now also refreshes stored `StudentFinalGrade` rows from existing official period grades before rendering, so governance-closed/read-only Final review pages do not keep showing stale final averages from older computation rules.
 - Normal score and attendance writes now immediately recompute stored period and final grades for only the affected student(s), while Summary/Submit still provide full-offering refresh points.
@@ -188,7 +203,7 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   so faculty can see the nearest active unsubmitted period deadline more clearly.
 - Faculty Dashboard now includes a read-only command-center area:
   - `Priority Actions` lists the most urgent faculty follow-ups first, including overdue unsubmitted periods, missing grades, at-risk students, correction requests, and activities without scores
-  - `Students At Risk` previews the top five prediction-based risk rows in the faculty member's current active teaching scope and links to the full at-risk monitor
+  - the embedded `Students At Risk` dashboard container was removed so the command area focuses on Priority Actions; the separate Students At-Risk Monitor remains available from navigation
 - Faculty period Summary print output now provides an NCBA-branded `Summary of Periodic Grades` sheet for Pinnacle encoding, with logo, school heading/address, grading period, academic year, semester/term, faculty name, course code/title, units, section, student list, periodic grade, and status.
 - When a period becomes closed under active grading period governance, the faculty period card still keeps `Attendance` and `Summary` available as read-only review pages, while write actions remain blocked unless the period becomes active again, is formally reopened, or has an approved correction window.
 - The `My Classes` page now exposes `Final Clearance` inside the Faculty Portal through a single dedicated action area, so faculty can preview their own campus-term clearance status and generate the official final-clearance PDF without opening the period page first or switching to the Admin Portal.
@@ -208,7 +223,10 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - actual email queue creation still happens in the background when the reminder becomes due
   - if the activity is deleted or no longer future-dated, the linked reminder is cancelled automatically
 - The Reminder Center page has been visually polished into clearer sections with summary cards, a guided create form, and easier-to-scan reminder cards.
-- Faculty Portal now also includes a Student At-Risk Monitor that groups prediction-based risk rows by class and period so faculty can prioritize intervention before periods close.
+- Faculty Portal now also includes a Student At-Risk Monitor that groups prediction-based risk rows by class and current period so faculty can prioritize intervention before periods close.
+- The Student At-Risk Monitor now labels its recommended usage rhythm directly on the page: Prelim for early warning, Midterm as the main intervention period, Pre-Final as the last follow-up checkpoint, and Final mostly for confirmation.
+- When active grading period governance is configured, the faculty at-risk monitor focuses on that active period and keeps final-grade projection on the detailed prediction page to reduce confusion.
+- Prediction at-risk status now considers both the selected period estimate and the possible final grade; a student can be flagged at risk when the current period is passing but the possible final grade is still below the configured passing threshold.
 - Faculty Portal now also includes a class-period `Who Viewed` history page that lets faculty review admin-side read-only grade book monitor openings already recorded in the audit trail.
 - Faculty Portal class-list handling now distinguishes:
   - `Remove from Class` for student schedule movement to another class
@@ -472,7 +490,14 @@ All business operations should respect these dimensions and permissions.
 - Admin guide section `7. Submission and Reopen Control` now mirrors the improved guide presentation style and explicitly maps locks, submission monitoring, reopen governance, and faculty re-submission follow-through to the correct Admin Portal pages.
 - Admin guide section `7. Submission and Reopen Control` now also uses a dedicated visible-border table style so policy tables are easier to scan and read during operations briefings.
 - Admin guide section `8. Grade Correction Process (System vs Manual)` now uses the same table-first presentation style and makes the system request path, official PDF artifact, approval notifications, and manual-only handling easier to distinguish.
-- Faculty guide and formal manual now use the clearer label `Grade Corrections and Reopen Governance` and begin that section with a short system/manual mode summary to reduce confusion for faculty readers.
+- Faculty guide and manual use a simple `Corrections and Reopen` section with a short system/manual mode summary to reduce confusion for faculty readers.
+- Faculty Portal formal manual content has been rewritten in simpler, more natural faculty-facing language while preserving the same sections for workflow, submission, corrections, prediction, at-risk monitoring, reminders, memos, student status, and privacy/audit.
+- Faculty Portal main guide content has also been rewritten in simpler, more natural language and reorganized around grouped topic cards while preserving existing anchors for daily workflow, assignments, activities, summary, prediction, submission, corrections, class list, archived classes, password help, first login, privacy, reminders, and private memos.
+- Faculty Portal manual navigation has also been reorganized around grouped topic cards for portal basics, grades/submission, prediction/support, and records/security.
+- Faculty Portal guide and formal manual now use a stronger green/teal/gold visual theme with animated cards, anchor target highlighting, and bottom-left Back to top links that avoid the help button area.
+- Faculty Dashboard now uses a clearer "today first" layout with a stronger hero, shortcut cards for common tasks, a priority-action panel, a privacy-safe at-risk preview, and supporting KPI sections below.
+- Admin Portal guide has been redesigned as a polished workstream hub with a stronger hero, an operating-path card, grouped navigation for start/scope, grading setup, faculty operations, and security/monitoring, target highlighting, and a fixed Back to top link.
+- Admin Portal Security now includes a Faculty Deactivation page for scheduling or cancelling future faculty account deactivations. Due schedules are applied by running `python manage.py apply_scheduled_user_deactivations` from cron or a task scheduler, which deactivates the account, clears active sessions, and writes audit logs.
 - Faculty deadline reminder banners now distinguish between `no deadline configured` and `deadline configured for a different campus/term scope`, so faculty users get a clearer explanation when admin settings do not apply to their accepted classes.
 - The `Period Lock` admin form now uses actual grading-template period choices and validation, reducing deadline mismatches caused by manually typed term codes instead of real period codes.
 - EduGradesPro now has an `Active Grading Period` governance model separate from grading-template period codes:
@@ -480,6 +505,7 @@ All business operations should respect these dimensions and permissions.
   - one active period is selected per tenant/campus/term
   - the setting is visible in both Admin and Faculty portals
   - optional auto-advance moves to the next configured period after the current period deadline passes.
+  - auto-advance is forward-only; changing that deadline later does not move the active period backward, so admin must manually reset the active period when needed.
 
 ## 10. Open Design/Governance Topics
 - Expanded tenant-specific grading methodology options beyond the current average-all-periods and weighted-period profile modes.

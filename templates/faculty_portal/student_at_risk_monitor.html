@@ -194,6 +194,38 @@
     flex-wrap: wrap;
     gap: 0.4rem;
   }
+  .risk-period-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .risk-period-card {
+    border: 1px solid #dde8db;
+    border-radius: 0.9rem;
+    background: #ffffff;
+    padding: 0.85rem 0.95rem;
+    box-shadow: 0 8px 18px rgba(22, 55, 34, 0.06);
+  }
+  .risk-period-card strong {
+    display: block;
+    color: #173d27;
+    font-size: 0.95rem;
+  }
+  .risk-period-card span {
+    display: block;
+    color: #63786a;
+    font-size: 0.86rem;
+    margin-top: 0.2rem;
+  }
+  .risk-period-card.primary {
+    border-color: #9cc79b;
+    background: linear-gradient(135deg, #f1faf0 0%, #ffffff 100%);
+  }
+  .risk-period-card.last-call {
+    border-color: #e2c263;
+    background: linear-gradient(135deg, #fff9e6 0%, #ffffff 100%);
+  }
 </style>
 
 <div class="risk-shell">
@@ -201,16 +233,46 @@
     <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
       <div>
         <h2>Student At-Risk Monitor</h2>
-        <p>Review students whose current prediction is below the passing threshold, then open the class prediction page to inspect coverage, missing work, and the amount still needed to recover.</p>
+        <p>Review students whose current-period projection is below the passing threshold, then open the class prediction page only when you need the deeper formula details.</p>
         <div class="hero-meta">
           <span class="risk-chip">Unofficial advisory view</span>
           <span class="risk-chip">Read-only monitor</span>
-          <span class="risk-chip">Built from prediction snapshots</span>
+          <span class="risk-chip">Current-period focus</span>
         </div>
       </div>
       <div class="d-flex flex-wrap gap-2 justify-content-end">
         <a class="btn btn-outline-success rounded-pill px-4" href="{% url 'faculty_portal:my_courses' %}">Back to Classes</a>
         <a class="btn btn-outline-info rounded-pill px-4" href="{% url 'faculty_portal:guide' %}#guide-prediction">Prediction Guide</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="card risk-panel mb-4">
+    <div class="card-header">
+      <div class="risk-title">Best Time to Use This Monitor</div>
+      <div class="risk-copy">Use this page as an intervention list, not as an official grade sheet.</div>
+    </div>
+    <div class="card-body">
+      <div class="risk-period-strip">
+        <div class="risk-period-card">
+          <strong>Prelim</strong>
+          <span>Early warning. Identify students who need attention before the term becomes harder to recover.</span>
+        </div>
+        <div class="risk-period-card primary">
+          <strong>Midterm</strong>
+          <span>Main intervention period. This is usually the most useful checkpoint for advising and recovery work.</span>
+        </div>
+        <div class="risk-period-card last-call">
+          <strong>Pre-Final</strong>
+          <span>Last intervention checkpoint before final-period outcomes become difficult to change.</span>
+        </div>
+        <div class="risk-period-card">
+          <strong>Final</strong>
+          <span>Use mostly for final review and confirmation. It is usually late for major intervention.</span>
+        </div>
+      </div>
+      <div class="alert alert-light border small mb-0">
+        Recommended rhythm: check after Prelim submission, focus heavily during Midterm, and use Pre-Final as the last call for follow-up. The monitor focuses on the current active period when Configuration Management has an active grading period set.
       </div>
     </div>
   </div>
@@ -232,7 +294,7 @@
   <div class="card risk-filters mb-4">
     <div class="card-header">
       <div class="risk-title">Filters</div>
-      <div class="risk-copy">Use the filter panel to narrow the monitor to a specific class or archived view.</div>
+      <div class="risk-copy">Use the filter panel to narrow the current-period monitor to a specific class or archived view.</div>
     </div>
     <div class="card-body">
       <form method="get" class="row g-3 align-items-end">
@@ -266,6 +328,15 @@
   </div>
 
   {% if monitor_groups %}
+    {% if using_active_period_filter %}
+      <div class="alert alert-success border small">
+        Active grading period governance is set, so this monitor is showing current-period risk only.
+      </div>
+    {% else %}
+      <div class="alert alert-warning border small">
+        No active grading period is set for at least one class scope, so the monitor may include more than one period. Set the active grading period in Configuration Management for the cleanest current-period view.
+      </div>
+    {% endif %}
     <div class="row g-4">
       {% for group in monitor_groups %}
       <div class="col-12">
@@ -288,12 +359,11 @@
                 <thead>
                   <tr>
                     <th>Student</th>
-                    <th>Current Projection</th>
-                    <th>Projected Final</th>
-                    <th>Average Needed to Pass Final</th>
+                    <th>Current Period Projection</th>
+                    <th>Gap to Passing</th>
                     <th>Coverage</th>
                     <th>Remaining</th>
-                    <th>Risk</th>
+                    <th>Reason / Suggested Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -304,23 +374,15 @@
                       <div class="risk-subtle">{{ row.student.program.code|default:"" }}</div>
                     </td>
                     <td class="risk-score">{{ row.current_projected_period_grade_display|default:"-" }}</td>
-                    <td class="risk-score">{{ row.current_projected_final_grade_display|default:"-" }}</td>
                     <td>
-                      <div class="risk-score">
-                        {% if row.final_requirement_value_display %}
-                          {{ row.final_requirement_value_display }}
-                        {% else %}
-                          {{ row.final_requirement_label }}
-                        {% endif %}
-                      </div>
-                      {% if row.final_requirement_period_names %}
-                        <span class="risk-note">{{ row.final_requirement_period_names|join:", " }}</span>
-                      {% endif %}
+                      <div class="risk-score">{{ row.period_gap_display|default:"-" }}</div>
+                      <span class="risk-note">points below passing</span>
                     </td>
                     <td>{{ row.coverage_percent_display }}%</td>
                     <td>{{ row.remaining_item_count }}</td>
                     <td>
-                      <span class="risk-badge {{ row.risk_variant }}">At Risk</span>
+                      <span class="risk-badge {{ row.risk_variant }}">{{ row.risk_reason }}</span>
+                      <div class="risk-note">{{ row.suggested_action }}</div>
                     </td>
                   </tr>
                   {% endfor %}

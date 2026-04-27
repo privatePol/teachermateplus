@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
+from django.core.exceptions import ValidationError
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
@@ -20,6 +21,7 @@ from apps.auditlog.models import AuditLog
 from apps.admin_portal.services import AdminScopeService
 from apps.core.services.scope import ScopeService
 from apps.enrollment.models import Enrollment
+from apps.enrollment.services import EnrollmentService
 from apps.grading.models import (
     CourseTemplateAssignment,
     GradeActivity,
@@ -29,7 +31,7 @@ from apps.grading.models import (
     StudentActivityScore,
     StudentPeriodGrade,
 )
-from apps.rbac.models import Role, UserRole
+from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
 
@@ -243,6 +245,93 @@ class FacultyMonitoringScopeTests(TestCase):
 
         faculty_ids = list(AdminScopeService.scoped_faculty_users(request))
         self.assertIn(faculty_other_default.id, faculty_ids)
+
+    def test_scoped_students_does_not_leak_programless_students_from_other_campus(self):
+        visible_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_is,
+            program=None,
+            student_no="2025-PROGLESS-001",
+            last_name="Visible",
+            first_name="Student",
+        )
+        second_campus = Campus.objects.create(tenant=self.tenant, code="NCBA-CUBAO", name="Cubao")
+        second_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            code="CUB_COLL_IS",
+            name="Cubao Information Systems",
+        )
+        hidden_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            program=None,
+            student_no="2025-PROGLESS-999",
+            last_name="Hidden",
+            first_name="Student",
+        )
+
+        request = self._build_request()
+        student_ids = set(AdminScopeService.scoped_students(request).values_list("id", flat=True))
+
+        self.assertIn(visible_student.id, student_ids)
+        self.assertNotIn(hidden_student.id, student_ids)
+
+    def test_enrollment_update_rejects_cross_campus_student_mismatch(self):
+        enrollment_update = Permission.objects.create(
+            code="enrollment.update",
+            module="enrollment",
+            action="update",
+        )
+        RolePermission.objects.create(role=self.ac_role, permission=enrollment_update)
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_is,
+            program=None,
+            student_no="2025-VALID-001",
+            last_name="Valid",
+            first_name="Student",
+        )
+        enrollment = Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.ac_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+        )
+        second_campus = Campus.objects.create(tenant=self.tenant, code="NCBA-CUBAO", name="Cubao")
+        second_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            code="CUB_COLL_BUS",
+            name="Cubao Business",
+        )
+        other_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            program=None,
+            student_no="2025-OTHER-001",
+            last_name="Other",
+            first_name="Campus",
+        )
+        enrollment.student = other_student
+
+        with self.assertRaisesMessage(ValidationError, "Student and offering campus mismatch."):
+            EnrollmentService.update_enrollment(
+                user=self.ac_user,
+                enrollment=enrollment,
+                enrollment_status=Enrollment.Status.ACTIVE,
+                is_active=True,
+                portal=Enrollment.SourcePortal.ADMIN,
+            )
 
     def test_active_user_activity_rows_respects_current_session_timeout_policy(self):
         recent_user = User.objects.create_user(

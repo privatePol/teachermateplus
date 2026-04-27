@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.db.models import F, OuterRef, Subquery
@@ -38,6 +39,12 @@ def _parse_iso_datetime(param_name: str, value: str):
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed, None
+
+
+def _format_official_grade(value):
+    if value is None:
+        return None
+    return format(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP), "f")
 
 
 @require_GET
@@ -227,9 +234,9 @@ def sis_periodic_grades_api_view(request):
                 "student_no": row.student.student_no,
                 "student_name": student_full_name,
                 "student_status": enrollment_status_lookup.get((row.offering_id, row.student_id), "UNKNOWN"),
-                "class_standing_grade": str(row.class_standing_grade) if row.class_standing_grade is not None else None,
-                "exam_grade": str(row.exam_grade) if row.exam_grade is not None else None,
-                "period_grade": str(row.period_grade) if row.period_grade is not None else None,
+                "class_standing_grade": _format_official_grade(row.class_standing_grade),
+                "exam_grade": _format_official_grade(row.exam_grade),
+                "period_grade": _format_official_grade(row.period_grade),
                 "is_finalized": bool(row.is_finalized),
                 "submitted_at": row.submitted_at.isoformat() if row.submitted_at else None,
                 "submission_remarks": row.submission_remarks,

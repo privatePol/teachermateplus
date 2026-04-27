@@ -7,6 +7,11 @@
   <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:grading_period_lock_create' %}">Add Lock Rule</a>
   {% endif %}
 </div>
+<div class="alert alert-light border small">
+  <strong>Lock:</strong> disables faculty editing for the selected period scope.
+  <strong>Scope:</strong> Campus applies to all classes in that campus/term/period, while Course applies to one specific class and takes priority over the campus rule.
+  <strong>Active:</strong> inactive rules are ignored by faculty pages and deadline automation.
+</div>
 <form class="row g-2 mb-3">
   <div class="col-md-2">
     <select class="form-select" name="campus_id">
@@ -39,6 +44,13 @@
     </select>
   </div>
   <div class="col-md-2">
+    <select class="form-select" name="active">
+      <option value="1" {% if active_state == "1" %}selected{% endif %}>Active Rules</option>
+      <option value="0" {% if active_state == "0" %}selected{% endif %}>Inactive Rules</option>
+      <option value="all" {% if active_state == "all" %}selected{% endif %}>All Rule States</option>
+    </select>
+  </div>
+  <div class="col-md-2">
     <input class="form-control" name="q" value="{{ q }}" placeholder="Period/course/remarks">
   </div>
   <div class="col-md-2">
@@ -56,6 +68,7 @@
           <th>Scope</th>
           <th>Offering</th>
           <th>Deadline</th>
+          <th>Rule State</th>
           <th>Status</th>
           <th></th>
         </tr>
@@ -83,7 +96,16 @@
             {% endif %}
           </td>
           <td>
-            {% if row.is_locked %}
+            {% if row.is_active %}
+              <span class="badge text-bg-success">Active</span>
+            {% else %}
+              <span class="badge text-bg-secondary">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if not row.is_active %}
+              <span class="badge text-bg-secondary">Ignored</span>
+            {% elif row.is_locked %}
               <span class="badge text-bg-danger">Locked</span>
             {% else %}
               <span class="badge text-bg-success">Open</span>
@@ -93,12 +115,12 @@
             {% if "grading_periods.lock" in effective_permissions %}
             <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grading_period_lock_update' row.id %}">Edit</a>
             {% endif %}
-            {% if row.is_locked and "grading_periods.reopen" in effective_permissions %}
+            {% if row.is_active and row.is_locked and "grading_periods.reopen" in effective_permissions %}
             <form method="post" action="{% url 'admin_portal:grading_period_lock_reopen' row.id %}" class="d-inline">
               {% csrf_token %}
               <button class="btn btn-sm btn-outline-warning">Reopen</button>
             </form>
-            {% elif not row.is_locked and "grading_periods.lock" in effective_permissions %}
+            {% elif row.is_active and not row.is_locked and "grading_periods.lock" in effective_permissions %}
             <form method="post" action="{% url 'admin_portal:grading_period_lock_close' row.id %}" class="d-inline">
               {% csrf_token %}
               <button class="btn btn-sm btn-outline-danger">Lock</button>

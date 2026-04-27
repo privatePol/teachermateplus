@@ -5,7 +5,7 @@ from apps.grading.services import GradingGovernanceService
 
 
 class Command(BaseCommand):
-    help = "Automatically lock grading periods whose submission deadline has already passed."
+    help = "Automatically lock reopened gradebooks that were not resubmitted before the deadline."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -50,10 +50,10 @@ class Command(BaseCommand):
             )
 
         if result["count"] == 0:
-            self.stdout.write(self.style.SUCCESS("No overdue open period locks found."))
+            self.stdout.write(self.style.SUCCESS("No expired reopened gradebooks found."))
             return
 
         if dry_run:
             self.stdout.write(self.style.WARNING("Dry run complete. No database changes were made."))
         else:
-            self.stdout.write(self.style.SUCCESS(f"Auto-locked {result['count']} overdue grading period lock(s)."))
+            self.stdout.write(self.style.SUCCESS(f"Auto-locked {result['count']} expired reopened gradebook(s)."))

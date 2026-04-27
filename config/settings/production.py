@@ -1,4 +1,9 @@
+import os
+
 from .base import *  # noqa: F401,F403
+
+if not os.getenv("DJANGO_SECRET_KEY") or SECRET_KEY == "change-this-in-production":
+    raise RuntimeError("DJANGO_SECRET_KEY must be set to a non-default value in production.")
 
 DEBUG = env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if h.strip()]

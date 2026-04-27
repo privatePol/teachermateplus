@@ -105,8 +105,10 @@ class FacultyDashboardService:
         actions = []
         past_deadline_count = 0
         near_deadline_count = 0
+        locked_reopened_count = 0
         first_past_deadline = None
         first_near_deadline = None
+        first_locked_reopened = None
         missing_grade_classes = set()
         first_missing_grade = None
 
@@ -118,8 +120,21 @@ class FacultyDashboardService:
                 continue
             student_ids = active_student_ids_by_offering.get(offering.id, [])
             for period in periods:
+                GradingGovernanceService.auto_lock_expired_reopened_gradebook(
+                    offering=offering,
+                    template_period=period,
+                    at=now,
+                )
                 submission = GradingGovernanceService.get_submission(offering=offering, template_period=period)
                 is_submitted = bool(submission and submission.status == GradeSubmission.Status.SUBMITTED)
+                is_auto_locked_reopened = GradingGovernanceService.is_auto_locked_reopened_after_deadline(
+                    offering=offering,
+                    template_period=period,
+                )
+                if is_auto_locked_reopened:
+                    locked_reopened_count += 1
+                    first_locked_reopened = first_locked_reopened or (offering, period)
+                    continue
                 if not is_submitted:
                     deadline = GradingGovernanceService.resolve_submission_deadline(
                         offering=offering,
@@ -137,6 +152,23 @@ class FacultyDashboardService:
                         missing_grade_classes.add(offering.id)
                         first_missing_grade = first_missing_grade or (offering, period)
                         break
+
+        if first_locked_reopened:
+            offering, period = first_locked_reopened
+            actions.append(
+                cls._action(
+                    rank=0,
+                    severity="High",
+                    summary=(
+                        f"{locked_reopened_count} reopened gradebook"
+                        f"{'' if locked_reopened_count == 1 else 's'} "
+                        "is locked after the deadline and needs resubmission."
+                    ),
+                    detail=f"Open {cls._course_label(offering)} - {period.name} Summary to finalize and resubmit.",
+                    url=reverse("faculty_portal:period_summary", args=[offering.id, period.id]),
+                    button_label="Resubmit Gradebook",
+                )
+            )
 
         if first_past_deadline:
             offering, period, deadline = first_past_deadline

@@ -21,6 +21,8 @@ from django.db import models  # noqa: E402
 MODEL_PURPOSES = {
     "accounts.User": "Primary application user account for Admin Portal and Faculty Portal access.",
     "accounts.PortalLoginLockoutState": "Tracks repeated failed login attempts and temporary portal-specific lockout state.",
+    "accounts.UserSignatureCredential": "Encrypted account-level signature image credential for approved printable documents.",
+    "accounts.UserSignatureUsageLog": "Audit trail for stored signature placement on official generated documents.",
     "rbac.Role": "Role catalog used for RBAC and scoped governance.",
     "rbac.Permission": "Permission catalog used for action-level access checks.",
     "rbac.UserRole": "Scoped assignment of a role to a user, optionally limited by tenant, campus, or department.",

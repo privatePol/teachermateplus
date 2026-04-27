@@ -7,15 +7,19 @@
   .guide-shell {
     max-width: 1220px;
     margin: 0 auto;
+    padding-bottom: 4.5rem;
   }
   .guide-hero {
     border: 0;
     border-radius: 1.5rem;
     background:
-      radial-gradient(circle at top right, rgba(232, 197, 89, 0.18), transparent 28%),
-      linear-gradient(135deg, #f6fbf6 0%, #eef7ef 54%, #fbf4d8 100%);
-    box-shadow: 0 22px 38px rgba(18, 56, 34, 0.08);
+      radial-gradient(circle at 92% 14%, rgba(255, 205, 89, 0.48), transparent 26%),
+      radial-gradient(circle at 8% 88%, rgba(20, 184, 166, 0.28), transparent 30%),
+      linear-gradient(135deg, #0f5132 0%, #13795b 44%, #f4b942 100%);
+    box-shadow: 0 24px 44px rgba(13, 71, 45, 0.2);
     overflow: hidden;
+    color: #ffffff;
+    animation: guide-rise 0.55s ease both;
   }
   .guide-hero .card-body {
     padding: 1.5rem;
@@ -30,17 +34,17 @@
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #708877;
+    color: rgba(255, 255, 255, 0.78);
     margin-bottom: 0.45rem;
   }
   .guide-title {
     font-size: 2rem;
     font-weight: 800;
-    color: #143b25;
+    color: #ffffff;
     margin-bottom: 0.5rem;
   }
   .guide-subtitle {
-    color: #536b5b;
+    color: rgba(255, 255, 255, 0.86);
     max-width: 760px;
     margin-bottom: 1rem;
   }
@@ -66,12 +70,12 @@
     font-weight: 700;
   }
   .guide-hero-actions .guide-cta-primary {
-    background: linear-gradient(90deg, #1b6a40 0%, #8fab30 100%);
+    background: linear-gradient(90deg, #ffffff 0%, #fff4c7 100%);
     border-color: transparent;
-    color: #ffffff;
+    color: #0f5132;
   }
   .guide-hero-actions .guide-cta-primary:hover {
-    color: #ffffff;
+    color: #0f5132;
   }
   .guide-anchor-nav a:hover,
   .guide-hero-actions a:hover {
@@ -81,8 +85,9 @@
     border-radius: 1.35rem;
     overflow: hidden;
     background: #ffffff;
-    box-shadow: 0 16px 28px rgba(19, 57, 34, 0.12);
+    box-shadow: 0 18px 34px rgba(13, 60, 40, 0.22);
     position: relative;
+    animation: guide-float-in 0.7s ease 0.08s both;
   }
   .guide-visual-card img {
     width: 100%;
@@ -118,9 +123,15 @@
   .guide-highlight-card {
     border: 0;
     border-radius: 1.1rem;
-    background: linear-gradient(180deg, #ffffff 0%, #f7fbf7 100%);
+    background: linear-gradient(180deg, #ffffff 0%, #f2fbf7 100%);
     box-shadow: 0 12px 22px rgba(16, 50, 30, 0.06);
     height: 100%;
+    animation: guide-rise 0.55s ease both;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .guide-highlight-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 18px 34px rgba(16, 82, 54, 0.14);
   }
   .guide-highlight-card .card-body {
     padding: 1rem 1rem 0.95rem;
@@ -156,6 +167,15 @@
     border-radius: 1.15rem;
     box-shadow: 0 14px 28px rgba(16, 50, 30, 0.06);
     height: 100%;
+    animation: guide-rise 0.55s ease both;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .guide-section-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 20px 34px rgba(16, 82, 54, 0.12);
+  }
+  [id^="guide-"]:target .guide-section-card {
+    box-shadow: 0 0 0 3px rgba(244, 185, 66, 0.42), 0 18px 34px rgba(16, 82, 54, 0.14);
   }
   .guide-section-card .card-body {
     padding: 1.2rem;
@@ -195,6 +215,11 @@
     border-radius: 1rem;
     background: linear-gradient(180deg, #ffffff 0%, #f7fbf7 100%);
     border: 1px solid #e2ece3;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+  .guide-step:hover {
+    transform: translateX(4px);
+    border-color: #b7d8c5;
   }
   .guide-step-number {
     width: 52px;
@@ -281,10 +306,13 @@
   .guide-management-card {
     border: 0;
     border-radius: 1.25rem;
-    background: linear-gradient(135deg, #143a25 0%, #1a5f39 45%, #8fa838 100%);
+    background:
+      radial-gradient(circle at 90% 18%, rgba(255, 215, 102, 0.35), transparent 24%),
+      linear-gradient(135deg, #0b3d2e 0%, #087f5b 48%, #f4b942 100%);
     color: #f5fff7;
     box-shadow: 0 18px 34px rgba(16, 53, 31, 0.18);
     overflow: hidden;
+    animation: guide-rise 0.55s ease both;
   }
   .guide-management-card .card-body {
     padding: 1.35rem 1.35rem 1.25rem;
@@ -356,6 +384,109 @@
     color: #5b7162;
     font-size: 0.85rem;
   }
+  .guide-topic-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.9rem;
+  }
+  .guide-topic-card {
+    border: 1px solid #dfe9e1;
+    border-radius: 1rem;
+    background: #fff;
+    padding: 0.95rem 1rem;
+    height: 100%;
+    animation: guide-rise 0.55s ease both;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .guide-topic-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 18px 34px rgba(16, 82, 54, 0.13);
+  }
+  .guide-topic-card strong {
+    display: block;
+    color: #173d27;
+    font-size: 0.98rem;
+    margin-bottom: 0.3rem;
+  }
+  .guide-topic-card p {
+    color: #5b7162;
+    font-size: 0.88rem;
+    margin-bottom: 0.65rem;
+  }
+  .guide-topic-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .guide-topic-links a {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    border: 1px solid #dbe6dd;
+    background: #f8fbf8;
+    color: #234b33;
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 0.36rem 0.65rem;
+    text-decoration: none;
+  }
+  .guide-topic-links a:hover {
+    background: #fff5cf;
+    border-color: #f0d26c;
+  }
+  .faculty-guide-back-top {
+    position: fixed;
+    left: 1.25rem;
+    bottom: 4.25rem;
+    z-index: 30;
+    border: 1px solid rgba(15, 81, 50, 0.22);
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 16px 30px rgba(15, 81, 50, 0.16);
+    color: #0f5132;
+    font-weight: 800;
+    padding: 0.62rem 0.95rem;
+    text-decoration: none;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  }
+  .faculty-guide-back-top:hover {
+    background: #fff5cf;
+    color: #0f5132;
+    transform: translateY(-2px);
+    box-shadow: 0 20px 34px rgba(15, 81, 50, 0.2);
+    text-decoration: none;
+  }
+  @keyframes guide-rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes guide-float-in {
+    from {
+      opacity: 0;
+      transform: translateY(18px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .guide-hero,
+    .guide-visual-card,
+    .guide-highlight-card,
+    .guide-section-card,
+    .guide-management-card,
+    .guide-topic-card {
+      animation: none;
+      transition: none;
+    }
+  }
   .guide-divider {
     margin: 1rem 0 0.65rem;
   }
@@ -376,7 +507,14 @@
     .guide-highlight-grid {
       grid-template-columns: 1fr;
     }
+    .faculty-guide-back-top {
+      left: 0.85rem;
+      bottom: 4.25rem;
+    }
     .guide-map-grid {
+      grid-template-columns: 1fr;
+    }
+    .guide-topic-grid {
       grid-template-columns: 1fr;
     }
     .guide-image-panel {
@@ -390,7 +528,7 @@
 {% endblock %}
 
 {% block faculty_content %}
-<div class="guide-shell">
+<div class="guide-shell" id="top">
   <div class="card guide-hero mb-4">
     <div class="card-body">
       <div class="guide-hero-grid">
@@ -398,27 +536,17 @@
           <div class="guide-eyebrow">Faculty Help Center</div>
           <div class="guide-title">EduGradesPro Faculty Portal Guide</div>
           <p class="guide-subtitle">
-            This help center blends daily workflow guidance, score-encoding reminders, submission governance, and
-            policy checkpoints so faculty members can work confidently and consistently across the term.
+            Use this page as your quick guide for daily faculty work: accepting classes, encoding scores,
+            checking summaries, submitting grades, and handling corrections.
           </p>
           <div class="guide-hero-actions">
-            <a class="guide-cta-primary" href="#guide-workflow">Start With the Workflow</a>
-            <a href="{% url 'faculty_portal:guide_manual' %}">Open Formal Policy Manual</a>
+            <a class="guide-cta-primary" href="#guide-topics">Choose a Topic</a>
+            <a href="#guide-activities">Encode Scores</a>
+            <a href="#guide-submission">Submit Grades</a>
+            <a href="{% url 'faculty_portal:guide_manual' %}">Open Full Faculty Manual</a>
           </div>
-          <div class="guide-anchor-nav">
-            <a href="#guide-workflow">Daily Workflow</a>
-            <a href="#guide-assignments">Assignment Acceptance</a>
-            <a href="#guide-activities">Activities and Scores</a>
-            <a href="#guide-attendance-summary">Attendance and Summary</a>
-            <a href="#guide-prediction">Grade Prediction</a>
-            <a href="#guide-submission">Submission Rules</a>
-            <a href="#guide-corrections">Grade Corrections and Reopen</a>
-            <a href="#guide-classlist">Class List and Archives</a>
-            <a href="#guide-archived">Archived Classes</a>
-            <a href="#guide-notes">Private Memo</a>
-            <a href="#guide-password">Password Help</a>
-            <a href="#guide-first-login">First Login Consent</a>
-            <a href="#guide-privacy">Privacy and Governance</a>
+          <div class="guide-mini-note mb-0">
+            Start with the topic cards below. They group the guide by the task you want to do now.
           </div>
         </div>
         <div>
@@ -437,53 +565,74 @@
           <div class="card-body">
             <div class="guide-icon-badge">WF</div>
             <div class="guide-highlight-title">Follow the Daily Flow</div>
-            <p class="guide-highlight-copy">Open the right class, create activities carefully, encode cleanly, then review before final submission.</p>
+            <p class="guide-highlight-copy">Open the correct class, create activities, encode scores, then review before submitting.</p>
           </div>
         </div>
         <div class="card guide-highlight-card">
           <div class="card-body">
             <div class="guide-icon-badge">SC</div>
             <div class="guide-highlight-title">Check Scores Closely</div>
-            <p class="guide-highlight-copy">Blank means unencoded. Direct percentage and raw-score items follow different rules inside the template.</p>
+            <p class="guide-highlight-copy">Saved scores are used in computation. Direct percentage and raw-score items follow different rules.</p>
           </div>
         </div>
         <div class="card guide-highlight-card">
           <div class="card-body">
             <div class="guide-icon-badge">SB</div>
             <div class="guide-highlight-title">Submit With Confidence</div>
-            <p class="guide-highlight-copy">Use the summary and print sheet as your final checkpoint before you lock in a grading period.</p>
+            <p class="guide-highlight-copy">Use the Summary page and print sheet as your final check before submission.</p>
           </div>
         </div>
         <div class="card guide-highlight-card">
           <div class="card-body">
             <div class="guide-icon-badge">GV</div>
             <div class="guide-highlight-title">Stay Within Governance</div>
-            <p class="guide-highlight-copy">Deadlines, reopen rules, and correction policies are controlled for accountability and academic quality.</p>
+            <p class="guide-highlight-copy">Deadlines, reopen rules, and corrections follow the school's configured settings.</p>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="card guide-map-card">
+  <div class="card guide-map-card" id="guide-topics">
     <div class="card-body">
-      <div class="guide-map-title">Quick Guide Flow</div>
-      <div class="guide-map-grid">
-        <div class="guide-map-item">
-          <strong>1. Start Daily Work</strong>
-          <p>Follow workflow and open the correct class/period.</p>
+      <div class="guide-map-title">Choose a Topic</div>
+      <div class="guide-topic-grid">
+        <div class="guide-topic-card">
+          <strong>Start Class Work</strong>
+          <p>Use these when you are opening a class or checking a new assignment.</p>
+          <div class="guide-topic-links">
+            <a href="#guide-workflow">Daily Flow</a>
+            <a href="#guide-assignments">Assignments</a>
+            <a href="#guide-archived">Archived</a>
+          </div>
         </div>
-        <div class="guide-map-item">
-          <strong>2. Encode and Review</strong>
-          <p>Create activities, encode scores, and verify summary.</p>
+        <div class="guide-topic-card">
+          <strong>Encode and Review</strong>
+          <p>Use these when creating activities, entering scores, or checking attendance and summary.</p>
+          <div class="guide-topic-links">
+            <a href="#guide-activities">Activities</a>
+            <a href="#guide-attendance-summary">Attendance</a>
+            <a href="#guide-prediction">Prediction</a>
+          </div>
         </div>
-        <div class="guide-map-item">
-          <strong>3. Submit with Policy</strong>
-          <p>Finalize only when ready and follow correction rules.</p>
+        <div class="guide-topic-card">
+          <strong>Submit or Correct</strong>
+          <p>Use these when grades are ready, reopened, overdue, or need correction.</p>
+          <div class="guide-topic-links">
+            <a href="#guide-submission">Submission</a>
+            <a href="#guide-corrections">Corrections</a>
+            <a href="#guide-classlist">Class List</a>
+          </div>
         </div>
-        <div class="guide-map-item">
-          <strong>4. Support and Privacy</strong>
-          <p>Use password/consent help and protect student data.</p>
+        <div class="guide-topic-card">
+          <strong>Account and Notes</strong>
+          <p>Use these for password help, first login, privacy, reminders, and private memos.</p>
+          <div class="guide-topic-links">
+            <a href="#guide-password">Password</a>
+            <a href="#guide-first-login">First Login</a>
+            <a href="#guide-privacy">Privacy</a>
+            <a href="#guide-notes">Memos</a>
+          </div>
         </div>
       </div>
     </div>
@@ -531,14 +680,14 @@
         <div class="card-body">
           <div class="guide-section-title">Faculty Assignment Acceptance Rules</div>
           <ul class="guide-list">
-            <li>Every newly assigned class must be accepted first before you can open grading or class-list tools.</li>
-            <li>The pending-assignment card shows the response due date. Respond before the deadline so the assignment does not expire.</li>
-            <li>If there is a concern about the load, use <strong>Request Clarification</strong> and include a note for admin.</li>
-            <li>If the load should not be assigned to you, use <strong>Decline</strong> and explain the reason clearly.</li>
-            <li>If the assignment already expired, wait for admin to refresh the response window before responding again.</li>
+            <li>Accept a new class assignment before using grading or class-list tools.</li>
+            <li>Check the response due date on the pending-assignment card.</li>
+            <li>If something is unclear, choose <strong>Request Clarification</strong> and add a note.</li>
+            <li>If the class should not be assigned to you, choose <strong>Decline</strong> and explain why.</li>
+            <li>If the assignment expired, wait for admin to refresh the response window.</li>
           </ul>
           <div class="guide-mini-note">
-            Good routine: check pending assignments first each time you log in, especially after load changes or at the beginning of a new term.
+            Good routine: check pending assignments each time you log in, especially after load changes or at the start of a term.
           </div>
         </div>
       </div>
@@ -549,12 +698,12 @@
           <div class="guide-section-title">How to Respond to a New Assignment</div>
           <ol class="guide-list">
             <li>Open <strong>My Classes</strong>.</li>
-            <li>Review the <strong>Pending Faculty Assignments</strong> section first.</li>
-            <li>Read the course, section, schedule, and any admin instructions carefully.</li>
-            <li>Review the <strong>Grading Template</strong> shown on the assignment or class card so you know the grading structure attached to that class.</li>
+            <li>Check the <strong>Pending Faculty Assignments</strong> section.</li>
+            <li>Read the course, section, schedule, and admin instructions.</li>
+            <li>Open the <strong>Grading Template</strong> if you want to review the grading structure.</li>
             <li>If the load is correct, click <strong>Accept Assignment</strong>.</li>
-            <li>If the load needs discussion, enter your note and choose <strong>Request Clarification</strong> or <strong>Decline</strong>.</li>
-            <li>After acceptance, the class becomes available for grading and class-list work.</li>
+            <li>If the load needs discussion, add a note and choose <strong>Request Clarification</strong> or <strong>Decline</strong>.</li>
+            <li>After acceptance, grading and class-list tools become available.</li>
           </ol>
         </div>
       </div>
@@ -571,43 +720,43 @@
         <div class="card-body">
           <div class="guide-section-title">Creating Activities and Encoding Scores</div>
           <ul class="guide-list">
-            <li>Choose the <strong>Component</strong> first. Subcomponent and detail controls open only when the selected structure requires them.</li>
-            <li>Use short activity titles to avoid crowding the summary and printed grade book.</li>
-            <li>The <strong>Date</strong> field helps EduGradesPro keep the class record in proper activity order and supports audit clarity.</li>
-            <li>If the item uses <strong>Raw Score</strong>, the score cannot go beyond the activity total score.</li>
-            <li>If the item uses <strong>Direct Percentage</strong>, enter a percentage directly from 0 to 100.</li>
-            <li>Blank score fields remain unencoded. Clearing a previously saved score removes it for that activity.</li>
+            <li>Choose the <strong>Component</strong> first. Subcomponent and detail fields appear only when needed.</li>
+            <li>Use short activity titles so the summary and printout stay easy to read.</li>
+            <li>Use the <strong>Date</strong> field to keep activities in proper order.</li>
+            <li>For <strong>Raw Score</strong>, the score cannot be higher than the activity total.</li>
+            <li>For <strong>Direct Percentage</strong>, enter a value from 0 to 100.</li>
+            <li>Saved blank active-student scores are treated as 0.</li>
           </ul>
           <div class="guide-mini-note">
-            Tip: If you only want to encode one or two students first, enter values only for those students and leave the others blank.
+            Tip: if you save the score sheet, blank active-student cells become 0. Review before saving.
           </div>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Create Grade Activity</h6>
           <ol class="guide-list">
-            <li>Open <strong>My Classes</strong> and accept any pending assignment first if the class is newly assigned. Watch the response due date on the pending card so the load does not expire before you acknowledge it.</li>
-            <li>Click <strong>Template</strong> on the class card whenever you want to review the assigned grading structure before encoding activities or scores.</li>
-            <li>If there is a problem with the load, use the clarification or decline action with a note to admin. Once an assignment expires, only admin can refresh the response window.</li>
-            <li>Choose class -> choose period -> click the <strong>Activities</strong> icon.</li>
+            <li>Open <strong>My Classes</strong> and accept the assignment if it is still pending.</li>
+            <li>Click <strong>Template</strong> if you want to check the grading structure first.</li>
+            <li>If there is a problem with the load, send a clarification or decline note to admin.</li>
+            <li>Choose the class, choose the period, then click <strong>Activities</strong>.</li>
             <li>Select <strong>Component</strong> first.</li>
             <li>Select <strong>Subcomponent</strong> only if the selected component requires it.</li>
             <li>Select <strong>Detail</strong> only if the selected subcomponent requires it.</li>
             <li>Enter a short <strong>Activity Title</strong> (ex: Q1, R1, A1, AC1).</li>
-            <li>Enter <strong>Total Score</strong> (for direct percentage items, system uses 100).</li>
+            <li>Enter <strong>Total Score</strong>. For direct percentage items, the system uses 100.</li>
             <li>Set <strong>Date</strong> using the date picker.</li>
             <li>Click <strong>Save Activity</strong>.</li>
           </ol>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Encode Scores</h6>
           <ol class="guide-list">
             <li>From the Activities table, click <strong>Encode Scores</strong> on the target activity.</li>
-            <li>Enter score values only for students to encode now (leave blank if not yet ready).</li>
+            <li>Enter score values for the activity. Blank active-student cells save as <strong>0</strong>.</li>
             <li>Click <strong>Save Scores</strong>.</li>
-            <li>Verify the <strong>Encoded</strong> count on the Activities list.</li>
+            <li>Check the <strong>Encoded</strong> count on the Activities list.</li>
           </ol>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Update Existing Activity</h6>
           <ol class="guide-list">
             <li>Click <strong>Edit</strong> on the activity row.</li>
-            <li>Update component mapping/title/total/date as needed.</li>
+            <li>Update the mapping, title, total score, or date as needed.</li>
             <li>Click <strong>Update Activity</strong>.</li>
-            <li>Re-check summary results after update.</li>
+            <li>Check the Summary again after updating.</li>
           </ol>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Delete Activity</h6>
           <ol class="guide-list">
@@ -617,12 +766,14 @@
           </ol>
           <h6 class="mt-3 mb-2 fw-bold text-success">Guardrails (Activities and Scores)</h6>
           <ul class="guide-list">
-            <li>You cannot save scores above the allowed max (total score for raw-score items, 100 for direct percentage).</li>
-            <li>The Activities page and the Encode Scores page now include a <strong>Quick Jump</strong> strip so you can move directly to Attendance, Summary, or Who Viewed without returning to the period card first.</li>
+            <li>You cannot save scores above the allowed maximum.</li>
+            <li>Saved blank scores count as zero-score records.</li>
+            <li>Submission is blocked until every required non-attendance grading area has at least one activity.</li>
+            <li>Use the <strong>Quick Jump</strong> strip to move to Attendance, Summary, or Who Viewed.</li>
             <li>If the period is <strong>Submitted</strong> or <strong>Locked</strong>, normal editing is blocked.</li>
-            <li>During correction window, editing is scope-limited to approved correction items only.</li>
-            <li>Activity deletion is blocked while approved correction window is active.</li>
-            <li>If you type score values and try to leave the Encode Scores page without saving, EduGradesPro now warns that unsaved encoded data will be lost.</li>
+            <li>During a correction window, you may edit only the approved correction items.</li>
+            <li>Activity deletion is blocked while an approved correction window is active.</li>
+            <li>If you leave the Encode Scores page with unsaved scores, EduGradesPro warns you first.</li>
           </ul>
           <div class="guide-image-card mt-3">
             <img src="{% get_media_prefix %}portal-img/activities_encoding_scores_workflow.png" alt="Creating activities and encoding scores workflow">
@@ -636,31 +787,31 @@
           <div class="guide-section-title">Attendance and Summary (Step-by-Step)</div>
           <h6 class="mb-2 fw-bold text-success">Step-by-Step: Attendance</h6>
           <ol class="guide-list">
-            <li>Open period card -> click <strong>Attendance</strong> icon.</li>
-            <li>Create or select an attendance session (date/title).</li>
+            <li>Open the period card and click <strong>Attendance</strong>.</li>
+            <li>Create or select an attendance session.</li>
             <li>Set attendance status per student.</li>
             <li>Click <strong>Save Attendance</strong>.</li>
           </ol>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Summary Review</h6>
           <ol class="guide-list">
-            <li>Open period card -> click <strong>Summary</strong> icon.</li>
-            <li>Review component-level and overall period grades.</li>
-            <li>Check submission readiness indicators (coverage, missing records).</li>
-            <li>Use <strong>Print Grade Book</strong> for pre-submission verification.</li>
+            <li>Open the period card and click <strong>Summary</strong>.</li>
+            <li>Review component grades and the period grade.</li>
+            <li>Check readiness cards for coverage and missing records.</li>
+            <li>Use <strong>Print Grade Book</strong> for review after submission.</li>
             <li>Submit only when ready.</li>
           </ol>
           <h6 class="mt-3 mb-2 fw-bold text-success">Guardrails (Attendance and Summary)</h6>
             <ul class="guide-list">
-              <li>Submitted or locked periods are view-only for normal attendance/summary edits.</li>
-              <li>The Attendance, Summary, and Who Viewed pages now include the same <strong>Quick Jump</strong> strip so faculty can move between related grading pages with fewer clicks.</li>
-              <li>If a period is closed by the active grading period policy after deadline, the <strong>Attendance</strong> and <strong>Summary</strong> pages remain accessible for review, but they open in read-only mode.</li>
-              <li>Submission is blocked if no encoded grade/attendance exists for active students.</li>
-              <li>If some active students have no records, system shows warning before final submission.</li>
-              <li>Official computed period grades and final grade follow the tenant grading policy of the class. By default they remain visible, but Admin may still restrict their release until the configured deadline.</li>
-              <li>The <strong>Who Viewed</strong> icon on the period card remains available even when the period is closed, so faculty can still review grade book monitor history for that class period.</li>
+              <li>Submitted or locked periods are read-only for normal attendance and summary work.</li>
+              <li>Use the <strong>Quick Jump</strong> strip to move between Attendance, Summary, and Who Viewed.</li>
+              <li>If a period is closed by active-period rules, Attendance and Summary stay open for review but not editing.</li>
+              <li>Submission is blocked if there are no encoded grade or attendance records for active students.</li>
+              <li>If active students still have missing records, EduGradesPro warns you before submission.</li>
+              <li>Official grades follow the grading policy matched to the class.</li>
+              <li>The <strong>Who Viewed</strong> icon remains available even when the period is closed.</li>
             </ul>
           <div class="guide-mini-note">
-            If a value looks unexpected, review the activity setup, score entry method, total score, and class list status before submitting. The formal policy manual includes a full sample computation from raw scores through final grade.
+            If a value looks wrong, check the activity setup, score method, total score, and class-list status before submitting.
           </div>
         </div>
       </div>
@@ -673,19 +824,20 @@
         <div class="card-body">
           <div class="guide-section-title">Grade Prediction and What-If Simulation</div>
           <ul class="guide-list">
-            <li>Prediction is unofficial and read-only. It never changes the official gradebook.</li>
-            <li>EduGradesPro uses the same assigned grading template structure and current encoded data to estimate outcomes.</li>
-            <li>The primary projected grade follows the default assumption configured by admin for your tenant.</li>
-            <li>Each period has its own prediction page, and the main estimate is for that current grading period.</li>
-            <li>The possible final-grade value is secondary guidance showing how the current period estimate may affect the overall final grade.</li>
-            <li>If enabled, the system can also show best-case, worst-case, and target-needed guidance.</li>
-            <li>If enabled for your role, the what-if simulator lets you test remaining performance scenarios before actual encoding.</li>
-            <li>The Prediction page now includes a dedicated interpretation guide so faculty can review the methodology, Base 50 transmutation, period-grade and final-grade computation, the factors used in each column, and sample scenarios before relying on the values.</li>
-            <li>The page can also show the average still needed across the remaining final periods to reach a passing final grade.</li>
-            <li>The Faculty Portal also includes a Student At-Risk Monitor that groups students by class and period so you can see who needs attention first.</li>
+            <li>Prediction is unofficial and read-only. It does not change the official gradebook.</li>
+            <li>It uses the same grading template and current encoded data.</li>
+            <li>The main estimate is for the selected period.</li>
+            <li>The possible final grade is only extra guidance.</li>
+            <li>A student is marked at risk if the current-period estimate or possible final grade is below passing.</li>
+            <li>If enabled, you may also see highest possible, lowest possible, and needed-score guidance.</li>
+            <li>If enabled for your role, the what-if tool lets you test possible remaining scores without saving anything.</li>
+            <li>Use <strong>How Prediction Works</strong> if you need the full explanation of each column and formula.</li>
+            <li>The At-Risk Monitor lists students who need attention first.</li>
+            <li>Use it as a current-period intervention list: Prelim for early warning, Midterm for main intervention, Pre-Final for last follow-up, and Final mostly for confirmation.</li>
+            <li>When an active grading period is set, the monitor focuses on that period.</li>
           </ul>
           <div class="guide-mini-note">
-            Treat prediction as planning support only. Official grades still depend on actual encoded scores, submission status, and approved governance actions.
+            Treat prediction as planning support only. Official grades still depend on saved scores, submission status, and approved correction actions.
           </div>
         </div>
       </div>
@@ -697,11 +849,11 @@
           <ol class="guide-list">
             <li>Open <strong>My Classes</strong>, choose the class, then open the period card.</li>
             <li>Click the <strong>Prediction</strong> icon.</li>
-            <li>Open <strong>How Prediction Works</strong> when you need the full explanation of each column and sample scenarios.</li>
-            <li>Review current projection, coverage, remaining items, and at-risk indicators.</li>
-            <li>Open the <strong>At-Risk Monitor</strong> from the sidebar when you want a class-by-class list of students who are currently below the passing line.</li>
-            <li>If what-if is enabled, select a student and enter an estimated remaining performance percentage.</li>
-            <li>Use <strong>Refresh Prediction</strong> after major score changes if you want a fresh snapshot immediately.</li>
+            <li>Open <strong>How Prediction Works</strong> if you need column explanations.</li>
+            <li>Review the estimated grade, possible final grade, progress, remaining items, and status.</li>
+            <li>Open the <strong>At-Risk Monitor</strong> from the sidebar for a class-by-class intervention list.</li>
+            <li>If what-if is enabled, select a student and enter a possible remaining score percentage.</li>
+            <li>Use <strong>Refresh Prediction</strong> after major score changes.</li>
           </ol>
         </div>
       </div>
@@ -718,26 +870,24 @@
         <div class="card-body">
           <div class="guide-section-title">Submission Rules</div>
           <ul class="guide-list">
-            <li>Submitted grading periods become view-only for normal editing.</li>
-            <li>EduGradesPro blocks submission if there are no encoded grade or attendance records for active students.</li>
-            <li>If any ACTIVE student still has blank required grade or attendance records in the visible summary columns, EduGradesPro blocks submission until the blanks are completed or the status is updated to DRP/WITHDRAWN/INC.</li>
-            <li>If you try to leave the score-entry page with unsaved encoded scores and then cancel the warning prompt, EduGradesPro automatically scrolls back to the Save Scores area and briefly points to the button so you can save right away.</li>
-            <li>On Activity and Attendance forms, the visual save cue now stays hidden on a clean page and only appears after you change something that still needs to be saved.</li>
-            <li>The Summary readiness area now uses colored cards for ACTIVE, complete records, missing records, coverage, DRP, WITHDRAWN, and INC. Pass/Fail cards follow the current passing-threshold rule and normally appear with the official period grade; they are delayed only when Admin explicitly enables the post-deadline official-grade release restriction. EduGradesPro now resolves that threshold in this order: matched Tenant Grading Profile override, assigned grading-template threshold, tenant default setting, then fallback 75.00.</li>
-            <li>The overall <strong>FINAL GRADE</strong> appears only on the <strong>Final</strong> period Summary page. On that Final page, EduGradesPro also shows <strong>PRELIM GRADE</strong>, <strong>MIDTERM GRADE</strong>, and <strong>PRE-FINAL GRADE</strong> columns before the Final Exam so faculty can review the grade trail in one place.</li>
-            <li>EduGradesPro computes the overall <strong>FINAL GRADE</strong> using the full configured period count. If earlier periods already have grades but later periods are still blank, the missing periods still count in the divisor instead of being ignored.</li>
-              <li>EduGradesPro now shows a visible <strong>Current Active Grading Period</strong> banner on the Faculty Dashboard, on <strong>My Classes</strong>, and inside the class period page so you can see which period the campus is currently focused on.</li>
-              <li>When an active grading period is configured, non-active period cards are closed by policy for normal encoding. <strong>Attendance</strong> and <strong>Summary</strong> remain open as read-only review pages, while activity/score changes still require the period to become active, be reopened, or use an approved <strong>correction window</strong>.</li>
-              <li>The <strong>My Classes</strong> page now includes a dedicated <strong>Final Clearance</strong> action area so faculty can preview their campus-term completion status and generate the official clearance PDF without opening the period page first.</li>
-              <li>When NCBA enables stored signatures, you may open <strong>My Signature</strong> from the Faculty Portal header to upload an encrypted signature image. EduGradesPro asks for your current password before it saves, replaces, or removes that stored signature.</li>
-              <li>Each generated clearance includes a printed <strong>QR code</strong>, <strong>Reference No.</strong>, and <strong>Verification Code</strong> so authorized NCBA personnel can validate the paper copy from the Admin Portal.</li>
-              <li>EduGradesPro also shows a visible <strong>grade submission deadline banner</strong> on the Faculty Dashboard, on <strong>My Classes</strong>, and inside the class period page so you can track the active period deadline more easily. If a deadline exists but belongs to a different campus or term scope, or uses a period code that does not match your class template, the banner will say so directly.</li>
-              <li>If the submission deadline already passed and the class-period is still not submitted, EduGradesPro keeps the grade book open so you can finish encoding and submit. The page will show an overdue warning and the class will appear in the authorized non-compliance monitor.</li>
-              <li>Overdue reminders are sent to the faculty member only. AC, Dean, CAO, and other authorized users track late submissions from the Admin Portal non-compliance list instead of separate email notices.</li>
-              <li>The Faculty Dashboard now also includes an <strong>Incomplete Students</strong> KPI so you can quickly see how many active-class rows are currently marked <strong>INC</strong>.</li>
-              <li>The Faculty Dashboard now starts with <strong>Priority Actions</strong> and <strong>Students At Risk</strong> so you can open the most urgent class, score, correction, or intervention task without reading every count first.</li>
-              <li>The Summary page print button now produces an NCBA-branded <strong>Summary of Periodic Grades</strong> sheet for Pinnacle encoding, including the faculty name, semester/term, course code, course title, and final periodic grade list.</li>
-              <li>Always review the printed sheet or on-screen summary before finalizing.</li>
+            <li>After submission, the period becomes read-only for normal editing.</li>
+            <li>EduGradesPro blocks submission if active students have no encoded grade or attendance records.</li>
+            <li>If ACTIVE students still have required missing records, complete the records or update the student status to DRP/WITHDRAWN/INC where appropriate.</li>
+            <li>If you try to leave score entry with unsaved scores, EduGradesPro warns you first.</li>
+            <li>The official Summary of Grades table and printout appear only after submission.</li>
+            <li>If you submitted before the deadline, you may reopen before the deadline, revise, and resubmit.</li>
+            <li>If a reopened gradebook reaches the deadline without resubmission, editing is locked, but you can still finalize and resubmit existing records from Summary.</li>
+            <li>Readiness cards show ACTIVE, complete records, missing records, coverage, DRP, WITHDRAWN, and INC.</li>
+            <li>The overall <strong>FINAL GRADE</strong> appears only on the <strong>Final</strong> period Summary page.</li>
+            <li>Final grade follows the configured formula. If no special formula is set, all configured periods count.</li>
+            <li>The <strong>Current Active Grading Period</strong> banner shows which period the campus is focused on.</li>
+            <li>If auto-advance is enabled, the active period moves forward after the active period deadline passes. Editing that deadline later does not move it backward automatically.</li>
+            <li>When a non-active period is closed, Attendance and Summary remain available for read-only review.</li>
+            <li>The <strong>Final Clearance</strong> area in My Classes lets you preview completion status and generate the clearance PDF.</li>
+            <li>If stored signatures are enabled, use <strong>My Signature</strong> to upload or manage your signature.</li>
+            <li>If the deadline passed and the period is still unsubmitted, the gradebook stays open so you can finish and submit. It will be marked overdue.</li>
+            <li>Priority Actions on the Dashboard shows urgent work such as deadlines, missing scores, corrections, resubmission, and intervention tasks.</li>
+            <li>Always review the on-screen Summary or printed sheet before finalizing.</li>
           </ul>
           <div class="guide-image-card mt-3">
             <img src="{% get_media_prefix %}portal-img/submission_rules.png" alt="Submission rules workflow">
@@ -748,59 +898,59 @@
     <div class="col-lg-6" id="guide-corrections">
       <div class="card guide-section-card">
         <div class="card-body">
-          <div class="guide-section-title">Grade Corrections and Reopen Governance</div>
+          <div class="guide-section-title">Grade Corrections and Reopen</div>
           <div class="guide-policy-grid mb-3">
             <div class="guide-policy-item">
               <strong>System Request Mode</strong>
-              <p>Use the in-portal correction request if your school allows online filing and approval tracking for grade changes.</p>
+              <p>Use the portal correction request if your school allows online filing and approval tracking.</p>
             </div>
             <div class="guide-policy-item">
               <strong>Manual Only Mode</strong>
-              <p>Use the paper route when the tenant policy requires manual approval and admin reopen processing outside the portal.</p>
+              <p>Use the paper/manual process when the school requires correction approval outside the portal.</p>
             </div>
           </div>
           <h6 class="mb-2 fw-bold text-success">System Request Mode (SYSTEM_REQUEST)</h6>
           <ol class="guide-list">
             <li>Submit period first.</li>
-            <li>Open <strong>Correction Requests</strong> from Summary/Period screen.</li>
+            <li>Open <strong>Correction Requests</strong> from the Summary or period screen.</li>
             <li>Select one or more students, or choose the entire class, then choose the affected grading items.</li>
             <li>Review the auto-loaded original values and enter only the corrected values.</li>
             <li>File the request with justification.</li>
-            <li>Wait for governance approval route (for example: Coordinator -> CAO).</li>
-            <li>After final approval, EduGradesPro copies the approved corrected values directly into the gradebook and recomputes the affected student's submitted period and final grade automatically.</li>
-            <li>No additional faculty finalize step is required for this direct score-correction petition flow.</li>
-            <li>If your school enables the official correction report feature, the approved request also provides an official PDF for registrar reference showing campus applicability, official grade original/corrected values, and approval summary (supporting files remain in-system). The PDF opens in a new browser tab for preview/print/download.</li>
-            <li>If your school enables submission notifications, EduGradesPro also emails the configured approver roles, such as CAO and college dean, using an NCBA-branded card that includes petitioner and period name details.</li>
+            <li>Wait for the approval route, such as Coordinator to CAO.</li>
+            <li>After final approval, EduGradesPro posts the approved corrected values and recomputes affected grades.</li>
+            <li>No extra faculty finalize step is needed for direct score-correction petitions.</li>
+            <li>If enabled, the approved request can provide an official correction PDF for registrar reference.</li>
+            <li>If enabled, EduGradesPro can email the configured approver roles.</li>
           </ol>
           <h6 class="mt-3 mb-2 fw-bold text-success">Manual Mode (MANUAL_ONLY)</h6>
           <ol class="guide-list">
-            <li>Faculty prepares and submits paper correction form.</li>
-            <li>Paper form is approved by authorized academic officers.</li>
-            <li>Final approver (or authorized admin) reopens the class period in Admin Portal.</li>
-            <li>Faculty performs approved correction updates.</li>
-            <li>Faculty re-submits period.</li>
+            <li>Prepare and submit the paper correction form.</li>
+            <li>Wait for approval from the required officers.</li>
+            <li>Admin reopens the class period if needed.</li>
+            <li>Apply the approved correction updates.</li>
+            <li>Resubmit the period.</li>
           </ol>
           <h6 class="mt-3 mb-2 fw-bold text-success">Guardrails (Corrections)</h6>
           <div class="guide-policy-grid">
             <div class="guide-policy-item">
               <strong>Manual-Only Schools</strong>
-              <p>If the tenant is set to <strong>MANUAL_ONLY</strong>, in-portal correction request filing is disabled. Faculty should follow paper approval flow and wait for authorized admin reopen action.</p>
+              <p>If the school is set to <strong>MANUAL_ONLY</strong>, portal correction requests are disabled. Follow the paper process.</p>
             </div>
             <div class="guide-policy-item">
               <strong>After Deadline</strong>
-              <p>If the period is still unsubmitted, the grade book stays open and the faculty member should finish encoding and submit as soon as possible. Once a period is already submitted, any later change should go through the correction request workflow.</p>
+              <p>If the period is still unsubmitted, finish encoding and submit. If it was already submitted, use the correction workflow.</p>
             </div>
             <div class="guide-policy-item">
               <strong>Approval Route</strong>
-              <p>Approval route is configured by admin based on the requesting faculty department. Your school may use one-step final approval (for example, CAO) or two-step review (for example, Coordinator then CAO).</p>
+              <p>Approval routes are configured by admin. Your school may use one-step or two-step approval.</p>
             </div>
             <div class="guide-policy-item">
               <strong>Original vs Corrected Value</strong>
-              <p>The correction request grid already shows the current gradebook value. Faculty should enter only the approved replacement value for each selected row.</p>
+              <p>The request grid shows the current value. Enter only the replacement value.</p>
             </div>
             <div class="guide-policy-item">
               <strong>Audit Trail</strong>
-              <p>Submissions, reopen actions, correction requests, approvals, and follow-up actions are logged for monitoring and accountability.</p>
+              <p>Submissions, reopen actions, correction requests, approvals, and related changes are logged.</p>
             </div>
           </div>
         </div>
@@ -816,36 +966,37 @@
     <div class="col-lg-6">
       <div class="card guide-section-card">
         <div class="card-body">
-          <div class="guide-section-title">Class List Rules: Movement, ACTIVE, DRP, WITHDRAWN, and INC</div>
+          <div class="guide-section-title">Class List Rules</div>
           <ul class="guide-list">
-            <li><strong>ACTIVE</strong> means the student remains part of the grading coverage.</li>
-            <li><strong>Remove from Class</strong> is for schedule movement. Use it when the student transferred to another class/section and should no longer appear in this class master list.</li>
-            <li><strong>DRP</strong> means the student dropped this particular class and should no longer be treated as an active graded student for the class.</li>
-            <li><strong>WITHDRAWN</strong> means the student withdrew from the term and is also excluded from normal active grading coverage.</li>
-            <li><strong>INC</strong> means the class record is incomplete and is also excluded from normal active grading coverage.</li>
-            <li>Use the class list carefully before submission because class list status affects readiness, summary interpretation, and final grade handling.</li>
+            <li><strong>ACTIVE</strong> means the student is included in grading.</li>
+            <li><strong>Remove from Class</strong> is for schedule movement to another class or section.</li>
+            <li><strong>DRP</strong> means the student dropped this class.</li>
+            <li><strong>WITHDRAWN</strong> means the student withdrew from the term.</li>
+            <li><strong>INC</strong> means the class record is incomplete.</li>
+            <li>By default, faculty can mark DRP through Pre-Final, but not once Final is the active grading period.</li>
+            <li>Class-list status affects readiness, summary results, and final grade handling.</li>
           </ul>
           <div class="guide-mini-note">
-            EduGradesPro now shows a visible <strong>Status Legend</strong> on the class list page so you can immediately see what <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>WITHDRAWN</strong>, and <strong>INC</strong> mean before updating a row.
+            The class list shows a <strong>Status Legend</strong> so you can quickly check the meaning of each status.
           </div>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Handle Student Movement or DRP/WITHDRAWN/INC</h6>
           <ol class="guide-list">
             <li>Open class -> go to <strong>Class List</strong>.</li>
             <li>Find the student row.</li>
-            <li>Use the line number at the start of each row if you want a faster visual reference while checking the class list.</li>
-            <li>If the student only changed schedule, click the small <strong>x</strong> beside the student number, then type <strong>remove</strong> to confirm.</li>
-            <li>If the student truly dropped the class, withdrew from the term, or needs an incomplete class record, use the status dropdown and choose <strong>DRP</strong>, <strong>WITHDRAWN</strong>, or <strong>INC</strong>.</li>
+            <li>Use the line number for easier checking.</li>
+            <li>If the student only changed schedule, click the small <strong>x</strong> beside the student number and type <strong>remove</strong> to confirm.</li>
+            <li>If the student dropped, withdrew, or is incomplete, use the status dropdown.</li>
             <li>Click <strong>Save Status</strong> when updating DRP/WITHDRAWN/INC.</li>
             <li>Recheck Summary readiness after status update.</li>
           </ol>
           <div class="guide-mini-note">
-            Guardrail: removed, DRP, WITHDRAWN, and INC students are excluded from normal active grading coverage and submission readiness counts.
+            Removed, DRP, WITHDRAWN, and INC students are excluded from normal active grading and readiness counts.
           </div>
           <div class="guide-mini-note">
-            Faster lookup: when adding a student to the class list, type the student number or the student's last name and first name first so EduGradesPro narrows the student dropdown before you click <strong>Save</strong>.
+            Faster lookup: when adding a student, search by student number, last name, or first name.
           </div>
           <div class="guide-mini-note">
-            Readability: the class list now shows the <strong>last name in uppercase</strong> and the <strong>first name in proper case</strong> so faculty can scan names more comfortably.
+            Names are formatted as <strong>LAST NAME</strong>, <strong>First Name</strong> for easier scanning.
           </div>
         </div>
       </div>
@@ -855,15 +1006,15 @@
         <div class="card-body">
           <div class="guide-section-title">Archived Classes Explained</div>
           <ul class="guide-list">
-            <li><strong>Active Classes</strong> = current workload under active AY/Term and non-archived offerings.</li>
-            <li><strong>Archived Classes</strong> = offerings outside current active AY/Term scope or explicitly archived offerings.</li>
-            <li>Archived classes are kept for historical reference and monitoring.</li>
+            <li><strong>Active Classes</strong> are your current class workload.</li>
+            <li><strong>Archived Classes</strong> are older or archived offerings.</li>
+            <li>Archived classes are kept for review and records.</li>
           </ul>
           <h6 class="mt-3 mb-2 fw-bold text-success">How to View Archived Classes</h6>
           <ol class="guide-list">
             <li>Open <strong>My Classes</strong>.</li>
-            <li>Switch to <strong>Archived</strong> tab/filter.</li>
-            <li>Open class card if review access is allowed by policy.</li>
+            <li>Switch to the <strong>Archived</strong> tab or filter.</li>
+            <li>Open a class card if review access is allowed.</li>
           </ol>
         </div>
       </div>
@@ -874,14 +1025,14 @@
           <div class="guide-section-title">If You Lost Your Password</div>
           <ul class="guide-list">
             <li>Go to the Faculty Portal sign-in page and use the <strong>Forgot Password</strong> option.</li>
-            <li>Enter your official faculty email address that is registered in EduGradesPro.</li>
-            <li>Check your email inbox for the password reset message from the system.</li>
-            <li>If the email does not arrive, check your spam or junk folder first.</li>
-            <li>If your account is temporarily locked after too many failed sign-in attempts, wait for the lockout period to end or use the reset option if needed.</li>
-            <li>If you still cannot reset your password, contact your campus administrator, registrar support, or the assigned EduGradesPro operations team.</li>
+            <li>Enter your registered faculty email address.</li>
+            <li>Check your inbox for the reset email.</li>
+            <li>If it does not arrive, check spam or junk mail.</li>
+            <li>If your account is temporarily locked, wait for the lockout to end or use reset if available.</li>
+            <li>If you still cannot reset it, contact your campus administrator or support team.</li>
           </ul>
           <div class="guide-mini-note">
-            For security, faculty members should not request passwords from co-teachers or share login credentials. Use the reset process or ask the authorized support team for assistance.
+            Do not share passwords or ask co-teachers for login help. Use the reset process or contact support.
           </div>
         </div>
       </div>
@@ -891,17 +1042,17 @@
         <div class="card-body">
           <div class="guide-section-title">User Account Security</div>
           <ol class="guide-list">
-            <li>Use a strong password that satisfies EduGradesPro password complexity rules.</li>
-            <li>On first login or after an issued password reset, complete the <strong>forced password change</strong> before portal access continues.</li>
-            <li>Review and accept the current <strong>EduGradesPro Privacy Consent</strong> before using the portal.</li>
-            <li>If enabled by NCBA, enter the email OTP sent to your registered email after your password is accepted.</li>
-            <li>The first portal visit may show a quick tour with callouts for the dashboard, classes, at-risk monitor, reminders, guide, and privacy notice. You may use Prev/Next or choose <strong>Disable on next logon</strong>.</li>
-            <li>EduGradesPro enforces <strong>single-device session control</strong>, so signing in on a new device may close your older session automatically.</li>
-            <li>Faculty portal sessions now time out after <strong>1 hour</strong>. Active use refreshes the session window, but long inactivity will require you to sign in again.</li>
-            <li>Repeated failed sign-in attempts may trigger a temporary <strong>login lockout</strong> for your protection.</li>
+            <li>Use a strong password that meets EduGradesPro rules.</li>
+            <li>On first login or after reset, change your password when prompted.</li>
+            <li>Review and accept the <strong>EduGradesPro Privacy Consent</strong>.</li>
+            <li>If OTP is enabled, enter the code sent to your registered email.</li>
+            <li>The first visit may show a quick tour. You may move through it or disable it for the next login.</li>
+            <li>Signing in on a new device may close your older session.</li>
+            <li>Faculty sessions time out after <strong>1 hour</strong> of inactivity.</li>
+            <li>Too many failed login attempts may temporarily lock the account.</li>
           </ol>
           <div class="guide-mini-note">
-            These controls protect your account, student records, and the audit trail. Use only your own faculty account and keep credentials private.
+            These controls protect your account and student records. Use only your own faculty account.
           </div>
         </div>
       </div>
@@ -909,13 +1060,13 @@
     <div class="col-lg-6" id="guide-privacy">
       <div class="card guide-section-card">
         <div class="card-body">
-          <div class="guide-section-title">Privacy, Data Protection, and Accountability</div>
+          <div class="guide-section-title">Privacy, Data Protection, and Audit</div>
           <ul class="guide-list">
-            <li>Use only your assigned faculty credentials. Do not share your password with anyone.</li>
-            <li>Password complexity validation, optional email OTP, forced password change, privacy consent, single-device session enforcement, a <strong>1-hour session timeout</strong>, and temporary login lockout are part of the account security flow.</li>
-            <li>Review student data only for officially assigned classes.</li>
-            <li>Changes in scores, attendance, submissions, corrections, and reopen actions are monitored for governance and audit purposes.</li>
-            <li>Respect institutional data privacy requirements when viewing, printing, or discussing student records.</li>
+            <li>Use only your own faculty account. Do not share your password.</li>
+            <li>Password rules, OTP, privacy consent, single-device login, session timeout, and lockout help protect accounts.</li>
+            <li>Review student data only for your assigned classes.</li>
+            <li>Score, attendance, submission, correction, and reopen actions may be audited.</li>
+            <li>Handle printed or exported records according to school data privacy rules.</li>
           </ul>
           <div class="guide-mini-note">
             For the official privacy statement, refer to the
@@ -928,37 +1079,38 @@
 
   <div class="card guide-management-card">
     <div class="card-body">
-      <div class="guide-management-title">For Academic Officers and Management</div>
+      <div class="guide-management-title">Need the Full Manual?</div>
       <p class="guide-management-copy">
-        EduGradesPro now has a dedicated formal manual version for governance conversations, approval discussions, and policy review.
-        Use it when you need a cleaner reference for institutional rules rather than the day-to-day faculty help flow.
+        The full faculty manual keeps the same topics but explains them in a more complete reference format.
+        Open it when you need more detail about rules, approvals, or school settings.
       </p>
       <div class="guide-management-grid">
         <div class="guide-management-item">
-          <h3>Policy Framing</h3>
-          <p>Summarizes submission, reopen, correction, status, and privacy expectations in a more formal structure.</p>
+          <h3>Rules in One Place</h3>
+          <p>Reviews submission, reopen, correction, status, and privacy rules.</p>
         </div>
         <div class="guide-management-item">
-          <h3>Governance Reference</h3>
-          <p>Useful when discussing who approves, who monitors, and how audit trails protect academic integrity.</p>
+          <h3>Approval Reference</h3>
+          <p>Helps explain who reviews, who approves, and what gets logged.</p>
         </div>
         <div class="guide-management-item">
-          <h3>Management-Ready</h3>
-          <p>Prepared to support later review with academics, deans, registrars, and institutional decision-makers.</p>
+          <h3>For Review</h3>
+          <p>Useful for academic, registrar, dean, or operations review.</p>
         </div>
       </div>
       <div class="guide-management-item mt-3">
         <h3>Faculty Reminder Center</h3>
-        <p>Faculty can save future activity reminders, snooze them, mark them completed, and optionally queue reminder emails once the feature is enabled by tenant configuration. Future-dated activities can also auto-create preparation reminders so planned work does not get missed. When a periodic submission becomes overdue, the same page can also show formal submission compliance notices such as notice, warning, or escalation follow-ups.</p>
+        <p>Faculty can create reminders, snooze them, mark them done, and receive reminder emails if enabled. The page can also show overdue-submission notices when that workflow is enabled.</p>
       </div>
       <div class="guide-management-item mt-3" id="guide-notes">
         <h3>Faculty Notes / Private Memo</h3>
-        <p>Faculty can keep private notes about a class or student, pin important follow-ups, and return to them later without exposing the note to students.</p>
+        <p>Faculty can keep private notes about a class or student, pin important follow-ups, and return to them later. Students cannot see these notes.</p>
       </div>
       <div class="guide-hero-actions mt-3 mb-0">
-        <a class="guide-cta-primary" href="{% url 'faculty_portal:guide_manual' %}">Open Formal Policy Manual</a>
+        <a class="guide-cta-primary" href="{% url 'faculty_portal:guide_manual' %}">Open Full Faculty Manual</a>
       </div>
     </div>
   </div>
+  <a class="faculty-guide-back-top" href="#top" aria-label="Back to top">Back to top</a>
 </div>
 {% endblock %}

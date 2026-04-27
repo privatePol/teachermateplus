@@ -45,6 +45,7 @@ from .views import (
     faculty_activity_monitor_view,
     faculty_final_clearance_view,
     faculty_final_clearance_verify_view,
+    faculty_deactivation_schedule_view,
     faculty_assignment_create_view,
     faculty_assignment_assign_view,
     faculty_assignment_dashboard_view,
@@ -176,6 +177,11 @@ urlpatterns = [
     path("admin-portal/organization/programs/create/", program_create_view, name="program_create"),
     path("admin-portal/organization/programs/<int:program_id>/edit/", program_update_view, name="program_update"),
     path("admin-portal/security/users/", user_list_view, name="user_list"),
+    path(
+        "admin-portal/security/faculty-deactivation/",
+        faculty_deactivation_schedule_view,
+        name="faculty_deactivation_schedule",
+    ),
     path("admin-portal/security/login-lockouts/", login_lockout_list_view, name="login_lockout_list"),
     path(
         "admin-portal/security/login-lockouts/<int:lockout_id>/unlock/",

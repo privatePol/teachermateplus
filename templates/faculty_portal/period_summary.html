@@ -432,7 +432,14 @@
   </h2>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+    {% if can_self_reopen %}
+    <button class="btn btn-sm btn-outline-warning" type="button" data-bs-toggle="modal" data-bs-target="#selfReopenModal">
+      Reopen Before Deadline
+    </button>
+    {% endif %}
+    {% if can_view_gradebook_summary %}
     <button class="btn btn-sm btn-outline-primary print-trigger-btn" type="button" onclick="window.print();">Print Periodic Grades</button>
+    {% endif %}
     {% if "corrections.create" in effective_permissions and system_correction_enabled %}
       <a class="btn btn-sm btn-outline-warning" href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Correction Requests</a>
     {% endif %}
@@ -449,19 +456,30 @@
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Corrections</a>.
   {% endif %}
 </div>
+{% elif is_locked %}
+<div class="alert alert-danger no-print">
+  {% if is_auto_locked_reopened_after_deadline %}
+    This reopened gradebook was not resubmitted before the deadline. Score editing is disabled, but you can still finalize and resubmit the gradebook below.
+  {% else %}
+    This period is locked by academic governance.
+  {% endif %}
+</div>
 {% elif is_non_compliant %}
 <div class="alert alert-danger no-print">
   Submission deadline already passed for this period. You may continue encoding until you submit, but this class is already listed in the non-compliance monitor for authorized academic users.
 </div>
 {% elif is_governance_closed %}
 <div class="alert alert-secondary no-print">
-  This period is currently read-only under active grading period governance. You may still review the summary and print the grade book, but encoding and submission actions are disabled.
+  This period is currently read-only under active grading period governance. Encoding and submission actions are disabled.
   {% if governance_message %}<div class="small mt-1">{{ governance_message }}</div>{% endif %}
 </div>
 {% elif is_submitted %}
-<div class="alert alert-info no-print">This period has been submitted. Summary is view-only.</div>
-{% elif is_locked %}
-<div class="alert alert-danger no-print">This period is locked by admin. Summary is view-only.</div>
+<div class="alert alert-info no-print">
+  This period has been submitted. Summary is view-only.
+  {% if can_self_reopen %}
+    You may reopen it before the deadline if you need to revise, but the summary and printout will be hidden again until you resubmit.
+  {% endif %}
+</div>
 {% endif %}
 
 {% if official_grade_release_notes %}
@@ -510,12 +528,25 @@
         Pass/Fail cards appear only after the official {{ period.name }} grade is allowed to be shown by the current release policy.
         {% endif %}
       </div>
-      {% if not is_locked and not is_submitted and not is_governance_closed %}
+      {% if can_submit_period %}
       {% if submit_readiness.students_with_any_grade == 0 %}
       <div class="alert alert-danger py-2 mt-2 mb-0">
         No encoded records found for ACTIVE students. Submission is blocked.
         Encode at least one record, or mark applicable students as DRP/W/INC in
         <a href="{% url 'faculty_portal:offering_enrollment' offering.id %}">Enrollment</a>.
+      </div>
+      {% elif submit_readiness.missing_template_bucket_count > 0 %}
+      <div class="alert alert-danger py-2 mt-2 mb-0">
+        Submission is blocked because the grading template still has required buckets without setup.
+        Create at least one activity for every required component, subcomponent, or detail.
+        {% if submit_readiness.missing_template_items %}
+        <div class="mt-1">
+          Missing:
+          {% for item in submit_readiness.missing_template_items|slice:":5" %}
+            <span class="badge text-bg-light border">{{ item.label }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
       {% elif submit_readiness.students_missing_any_grade > 0 %}
       <div class="alert alert-danger py-2 mt-2 mb-0">
@@ -527,7 +558,7 @@
       {% endif %}
     </div>
 
-    {% if not is_locked and not is_submitted and not is_governance_closed %}
+    {% if can_submit_period %}
     <form id="period-submit-form" method="post" action="{% url 'faculty_portal:period_submit' offering.id period.id %}">
       {% csrf_token %}
       <input type="hidden" name="confirm_submit" id="confirm-submit-input" value="0">
@@ -538,7 +569,7 @@
         type="button"
         data-bs-toggle="modal"
         data-bs-target="#submitConfirmModal"
-        {% if submit_readiness.students_with_any_grade == 0 or submit_readiness.students_missing_any_grade > 0 %}disabled{% endif %}
+        {% if submit_readiness.students_with_any_grade == 0 or submit_readiness.missing_template_bucket_count > 0 or submit_readiness.students_missing_any_grade > 0 %}disabled{% endif %}
       >
         Finalize and Submit {{ period.name }} Grades
       </button>
@@ -547,7 +578,32 @@
   </div>
 </div>
 
-{% if not is_locked and not is_submitted and not is_governance_closed %}
+{% if can_self_reopen %}
+<div class="modal fade" id="selfReopenModal" tabindex="-1" aria-labelledby="selfReopenModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content" method="post" action="{% url 'faculty_portal:period_self_reopen' offering.id period.id %}">
+      {% csrf_token %}
+      <div class="modal-header">
+        <h5 class="modal-title" id="selfReopenModalLabel">Reopen Before Deadline</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">
+          Reopening hides the official Summary/Print until you resubmit before the deadline.
+        </p>
+        <label class="form-label" for="self-reopen-remarks">Justification</label>
+        <textarea id="self-reopen-remarks" class="form-control" name="remarks" rows="3" required maxlength="255" placeholder="Briefly explain why this submitted gradebook needs to be reopened."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-warning">Reopen Gradebook</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if can_submit_period %}
 <div class="modal fade" id="submitConfirmModal" tabindex="-1" aria-labelledby="submitConfirmModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -589,6 +645,20 @@
 </script>
 {% endif %}
 
+{% if not can_view_gradebook_summary %}
+{% if is_auto_locked_reopened_after_deadline %}
+<div class="alert alert-warning border no-print">
+  This gradebook was reopened and missed the resubmission deadline. Editing is disabled; use the readiness cards above and the Finalize and Submit button to resubmit the existing records.
+</div>
+{% else %}
+<div class="alert alert-warning border no-print">
+  Submit this gradebook to view or print the official Summary of Grades for AIMS encoding.
+  Until submission, use the readiness cards above to complete missing records and template requirements.
+</div>
+{% endif %}
+{% endif %}
+
+{% if can_view_gradebook_summary %}
 <div class="gradebook-print-header">
   <div class="print-brand-row">
     <img class="print-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA">
@@ -671,7 +741,7 @@
           {% for prior in prior_period_headers %}
             <th rowspan="4" class="metric-col metric-final">{{ prior.label }}</th>
           {% endfor %}
-          {% for exam in summary_layout.exam_components %}
+          {% for exam in visible_exam_components %}
             <th rowspan="4" class="band-exam metric-col metric-final">{{ exam.label }}</th>
           {% endfor %}
           {% if show_official_period_grade %}
@@ -751,7 +821,7 @@
         {% for prior in prior_period_headers %}
         <td class="metric-col metric-final"></td>
         {% endfor %}
-        {% for exam in summary_layout.exam_components %}
+        {% for exam in visible_exam_components %}
           <td class="metric-col metric-final">
             {% if exam.sections and exam.sections.0.activity_columns %}
               {{ exam.sections.0.activity_columns.0.total_score|default:"" }}
@@ -823,4 +893,5 @@
     <div class="submitted-by-name">{{ request.user.full_name|default:request.user.username }}</div>
   </div>
 </div>
+{% endif %}
 {% endblock %}

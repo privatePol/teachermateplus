@@ -1885,7 +1885,136 @@ class GradingGovernanceService:
 
     @classmethod
     def can_faculty_self_reopen_before_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
-        return False
+        submission = cls.get_submission(offering=offering, template_period=template_period)
+        if not submission or submission.status != GradeSubmission.Status.SUBMITTED:
+            return False
+        lock = cls.resolve_lock(offering=offering, template_period=template_period)
+        if not lock or lock.is_locked or not lock.deadline_at:
+            return False
+        return timezone.now() <= lock.deadline_at
+
+    @classmethod
+    @transaction.atomic
+    def faculty_self_reopen_before_deadline(
+        cls,
+        *,
+        user,
+        offering,
+        template_period: GradingTemplatePeriod,
+        remarks: str | None = None,
+    ):
+        justification = (remarks or "").strip()
+        if not justification:
+            raise ValidationError("Reopen justification is required.")
+        if not cls.can_faculty_self_reopen_before_deadline(
+            offering=offering,
+            template_period=template_period,
+        ):
+            raise ValidationError("Faculty self-reopen is allowed only for submitted gradebooks before the deadline.")
+        return cls.reopen_period(
+            user=user,
+            offering=offering,
+            template_period=template_period,
+            remarks=justification,
+        )
+
+    @classmethod
+    def _template_activity_requirements(
+        cls,
+        *,
+        offering,
+        template_period: GradingTemplatePeriod,
+    ):
+        components = list(
+            template_period.components.filter(is_active=True)
+            .prefetch_related(
+                Prefetch(
+                    "subcomponents",
+                    queryset=GradingTemplateSubcomponent.objects.filter(is_active=True)
+                    .prefetch_related(
+                        Prefetch(
+                            "details",
+                            queryset=GradingTemplateDetail.objects.filter(is_active=True).order_by("sort_order", "id"),
+                        )
+                    )
+                    .order_by("sort_order", "id"),
+                )
+            )
+            .order_by("sort_order", "id")
+        )
+        activity_buckets = set(
+            GradeActivity.objects.filter(
+                offering_id=offering.id,
+                template_period_id=template_period.id,
+                is_active=True,
+            ).values_list("template_component_id", "template_subcomponent_id", "template_detail_id")
+        )
+        required_items = []
+        missing_items = []
+
+        if not components:
+            return {
+                "required_items": [],
+                "missing_items": [
+                    {
+                        "level": "period",
+                        "label": f"{template_period.name} has no active grading components",
+                        "component_id": None,
+                        "subcomponent_id": None,
+                        "detail_id": None,
+                    }
+                ],
+            }
+
+        for component in components:
+            subcomponents = list(component.subcomponents.all())
+            if not subcomponents:
+                item = {
+                    "level": "component",
+                    "label": component.name or component.code,
+                    "component_id": component.id,
+                    "subcomponent_id": None,
+                    "detail_id": None,
+                    "expected_record_type": "activity",
+                }
+                required_items.append(item)
+                if (component.id, None, None) not in activity_buckets:
+                    missing_items.append(item)
+                continue
+
+            for subcomponent in subcomponents:
+                details = list(subcomponent.details.all())
+                label_prefix = f"{component.name or component.code} > {subcomponent.name or subcomponent.code}"
+                if subcomponent.is_attendance_component:
+                    continue
+                if not details:
+                    item = {
+                        "level": "subcomponent",
+                        "label": label_prefix,
+                        "component_id": component.id,
+                        "subcomponent_id": subcomponent.id,
+                        "detail_id": None,
+                        "expected_record_type": "activity",
+                    }
+                    required_items.append(item)
+                    if (component.id, subcomponent.id, None) not in activity_buckets:
+                        missing_items.append(item)
+                    continue
+
+                for detail in details:
+                    item = {
+                        "level": "detail",
+                        "label": f"{label_prefix} > {detail.name or detail.code}",
+                        "component_id": component.id,
+                        "subcomponent_id": subcomponent.id,
+                        "detail_id": detail.id,
+                        "expected_record_type": "activity",
+                    }
+                    required_items.append(item)
+                    if (component.id, subcomponent.id, detail.id) not in activity_buckets:
+                        missing_items.append(item)
+
+        return {"required_items": required_items, "missing_items": missing_items}
 
     @classmethod
     def evaluate_submission_readiness(cls, *, offering, template_period: GradingTemplatePeriod):
@@ -1908,8 +2037,11 @@ class GradingGovernanceService:
                 "students_with_complete_records": 0,
                 "expected_activity_count": 0,
                 "expected_attendance_session_count": 0,
+                "expected_template_bucket_count": 0,
+                "missing_template_bucket_count": 0,
                 "coverage_percent": Decimal("0.00"),
                 "missing_students": [],
+                "missing_template_items": [],
             }
 
         active_activity_ids = list(
@@ -1935,6 +2067,11 @@ class GradingGovernanceService:
             ).values_list("id", flat=True)
         )
         expected_attendance_session_count = len(active_attendance_session_ids) if has_attendance_component else 0
+        template_requirements = cls._template_activity_requirements(
+            offering=offering,
+            template_period=template_period,
+        )
+        missing_template_items = template_requirements["missing_items"]
 
         score_student_ids = set(
             StudentActivityScore.objects.filter(
@@ -2014,8 +2151,11 @@ class GradingGovernanceService:
             "students_with_complete_records": students_with_complete_records,
             "expected_activity_count": expected_activity_count,
             "expected_attendance_session_count": expected_attendance_session_count,
+            "expected_template_bucket_count": len(template_requirements["required_items"]),
+            "missing_template_bucket_count": len(missing_template_items),
             "coverage_percent": coverage_percent,
             "missing_students": missing_students,
+            "missing_template_items": missing_template_items,
         }
 
     @classmethod
@@ -2056,12 +2196,125 @@ class GradingGovernanceService:
     @transaction.atomic
     def auto_lock_due_periods(cls, *, at=None, limit: int | None = None, dry_run: bool = False):
         now = at or timezone.now()
+        reopened_submissions = list(
+            GradeSubmission.objects.select_related(
+                "tenant",
+                "campus",
+                "offering",
+                "offering__academic_year",
+                "offering__term",
+                "template_period",
+            )
+            .filter(status=GradeSubmission.Status.REOPENED)
+            .order_by("updated_at", "id")
+        )
+        rows = []
+        for submission in reopened_submissions:
+            if limit is not None and len(rows) >= limit:
+                break
+            row = cls._auto_lock_expired_reopened_submission(
+                submission=submission,
+                now=now,
+                dry_run=dry_run,
+            )
+            if row is None:
+                continue
+            rows.append(row)
         return {
             "checked_at": now,
-            "count": 0,
+            "count": len(rows),
             "dry_run": dry_run,
-            "rows": [],
+            "rows": rows,
         }
+
+    @classmethod
+    @transaction.atomic
+    def auto_lock_expired_reopened_gradebook(
+        cls,
+        *,
+        offering,
+        template_period: GradingTemplatePeriod,
+        at=None,
+        dry_run: bool = False,
+    ):
+        submission = cls.get_submission(offering=offering, template_period=template_period)
+        if not submission:
+            return None
+        submission = (
+            GradeSubmission.objects.select_related(
+                "tenant",
+                "campus",
+                "offering",
+                "offering__academic_year",
+                "offering__term",
+                "template_period",
+            )
+            .filter(id=submission.id)
+            .first()
+        )
+        return cls._auto_lock_expired_reopened_submission(
+            submission=submission,
+            now=at or timezone.now(),
+            dry_run=dry_run,
+        )
+
+    @classmethod
+    def _auto_lock_expired_reopened_submission(cls, *, submission: GradeSubmission, now, dry_run: bool = False):
+        if submission.status != GradeSubmission.Status.REOPENED:
+            return None
+        lock = cls.resolve_lock(offering=submission.offering, template_period=submission.template_period)
+        if not lock or not lock.deadline_at or lock.deadline_at >= now:
+            return None
+        row = {
+            "id": lock.id,
+            "submission_id": submission.id,
+            "tenant_code": submission.tenant.code,
+            "campus_code": submission.campus.code,
+            "academic_year_code": submission.offering.academic_year.code,
+            "term_code": submission.offering.term.code,
+            "period_code": submission.template_period.code,
+            "scope_type": GradingPeriodLock.ScopeType.COURSE,
+            "course_offering_id": submission.offering_id,
+            "deadline_at": lock.deadline_at,
+        }
+        if dry_run:
+            return row
+
+        course_lock, _created = GradingPeriodLock.objects.update_or_create(
+            tenant_id=submission.tenant_id,
+            campus_id=submission.campus_id,
+            academic_year_id=submission.offering.academic_year_id,
+            term_id=submission.offering.term_id,
+            period_code=lock.period_code,
+            scope_type=GradingPeriodLock.ScopeType.COURSE,
+            course_offering_id=submission.offering_id,
+            defaults={
+                "is_locked": True,
+                "deadline_at": lock.deadline_at,
+                "locked_at": now,
+                "locked_by_user": None,
+                "remarks": "Auto-locked because a reopened gradebook was not resubmitted before the deadline.",
+                "is_active": True,
+            },
+        )
+        AuditService.log_event(
+            action="LOCK",
+            portal="SYSTEM",
+            entity_type="GradingPeriodLock",
+            entity_id=course_lock.id,
+            actor=None,
+            tenant=submission.tenant,
+            campus=submission.campus,
+            after_data={
+                "submission_id": submission.id,
+                "offering_id": submission.offering_id,
+                "template_period_id": submission.template_period_id,
+                "deadline_at": lock.deadline_at.isoformat() if lock.deadline_at else None,
+                "reason": "REOPENED_DEADLINE_EXPIRED",
+            },
+        )
+        row["id"] = course_lock.id
+        return row
 
     @classmethod
     def get_submission(cls, *, offering, template_period: GradingTemplatePeriod):
@@ -2145,6 +2398,16 @@ class GradingGovernanceService:
         return bool(lock and lock.is_locked)
 
     @classmethod
+    def is_auto_locked_reopened_after_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
+        submission = cls.get_submission(offering=offering, template_period=template_period)
+        if not submission or submission.status != GradeSubmission.Status.REOPENED:
+            return False
+        lock = cls.resolve_lock(offering=offering, template_period=template_period)
+        if not lock or not lock.is_locked:
+            return False
+        return "reopened gradebook was not resubmitted before the deadline" in (lock.remarks or "").lower()
+
+    @classmethod
     def is_submitted(cls, *, offering, template_period: GradingTemplatePeriod):
         submission = cls.get_submission(offering=offering, template_period=template_period)
         return bool(submission and submission.status == GradeSubmission.Status.SUBMITTED)
@@ -2220,6 +2483,8 @@ class GradingGovernanceService:
         if cls.is_locked(offering=offering, template_period=template_period) or cls.is_submitted(
             offering=offering, template_period=template_period
         ):
+            if cls.is_auto_locked_reopened_after_deadline(offering=offering, template_period=template_period):
+                return True
             if not cls.has_active_unlock_window(offering=offering, template_period=template_period):
                 raise ValidationError(f"{template_period.code} is locked/submitted and has no active correction window.")
         return True
@@ -2259,7 +2524,12 @@ class GradingGovernanceService:
     @classmethod
     @transaction.atomic
     def submit_period(cls, *, user, offering, template_period: GradingTemplatePeriod, remarks: str | None = None):
-        cls.assert_encoding_allowed(offering=offering, template_period=template_period)
+        can_resubmit_auto_locked_reopen = cls.is_auto_locked_reopened_after_deadline(
+            offering=offering,
+            template_period=template_period,
+        )
+        if not can_resubmit_auto_locked_reopen:
+            cls.assert_encoding_allowed(offering=offering, template_period=template_period)
         readiness = cls.evaluate_submission_readiness(offering=offering, template_period=template_period)
         if readiness["eligible_student_count"] <= 0:
             raise ValidationError("No ACTIVE students available for submission in this period.")
@@ -2267,6 +2537,14 @@ class GradingGovernanceService:
             raise ValidationError(
                 "Cannot submit yet. No grade records are encoded for ACTIVE students. "
                 "Encode at least one grade/attendance record or mark students as DRP/W/INC first."
+            )
+        if readiness.get("missing_template_bucket_count", 0) > 0:
+            missing_labels = ", ".join(
+                item["label"] for item in readiness.get("missing_template_items", [])[:5]
+            )
+            raise ValidationError(
+                "Cannot submit yet. The grading template still has required components without activity or attendance setup"
+                + (f": {missing_labels}." if missing_labels else ".")
             )
         if readiness["students_missing_any_grade"] > 0:
             raise ValidationError(
@@ -2315,6 +2593,14 @@ class GradingGovernanceService:
                 },
             },
         )
+        if can_resubmit_auto_locked_reopen:
+            lock = cls.resolve_lock(offering=offering, template_period=template_period)
+            if lock and lock.is_locked:
+                lock.is_locked = False
+                lock.reopened_by_user = user
+                lock.reopened_at = timezone.now()
+                lock.remarks = "Auto deadline lock cleared after faculty resubmission."
+                lock.save(update_fields=["is_locked", "reopened_by_user", "reopened_at", "remarks", "updated_at"])
         return submission
 
     @classmethod
@@ -2863,6 +3149,12 @@ class FacultyGradingService:
     def _round(value: Decimal) -> Decimal:
         return value.quantize(Decimal("0.01"))
 
+    @staticmethod
+    def _round_official_grade(value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        return Decimal(value).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
     @classmethod
     def resolve_score_input_mode(
         cls,
@@ -3133,13 +3425,13 @@ class FacultyGradingService:
             for entry in strategy_entries:
                 period_value = period_values_by_period_id.get(entry["period_id"]) or Decimal("0")
                 weighted_total += Decimal(period_value) * (Decimal(entry["weight"]) / Decimal("100"))
-            return cls._round(weighted_total)
+            return cls._round_official_grade(weighted_total)
 
         total_value = sum(
             (Decimal(period_values_by_period_id.get(entry["period_id"]) or Decimal("0")))
             for entry in strategy_entries
         )
-        return cls._round(total_value / Decimal(len(strategy_entries)))
+        return cls._round_official_grade(total_value / Decimal(len(strategy_entries)))
 
     @staticmethod
     def get_active_enrollments(offering):
@@ -3921,11 +4213,11 @@ class FacultyGradingService:
                     component_score or Decimal("0")
                 )
 
-            class_standing = cls._round(class_standing)
-            exam_grade = cls._round(exam_grade) if exam_grade is not None else None
+            class_standing = cls._round_official_grade(class_standing)
+            exam_grade = cls._round_official_grade(exam_grade)
             period_grade = None
             if not has_exam_component or has_exam_data:
-                period_grade = cls._round(weighted_period_grade)
+                period_grade = cls._round_official_grade(weighted_period_grade)
 
             period_row, _created = StudentPeriodGrade.objects.update_or_create(
                 offering=offering,

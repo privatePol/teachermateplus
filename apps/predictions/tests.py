@@ -230,6 +230,76 @@ class PredictionSnapshotTests(TestCase):
         self.assertEqual(row.worst_case_period_grade, official_period.period_grade)
         self.assertEqual(row.current_projected_final_grade, official_final.final_grade)
 
+    def test_student_is_at_risk_when_possible_final_is_below_passing(self):
+        midterm = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="MIDTERM",
+            name="Midterm",
+            sequence_no=2,
+            weight_percentage=Decimal("25.00"),
+        )
+        prefinal = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PREFINAL",
+            name="Pre-Final",
+            sequence_no=3,
+            weight_percentage=Decimal("25.00"),
+        )
+        final_exam = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="FINAL",
+            name="FX",
+            sequence_no=4,
+            weight_percentage=Decimal("25.00"),
+        )
+        midterm_component = GradingTemplateComponent.objects.create(
+            template_period=midterm,
+            code="MT_CS",
+            name="Midterm Class Standing",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        midterm_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=midterm,
+            template_component=midterm_component,
+            title="Midterm Quiz",
+            total_score=Decimal("100.00"),
+            created_by_user=self.user,
+            is_active=True,
+        )
+        StudentActivityScore.objects.create(
+            activity=midterm_activity,
+            student=self.student,
+            raw_score=Decimal("100.00"),
+            computed_score=Decimal("100.00"),
+            encoded_by_user=self.user,
+            is_active=True,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            student=self.student,
+            class_standing_grade=Decimal("90.00"),
+            period_grade=Decimal("90.00"),
+        )
+
+        result = PredictionSnapshotService.get_period_predictions(
+            offering=self.offering,
+            template_period=midterm,
+            user=self.user,
+            force_refresh=True,
+        )
+
+        row = result["rows"][0]
+        self.assertEqual(row.current_projected_period_grade, Decimal("100.00"))
+        self.assertLess(row.current_projected_final_grade, Decimal("75.00"))
+        self.assertTrue(row.at_risk_flag)
+
     def test_final_requirement_for_remaining_periods_reports_needed_average(self):
         midterm = GradingTemplatePeriod.objects.create(
             template=self.template,
@@ -338,7 +408,7 @@ class PredictionSnapshotTests(TestCase):
             current_period_grade=Decimal("99.80"),
         )
 
-        self.assertEqual(projected_final, Decimal("38.25"))
+        self.assertEqual(projected_final, Decimal("38"))
         self.assertEqual(requirement["status"], "REQUIRED")
         self.assertEqual(requirement["required_average"], Decimal("61.26"))
         self.assertEqual(requirement["remaining_period_names"], ["Pre-Final", "FX"])

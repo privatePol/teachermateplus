@@ -6,13 +6,19 @@
   .manual-shell {
     max-width: 1120px;
     margin: 0 auto;
+    padding-bottom: 4.5rem;
   }
   .manual-hero {
     border: 0;
     border-radius: 1.4rem;
-    background: linear-gradient(135deg, #143a25 0%, #1a5e38 48%, #8fa737 100%);
+    background:
+      radial-gradient(circle at 88% 16%, rgba(255, 205, 89, 0.45), transparent 27%),
+      radial-gradient(circle at 8% 92%, rgba(20, 184, 166, 0.26), transparent 30%),
+      linear-gradient(135deg, #0b3d2e 0%, #087f5b 50%, #f4b942 100%);
     color: #f6fff8;
-    box-shadow: 0 18px 34px rgba(15, 51, 30, 0.18);
+    box-shadow: 0 24px 44px rgba(15, 51, 30, 0.22);
+    overflow: hidden;
+    animation: manual-rise 0.55s ease both;
   }
   .manual-hero .card-body {
     padding: 1.45rem;
@@ -54,25 +60,87 @@
     border: 1px solid rgba(255, 255, 255, 0.24);
     color: #ffffff;
   }
-  .manual-anchor-nav {
+  .manual-topic-card {
+    border: 0;
+    border-radius: 1.1rem;
+    box-shadow: 0 12px 24px rgba(16, 50, 30, 0.06);
+    background: #ffffff;
+    margin-bottom: 1rem;
+    animation: manual-rise 0.55s ease both;
+  }
+  .manual-topic-card .card-body {
+    padding: 1.1rem 1.15rem;
+  }
+  .manual-topic-title {
+    font-size: 1.08rem;
+    font-weight: 800;
+    color: #173d27;
+    margin-bottom: 0.75rem;
+  }
+  .manual-topic-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.85rem;
+  }
+  .manual-topic-item {
+    border: 1px solid #dfe9e1;
+    border-radius: 1rem;
+    background: #fff;
+    padding: 0.9rem 0.95rem;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .manual-topic-item:hover {
+    transform: translateY(-4px);
+    border-color: #f0d26c;
+    box-shadow: 0 18px 34px rgba(16, 82, 54, 0.13);
+  }
+  .manual-topic-item strong {
+    display: block;
+    color: #173d27;
+    font-size: 0.96rem;
+    margin-bottom: 0.3rem;
+  }
+  .manual-topic-item p {
+    color: #5b7162;
+    font-size: 0.86rem;
+    margin-bottom: 0.65rem;
+  }
+  .manual-topic-links {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.55rem;
-    margin-top: 1rem;
+    gap: 0.4rem;
   }
-  .manual-anchor-nav a {
-    text-decoration: none;
-    padding: 0.48rem 0.85rem;
+  .manual-topic-links a {
+    display: inline-flex;
+    align-items: center;
     border-radius: 999px;
-    background: #ffffff;
-    color: #173e27;
+    border: 1px solid #dbe6dd;
+    background: #f8fbf8;
+    color: #234b33;
+    font-size: 0.8rem;
     font-weight: 700;
+    padding: 0.34rem 0.62rem;
+    text-decoration: none;
+  }
+  .manual-topic-links a:hover {
+    background: #fff5cf;
+    border-color: #f0d26c;
   }
   .manual-section-card {
     border: 0;
     border-radius: 1.1rem;
     box-shadow: 0 12px 24px rgba(16, 50, 30, 0.06);
     height: 100%;
+    animation: manual-rise 0.55s ease both;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .manual-section-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 20px 34px rgba(16, 82, 54, 0.12);
+  }
+  .manual-section-card:target,
+  [id^="manual-"]:target.manual-section-card {
+    box-shadow: 0 0 0 3px rgba(244, 185, 66, 0.42), 0 18px 34px rgba(16, 82, 54, 0.14);
   }
   .manual-section-card .card-body {
     padding: 1.2rem;
@@ -101,8 +169,13 @@
   .manual-rule {
     border-radius: 1rem;
     padding: 0.95rem 1rem;
-    background: linear-gradient(180deg, #fffef8 0%, #faf4dd 100%);
+    background: linear-gradient(180deg, #ffffff 0%, #fff6d7 100%);
     border: 1px solid #efe1a5;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+  .manual-rule:hover {
+    transform: translateX(4px);
+    border-color: #e6c951;
   }
   .manual-rule strong {
     color: #4f4114;
@@ -141,41 +214,121 @@
     background: #f6faf6;
     color: #53695c;
   }
+  .faculty-guide-back-top {
+    position: fixed;
+    left: 1.25rem;
+    bottom: 4.25rem;
+    z-index: 30;
+    border: 1px solid rgba(15, 81, 50, 0.22);
+    border-radius: 999px;
+    background: #ffffff;
+    box-shadow: 0 16px 30px rgba(15, 81, 50, 0.16);
+    color: #0f5132;
+    font-weight: 800;
+    padding: 0.62rem 0.95rem;
+    text-decoration: none;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  }
+  .faculty-guide-back-top:hover {
+    background: #fff5cf;
+    color: #0f5132;
+    transform: translateY(-2px);
+    box-shadow: 0 20px 34px rgba(15, 81, 50, 0.2);
+    text-decoration: none;
+  }
+  @keyframes manual-rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .manual-hero,
+    .manual-topic-card,
+    .manual-topic-item,
+    .manual-section-card,
+    .manual-rule {
+      animation: none;
+      transition: none;
+    }
+  }
   @media (max-width: 991.98px) {
     .manual-grid-2 {
       grid-template-columns: 1fr;
+    }
+    .manual-topic-grid {
+      grid-template-columns: 1fr;
+    }
+    .faculty-guide-back-top {
+      left: 0.85rem;
+      bottom: 4.25rem;
     }
   }
 </style>
 {% endblock %}
 
 {% block faculty_content %}
-<div class="manual-shell">
+<div class="manual-shell" id="top">
   <div class="card manual-hero mb-4">
     <div class="card-body">
-      <div class="manual-eyebrow">Formal Reference Manual</div>
-      <div class="manual-title">EduGradesPro Faculty Portal Policies and Governance Manual</div>
+      <div class="manual-eyebrow">Faculty Manual</div>
+      <div class="manual-title">EduGradesPro Faculty Portal Guide</div>
       <p class="manual-subtitle">
-        This page is written in a more formal tone for academic officers, deans, registrars, and management teams who need
-        a structured reference for workflow, controls, and governance expectations.
+        This guide explains the Faculty Portal in simple terms: what each feature is for, when to use it, and what rules
+        affect grading, submission, corrections, and student status.
       </p>
       <div class="manual-actions">
         <a class="manual-primary" href="{% url 'faculty_portal:guide' %}">Back to Faculty Help Center</a>
+        <a class="manual-secondary" href="#manual-topics">Choose a Topic</a>
         <a class="manual-secondary" href="https://ncba.edu.ph/ncba-privacy-notice/" target="_blank" rel="noopener noreferrer">Open NCBA Privacy Notice</a>
       </div>
-      <div class="manual-anchor-nav">
-        <a href="#manual-purpose">Purpose</a>
-        <a href="#manual-workflow">Workflow</a>
-        <a href="#manual-assignments">Assignment Acceptance</a>
-        <a href="#manual-submission">Submission Governance</a>
-        <a href="#manual-corrections">Grade Corrections and Reopen</a>
-        <a href="#manual-sample-computation">Sample Computation</a>
-        <a href="#manual-prediction">Grade Prediction</a>
-        <a href="#manual-at-risk">At-Risk Monitor</a>
-        <a href="#manual-reminders">Reminder Center</a>
-        <a href="#manual-notes">Private Memo</a>
-        <a href="#manual-status">Student Status Rules</a>
-        <a href="#manual-privacy">Privacy and Audit</a>
+    </div>
+  </div>
+
+  <div class="card manual-topic-card" id="manual-topics">
+    <div class="card-body">
+      <div class="manual-topic-title">Choose a Topic</div>
+      <div class="manual-topic-grid">
+        <div class="manual-topic-item">
+          <strong>Portal Basics</strong>
+          <p>Start here for purpose, roles, workflow, and assignment acceptance.</p>
+          <div class="manual-topic-links">
+            <a href="#manual-purpose">Purpose</a>
+            <a href="#manual-workflow">Workflow</a>
+            <a href="#manual-assignments">Assignments</a>
+          </div>
+        </div>
+        <div class="manual-topic-item">
+          <strong>Grades and Submission</strong>
+          <p>Use these for submission rules, correction rules, and sample computation.</p>
+          <div class="manual-topic-links">
+            <a href="#manual-submission">Submission</a>
+            <a href="#manual-corrections">Corrections</a>
+            <a href="#manual-sample-computation">Computation</a>
+          </div>
+        </div>
+        <div class="manual-topic-item">
+          <strong>Prediction and Support</strong>
+          <p>Use these for prediction, at-risk monitoring, reminders, and private notes.</p>
+          <div class="manual-topic-links">
+            <a href="#manual-prediction">Prediction</a>
+            <a href="#manual-at-risk">At-Risk</a>
+            <a href="#manual-reminders">Reminders</a>
+            <a href="#manual-notes">Memos</a>
+          </div>
+        </div>
+        <div class="manual-topic-item">
+          <strong>Records and Security</strong>
+          <p>Use these for student status, privacy, security, and audit expectations.</p>
+          <div class="manual-topic-links">
+            <a href="#manual-status">Student Status</a>
+            <a href="#manual-privacy">Privacy</a>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -183,21 +336,21 @@
   <div class="manual-grid-2 mb-4" id="manual-purpose">
     <div class="card manual-section-card">
       <div class="card-body">
-        <div class="manual-section-title">1. Purpose and Scope</div>
+        <div class="manual-section-title">1. What This Portal Is For</div>
         <p class="manual-copy">
-          EduGradesPro Faculty Portal is intended to support assigned faculty members in managing grading activities, attendance,
-          summary review, class list status updates, submissions, and governed corrections for officially assigned classes.
+          The Faculty Portal helps faculty manage the classes officially assigned to them. Faculty can create activities,
+          encode scores, record attendance, review summaries, submit grades, and request corrections when needed.
         </p>
         <ul class="manual-policy-list">
-          <li>The portal is role-aware and limited to faculty-assigned offerings.</li>
-          <li>Its purpose is academic operations, not general student record administration.</li>
-          <li>Institutional governance settings determine deadline behavior, reopen behavior, and correction handling.</li>
+          <li>You only see classes assigned to you.</li>
+          <li>The portal is for grading work, not full student-record management.</li>
+          <li>Deadlines, reopen rules, and correction rules follow the settings configured by the school.</li>
         </ul>
       </div>
     </div>
     <div class="card manual-section-card">
       <div class="card-body">
-        <div class="manual-section-title">2. Role Positioning</div>
+        <div class="manual-section-title">2. Who Does What</div>
         <table class="manual-table">
           <thead>
             <tr>
@@ -208,15 +361,15 @@
           <tbody>
             <tr>
               <td>Faculty</td>
-              <td>Creates activities, encodes scores, records attendance, reviews summaries, submits grades, and requests corrections when needed.</td>
+              <td>Creates activities, encodes scores, records attendance, reviews summaries, submits grades, and files correction requests when needed.</td>
             </tr>
             <tr>
               <td>Campus Admin / Dean</td>
-              <td>Reviews governed requests, monitors deadlines, and manages institutional oversight where permissions allow.</td>
+              <td>Reviews requests, monitors deadlines, and checks grading work based on assigned permissions.</td>
             </tr>
             <tr>
               <td>Super Admin / Operations</td>
-              <td>Maintains settings, security, permissions, print headers, and system-level governance controls.</td>
+              <td>Manages settings, security, permissions, print setup, and system-wide controls.</td>
             </tr>
           </tbody>
         </table>
@@ -226,50 +379,50 @@
 
   <div class="card manual-section-card mb-4" id="manual-workflow">
     <div class="card-body">
-      <div class="manual-section-title">3. Faculty Workflow Standard</div>
+      <div class="manual-section-title">3. Usual Faculty Workflow</div>
       <table class="manual-table">
         <thead>
           <tr>
             <th>Stage</th>
-            <th>Expected Action</th>
-            <th>Governance Rationale</th>
+            <th>What You Do</th>
+            <th>Why It Matters</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td>Class Selection</td>
-            <td>Faculty opens only assigned offerings in the current academic scope and may review the read-only grading template attached to each class before encoding work.</td>
-            <td>Prevents unauthorized access outside assignment scope.</td>
+            <td>Open the class assigned to you. You may also review the grading template before encoding.</td>
+            <td>This keeps class access limited to the correct faculty member.</td>
           </tr>
           <tr>
             <td>Activity Setup</td>
-            <td>Faculty creates activities under the proper component, subcomponent, and detail path.</td>
-            <td>Protects grading consistency and reporting accuracy.</td>
+            <td>Create each activity under the correct grading component, subcomponent, or detail.</td>
+            <td>This keeps grade computation correct.</td>
           </tr>
           <tr>
             <td>Score Encoding</td>
-            <td>Faculty encodes only available scores and leaves missing items blank until ready. If unsaved score entries exist and the faculty tries to leave the score page, EduGradesPro warns that the unsaved encoded data will be lost.</td>
-            <td>Distinguishes unencoded records from zero or actual performance values.</td>
+            <td>Encode scores, then save. If you try to leave with unsaved scores, EduGradesPro warns you first.</td>
+            <td>Saved scores are used in grade computation. Unsaved work is not.</td>
           </tr>
           <tr>
             <td>Summary Review</td>
-            <td>Faculty reviews computed outputs before submission.</td>
-            <td>Reduces avoidable correction requests and mis-submissions.</td>
+            <td>Review the summary before submitting.</td>
+            <td>This helps catch mistakes before grades become official.</td>
           </tr>
           <tr>
             <td>Submission</td>
-            <td>Faculty finalizes only when records are sufficiently complete for the period.</td>
-            <td>Submission is treated as a governance checkpoint, not merely a save action.</td>
+            <td>Submit only when the period records are complete and checked.</td>
+            <td>Submission is the official checkpoint for that period.</td>
           </tr>
             <tr>
               <td>Active Period Control</td>
-              <td>When the campus-term active grading period is set, faculty performs normal grading work only in that active period. Other periods remain closed for editing unless they are formally reopened or inside an approved correction window, but Attendance and Summary stay available in read-only mode for review.</td>
-              <td>Prevents premature encoding in future periods while still preserving approved correction access for earlier periods.</td>
+              <td>When an active grading period is set, normal editing is allowed only in that period. Other periods are usually read-only unless reopened or covered by an approved correction window. If auto-advance is enabled, the active period moves forward after the current period deadline passes. Editing that deadline later does not move it back automatically.</td>
+              <td>This prevents work in the wrong period while still allowing approved exceptions.</td>
             </tr>
           <tr>
             <td>Grade Book View History</td>
-            <td>Faculty may open the period-card <strong>Who Viewed</strong> action to review admin-side read-only grade book monitor openings recorded for that class period. The related grading pages also provide a Quick Jump strip so Activities, Attendance, Summary, and Who Viewed remain reachable with fewer clicks.</td>
-            <td>Improves transparency by letting faculty see when authorized academic monitors opened the grade book.</td>
+            <td>Use <strong>Who Viewed</strong> to see authorized admin-side openings of the gradebook monitor. Use the Quick Jump links to move between Activities, Attendance, Summary, and Who Viewed.</td>
+            <td>This makes monitoring more transparent and easier to check.</td>
           </tr>
         </tbody>
       </table>
@@ -279,33 +432,33 @@
   <div class="manual-grid-2 mb-4" id="manual-assignments">
     <div class="card manual-section-card">
       <div class="card-body">
-        <div class="manual-section-title">4. Faculty Assignment Acceptance Governance</div>
+        <div class="manual-section-title">4. Assignment Acceptance</div>
         <div class="manual-rule-grid">
           <div class="manual-rule">
-            <strong>Acknowledgment Before Access</strong>
-            <p>Newly assigned classes remain pending until the faculty member accepts the load. Pending assignments block grading and class-list work for that offering.</p>
+            <strong>Accept Before Working</strong>
+            <p>A new class assignment stays pending until you accept it. While it is pending, grading and class-list actions are blocked.</p>
           </div>
           <div class="manual-rule">
-            <strong>Faculty Response Options</strong>
-            <p>Faculty may accept, request clarification, or decline the assignment with a written note so the academic office can act on the exact concern.</p>
+            <strong>Your Response Options</strong>
+            <p>You may accept, ask for clarification, or decline the assignment. Add a note so the academic office knows your concern.</p>
           </div>
           <div class="manual-rule">
             <strong>Response Deadline</strong>
-            <p>Each pending assignment carries a response window. Reminder and expiry behavior follow tenant-configured settings and should be processed by scheduled jobs.</p>
+            <p>Pending assignments may have a response deadline. Reminders and expiry follow the school's configured settings.</p>
           </div>
         </div>
       </div>
     </div>
     <div class="card manual-section-card">
       <div class="card-body">
-        <div class="manual-section-title">5. Monitoring and Renewal Controls</div>
+        <div class="manual-section-title">5. Assignment Monitoring</div>
         <ul class="manual-policy-list">
-          <li>Admin monitoring should treat accepted loads as the operational checkpoint before grading starts.</li>
-          <li>Clarification and decline notes should be reviewed before a load is changed or reissued.</li>
-          <li>Expired assignments require an admin renewal or reissue before the faculty member can respond again.</li>
-          <li>Metric cards in Faculty Assignments should be reviewed for pending, due-within-24-hours, accepted, and expired loads.</li>
-          <li>The class card in Faculty Portal now shows the currently assigned grading template, and faculty may open a read-only template page to review period formulas and class-standing breakdowns before grading.</li>
-          <li>Use <code>manage.py process_faculty_assignment_reminders</code> in scheduled operations so reminders and expirations are applied consistently.</li>
+          <li>Accepted assignments mean the faculty member can begin normal class work.</li>
+          <li>Clarification and decline notes should be reviewed before changing or reissuing a load.</li>
+          <li>Expired assignments must be renewed or reissued by admin before the faculty member can respond again.</li>
+          <li>Admin users can monitor pending, due soon, accepted, and expired loads.</li>
+          <li>The Faculty Portal class card shows the assigned grading template. Faculty can open it in read-only mode to review formulas before grading.</li>
+          <li>Scheduled operations should run <code>manage.py process_faculty_assignment_reminders</code> so reminders and expirations are processed regularly.</li>
         </ul>
       </div>
     </div>
@@ -314,92 +467,96 @@
   <div class="manual-grid-2 mb-4" id="manual-submission">
     <div class="card manual-section-card">
       <div class="card-body">
-        <div class="manual-section-title">6. Submission Governance</div>
+        <div class="manual-section-title">6. Grade Submission</div>
         <div class="manual-rule-grid">
           <div class="manual-rule">
-            <strong>Submission Readiness</strong>
-            <p>Faculty should review active students, missing records, and summary outputs before submission. EduGradesPro surfaces readiness indicators to support this review, and it blocks submission when ACTIVE students still have blank required grade or attendance records.</p>
+            <strong>Before You Submit</strong>
+            <p>Check the active students, missing records, and summary results first. EduGradesPro shows readiness cards and blocks submission if ACTIVE students still have required blank grade or attendance records.</p>
           </div>
           <div class="manual-rule">
-            <strong>Readiness Cards and Threshold</strong>
-            <p>The Summary page now presents submission readiness through colored cards for ACTIVE, complete records, missing records, coverage, DRP, WITHDRAWN, and INC. Pass/Fail counts follow the configured passing threshold and normally appear together with the official period grade. EduGradesPro resolves that threshold in this order: Tenant Grading Profile override, assigned grading-template threshold, tenant default setting, then fallback 75.00. Admin may still restrict official-grade release until the configured deadline.</p>
+            <strong>Readiness Cards</strong>
+            <p>The Summary page shows cards for ACTIVE, complete records, missing records, coverage, DRP, WITHDRAWN, and INC. The official Summary of Grades table and printout appear only after submission, so unsubmitted records are not treated as the official AIMS source. Pass/Fail counts use the configured passing grade, usually 75 unless another rule is set.</p>
           </div>
           <div class="manual-rule">
-            <strong>Final Period Grade Trail</strong>
-            <p>The overall <strong>FINAL GRADE</strong> is shown only on the <strong>Final</strong> period Summary page. That Final page also displays <strong>PRELIM GRADE</strong>, <strong>MIDTERM GRADE</strong>, and <strong>PRE-FINAL GRADE</strong> columns before the Final Exam so faculty can review the earlier official period results alongside the final-period output.</p>
+            <strong>Reopen Before the Deadline</strong>
+            <p>If you submitted before the deadline, you may reopen the gradebook before the deadline, make changes, and resubmit. While reopened, Summary/Print is hidden. If the reopened gradebook reaches the deadline without resubmission, score, activity, and attendance editing are locked, but you can still finalize and resubmit the existing records from Summary.</p>
           </div>
           <div class="manual-rule">
-            <strong>Final Grade Averaging Rule</strong>
-            <p>EduGradesPro computes the overall <strong>FINAL GRADE</strong> using the matched tenant grading profile formula for the class. If no special tenant formula is configured, EduGradesPro uses the full configured number of grading periods, so later blank periods still count in the divisor instead of being excluded from the average.</p>
+            <strong>Final Page Grade Trail</strong>
+            <p>The overall <strong>FINAL GRADE</strong> appears only on the <strong>Final</strong> period Summary page. That page also shows <strong>PRELIM GRADE</strong>, <strong>MIDTERM GRADE</strong>, and <strong>PRE-FINAL GRADE</strong> before the final-period grade column, such as <strong>FX Grade</strong>.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Final Grade Formula</strong>
+            <p>EduGradesPro computes the <strong>FINAL GRADE</strong> using the grading profile matched to the class. If there is no special formula, it uses all configured grading periods. Missing later periods still count in the divisor.</p>
           </div>
             <div class="manual-rule">
-              <strong>Deadline Enforcement</strong>
-              <p>Submission windows are governed by period lock rules and may be auto-locked based on configured deadlines.</p>
+              <strong>Deadlines</strong>
+              <p>Period lock rules define submission deadlines. These deadlines are used for compliance tracking and, in some cases, locking behavior.</p>
             </div>
             <div class="manual-rule">
-              <strong>Read-Only Review After Deadline</strong>
-              <p>When a period is no longer open for normal encoding under active-period governance, faculty may still open Attendance and Summary to review stored records, but editing and submission actions stay disabled unless the period is formally reopened or covered by an approved correction window.</p>
+              <strong>Read-Only Review</strong>
+              <p>When a period is closed for normal encoding, Attendance and Summary may still be opened for review. Editing stays blocked unless the period is active again, reopened, or covered by an approved correction window.</p>
             </div>
             <div class="manual-rule">
               <strong>Final Clearance</strong>
-              <p>The My Classes page now includes a dedicated Final Clearance action area that lets the faculty member preview campus-term completion status and generate the official final clearance PDF once all clearance conditions are satisfied. Each generated report prints a QR code, Reference No., and Verification Code for NCBA-side validation.</p>
+              <p>My Classes includes a Final Clearance area. Faculty can check completion status and generate the official final clearance PDF once all requirements are met. The PDF includes a QR code, Reference No., and Verification Code.</p>
             </div>
             <div class="manual-rule">
               <strong>My Signature</strong>
-              <p>When NCBA enables stored signatures, faculty can open My Signature from the portal header to upload an encrypted PNG/JPG signature image. Current-password confirmation is required before the stored signature can be saved, replaced, or removed.</p>
+              <p>If stored signatures are enabled, faculty can upload a PNG/JPG signature from My Signature. The current password is required before saving, replacing, or removing a signature.</p>
             </div>
             <div class="manual-rule">
-              <strong>Deadline Reminder Banner</strong>
-              <p>EduGradesPro surfaces the current active grading period and the current grade submission deadline on the Faculty Dashboard, My Classes page, and the class period page so faculty can see both the official working period and its due date before final submission. If a configured deadline belongs to a different campus or term scope, or uses a period code that does not match the class template, the banner now explains that it does not match the faculty member's accepted classes.</p>
+              <strong>Deadline Banner</strong>
+              <p>The Faculty Dashboard, My Classes, and class period page show the current active grading period and submission deadline. If a deadline does not match the faculty member's campus, term, or class template period, the banner explains why it does not apply.</p>
             </div>
             <div class="manual-rule">
               <strong>Dashboard Priority Actions</strong>
-              <p>The Faculty Dashboard now includes Priority Actions and Students At Risk near the top of the page so faculty can quickly open urgent deadline, missing-grade, score-entry, correction, and intervention follow-ups from one read-only command-center area.</p>
+              <p>Priority Actions shows urgent work near the top of the Dashboard, such as deadlines, missing grades, score entry, corrections, resubmissions, and intervention follow-ups.</p>
             </div>
             <div class="manual-rule">
               <strong>Pinnacle Periodic Grade Summary</strong>
-              <p>The Summary page print button generates an NCBA-branded Summary of Periodic Grades for Pinnacle encoding. The sheet includes the NCBA logo and heading, address, grading period, academic year, semester/term, faculty name, course code, course title, units, section, student list, periodic grade, and status.</p>
+              <p>The Summary print button generates an NCBA-branded Summary of Periodic Grades for Pinnacle encoding. It includes the class details, student list, periodic grade, and status.</p>
             </div>
             <div class="manual-rule">
               <strong>Overdue but Still Open</strong>
-              <p>If the submission deadline passes and the class-period is still unfinished, EduGradesPro keeps the grade book open so the faculty member can complete encoding and submit. The period is simply marked overdue and included in the non-compliance monitor for authorized users.</p>
+              <p>If the deadline passes and the period is still unfinished, the gradebook stays open so faculty can complete encoding and submit. The period is marked overdue and appears in the non-compliance monitor for authorized users.</p>
             </div>
           <div class="manual-rule">
-            <strong>Print Record</strong>
-            <p>The print sheet serves as a formal companion document for review, sign-off, and institutional filing.</p>
+            <strong>Printed Copy</strong>
+            <p>The printed sheet can be used for review, sign-off, and filing.</p>
           </div>
         </div>
       </div>
     </div>
     <div class="card manual-section-card" id="manual-corrections">
       <div class="card-body">
-        <div class="manual-section-title">7. Grade Corrections and Reopen Governance</div>
+        <div class="manual-section-title">7. Corrections and Reopen</div>
         <div class="manual-rule-grid mb-3">
           <div class="manual-rule">
             <strong>System Request Mode</strong>
-            <p>Use the in-portal correction request when institutional policy allows electronic filing and approval tracking.</p>
+            <p>Use the portal correction request when the school allows electronic filing and approval tracking.</p>
           </div>
           <div class="manual-rule">
             <strong>Manual Only Mode</strong>
-            <p>Use the paper route when the tenant policy requires manual approval and admin reopen processing outside the portal.</p>
+            <p>Use the paper/manual process when the school requires corrections to be handled outside the portal.</p>
           </div>
         </div>
         <div class="manual-rule-grid">
           <div class="manual-rule">
             <strong>After Deadline</strong>
-            <p>If the period is still unsubmitted, continue encoding and submit as soon as possible. If the period was already submitted and later needs changes, use the correction request workflow.</p>
+            <p>If the period is not yet submitted, keep encoding and submit as soon as possible. If it was already submitted and needs changes, use the correction workflow.</p>
           </div>
           <div class="manual-rule">
-            <strong>Audit Traceability</strong>
-            <p>Requests, approvals, rejections, reopen actions, gradebook updates, correction attachment uploads/downloads, and optional official correction PDF outputs are captured for accountability and monitoring.</p>
+            <strong>Audit Trail</strong>
+            <p>Requests, approvals, rejections, reopen actions, gradebook changes, attachments, and correction PDFs are logged for accountability.</p>
           </div>
           <div class="manual-rule">
-            <strong>Submission Notifications</strong>
-            <p>When enabled by tenant configuration, filing a correction request can immediately notify selected approver roles such as the college dean and CAO through NCBA-branded email notification cards that include petitioner and period name details.</p>
+            <strong>Notifications</strong>
+            <p>If enabled, correction requests can notify approvers such as the Dean or CAO by email.</p>
           </div>
           <div class="manual-rule">
-            <strong>Direct Score Petition Posting</strong>
-            <p>When the correction petition already contains exact corrected score values, final approval allows EduGradesPro to post the approved values directly into the gradebook, recompute the affected student's submitted period and final grade, and close the request without any additional faculty finalize step.</p>
+            <strong>Direct Score Posting</strong>
+            <p>If the request already includes exact corrected scores, final approval can post those scores directly, recompute the affected student's grades, and close the request.</p>
           </div>
         </div>
       </div>
@@ -410,8 +567,8 @@
     <div class="card-body">
       <div class="manual-section-title">7.1 Sample Grade Computation</div>
       <p class="manual-copy">
-        The following example shows how EduGradesPro computes one student's grade using a Base-50 raw-score setup,
-        period component weights, and the final-grade formula. Actual classes follow the grading template assigned to the course.
+        This example shows how EduGradesPro can compute one student's grade using Base-50 scoring, component weights,
+        and a final-grade formula. Actual classes still follow the grading template assigned to the course.
       </p>
 
       <div class="manual-rule-grid mb-3">
@@ -420,8 +577,16 @@
           <p><code>Computed Score = ((Raw Score / Total Score) x 50) + 50</code></p>
         </div>
         <div class="manual-rule">
+          <strong>Blank Score Entry</strong>
+          <p>When scores are saved, blank active-student score cells are saved as 0.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Template Coverage Before Submission</strong>
+          <p>Before submission, every required non-attendance grading area must have at least one activity.</p>
+        </div>
+        <div class="manual-rule">
           <strong>Sample Period Structure</strong>
-          <p>Prelim and Midterm use Class Standing 60% plus Exam 40%. Prefinal uses the class-standing result as the period grade in this example. Final Exam uses the exam score as the period grade.</p>
+          <p>In this sample, Prelim and Midterm use Class Standing 60% plus Exam 40%. Pre-Final uses class standing as the period grade. Final Exam uses the exam score as the period grade.</p>
         </div>
       </div>
 
@@ -547,46 +712,46 @@
         </tbody>
       </table>
       <div class="manual-note">
-        Summer computation depends on the matched Tenant Grading Profile. If the Summer profile uses weighted selected periods, Prelim is excluded by leaving the Prelim period code out of the weight list.
+        Summer computation depends on the grading profile matched to the class. If the Summer profile uses selected weighted periods, Prelim is excluded by not including it in the weight list.
       </div>
     </div>
   </div>
 
   <div class="card manual-section-card mb-4" id="manual-prediction">
     <div class="card-body">
-      <div class="manual-section-title">8. Grade Prediction Governance</div>
+      <div class="manual-section-title">8. Grade Prediction</div>
       <div class="manual-rule-grid">
         <div class="manual-rule">
           <strong>Unofficial and Read-Only</strong>
-          <p>Grade prediction is an advisory tool only. It never writes to the official gradebook and must remain clearly labeled as unofficial.</p>
+          <p>Grade prediction is only a guide. It does not change the official gradebook.</p>
         </div>
         <div class="manual-rule">
           <strong>Same Grading Rules</strong>
-          <p>Prediction uses the same assigned grading template, weighting path, and final-grade formula used by the official computation engine for the class.</p>
+          <p>Prediction uses the same grading template and formula path as the official grade computation.</p>
         </div>
         <div class="manual-rule">
           <strong>Scenario Planning</strong>
-          <p>When enabled, the what-if simulator helps faculty test assumed scores for remaining items in the current grading period without altering saved grading records.</p>
+          <p>When enabled, the what-if tool lets faculty test possible scores for remaining items without saving anything to the gradebook.</p>
         </div>
         <div class="manual-rule">
           <strong>Feature-Governed Access</strong>
-          <p>Access to prediction pages and what-if simulation must be enabled through Configuration Management and can be limited by role.</p>
+          <p>Prediction and what-if access are controlled in Configuration Management and may be limited by role.</p>
         </div>
         <div class="manual-rule">
           <strong>Interpretation Guidance</strong>
-          <p>The prediction screen should provide a direct link to a separate explanation page that defines each displayed column, explains the methodology and factor set behind each value, documents Base 50 transmutation and the period/final-grade formulas, gives examples, and reminds faculty that simulated values are planning guides only.</p>
+          <p>The prediction page includes an explanation page for the columns, formulas, Base-50 scoring, examples, and reminders that the values are only for planning.</p>
         </div>
         <div class="manual-rule">
           <strong>Passing-Final Requirement</strong>
-          <p>For students who remain at risk, the prediction screen may also show the average grade still needed across the remaining final periods so faculty can identify the level required to finish with a passing final grade.</p>
+          <p>For at-risk students, the page may show what average is still needed in the remaining periods to reach a passing final grade.</p>
         </div>
         <div class="manual-rule">
           <strong>Period-Specific Estimate</strong>
-          <p>Each prediction page is tied to one grading period. The main estimated grade is for that current period, while the possible final grade is shown only as secondary planning guidance.</p>
+          <p>Each prediction page is for one grading period. The main estimate is the current-period grade. The possible final grade is only extra guidance.</p>
         </div>
         <div class="manual-rule">
           <strong>Official Grade Release Control</strong>
-          <p>The Faculty Portal may hide official computed period grades and the official final grade until the configured deadline has passed. This release behavior is governed by admin settings and is separate from the unofficial prediction module.</p>
+          <p>Official grades may be hidden until the configured release point. This is separate from prediction, which is always unofficial.</p>
         </div>
       </div>
     </div>
@@ -598,19 +763,27 @@
       <div class="manual-rule-grid">
         <div class="manual-rule">
           <strong>Purpose</strong>
-          <p>The at-risk monitor groups students by class and period so faculty can quickly spot who needs follow-up before the period closes.</p>
+          <p>The at-risk monitor lists students who may need help in the current period.</p>
         </div>
         <div class="manual-rule">
           <strong>How to Use</strong>
-          <p>Open the monitor from the Faculty Portal sidebar, then review the students who are currently projected below the passing line.</p>
+          <p>Open it from the Faculty Portal sidebar and check students projected below the passing line.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Risk Rule</strong>
+          <p>A student appears here if the current-period estimate or the possible final grade is below the passing threshold.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Best Periods</strong>
+          <p>Use Prelim for early warning, Midterm for the main intervention, Pre-Final for last follow-up, and Final mostly for confirmation.</p>
         </div>
         <div class="manual-rule">
           <strong>Next Step</strong>
-          <p>Use the class prediction page or class summary page to inspect coverage, missing items, and the amount still needed to recover.</p>
+          <p>Open the class prediction or summary page to check coverage, missing items, and possible follow-up work.</p>
         </div>
         <div class="manual-rule">
           <strong>Governance Note</strong>
-          <p>This is an advisory tool only. It does not replace the official gradebook, submission, or correction process.</p>
+          <p>This is only an advisory tool. It does not replace official grades, submission, or correction approval.</p>
         </div>
       </div>
     </div>
@@ -631,52 +804,55 @@
           <tbody>
             <tr>
               <td>ACTIVE</td>
-              <td>Student remains part of the graded class list.</td>
-              <td>Included in normal grading coverage and readiness checks.</td>
+              <td>The student is still part of the class.</td>
+              <td>Included in grading, coverage, and readiness checks.</td>
             </tr>
             <tr>
               <td>Removed from Class</td>
-              <td>Student changed schedule and should be removed from this specific class master list without being marked dropped or withdrawn.</td>
-              <td>Excluded from active grading coverage for this class while preserving cleaner distinction from DRP/WITHDRAWN/INC governance. Faculty uses the small remove icon beside the student number and must type <strong>remove</strong> to confirm the action.</td>
+              <td>The student moved out of this class section but is not marked dropped or withdrawn.</td>
+              <td>Excluded from this class's active grading. Faculty must use the remove icon and type <strong>remove</strong> to confirm.</td>
             </tr>
             <tr>
               <td>DRP</td>
-              <td>Student is dropped from this particular class.</td>
-              <td>Excluded from active grading coverage and readiness calculations.</td>
+              <td>The student dropped this class.</td>
+              <td>Excluded from active grading and readiness checks.</td>
             </tr>
             <tr>
               <td>WITHDRAWN</td>
-              <td>Student is withdrawn from the term.</td>
-              <td>Excluded from active grading coverage and tracked separately from dropped students.</td>
+              <td>The student withdrew from the term.</td>
+              <td>Excluded from active grading and tracked separately from dropped students.</td>
             </tr>
             <tr>
               <td>INC</td>
-              <td>Student has an incomplete class record.</td>
-              <td>Excluded from active grading coverage and readiness calculations until the record is resolved.</td>
+              <td>The student has an incomplete class record.</td>
+              <td>Excluded from active grading and readiness checks until resolved.</td>
             </tr>
           </tbody>
           </table>
           <div class="manual-note">
-            The class-list page now also shows a visible <strong>Status Legend</strong> so faculty can confirm the meaning of <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>WITHDRAWN</strong>, and <strong>INC</strong> at a glance before changing any row.
+            The class-list page shows a <strong>Status Legend</strong> so faculty can quickly check what <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>WITHDRAWN</strong>, and <strong>INC</strong> mean.
           </div>
           <div class="manual-note">
-            When faculty adds a student to the class, EduGradesPro now supports typed lookup by student number or by the student's last name and first name before the faculty clicks <strong>Save</strong>.
+            Faculty DRP changes follow the cutoff configured by Admin. By default, DRP is allowed through Pre-Final and blocked once Final is the active grading period.
+          </div>
+          <div class="manual-note">
+            When adding a student, faculty can search by student number, last name, or first name before clicking <strong>Save</strong>.
           </div>
         <div class="manual-note">
-          For easier visual checking, the class list also shows a line number before the student number and formats names as <strong>LAST NAME</strong>, <strong>First Name</strong>.
+          For easier checking, the class list shows a line number before the student number and formats names as <strong>LAST NAME</strong>, <strong>First Name</strong>.
         </div>
       </div>
     </div>
     <div class="card manual-section-card" id="manual-privacy">
       <div class="card-body">
-        <div class="manual-section-title">10. Privacy, Security, and Audit Controls</div>
+        <div class="manual-section-title">10. Privacy, Security, and Audit</div>
         <ul class="manual-policy-list">
-          <li>Faculty access is limited to assigned offerings and authorized portal functions.</li>
-          <li>Password complexity validation, optional email OTP, forced password change, privacy consent, single-device session enforcement, a 1-hour session timeout, and temporary login lockout are governed centrally.</li>
-          <li>The Faculty Portal quick tour is a read-only orientation aid. Faculty may turn it off for their own next logon using the tour control.</li>
-          <li>Operational actions may be audited, including submission, reopen, correction, and related record changes.</li>
-          <li>Printed or exported records should be handled according to institutional data privacy requirements.</li>
-          <li>The institutional privacy statement remains the authoritative privacy reference.</li>
+          <li>Faculty can access only assigned classes and allowed portal functions.</li>
+          <li>Password rules, OTP, forced password change, privacy consent, single-device login, session timeout, and lockout are controlled by system settings.</li>
+          <li>The Faculty Portal quick tour is only a guide. Faculty may turn it off for their next login.</li>
+          <li>Important actions may be audited, including submission, reopen, correction, and gradebook changes.</li>
+          <li>Printed or exported records must be handled according to school data privacy rules.</li>
+          <li>The official privacy reference is the institutional privacy notice.</li>
         </ul>
         <div class="manual-note">
           Official reference:
@@ -688,38 +864,37 @@
 
   <div class="card manual-section-card">
     <div class="card-body">
-      <div class="manual-section-title">11. Management Discussion Note</div>
+      <div class="manual-section-title">11. Management Note</div>
       <p class="manual-copy">
-        This manual is intentionally structured to support later policy walkthroughs with academic leadership and management.
-        As EduGradesPro governance is finalized, we can continue expanding this manual into a more formal institutional reference
-        with approval matrices, deadline charts, and role-by-role accountability tables.
+        This guide can still be expanded later for management review. Future versions may include approval matrices,
+        deadline charts, and role-by-role responsibility tables.
       </p>
     </div>
   </div>
 
   <div class="card manual-section-card mt-4" id="manual-reminders">
     <div class="card-body">
-      <div class="manual-section-title">12. Faculty Reminder Center and Email Queue</div>
+      <div class="manual-section-title">12. Reminder Center and Email Queue</div>
       <div class="manual-rule-grid">
         <div class="manual-rule">
           <strong>Reminder Center</strong>
-          <p>Faculty may create future activity reminders, due-date reminders, and follow-up notes in one portal location. When a faculty member creates a future-dated activity, EduGradesPro can also auto-create a preparation reminder tied to that activity.</p>
+          <p>Faculty can create activity reminders, due-date reminders, and follow-up notes in one place. Future-dated activities can also create preparation reminders.</p>
         </div>
         <div class="manual-rule">
           <strong>Completion and Snooze</strong>
-          <p>Reminder items can be marked completed or snoozed so the faculty list stays organized and practical.</p>
+          <p>Reminders can be marked done or snoozed so the list stays useful.</p>
         </div>
         <div class="manual-rule">
           <strong>Optional Email Queue</strong>
-          <p>When tenant configuration enables it, due reminders can queue email notifications to the faculty's registered email address without blocking the production web request.</p>
+          <p>If enabled, due reminders can send email notifications to the faculty member's registered email address.</p>
         </div>
         <div class="manual-rule">
           <strong>Performance Safeguard</strong>
-          <p>The reminder email flow is queue-based and batch-processed so the web server does not attempt to send hundreds of emails in a single page request.</p>
+          <p>Email reminders are queued and processed in batches, so normal page loading stays fast.</p>
         </div>
         <div class="manual-rule">
           <strong>Submission Compliance Notices</strong>
-          <p>When tenant configuration enables the non-compliance workflow, the Reminder Center can also show formal overdue-submission notices for a class period. These notices are informational and remain visible until the affected periodic grade book is finally submitted and resolved.</p>
+          <p>If enabled, the Reminder Center can show overdue-submission notices. These stay visible until the affected period is submitted and resolved.</p>
         </div>
       </div>
     </div>
@@ -731,15 +906,15 @@
       <div class="manual-rule-grid">
         <div class="manual-rule">
           <strong>Private to Faculty</strong>
-          <p>Faculty notes are private working memos for the faculty user and are not visible to students.</p>
+          <p>Faculty notes are private memos. Students cannot see them.</p>
         </div>
         <div class="manual-rule">
           <strong>Optional Scope</strong>
-          <p>Each memo may remain general or be linked to a specific class or student for easier follow-up.</p>
+          <p>A memo can be general or linked to a class or student.</p>
         </div>
         <div class="manual-rule">
           <strong>Pinning and Review</strong>
-          <p>Important notes may be pinned so they stay easy to find, while older notes remain searchable in the memo center.</p>
+          <p>Important notes can be pinned. Older notes can still be searched.</p>
         </div>
         <div class="manual-rule">
           <strong>Recommended Use</strong>
@@ -748,5 +923,6 @@
       </div>
     </div>
   </div>
+  <a class="faculty-guide-back-top" href="#top" aria-label="Back to top">Back to top</a>
 </div>
 {% endblock %}

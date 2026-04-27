@@ -7,6 +7,9 @@
     {% if "users.read" in effective_permissions %}
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:login_lockout_list' %}">Login Lockouts</a>
     {% endif %}
+    {% if "users.update" in effective_permissions %}
+    <a class="btn btn-sm btn-outline-danger" href="{% url 'admin_portal:faculty_deactivation_schedule' %}">Faculty Deactivation</a>
+    {% endif %}
     {% if "users.create" in effective_permissions %}
     <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:user_create' %}">Add User</a>
     {% endif %}

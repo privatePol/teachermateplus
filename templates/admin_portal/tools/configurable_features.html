@@ -738,6 +738,14 @@
         {% endif %}
         {% for error in form.enrollment_ownership_mode.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.faculty_drp_allowed_through_period.id_for_label }}">{{ form.faculty_drp_allowed_through_period.label }}</label>
+        {{ form.faculty_drp_allowed_through_period }}
+        {% if form.faculty_drp_allowed_through_period.help_text %}
+        <div class="form-text">{{ form.faculty_drp_allowed_through_period.help_text }}</div>
+        {% endif %}
+        {% for error in form.faculty_drp_allowed_through_period.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
       <div class="row g-3">
         <div class="col-md-4">
           <label class="form-label" for="{{ form.class_master_list_term.id_for_label }}">{{ form.class_master_list_term.label }}</label>

@@ -311,6 +311,8 @@
           <div class="period-state">
             {% if item.is_correction_active %}
               <span class="badge text-bg-warning">Correction Window Open</span>
+            {% elif item.is_locked %}
+              <span class="badge text-bg-danger">Locked</span>
             {% elif item.is_non_compliant %}
               <span class="badge text-bg-danger">Non-Compliant</span>
             {% elif item.submission_status == "REOPENED" %}
@@ -319,8 +321,6 @@
               <span class="badge text-bg-secondary">Closed by Active Period Policy</span>
             {% elif item.is_submitted %}
               <span class="badge text-bg-info">Submitted</span>
-            {% elif item.is_locked %}
-              <span class="badge text-bg-danger">Locked</span>
             {% else %}
               <span class="badge text-bg-success">Open</span>
             {% endif %}
@@ -338,7 +338,11 @@
               <span>Not set by admin yet</span>
             {% endif %}
           </div>
-          {% if item.is_non_compliant %}
+          {% if item.is_locked and item.submission_status == "REOPENED" %}
+          <div class="alert alert-danger py-2 small">
+            This reopened gradebook was not resubmitted before the deadline. Score editing is disabled; open Summary to finalize and resubmit the existing records.
+          </div>
+          {% elif item.is_non_compliant %}
           <div class="alert alert-danger py-2 small">
             Submission deadline already passed. This grading period stays open until submitted, but it is already tagged for non-compliance monitoring.
           </div>

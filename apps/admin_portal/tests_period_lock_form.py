@@ -1,10 +1,15 @@
-from datetime import date
+from datetime import UTC, date
 
+from django.conf import settings
 from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
 
 from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
+from apps.accounts.models import User
 from apps.admin_portal.forms import GradingPeriodLockForm
-from apps.grading.models import CourseTemplateAssignment, GradingTemplate, GradingTemplatePeriod
+from apps.grading.models import CourseTemplateAssignment, GradingPeriodLock, GradingTemplate, GradingTemplatePeriod
+from apps.rbac.models import Permission
 from apps.tenants.models import Campus, Department, Program, Tenant
 
 
@@ -159,3 +164,74 @@ class GradingPeriodLockFormTests(TestCase):
         rendered = str(form["period_code"])
         self.assertIn('value="GENED_PRELIM"', rendered)
         self.assertIn("Prelim (GENED_PRELIM)", rendered)
+
+    def test_period_lock_form_explains_lock_scope_and_active_flags(self):
+        form = GradingPeriodLockForm(
+            tenant_queryset=Tenant.objects.filter(id=self.tenant.id),
+            campus_queryset=Campus.objects.filter(id=self.campus.id),
+            academic_year_queryset=AcademicYear.objects.filter(id=self.academic_year.id),
+            term_queryset=Term.objects.filter(id=self.term.id),
+            offering_queryset=CourseOffering.objects.filter(id=self.offering.id),
+        )
+
+        self.assertIn("faculty score, activity, and attendance editing is disabled", form.fields["is_locked"].help_text)
+        self.assertIn("Campus to apply the same rule", form.fields["scope_type"].help_text)
+        self.assertIn("ignored by faculty pages", form.fields["is_active"].help_text)
+
+    def test_period_lock_list_hides_inactive_rules_by_default(self):
+        Permission.objects.bulk_create(
+            [
+                Permission(code="admin_portal.access", module="admin_portal", action="access"),
+                Permission(code="grading_periods.read", module="grading_periods", action="read"),
+                Permission(code="grading_periods.lock", module="grading_periods", action="lock"),
+                Permission(code="grading_periods.reopen", module="grading_periods", action="reopen"),
+            ]
+        )
+        admin_user = User.objects.create_superuser(
+            username="superadmin",
+            email="superadmin@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        active_lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.period.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.datetime(2026, 4, 24, 0, 0, tzinfo=UTC),
+            is_locked=False,
+            is_active=True,
+        )
+        inactive_lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.period.code,
+            scope_type=GradingPeriodLock.ScopeType.COURSE,
+            course_offering=self.offering,
+            deadline_at=timezone.datetime(2026, 4, 24, 0, 0, tzinfo=UTC),
+            is_locked=True,
+            is_active=False,
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse("admin_portal:grading_period_lock_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Active Rules")
+        self.assertContains(response, "Rule State")
+        self.assertContains(response, f"Edit</a>", count=1, html=False)
+        self.assertContains(response, str(active_lock.period_code))
+        self.assertNotContains(response, "Ignored")
+        self.assertNotContains(response, f"/period-locks/{inactive_lock.id}/edit/")
+
+        response = self.client.get(reverse("admin_portal:grading_period_lock_list") + "?active=0")
+        self.assertContains(response, "Inactive")
+        self.assertContains(response, "Ignored")
+        self.assertContains(response, f"/period-locks/{inactive_lock.id}/edit/")

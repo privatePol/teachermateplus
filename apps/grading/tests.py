@@ -486,6 +486,30 @@ class CorrectionWorkflowTests(TestCase):
             ).exists()
         )
 
+    def test_official_period_and_final_grades_round_to_whole_numbers(self):
+        GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
+            status=GradeSubmission.Status.REOPENED
+        )
+
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=self.activity,
+            score_payload=[{"student_id": self.student1.id, "raw_score": Decimal("33.50")}],
+        )
+
+        score = StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True)
+        period_grade = StudentPeriodGrade.objects.get(
+            offering=self.offering,
+            template_period=self.period,
+            student=self.student1,
+        )
+        final_grade = StudentFinalGrade.objects.get(offering=self.offering, student=self.student1)
+
+        self.assertEqual(score.computed_score, Decimal("83.50"))
+        self.assertEqual(period_grade.class_standing_grade, Decimal("84"))
+        self.assertEqual(period_grade.period_grade, Decimal("84"))
+        self.assertEqual(final_grade.final_grade, Decimal("84"))
+
     def test_exam_component_flag_drives_exam_bucket_without_code_name_dependency(self):
         GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
             status=GradeSubmission.Status.REOPENED
@@ -1390,3 +1414,28 @@ class CompletionGraceWindowTests(TestCase):
         self.lock.refresh_from_db()
         self.assertEqual(result["count"], 0)
         self.assertFalse(self.lock.is_locked)
+
+    def test_auto_lock_locks_reopened_submission_after_deadline(self):
+        submission = GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            status=GradeSubmission.Status.REOPENED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now() - timedelta(days=1),
+            reopened_by_user=self.faculty_user,
+            reopened_at=timezone.now() - timedelta(hours=2),
+        )
+
+        result = GradingGovernanceService.auto_lock_due_periods(at=timezone.now())
+
+        self.assertEqual(result["count"], 1)
+        course_lock = GradingPeriodLock.objects.get(
+            scope_type=GradingPeriodLock.ScopeType.COURSE,
+            course_offering=self.offering,
+            period_code=self.lock.period_code,
+        )
+        self.assertTrue(course_lock.is_locked)
+        submission.refresh_from_db()
+        self.assertEqual(submission.status, GradeSubmission.Status.REOPENED)
