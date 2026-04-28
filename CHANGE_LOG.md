@@ -29,6 +29,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Faculty Portal main guide navigation has been reorganized into grouped topic cards so faculty can jump by task without scanning a cluttered list of links.
 - Faculty Portal manual navigation has also been reorganized into grouped topic cards for easier scanning and less visual clutter.
 - Faculty Portal guide and formal manual have been visually refreshed with a stronger green/teal/gold theme, animated cards, target highlighting, and bottom-left Back to top links.
+- Faculty Portal guide now includes a Frequently Asked Questions section covering attendance sessions, official-grade visibility, active period expectations, corrections, readiness, and at-risk monitoring.
+- Faculty Portal FAQ has been expanded with submission-related guidance for DRP cutoff, Final Clearance printing, missing grading-component activities, wrong class assignments, overdue submission, and readiness blockers.
 - Faculty Dashboard has been redesigned for easier reading and navigation with a stronger hero, quick shortcut cards, a two-column priority/action area, and a privacy-safe at-risk student preview.
 - Admin Portal guide has been redesigned as a polished workstream hub with a stronger hero, an operating-path card, grouped navigation, target highlighting, and a fixed Back to top link.
 - Admin Portal now includes a Faculty Deactivation page where authorized admins can schedule or cancel future faculty account deactivations, backed by the `apply_scheduled_user_deactivations` management command for cron processing.

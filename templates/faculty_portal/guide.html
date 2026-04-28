@@ -303,6 +303,33 @@
     color: #5d5532;
     margin: 0.35rem 0 0;
   }
+  .guide-faq-grid {
+    display: grid;
+    gap: 0.85rem;
+  }
+  .guide-faq-item {
+    border: 1px solid #dfe9e1;
+    border-radius: 1rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f7fbf7 100%);
+    box-shadow: 0 10px 20px rgba(18, 53, 32, 0.06);
+    overflow: hidden;
+  }
+  .guide-faq-item summary {
+    cursor: pointer;
+    color: #173d27;
+    font-weight: 800;
+    padding: 0.95rem 1rem;
+    list-style-position: inside;
+  }
+  .guide-faq-item p {
+    color: #5b7162;
+    margin: 0;
+    padding: 0 1rem 1rem;
+  }
+  .guide-faq-item[open] {
+    border-color: #f0d26c;
+    box-shadow: 0 18px 34px rgba(16, 82, 54, 0.12);
+  }
   .guide-management-card {
     border: 0;
     border-radius: 1.25rem;
@@ -632,6 +659,7 @@
             <a href="#guide-first-login">First Login</a>
             <a href="#guide-privacy">Privacy</a>
             <a href="#guide-notes">Memos</a>
+            <a href="#guide-faq">FAQ</a>
           </div>
         </div>
       </div>
@@ -1073,6 +1101,62 @@
             <a href="https://ncba.edu.ph/ncba-privacy-notice/" target="_blank" rel="noopener noreferrer">NCBA Data Privacy Notice</a>.
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card guide-section-card mb-4" id="guide-faq">
+    <div class="card-body">
+      <div class="guide-section-title">Frequently Asked Questions</div>
+      <div class="guide-faq-grid">
+        <details class="guide-faq-item">
+          <summary>Why can I not create an attendance session?</summary>
+          <p>If the period is read-only, closed, locked, or already submitted, session creation is disabled. You can still select an existing session for review if one was created earlier.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>Why are official grades hidden or not printable yet?</summary>
+          <p>In this setup, faculty can see or print official grades only after submission.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>What should I do if the current active period is not the period I expected?</summary>
+          <p>The active period is governed by admin settings and deadline rules. If a prior period is closed, open the current active period for encoding, or ask authorized admin users about reopen or correction options.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>Can I still edit grades after submission?</summary>
+          <p>Submitted gradebooks are protected. Use the correction or reopen process when changes are still required.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>Until when can I mark a student as dropped?</summary>
+          <p>Faculty DRP access depends on the school's configured cutoff period. In the usual setup, faculty may mark DRP through Pre-Final, but not after Pre-Final before the Final Exam period.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>When can I print the Final Clearance?</summary>
+          <p>Use the Final Clearance area in My Classes after the required final-period and final-grade submission requirements are complete. If the clearance link is not available yet, finish the remaining submission or readiness items first.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>What happens if I do not create an activity for a grading component?</summary>
+          <p>If the template requires that component, submission readiness may block submission because EduGradesPro has no activity or attendance setup to compute that part of the grade. Create the needed activity, encode scores, then recompute or review Summary again.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>What should I do if a class in My Classes is not mine?</summary>
+          <p>Do not encode grades or attendance for that class. Report it to your campus administrator, dean, or academic coordinator so the faculty assignment can be corrected.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>Why can I not submit even though I encoded some scores?</summary>
+          <p>Submission requires complete records for active students and required template items. Check Summary readiness for missing activities, attendance sessions, blank required records, or students that need the correct class-list status.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>What should I do if the submission deadline already passed?</summary>
+          <p>Finish encoding and submit as soon as possible. Overdue unsubmitted gradebooks remain open for completion, but they may appear in monitoring and non-compliance reports.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>Why is a student missing from submission readiness?</summary>
+          <p>Only active students are included in normal readiness checks. Students marked DRP, WITHDRAWN, INC, or removed from class may be excluded from active grading counts.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>When should I use the At-Risk Monitor?</summary>
+          <p>Use it during the current active grading period, especially after scores are encoded. It is most helpful before the period closes, while there is still time for intervention.</p>
+        </details>
       </div>
     </div>
   </div>
