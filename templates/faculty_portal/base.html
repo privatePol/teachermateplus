@@ -130,6 +130,18 @@
     padding: 1.35rem;
     min-width: 0;
   }
+  .faculty-identity-warning {
+    border: 1px solid #e8c85d;
+    border-radius: 1rem;
+    background: linear-gradient(135deg, #fff8dc 0%, #fff3bd 100%);
+    color: #5b4700;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 10px 22px rgba(122, 91, 0, 0.09);
+  }
+  .faculty-identity-warning strong {
+    color: #453600;
+  }
   .faculty-user {
     color: #f6fff8;
     font-weight: 600;
@@ -407,6 +419,11 @@
       </div>
     </aside>
     <main class="faculty-main">
+      {% if faculty_portal_identity_warning %}
+      <div class="faculty-identity-warning" role="alert">
+        <strong>Active session notice:</strong> {{ faculty_portal_identity_warning }}
+      </div>
+      {% endif %}
       {% block faculty_content %}{% endblock %}
     </main>
   </div>
