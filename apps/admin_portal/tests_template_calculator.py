@@ -8,7 +8,12 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Term
-from apps.grading.models import GradingTemplate, GradingTemplateComponent, GradingTemplatePeriod
+from apps.grading.models import (
+    GradingTemplate,
+    GradingTemplateComponent,
+    GradingTemplatePeriod,
+    TenantGradingProfile,
+)
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.tenants.models import Campus, Department, Tenant
 
@@ -165,7 +170,7 @@ class GradingTemplateCalculatorViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Grading Template Testing Calculator")
         self.assertContains(response, "Testing Template")
-        self.assertContains(response, "Template Final Preview")
+        self.assertContains(response, "Final Grade")
         self.assertContains(response, "85.00")
 
     def test_post_calculator_computes_periods_and_final_grade(self):
@@ -197,3 +202,49 @@ class GradingTemplateCalculatorViewTests(TestCase):
         self.assertContains(response, "Midterm")
         self.assertContains(response, "Pre-Final Class Standing")
         self.assertContains(response, "Final Exam")
+        self.assertContains(response, "Final Grade Computation")
+        content = response.content.decode()
+        self.assertGreater(content.index("Final Grade Computation"), content.index("Final Exam"))
+
+    def test_calculator_uses_weighted_tenant_grading_profile_final_formula(self):
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            profile_code="REG-WEIGHTED",
+            profile_name="Regular Weighted Formula",
+            grading_template=self.template,
+            final_grade_formula_mode=TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
+            final_grade_formula_json={
+                "period_weights": [
+                    {"period_code": "PRELIM", "weight": "50.00"},
+                    {"period_code": "MIDTERM", "weight": "50.00"},
+                ]
+            },
+            is_active=True,
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("admin_portal:grading_template_calculator"),
+            {
+                "grading_template": self.template.id,
+                "sample_value": "85.00",
+                f"component_{self.prelim_cs.id}_raw": "90.00",
+                f"component_{self.prelim_cs.id}_total": "100.00",
+                f"component_{self.prelim_exam.id}_raw": "80.00",
+                f"component_{self.prelim_exam.id}_total": "100.00",
+                f"component_{self.midterm_cs.id}_raw": "70.00",
+                f"component_{self.midterm_cs.id}_total": "100.00",
+                f"component_{self.midterm_exam.id}_raw": "60.00",
+                f"component_{self.midterm_exam.id}_total": "100.00",
+                f"component_{self.prefinal_component.id}_raw": "88.00",
+                f"component_{self.prefinal_component.id}_total": "100.00",
+                f"component_{self.final_exam_component.id}_raw": "92.00",
+                f"component_{self.final_exam_component.id}_total": "100.00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "REG-WEIGHTED")
+        self.assertContains(response, "Weighted Selected Periods")
+        self.assertContains(response, "(93.00 x 50.00%) + (83.00 x 50.00%) = 88.00")
+        self.assertContains(response, "Official Rounded Final Grade")

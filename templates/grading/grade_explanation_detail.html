@@ -1,0 +1,164 @@
+{% if restricted_message %}
+<div class="alert alert-warning mb-0">
+  <strong>Explanation hidden.</strong>
+  <div>{{ restricted_message }}</div>
+  {% if official_grade_release_notes %}
+    <ul class="mb-0 mt-2">
+      {% for note in official_grade_release_notes %}
+      <li>{{ note }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>
+{% else %}
+<div class="grade-explain">
+  <div class="row g-3 mb-3">
+    <div class="col-md-7">
+      <div class="border rounded-3 p-3 h-100">
+        <div class="text-uppercase text-muted small fw-semibold">Overview</div>
+        <div class="h5 mb-1">{{ explanation.student.name }}</div>
+        <div class="small text-muted">{{ explanation.student.student_no }}{% if explanation.student.masked %} · identity masked{% endif %}</div>
+        <div class="small mt-2">{{ explanation.offering.course }} · {{ explanation.offering.section }} · {{ explanation.offering.term }}</div>
+      </div>
+    </div>
+    <div class="col-md-5">
+      <div class="border rounded-3 p-3 h-100">
+        <div class="text-uppercase text-muted small fw-semibold">Grade</div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="display-6 fw-bold text-success">{{ explanation.official_value|default:"-" }}</span>
+          {% if explanation.pass_fail %}
+          <span class="badge {% if explanation.pass_fail == 'PASSED' %}text-bg-success{% else %}text-bg-danger{% endif %}">{{ explanation.pass_fail }}</span>
+          {% endif %}
+        </div>
+        <div class="small text-muted">
+          Raw diagnostic value: {{ explanation.raw_value|floatformat:4|default:"-" }} · Rounded: {{ explanation.computed_official_value|default:"-" }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if explanation.warnings %}
+  <div class="mb-3">
+    {% for warning in explanation.warnings %}
+      <span class="badge text-bg-warning me-1 mb-1">{{ warning }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="border rounded-3 p-3 mb-3">
+    <div class="text-uppercase text-muted small fw-semibold mb-2">Source of Truth</div>
+    <div class="row g-2 small">
+      <div class="col-md-6"><strong>Template:</strong> {{ explanation.template.name }} <span class="text-muted">({{ explanation.template.source_label }})</span></div>
+      <div class="col-md-6"><strong>Profile:</strong> {{ explanation.profile.name }}</div>
+      <div class="col-md-6"><strong>Passing Threshold:</strong> {{ explanation.passing_threshold.value }} <span class="text-muted">({{ explanation.passing_threshold.source_label }})</span></div>
+      <div class="col-md-6"><strong>Base Value:</strong> {{ explanation.base_value.value }} <span class="text-muted">({{ explanation.base_value.source_label }})</span></div>
+      <div class="col-md-6"><strong>Final Formula:</strong> {{ explanation.final_formula.source_label }}</div>
+      <div class="col-md-6"><strong>Rounding:</strong> {{ explanation.rounding_policy.mode }}</div>
+    </div>
+  </div>
+
+  {% if explanation.grade_type == "FINAL" %}
+  <div class="border rounded-3 p-3 mb-3">
+    <div class="text-uppercase text-muted small fw-semibold mb-2">Period Breakdown</div>
+    <div class="small mb-2">{{ explanation.formula_text }}</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Period</th><th>Official Period Grade</th><th>Value Used</th><th>Weight/Share</th><th>Contribution</th></tr></thead>
+        <tbody>
+          {% for row in explanation.period_breakdown %}
+          <tr>
+            <td>{{ row.period_name }}</td>
+            <td>{{ row.period_grade|default:"-" }}</td>
+            <td>{% if row.missing %}0{% else %}{{ row.value_used }}{% endif %}</td>
+            <td>{% if row.weight %}{{ row.weight }}%{% else %}Average divisor{% endif %}</td>
+            <td>{{ row.contribution|floatformat:4|default:"-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="border rounded-3 p-3 mb-3">
+    <div class="text-uppercase text-muted small fw-semibold mb-2">Period Breakdown</div>
+    <div class="small mb-2">{{ explanation.formula_text }}</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Component</th><th>Type</th><th>Weight</th><th>Computed</th><th>Weighted Contribution</th></tr></thead>
+        <tbody>
+          {% for component in explanation.component_breakdown %}
+          <tr>
+            <td>{{ component.name }}</td>
+            <td>{% if component.is_exam_component %}Exam{% else %}Class Standing{% endif %}</td>
+            <td>{{ component.weight }}%</td>
+            <td>{{ component.score|default:"-" }}</td>
+            <td>{{ component.weighted_contribution|floatformat:4 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <details class="border rounded-3 p-3 mb-3">
+    <summary class="fw-semibold">Show Detailed Computation</summary>
+    <div class="mt-3">
+      {% for component in explanation.component_breakdown %}
+      <div class="mb-3">
+        <div class="fw-semibold">{{ component.name }} · {{ component.weight }}%</div>
+        {% if component.subcomponents %}
+          {% for sub in component.subcomponents %}
+          <div class="ms-3 mt-2">
+            <div class="small"><strong>{{ sub.name }}</strong> · {{ sub.weight }}% · score {{ sub.score|default:"-" }}{% if sub.is_attendance_component %} · attendance{% endif %}</div>
+            {% if sub.details %}
+              {% for detail in sub.details %}
+              <div class="ms-3 small text-muted">{{ detail.name }} · {{ detail.weight }}% · score {{ detail.score|default:"-" }}</div>
+              {% for activity in detail.activities %}
+              <div class="ms-4 small">{{ activity.title }}: {{ activity.raw_score|default:"-" }}/{{ activity.total_score }} = {{ activity.computed_score|default:"-" }}{% if activity.missing %} <span class="badge text-bg-light">missing</span>{% endif %}</div>
+              {% endfor %}
+              {% endfor %}
+            {% endif %}
+            {% for activity in sub.activities %}
+            <div class="ms-3 small">{{ activity.title }}: {{ activity.raw_score|default:"-" }}/{{ activity.total_score }} = {{ activity.computed_score|default:"-" }}{% if activity.missing %} <span class="badge text-bg-light">missing</span>{% endif %}</div>
+            {% endfor %}
+            {% for attendance in sub.attendance_records %}
+            <div class="ms-3 small">{{ attendance.title }}: {{ attendance.status_label }} = {{ attendance.mapped_score|default:"-" }}{% if attendance.missing %} <span class="badge text-bg-light">missing</span>{% endif %}</div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        {% endif %}
+        {% for activity in component.activities %}
+        <div class="ms-3 small">{{ activity.title }}: {{ activity.raw_score|default:"-" }}/{{ activity.total_score }} = {{ activity.computed_score|default:"-" }}{% if activity.missing %} <span class="badge text-bg-light">missing</span>{% endif %}</div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+      <div class="small text-muted">Attendance mapping: Present = 100, Excused = 100, Late = 90, Absent = 0.</div>
+    </div>
+  </details>
+  {% endif %}
+
+  {% if explanation.correction_history %}
+  <div class="border rounded-3 p-3">
+    <div class="text-uppercase text-muted small fw-semibold mb-2">Correction History</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Request</th><th>Period</th><th>Item</th><th>Original</th><th>Corrected</th><th>Approved By</th><th>Approved At</th></tr></thead>
+        <tbody>
+          {% for item in explanation.correction_history %}
+          <tr>
+            <td>#{{ item.request_id }}</td>
+            <td>{{ item.period }}</td>
+            <td>{{ item.item }}</td>
+            <td>{{ item.old_value|default:"-" }}</td>
+            <td>{{ item.new_value|default:"-" }}</td>
+            <td>{{ item.approved_by|default:"-" }}</td>
+            <td>{{ item.approved_at|date:"M d, Y H:i"|default:"-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

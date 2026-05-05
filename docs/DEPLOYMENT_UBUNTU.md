@@ -480,9 +480,16 @@ EMAIL_HOST_PASSWORD=replace-with-app-password
 DEFAULT_FROM_EMAIL=noreply@ncba.edu.ph
 EMAIL_TIMEOUT=10
 
+# SIS API: prefer tenant-bound keys created after deployment.
 SIS_API_TOKEN=replace-with-strong-random-token
+SIS_API_LEGACY_TOKEN_ENABLED=False
+SIS_API_RATE_LIMIT_PER_MINUTE=60
 PRIVACY_CONSENT_VERSION=2026-03
 ENFORCE_SINGLE_DEVICE_SESSION=True
+MAINTENANCE_MODE=False
+ACTUAL_DATA_RESET_ALLOW_PRODUCTION=False
+ACTUAL_DATA_RESET_EXTERNAL_BACKUP_CONFIRMED=False
+DJANGO_LOG_DIR=/var/log/edugradespro
 ```
 
 Protect it:
@@ -531,9 +538,23 @@ DEFAULT_FROM_EMAIL=noreply@ncba.edu.ph
 EMAIL_TIMEOUT=10
 
 SIS_API_TOKEN=replace-with-strong-random-token
+SIS_API_LEGACY_TOKEN_ENABLED=False
+SIS_API_RATE_LIMIT_PER_MINUTE=60
 PRIVACY_CONSENT_VERSION=2026-03
 ENFORCE_SINGLE_DEVICE_SESSION=True
+MAINTENANCE_MODE=False
+ACTUAL_DATA_RESET_ALLOW_PRODUCTION=False
+ACTUAL_DATA_RESET_EXTERNAL_BACKUP_CONFIRMED=False
+DJANGO_LOG_DIR=/var/log/edugradespro-staging
 ```
+
+After migration, create tenant-bound SIS keys with:
+
+```bash
+python manage.py create_sis_api_key --tenant-code NCBA --name "NCBA SIS"
+```
+
+Store the printed token securely. Rotate by creating a replacement key and revoking/deactivating the old `tenant_api_keys` row.
 
 Protect it:
 

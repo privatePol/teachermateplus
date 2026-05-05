@@ -1,270 +1,547 @@
 {% extends "admin_portal/base.html" %}
 
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .governance-shell {
+    display: grid;
+    gap: 1rem;
+  }
+  .governance-hero {
+    background: linear-gradient(135deg, #145239 0%, #27714c 56%, #c0b84f 100%);
+    color: #fff;
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    box-shadow: 0 14px 28px rgba(20, 82, 57, 0.14);
+  }
+  .governance-hero h2 {
+    font-size: 1.35rem;
+    font-weight: 800;
+    margin: 0 0 0.35rem;
+  }
+  .governance-hero p {
+    color: rgba(255, 255, 255, 0.92);
+    margin: 0;
+    max-width: 68rem;
+  }
+  .governance-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .governance-nav a {
+    border: 1px solid #d8e5dc;
+    border-radius: 0.5rem;
+    color: #214a31;
+    font-weight: 700;
+    padding: 0.48rem 0.75rem;
+    text-decoration: none;
+    background: #fff;
+  }
+  .governance-nav a:hover {
+    border-color: #9fc4aa;
+    background: #f5fbf7;
+  }
+  .governance-panel {
+    border: 1px solid #e3ece6;
+    border-radius: 0.75rem;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(21, 58, 37, 0.07);
+    overflow: hidden;
+  }
+  .governance-panel-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+    padding: 1rem 1.15rem;
+    border-bottom: 1px solid #e6eee9;
+    background: #fbfdfb;
+  }
+  .governance-panel-title {
+    margin: 0 0 0.2rem;
+    color: #173d27;
+    font-size: 1rem;
+    font-weight: 800;
+  }
+  .governance-panel-text {
+    margin: 0;
+    color: #5a7062;
+    font-size: 0.88rem;
+  }
+  .governance-panel-body {
+    padding: 1rem 1.15rem 1.15rem;
+  }
+  .workflow-path {
+    display: grid;
+    gap: 0.6rem;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  }
+  .workflow-path-card {
+    border: 1px solid #dce8df;
+    border-radius: 0.65rem;
+    padding: 0.85rem;
+    background: #f9fcfa;
+  }
+  .workflow-path-card strong {
+    color: #173d27;
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+  .workflow-path-card span {
+    color: #607668;
+    font-size: 0.86rem;
+  }
+  .stage-grid {
+    display: grid;
+    gap: 0.8rem;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+  .stage-summary {
+    border: 1px solid #dfe9e2;
+    border-radius: 0.65rem;
+    padding: 0.8rem;
+    background: #fff;
+  }
+  .stage-summary-title {
+    color: #173d27;
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+  }
+  .role-field {
+    border: 1px solid #dfe9e2;
+    border-radius: 0.75rem;
+    background: #fff;
+    overflow: hidden;
+    height: 100%;
+  }
+  .role-field-header {
+    padding: 0.85rem;
+    border-bottom: 1px solid #e8f0eb;
+    background: #f8fbf9;
+  }
+  .role-field-title {
+    color: #173d27;
+    font-size: 0.95rem;
+    font-weight: 800;
+    margin-bottom: 0.25rem;
+  }
+  .role-field-help {
+    color: #617668;
+    font-size: 0.82rem;
+  }
+  .selected-roles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    min-height: 1.75rem;
+    margin-top: 0.6rem;
+  }
+  .selected-roles .badge {
+    font-weight: 700;
+  }
+  .role-picker-tools {
+    padding: 0.75rem 0.85rem 0;
+  }
+  .role-search {
+    font-size: 0.88rem;
+  }
+  .role-options {
+    display: grid;
+    gap: 0.35rem;
+    max-height: 17rem;
+    overflow: auto;
+    padding: 0.75rem 0.85rem 0.9rem;
+  }
+  .role-option {
+    display: flex;
+    gap: 0.55rem;
+    align-items: flex-start;
+    border: 1px solid #e4ede7;
+    border-radius: 0.55rem;
+    padding: 0.55rem 0.65rem;
+    background: #fff;
+  }
+  .role-option:hover {
+    border-color: #b7d5bf;
+    background: #f6fbf7;
+  }
+  .role-option input {
+    margin-top: 0.2rem;
+  }
+  .role-option label {
+    color: #263d2f;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1.25;
+    margin: 0;
+  }
+  .role-empty {
+    color: #6c7f72;
+    display: none;
+    font-size: 0.85rem;
+    padding: 0 0.85rem 0.85rem;
+  }
+  .switch-list {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .switch-row {
+    border: 1px solid #e1ebe5;
+    border-radius: 0.65rem;
+    padding: 0.8rem 0.9rem;
+    background: #fff;
+  }
+  .switch-row.is-sensitive {
+    background: #fffaf0;
+    border-color: #eed8a8;
+  }
+  .governance-savebar {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+    border: 1px solid #d8e5dc;
+    border-radius: 0.75rem 0.75rem 0 0;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 -8px 18px rgba(21, 58, 37, 0.10);
+    padding: 0.85rem 1rem;
+  }
+  .governance-savebar-note {
+    color: #53695d;
+    font-size: 0.86rem;
+  }
+  @media (max-width: 767.98px) {
+    .governance-panel-header,
+    .governance-savebar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block admin_content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="h5 mb-0">{{ title }}</h2>
-  <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
-</div>
-
-<div class="alert alert-info">
-  Use this page to decide who controls the grading-template lifecycle.
-  <strong>Phase 1</strong> is the role matrix for the existing actions.
-  <strong>Phase 2</strong> is the optional sequential workflow chain that adds step-by-step review and approval.
-</div>
-
-<div class="row g-3 mb-3">
-  <div class="col-lg-6">
-    <div class="card border-0 shadow-sm h-100">
-      <div class="card-header bg-white">
-        <strong>Recommended Setup: New Grading Template Issuance</strong>
+<div class="governance-shell">
+  <div class="governance-hero">
+    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+      <div>
+        <h2>{{ title }}</h2>
+        <p>Control who can create, review, publish, and hotfix grading templates for the selected tenant. Role choices are now checkbox-based so existing access is visible and harder to remove by accident.</p>
       </div>
-      <div class="card-body">
-        <div class="small text-muted mb-3">
-          Use this if your desired governance flow is:
-          <strong>Draft and Submit (SuperAdmin) -&gt; Review (AC) -&gt; Approval and Publishing (CAO)</strong>.
+      <a href="javascript:history.back()" class="btn btn-sm btn-outline-light">Back</a>
+    </div>
+  </div>
+
+  <div class="governance-nav" aria-label="Template governance page sections">
+    <a href="#overview">Overview</a>
+    <a href="#template-flow">Template Flow</a>
+    <a href="#hotfix-flow">Hotfix Flow</a>
+    <a href="#safeguards">Safeguards</a>
+    <a href="#current-setup">Current Setup</a>
+  </div>
+
+  <div class="governance-panel" id="overview">
+    <div class="governance-panel-header">
+      <div>
+        <h3 class="governance-panel-title">Recommended Governance Paths</h3>
+        <p class="governance-panel-text">Use these as a quick map before changing role access. Phase 1 controls action access; sequential chains add ordered review steps.</p>
+      </div>
+    </div>
+    <div class="governance-panel-body">
+      <div class="workflow-path">
+        <div class="workflow-path-card">
+          <strong>New Template</strong>
+          <span>Draft and Submit: SUPER_ADMIN -> Review: AC -> Final Approval/Publish: CAO</span>
         </div>
-        <div class="mb-2"><strong>Step 1. Phase 1 - Role Matrix</strong></div>
-        <ul class="small mb-3">
-          <li><strong>Draft Roles:</strong> SUPER_ADMIN</li>
-          <li><strong>Submit for Approval Roles:</strong> SUPER_ADMIN</li>
-          <li><strong>Approval Review Roles:</strong> AC, CAO</li>
-          <li><strong>Publish Roles:</strong> CAO</li>
-        </ul>
-        <div class="mb-2"><strong>Step 2. Phase 2 - Sequential Steps</strong></div>
-        <ul class="small mb-3">
-          <li><strong>Use a sequential template approval chain:</strong> ON</li>
-          <li><strong>Template Review:</strong> AC</li>
-          <li><strong>Final Approval:</strong> CAO</li>
-        </ul>
-        <div class="mb-2"><strong>Step 3. Workflow Safeguards</strong></div>
-        <ul class="small mb-0">
-          <li><strong>Require approval before publish:</strong> ON</li>
-          <li><strong>Allow same user to submit and review:</strong> OFF</li>
-          <li><strong>Allow same user to review and final-approve:</strong> OFF</li>
-          <li><strong>Allow same user to review and publish:</strong> ON only if CAO will both final-approve and publish</li>
-        </ul>
+        <div class="workflow-path-card">
+          <strong>Published Template Hotfix</strong>
+          <span>Request: SUPER_ADMIN -> Hotfix Review: AC -> Hotfix Final Apply: CAO</span>
+        </div>
+        <div class="workflow-path-card">
+          <strong>Duty Separation</strong>
+          <span>Keep same-user safeguard switches off unless NCBA formally allows combined duties.</span>
+        </div>
       </div>
     </div>
   </div>
-  <div class="col-lg-6">
-    <div class="card border-0 shadow-sm h-100">
-      <div class="card-header bg-white">
-        <strong>Recommended Setup: Hotfix</strong>
-      </div>
-      <div class="card-body">
-        <div class="small text-muted mb-3">
-          Hotfix is for <strong>changes to an already published template</strong>. It is separate from new-template review.
-          Use this if your desired governance flow is:
-          <strong>Hotfix Request (SuperAdmin) -&gt; Hotfix Review (AC) -&gt; Hotfix Final Apply (CAO)</strong>.
-        </div>
-        <div class="mb-2"><strong>Step 1. Phase 1 - Role Matrix</strong></div>
-        <ul class="small mb-3">
-          <li><strong>Hotfix Request Roles:</strong> SUPER_ADMIN</li>
-          <li><strong>Hotfix Review and Apply Roles:</strong> AC, CAO</li>
-        </ul>
-        <div class="mb-2"><strong>Step 2. Phase 2 - Sequential Steps</strong></div>
-        <ul class="small mb-3">
-          <li><strong>Use a sequential hotfix workflow:</strong> ON</li>
-          <li><strong>Hotfix Review:</strong> AC</li>
-          <li><strong>Hotfix Final Apply:</strong> CAO</li>
-        </ul>
-        <div class="mb-2"><strong>Step 3. Workflow Safeguards</strong></div>
-        <ul class="small mb-0">
-          <li><strong>Allow same user to request and apply a hotfix:</strong> OFF</li>
-          <li><strong>Allow same user to review and final-apply a hotfix:</strong> OFF</li>
-          <li>Keep hotfix duty separated from request duty to reduce abuse risk on live templates.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</div>
 
-<div class="row g-3 mb-3">
-  {% for card in stage_cards %}
-  <div class="col-md-6 col-xl-4">
-    <div class="card border-0 shadow-sm h-100">
-      <div class="card-header bg-white"><strong>{{ card.label }}</strong></div>
-      <div class="card-body">
-        {% if card.role_names %}
-          <div class="d-flex flex-wrap gap-2 mb-2">
-            {% for role_name in card.role_names %}
-            <span class="badge text-bg-secondary">{{ role_name }}</span>
-            {% endfor %}
+  <form method="post" novalidate id="template-governance-form">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <div class="governance-panel" id="template-flow">
+      <div class="governance-panel-header">
+        <div>
+          <h3 class="governance-panel-title">Template Flow</h3>
+          <p class="governance-panel-text">These settings control normal creation, review, approval, and publishing of grading templates.</p>
+        </div>
+        <span class="badge text-bg-success">New Templates</span>
+      </div>
+      <div class="governance-panel-body">
+        <div class="row g-3">
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.draft_roles %}
           </div>
-        {% else %}
-          <div class="text-muted small mb-2">No roles configured yet.</div>
-        {% endif %}
-        <div class="small text-muted">Role codes: {{ card.role_codes|join:", "|default:"-" }}</div>
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.submit_roles %}
+          </div>
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.approval_review_roles %}
+          </div>
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.publish_roles %}
+          </div>
+        </div>
+        <hr>
+        <div class="form-check form-switch mb-3">
+          {{ form.sequential_approval_enabled }}
+          <label class="form-check-label fw-semibold" for="{{ form.sequential_approval_enabled.id_for_label }}">{{ form.sequential_approval_enabled.label }}</label>
+          {% if form.sequential_approval_enabled.help_text %}<div class="form-text">{{ form.sequential_approval_enabled.help_text }}</div>{% endif %}
+          {% for error in form.sequential_approval_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="row g-3">
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.approval_review_step_roles %}
+          </div>
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.approval_final_step_roles %}
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-  {% endfor %}
+
+    <div class="governance-panel" id="hotfix-flow">
+      <div class="governance-panel-header">
+        <div>
+          <h3 class="governance-panel-title">Hotfix Flow</h3>
+          <p class="governance-panel-text">These settings control changes to already published templates. Keep this narrower than normal template editing.</p>
+        </div>
+        <span class="badge text-bg-warning">Published Templates</span>
+      </div>
+      <div class="governance-panel-body">
+        <div class="row g-3">
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.hotfix_request_roles %}
+          </div>
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.hotfix_review_apply_roles %}
+          </div>
+        </div>
+        <hr>
+        <div class="form-check form-switch mb-3">
+          {{ form.sequential_hotfix_enabled }}
+          <label class="form-check-label fw-semibold" for="{{ form.sequential_hotfix_enabled.id_for_label }}">{{ form.sequential_hotfix_enabled.label }}</label>
+          {% if form.sequential_hotfix_enabled.help_text %}<div class="form-text">{{ form.sequential_hotfix_enabled.help_text }}</div>{% endif %}
+          {% for error in form.sequential_hotfix_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="row g-3">
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.hotfix_review_step_roles %}
+          </div>
+          <div class="col-lg-6">
+            {% include "admin_portal/tools/template_governance_role_field.html" with field=form.hotfix_apply_step_roles %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="governance-panel" id="safeguards">
+      <div class="governance-panel-header">
+        <div>
+          <h3 class="governance-panel-title">Workflow Safeguards</h3>
+          <p class="governance-panel-text">These switches decide whether one person can perform multiple governance duties.</p>
+        </div>
+      </div>
+      <div class="governance-panel-body">
+        <div class="switch-list">
+          <div class="switch-row">
+            <div class="form-check form-switch">
+              {{ form.require_approval_before_publish }}
+              <label class="form-check-label fw-semibold" for="{{ form.require_approval_before_publish.id_for_label }}">{{ form.require_approval_before_publish.label }}</label>
+              {% if form.require_approval_before_publish.help_text %}<div class="form-text">{{ form.require_approval_before_publish.help_text }}</div>{% endif %}
+              {% for error in form.require_approval_before_publish.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+          <div class="switch-row is-sensitive">
+            <div class="form-check form-switch">
+              {{ form.allow_same_user_submit_review }}
+              <label class="form-check-label fw-semibold" for="{{ form.allow_same_user_submit_review.id_for_label }}">{{ form.allow_same_user_submit_review.label }}</label>
+              {% if form.allow_same_user_submit_review.help_text %}<div class="form-text">{{ form.allow_same_user_submit_review.help_text }}</div>{% endif %}
+              {% for error in form.allow_same_user_submit_review.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+          <div class="switch-row is-sensitive">
+            <div class="form-check form-switch">
+              {{ form.allow_same_user_review_approve }}
+              <label class="form-check-label fw-semibold" for="{{ form.allow_same_user_review_approve.id_for_label }}">{{ form.allow_same_user_review_approve.label }}</label>
+              {% if form.allow_same_user_review_approve.help_text %}<div class="form-text">{{ form.allow_same_user_review_approve.help_text }}</div>{% endif %}
+              {% for error in form.allow_same_user_review_approve.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+          <div class="switch-row is-sensitive">
+            <div class="form-check form-switch">
+              {{ form.allow_same_user_review_publish }}
+              <label class="form-check-label fw-semibold" for="{{ form.allow_same_user_review_publish.id_for_label }}">{{ form.allow_same_user_review_publish.label }}</label>
+              {% if form.allow_same_user_review_publish.help_text %}<div class="form-text">{{ form.allow_same_user_review_publish.help_text }}</div>{% endif %}
+              {% for error in form.allow_same_user_review_publish.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+          <div class="switch-row is-sensitive">
+            <div class="form-check form-switch">
+              {{ form.allow_same_user_hotfix_request_apply }}
+              <label class="form-check-label fw-semibold" for="{{ form.allow_same_user_hotfix_request_apply.id_for_label }}">{{ form.allow_same_user_hotfix_request_apply.label }}</label>
+              {% if form.allow_same_user_hotfix_request_apply.help_text %}<div class="form-text">{{ form.allow_same_user_hotfix_request_apply.help_text }}</div>{% endif %}
+              {% for error in form.allow_same_user_hotfix_request_apply.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+          <div class="switch-row is-sensitive">
+            <div class="form-check form-switch">
+              {{ form.allow_same_user_hotfix_review_apply }}
+              <label class="form-check-label fw-semibold" for="{{ form.allow_same_user_hotfix_review_apply.id_for_label }}">{{ form.allow_same_user_hotfix_review_apply.label }}</label>
+              {% if form.allow_same_user_hotfix_review_apply.help_text %}<div class="form-text">{{ form.allow_same_user_hotfix_review_apply.help_text }}</div>{% endif %}
+              {% for error in form.allow_same_user_hotfix_review_apply.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="governance-panel" id="current-setup">
+      <div class="governance-panel-header">
+        <div>
+          <h3 class="governance-panel-title">Current Setup Snapshot</h3>
+          <p class="governance-panel-text">A quick read of the active stage matrix before you save changes.</p>
+        </div>
+      </div>
+      <div class="governance-panel-body">
+        <div class="stage-grid">
+          {% for card in stage_cards %}
+          <div class="stage-summary">
+            <div class="stage-summary-title">{{ card.label }}</div>
+            {% if card.role_names %}
+              <div class="d-flex flex-wrap gap-2 mb-2">
+                {% for role_name in card.role_names %}
+                <span class="badge text-bg-secondary">{{ role_name }}</span>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="text-muted small mb-2">No roles configured yet.</div>
+            {% endif %}
+            <div class="small text-muted">Role codes: {{ card.role_codes|join:", "|default:"-" }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="governance-savebar">
+      <div class="governance-savebar-note">
+        Saving changes immediately affects who can perform template approval and hotfix actions for this tenant.
+      </div>
+      <div class="d-flex flex-wrap gap-2 justify-content-end">
+        <a class="btn btn-outline-secondary" href="{% url 'admin_portal:grading_template_list' %}">Back to Grading Templates</a>
+        <button class="btn btn-success" type="submit">Review and Save Governance</button>
+      </div>
+    </div>
+  </form>
 </div>
 
-<form method="post" novalidate>
-  {% csrf_token %}
-  {% if form.non_field_errors %}
-  <div class="alert alert-danger">{{ form.non_field_errors }}</div>
-  {% endif %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("template-governance-form");
+    const roleFields = Array.from(document.querySelectorAll("[data-role-field]"));
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Phase 1 - Role Matrix</strong></div>
-    <div class="card-body">
-      <div class="text-muted small mb-3">
-        This is the first layer of governance. It decides which roles are allowed to use the existing template actions:
-        <strong>Draft</strong>, <strong>Submit</strong>, <strong>Approval Review</strong>, <strong>Publish</strong>,
-        <strong>Hotfix Request</strong>, and <strong>Hotfix Review and Apply</strong>.
-      </div>
-      <div class="row g-3">
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.draft_roles.id_for_label }}">{{ form.draft_roles.label }}</label>
-          {{ form.draft_roles }}
-          {% if form.draft_roles.help_text %}<div class="form-text">{{ form.draft_roles.help_text }}</div>{% endif %}
-          {% for error in form.draft_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.submit_roles.id_for_label }}">{{ form.submit_roles.label }}</label>
-          {{ form.submit_roles }}
-          {% if form.submit_roles.help_text %}<div class="form-text">{{ form.submit_roles.help_text }}</div>{% endif %}
-          {% for error in form.submit_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.approval_review_roles.id_for_label }}">{{ form.approval_review_roles.label }}</label>
-          {{ form.approval_review_roles }}
-          {% if form.approval_review_roles.help_text %}<div class="form-text">{{ form.approval_review_roles.help_text }}</div>{% endif %}
-          {% for error in form.approval_review_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.publish_roles.id_for_label }}">{{ form.publish_roles.label }}</label>
-          {{ form.publish_roles }}
-          {% if form.publish_roles.help_text %}<div class="form-text">{{ form.publish_roles.help_text }}</div>{% endif %}
-          {% for error in form.publish_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.hotfix_request_roles.id_for_label }}">{{ form.hotfix_request_roles.label }}</label>
-          {{ form.hotfix_request_roles }}
-          {% if form.hotfix_request_roles.help_text %}<div class="form-text">{{ form.hotfix_request_roles.help_text }}</div>{% endif %}
-          {% for error in form.hotfix_request_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.hotfix_review_apply_roles.id_for_label }}">{{ form.hotfix_review_apply_roles.label }}</label>
-          {{ form.hotfix_review_apply_roles }}
-          {% if form.hotfix_review_apply_roles.help_text %}<div class="form-text">{{ form.hotfix_review_apply_roles.help_text }}</div>{% endif %}
-          {% for error in form.hotfix_review_apply_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-      </div>
-    </div>
-  </div>
+    function labelForInput(input) {
+      const label = document.querySelector("label[for='" + input.id + "']");
+      return label ? label.textContent.trim() : input.value;
+    }
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Phase 2 - Sequential Steps</strong></div>
-    <div class="card-body">
-      <div class="text-muted small mb-3">
-        This is the second layer of governance. Turn this on only if you want EduGradesPro to require a true
-        step-by-step chain, such as <strong>Template Review -&gt; Final Approval</strong> or
-        <strong>Hotfix Review -&gt; Hotfix Final Apply</strong>.
-      </div>
-      <div class="form-check form-switch mb-3">
-        {{ form.sequential_approval_enabled }}
-        <label class="form-check-label" for="{{ form.sequential_approval_enabled.id_for_label }}">{{ form.sequential_approval_enabled.label }}</label>
-        {% if form.sequential_approval_enabled.help_text %}<div class="form-text">{{ form.sequential_approval_enabled.help_text }}</div>{% endif %}
-        {% for error in form.sequential_approval_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-      </div>
-      <div class="row g-3 mb-3">
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.approval_review_step_roles.id_for_label }}">{{ form.approval_review_step_roles.label }}</label>
-          {{ form.approval_review_step_roles }}
-          {% if form.approval_review_step_roles.help_text %}<div class="form-text">{{ form.approval_review_step_roles.help_text }}</div>{% endif %}
-          {% for error in form.approval_review_step_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.approval_final_step_roles.id_for_label }}">{{ form.approval_final_step_roles.label }}</label>
-          {{ form.approval_final_step_roles }}
-          {% if form.approval_final_step_roles.help_text %}<div class="form-text">{{ form.approval_final_step_roles.help_text }}</div>{% endif %}
-          {% for error in form.approval_final_step_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-      </div>
+    function syncField(field) {
+      const summary = field.querySelector("[data-role-summary]");
+      const empty = field.querySelector("[data-role-empty]");
+      const checked = Array.from(field.querySelectorAll("input[type='checkbox']:checked"));
+      if (summary) {
+        summary.innerHTML = "";
+        checked.forEach(function (input) {
+          const badge = document.createElement("span");
+          badge.className = "badge text-bg-success";
+          badge.textContent = labelForInput(input);
+          summary.appendChild(badge);
+        });
+        if (!checked.length) {
+          const badge = document.createElement("span");
+          badge.className = "badge text-bg-light text-dark border";
+          badge.textContent = "No roles selected";
+          summary.appendChild(badge);
+        }
+      }
+      if (empty) {
+        const visibleOptions = Array.from(field.querySelectorAll("[data-role-option]")).filter(function (option) {
+          return option.style.display !== "none";
+        });
+        empty.style.display = visibleOptions.length ? "none" : "block";
+      }
+    }
 
-      <div class="form-check form-switch mb-3">
-        {{ form.sequential_hotfix_enabled }}
-        <label class="form-check-label" for="{{ form.sequential_hotfix_enabled.id_for_label }}">{{ form.sequential_hotfix_enabled.label }}</label>
-        {% if form.sequential_hotfix_enabled.help_text %}<div class="form-text">{{ form.sequential_hotfix_enabled.help_text }}</div>{% endif %}
-        {% for error in form.sequential_hotfix_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-      </div>
-      <div class="row g-3">
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.hotfix_review_step_roles.id_for_label }}">{{ form.hotfix_review_step_roles.label }}</label>
-          {{ form.hotfix_review_step_roles }}
-          {% if form.hotfix_review_step_roles.help_text %}<div class="form-text">{{ form.hotfix_review_step_roles.help_text }}</div>{% endif %}
-          {% for error in form.hotfix_review_step_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label" for="{{ form.hotfix_apply_step_roles.id_for_label }}">{{ form.hotfix_apply_step_roles.label }}</label>
-          {{ form.hotfix_apply_step_roles }}
-          {% if form.hotfix_apply_step_roles.help_text %}<div class="form-text">{{ form.hotfix_apply_step_roles.help_text }}</div>{% endif %}
-          {% for error in form.hotfix_apply_step_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-        </div>
-      </div>
-    </div>
-  </div>
+    roleFields.forEach(function (field) {
+      const search = field.querySelector("[data-role-search]");
+      const options = Array.from(field.querySelectorAll("[data-role-option]"));
+      const initial = Array.from(field.querySelectorAll("input[type='checkbox']:checked")).map(function (input) {
+        return input.value;
+      });
+      field.dataset.initialValues = JSON.stringify(initial);
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Workflow Safeguards</strong></div>
-    <div class="card-body">
-      <div class="form-check form-switch mb-3">
-        {{ form.require_approval_before_publish }}
-        <label class="form-check-label" for="{{ form.require_approval_before_publish.id_for_label }}">{{ form.require_approval_before_publish.label }}</label>
-        {% if form.require_approval_before_publish.help_text %}<div class="form-text">{{ form.require_approval_before_publish.help_text }}</div>{% endif %}
-        {% for error in form.require_approval_before_publish.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-      </div>
-      <div class="form-check form-switch mb-3">
-        {{ form.allow_same_user_submit_review }}
-        <label class="form-check-label" for="{{ form.allow_same_user_submit_review.id_for_label }}">{{ form.allow_same_user_submit_review.label }}</label>
-        {% if form.allow_same_user_submit_review.help_text %}<div class="form-text">{{ form.allow_same_user_submit_review.help_text }}</div>{% endif %}
-        {% for error in form.allow_same_user_submit_review.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-      </div>
-      <div class="form-check form-switch mb-3">
-        {{ form.allow_same_user_review_approve }}
-        <label class="form-check-label" for="{{ form.allow_same_user_review_approve.id_for_label }}">{{ form.allow_same_user_review_approve.label }}</label>
-        {% if form.allow_same_user_review_approve.help_text %}<div class="form-text">{{ form.allow_same_user_review_approve.help_text }}</div>{% endif %}
-        {% for error in form.allow_same_user_review_approve.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-      </div>
-      <div class="form-check form-switch mb-3">
-        {{ form.allow_same_user_review_publish }}
-        <label class="form-check-label" for="{{ form.allow_same_user_review_publish.id_for_label }}">{{ form.allow_same_user_review_publish.label }}</label>
-        {% if form.allow_same_user_review_publish.help_text %}<div class="form-text">{{ form.allow_same_user_review_publish.help_text }}</div>{% endif %}
-        {% for error in form.allow_same_user_review_publish.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-      </div>
-      <div class="form-check form-switch">
-        {{ form.allow_same_user_hotfix_review_apply }}
-        <label class="form-check-label" for="{{ form.allow_same_user_hotfix_review_apply.id_for_label }}">{{ form.allow_same_user_hotfix_review_apply.label }}</label>
-        {% if form.allow_same_user_hotfix_review_apply.help_text %}<div class="form-text">{{ form.allow_same_user_hotfix_review_apply.help_text }}</div>{% endif %}
-        {% for error in form.allow_same_user_hotfix_review_apply.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-      </div>
-      <div class="form-check form-switch mt-3">
-        {{ form.allow_same_user_hotfix_request_apply }}
-        <label class="form-check-label" for="{{ form.allow_same_user_hotfix_request_apply.id_for_label }}">{{ form.allow_same_user_hotfix_request_apply.label }}</label>
-        {% if form.allow_same_user_hotfix_request_apply.help_text %}<div class="form-text">{{ form.allow_same_user_hotfix_request_apply.help_text }}</div>{% endif %}
-        {% for error in form.allow_same_user_hotfix_request_apply.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
-      </div>
-    </div>
-  </div>
+      field.addEventListener("change", function () {
+        syncField(field);
+      });
 
-  <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><strong>Recommended NCBA Starting Point</strong></div>
-    <div class="card-body">
-      <ul class="mb-0">
-        <li><strong>Draft</strong>, <strong>Submit</strong>, <strong>Publish</strong>, and <strong>Hotfix Request</strong>: keep these under the template steward roles only.</li>
-        <li><strong>Phase 2 Sequence</strong>: use <strong>Template Review</strong> for Dean/AC scrutiny, then <strong>Final Approval</strong> for CAO.</li>
-        <li><strong>Hotfix Sequence</strong>: use <strong>Hotfix Review</strong> for academic scrutiny, then <strong>Hotfix Final Apply</strong> for CAO or steward-controlled final execution.</li>
-        <li>Keep all same-user safeguard switches off unless the institution formally accepts combined duties.</li>
-      </ul>
-    </div>
-  </div>
+      if (search) {
+        search.addEventListener("input", function () {
+          const query = search.value.trim().toLowerCase();
+          options.forEach(function (option) {
+            const text = option.dataset.roleText || "";
+            option.style.display = !query || text.indexOf(query) !== -1 ? "" : "none";
+          });
+          syncField(field);
+        });
+      }
+      syncField(field);
+    });
 
-  <div class="d-flex flex-wrap gap-2">
-    <button class="btn btn-success" type="submit">Save Template Governance</button>
-    <a class="btn btn-outline-secondary" href="{% url 'admin_portal:grading_template_list' %}">Back to Grading Templates</a>
-  </div>
-</form>
+    if (form) {
+      form.addEventListener("submit", function (event) {
+        const removed = [];
+        roleFields.forEach(function (field) {
+          const initial = JSON.parse(field.dataset.initialValues || "[]");
+          const current = Array.from(field.querySelectorAll("input[type='checkbox']:checked")).map(function (input) {
+            return input.value;
+          });
+          const currentSet = new Set(current);
+          initial.forEach(function (value) {
+            if (!currentSet.has(value)) {
+              const input = field.querySelector("input[value='" + value + "']");
+              removed.push((field.dataset.roleFieldLabel || "Role setting") + ": " + (input ? labelForInput(input) : value));
+            }
+          });
+        });
+
+        if (removed.length) {
+          const message = "You are removing these existing role assignments:\n\n" +
+            removed.slice(0, 12).join("\n") +
+            (removed.length > 12 ? "\n..." : "") +
+            "\n\nContinue saving?";
+          if (!window.confirm(message)) {
+            event.preventDefault();
+          }
+        }
+      });
+    }
+  });
+</script>
 {% endblock %}

@@ -19,32 +19,6 @@
   <div class="col-md-3"><input class="form-control" name="q" value="{{ q }}" placeholder="Search code or name"></div>
   <div class="col-md-2"><button class="btn btn-outline-secondary w-100">Filter</button></div>
 </form>
-<div class="card border-0 shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover mb-0">
-      <thead><tr><th>Tenant</th><th>Code</th><th>Name</th><th>Start</th><th>End</th><th>Status</th><th></th></tr></thead>
-      <tbody>
-      {% for row in page_obj %}
-        <tr>
-          <td>{{ row.tenant.code }}</td>
-          <td>{{ row.code }}</td>
-          <td>{{ row.name }}</td>
-          <td>{{ row.start_date }}</td>
-          <td>{{ row.end_date }}</td>
-          <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
-          <td class="text-end">
-            {% if "academic_years.update" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:academic_year_update' row.id %}">Edit</a>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="7" class="text-center text-muted py-4">No academic years found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
-</div>
+{% include "admin_portal/shared/active_inactive_sections.html" with section_label="Academic Years" table_template="admin_portal/academics/academic_year_table.html" active_empty_message="No active academic years found." inactive_empty_message="No inactive academic years found." %}
 {% endblock %}
 

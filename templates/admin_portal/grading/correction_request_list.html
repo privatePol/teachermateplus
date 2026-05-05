@@ -3,6 +3,11 @@
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Grade Correction Requests</h2>
+  {% if "corrections.create_on_behalf" in effective_permissions %}
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:grade_correction_request_create_on_behalf' %}">
+    Create On Behalf
+  </a>
+  {% endif %}
 </div>
 <form class="row g-2 mb-3">
   <div class="col-md-2">
@@ -40,6 +45,7 @@
           <th>Section</th>
           <th>Period</th>
           <th>Faculty</th>
+          <th>Initiated By</th>
           <th>Status</th>
           <th>Current Approver</th>
           <th>Requested</th>
@@ -58,6 +64,19 @@
             {{ row.requested_by_user.full_name|default:row.requested_by_user.username }}
             {% if row.requested_by_user.full_name != row.requested_by_user.username %}
               <div class="small text-muted">{{ row.requested_by_user.username }}</div>
+            {% endif %}
+            {% if row.request_source == "ADMIN_ON_BEHALF" %}
+              <div class="badge text-bg-light border">On behalf</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.initiated_by_user %}
+              {{ row.initiated_by_user.full_name|default:row.initiated_by_user.username }}
+              {% if row.initiated_by_user.full_name != row.initiated_by_user.username %}
+                <div class="small text-muted">{{ row.initiated_by_user.username }}</div>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">Same as faculty</span>
             {% endif %}
           </td>
           <td>
@@ -96,7 +115,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="10" class="text-center text-muted py-4">No correction requests found.</td></tr>
+        <tr><td colspan="11" class="text-center text-muted py-4">No correction requests found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

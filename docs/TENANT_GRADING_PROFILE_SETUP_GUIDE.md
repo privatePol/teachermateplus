@@ -244,7 +244,44 @@ The intended Summer final grade is:
 Final Grade = (Midterm Grade + Prefinal Grade + Final Exam Grade) / 3
 ```
 
-### Current Supported Setup Using Same Templates
+### Preferred Setup When Summer Has Separate 3-Period Templates
+
+If Summer uses different templates that contain only these active periods:
+
+- Midterm
+- Pre-Final
+- Final Exam
+
+then use:
+
+```text
+Final Grade Formula Mode = Average All Active Template Periods
+```
+
+This is the cleanest Summer setup because EduGradesPro will average only the active periods in the Summer template:
+
+```text
+Final Grade = (Midterm + Pre-Final + Final Exam) / 3
+```
+
+Do not use `Weighted Selected Periods` for this setup unless NCBA specifically wants unequal Summer period weights. If all three Summer periods are equal, `Average All Active Template Periods` is simpler, exact, and easier to explain.
+
+Use this profile pattern when course-template assignments already assign courses to their correct Summer templates:
+
+| Profile Example | Campus | Term Type | Formula Mode | Weights |
+| --- | --- | --- | --- | --- |
+| SUM-DEFAULT | blank | Summer | Average All Active Template Periods | none |
+
+This one Summer default profile is enough when:
+
+- all Summer offerings use the same final-grade rule
+- all Summer templates have only the three active Summer periods
+- passing threshold and base value are the same across NCBA
+- course-template assignments already control which Summer template each course uses
+
+Create separate Summer profiles only when a campus, department, program, course group, or course has a different rule, passing threshold, base value, or fallback template.
+
+### Alternate Setup When Summer Reuses Regular 4-Period Templates
 
 If Summer uses the same grading templates but excludes Prelim from the final grade, use:
 
@@ -279,7 +316,7 @@ Note:
 - The period codes must exactly match the active period codes in the grading template.
 - If the final period code in the template is `FINALS` instead of `FINAL`, use that exact code.
 
-### If Exact `/ 3` Is Required
+### If Equal Summer Weights Are Required
 
 The current profile form requires weighted entries to total exactly `100.00` with two decimal places.
 
@@ -296,13 +333,101 @@ For a mathematically exact `/ 3`, there are two clean options:
 1. Create Summer-specific templates where only Midterm, Prefinal, and Final are active, then use `Average All Active Template Periods`.
 2. Add a future formula mode such as `Average Selected Periods`, where selected periods can be averaged without weights.
 
-For now, the cleanest setup without additional code changes is:
+If Summer must reuse the regular 4-period template today, use:
 
 ```text
 MIDTERM=33.33
 PREFINAL=33.33
 FINAL=33.34
 ```
+
+If Summer has its own 3-period templates, do not use this weighted workaround. Use `Average All Active Template Periods`.
+
+## NCBA 10-Template / 3-Campus Example
+
+Assume NCBA has:
+
+- 10 Regular templates
+- 10 Summer templates
+- 3 campuses
+- courses assigned to their correct Regular or Summer template through Course Template Assignments
+- Regular templates have Prelim, Midterm, Pre-Final, and Final Exam
+- Summer templates have only Midterm, Pre-Final, and Final Exam
+
+In this case, the recommended setup is:
+
+1. Use Course Template Assignments to choose the correct template for each course and term.
+2. Use Tenant Grading Profiles to define the final-grade rule, passing threshold, and base value.
+3. Keep Campus blank when the same rule applies to Cubao, Fairview, and Taytay.
+4. Create campus-specific profiles only when one campus has a different grading rule or a campus-only template fallback.
+
+### Minimum Clean Setup
+
+If all NCBA campuses use the same passing threshold, base value, and final-grade formula, create only these two profiles:
+
+| Profile Code | Campus | Term Type | Template Field | Formula Mode | Period Weights |
+| --- | --- | --- | --- | --- | --- |
+| REG-DEFAULT | blank | Regular | broad Regular fallback template | Average All Active Template Periods | none |
+| SUM-DEFAULT | blank | Summer | broad Summer fallback template | Average All Active Template Periods | none |
+
+Why only two profiles?
+
+- The 10 template structures are already controlled by Course Template Assignments.
+- The template selected in the broad profile acts as a fallback if a course-template assignment is missing.
+- The Regular final formula is the same for all Regular templates.
+- The Summer final formula is the same for all Summer templates.
+- A blank Campus profile covers all three campuses.
+
+### When To Create More Than Two Profiles
+
+Create additional profiles only when the rule is different.
+
+Examples:
+
+| Situation | Recommended Profile Setup |
+| --- | --- |
+| Taytay has a different Summer rule | Add `SUM-TAYTAY` with Campus = Taytay |
+| Laboratory courses use a different base value | Add `REG-LAB` and/or `SUM-LAB` scoped by Course Type or Program |
+| One department has a different passing threshold | Add department-scoped Regular/Summer profiles |
+| One course has a special final formula | Add course-scoped Regular/Summer profiles |
+| A course-template assignment is missing and a profile must provide the fallback template | Put the fallback Grading Template on the matching profile |
+
+### Important Profile Field Guidance
+
+For this NCBA setup:
+
+| Field | Recommended Value |
+| --- | --- |
+| Tenant | NCBA |
+| Campus | blank, unless the rule is campus-specific |
+| Department / Program / Course / Course Type | blank for default profile; fill only for exceptions |
+| Applicable Term Type | Regular for Regular profile; Summer for Summer profile |
+| Grading Template | required; choose a sensible fallback template for the same term type |
+| Default Base Value | set only if this profile should control raw-score base/transmutation |
+| Passing Grade Threshold | usually 75.00, if NCBA wants the profile to declare it explicitly |
+| Final Grade Formula Mode | Average All Active Template Periods |
+| Final Grade Period Weights | leave blank for the recommended Regular and 3-period Summer setup |
+| Is Default | yes for broad fallback profiles |
+| Is Active | yes |
+
+### Summer Formula Reminder
+
+For the Summer templates described above, do this:
+
+```text
+Formula Mode: Average All Active Template Periods
+Weights: leave blank
+```
+
+Do not enter:
+
+```text
+MIDTERM=33.33
+PREFINAL=33.33
+FINAL=33.33
+```
+
+because the weighted profile form expects the total to be exactly `100.00`, and those three values total only `99.99`.
 
 ## How EduGradesPro Resolves The Profile
 
@@ -342,14 +467,12 @@ Recommended pattern:
 
 ## Example NCBA Setup Matrix
 
-| Template / Course Group | Regular Profile | Summer Profile | Campus |
+| Setup Pattern | Regular Profile | Summer Profile | Campus |
 | --- | --- | --- | --- |
-| Financial Management | Average all active periods | Weighted selected periods excluding Prelim | All campuses |
-| Marketing Management | Average all active periods | Weighted selected periods excluding Prelim | All campuses |
-| All Lecture Courses | Average all active periods | Weighted selected periods excluding Prelim | All campuses |
-| All Laboratory Courses | Average all active periods | Weighted selected periods excluding Prelim | All campuses |
-| Computer Science Lecture | Average all active periods | Weighted selected periods excluding Prelim | Taytay only |
-| Computer Science Laboratory | Average all active periods | Weighted selected periods excluding Prelim | Taytay only |
+| Course-template assignments already cover all 10 Regular templates and all 10 Summer templates | One broad Regular default profile using Average all active periods | One broad Summer default profile using Average all active periods | All campuses |
+| A template group has a different base value, threshold, or final-grade rule | Add a matching Regular profile scoped to that group | Add a matching Summer profile scoped to that group | All campuses, or one campus if the exception is campus-specific |
+| Taytay-only template rule | Add a Taytay-scoped Regular profile only if the rule differs from the default | Add a Taytay-scoped Summer profile only if the rule differs from the default | Taytay |
+| Summer reuses a 4-period Regular template and must exclude Prelim | Not applicable | Use Weighted selected periods excluding Prelim | All campuses or scoped exception |
 
 ## Operational Checklist
 
@@ -364,8 +487,9 @@ Before Summer grading:
 
 - Confirm the Summer term is marked `Summer`.
 - Confirm Summer grading profiles are active.
-- Confirm Summer profiles use `Weighted Selected Periods`.
-- Confirm Summer profile weights use the correct period codes:
+- If Summer has separate 3-period templates, confirm Summer profiles use `Average All Active Template Periods` and leave period weights blank.
+- If Summer reuses Regular 4-period templates and must exclude Prelim, confirm Summer profiles use `Weighted Selected Periods`.
+- For weighted Summer profiles only, confirm the period weights use the correct period codes:
 
 ```text
 MIDTERM=33.33
@@ -388,11 +512,16 @@ FINAL=33.34
    - Example: entering `FINAL` when the template uses `FINALS`.
    - Result: that period weight is ignored or validation fails.
 
-4. Creating a very specific all-term profile
+4. Using weighted Summer values of `33.33`, `33.33`, and `33.33`
+   - Result: the profile is rejected because the total is `99.99`, not `100.00`.
+   - If Summer has its own 3-period template, use `Average All Active Template Periods` instead.
+   - If Summer reuses a 4-period template, use `33.33`, `33.33`, and `33.34`.
+
+5. Creating a very specific all-term profile
    - Example: course-specific profile with blank term type.
    - Result: it may override a less-specific Summer profile.
 
-5. Using `Effective From Term` as if it means all future terms
+6. Using `Effective From Term` as if it means all future terms
    - Current behavior is exact-term or blank fallback.
    - Leave it blank unless the profile is intentionally for one exact term.
 

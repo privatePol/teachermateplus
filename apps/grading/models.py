@@ -78,6 +78,10 @@ class TemplateHotfixRequest(TimeStampedModel):
         FUTURE_ONLY = "FUTURE_ONLY", "Future Only"
         ACTIVE_NOT_SUBMITTED = "ACTIVE_NOT_SUBMITTED", "Active Not Submitted"
         SELECTED_OFFERINGS = "SELECTED_OFFERINGS", "Selected Offerings"
+        REQUESTING_FACULTY_OFFERINGS = (
+            "REQUESTING_FACULTY_OFFERINGS",
+            "Requesting Faculty's Accepted Offerings",
+        )
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
@@ -91,7 +95,7 @@ class TemplateHotfixRequest(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="hotfix_requests",
     )
-    apply_mode = models.CharField(max_length=24, choices=ApplyMode.choices)
+    apply_mode = models.CharField(max_length=32, choices=ApplyMode.choices)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     justification = models.TextField()
     selected_offering_ids_json = models.JSONField(blank=True, null=True)
@@ -962,6 +966,10 @@ class GradeCorrectionRequest(TimeStampedModel):
         LAPSED = "LAPSED", "Lapsed"
         CLOSED = "CLOSED", "Closed"
 
+    class RequestSource(models.TextChoices):
+        FACULTY_SELF = "FACULTY_SELF", "Faculty Self"
+        ADMIN_ON_BEHALF = "ADMIN_ON_BEHALF", "Admin On Behalf"
+
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="grade_correction_requests")
     campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT, related_name="grade_correction_requests")
     offering = models.ForeignKey(
@@ -979,6 +987,19 @@ class GradeCorrectionRequest(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="grade_correction_requests",
     )
+    initiated_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="initiated_grade_correction_requests",
+        blank=True,
+        null=True,
+    )
+    request_source = models.CharField(
+        max_length=24,
+        choices=RequestSource.choices,
+        default=RequestSource.FACULTY_SELF,
+    )
+    on_behalf_reason = models.TextField(blank=True, null=True)
     faculty_department = models.ForeignKey(
         "tenants.Department",
         on_delete=models.SET_NULL,

@@ -16,6 +16,48 @@ class ScopeService:
             return None
 
     @staticmethod
+    def expand_department_ids(department_ids, *, tenant_id: int | None = None, campus_id: int | None = None):
+        expanded_ids = {int(dept_id) for dept_id in department_ids or [] if dept_id}
+        pending_ids = set(expanded_ids)
+        while pending_ids:
+            children = Department.objects.filter(parent_id__in=pending_ids, is_active=True)
+            if tenant_id:
+                children = children.filter(tenant_id=tenant_id)
+            if campus_id:
+                children = children.filter(campus_id=campus_id)
+            child_ids = set(children.values_list("id", flat=True)) - expanded_ids
+            expanded_ids.update(child_ids)
+            pending_ids = child_ids
+        return list(expanded_ids)
+
+    @staticmethod
+    def department_ancestor_ids(department_id, *, include_self: bool = True):
+        try:
+            parsed_department_id = int(department_id) if department_id not in (None, "") else None
+        except (TypeError, ValueError):
+            parsed_department_id = None
+        if not parsed_department_id:
+            return []
+        department = Department.objects.filter(id=parsed_department_id).only("id", "parent_id").first()
+        if not department:
+            return []
+        ancestor_ids = [department.id] if include_self else []
+        parent_id = department.parent_id
+        seen = {department.id}
+        while parent_id and parent_id not in seen:
+            seen.add(parent_id)
+            ancestor_ids.append(parent_id)
+            parent_id = Department.objects.filter(id=parent_id).values_list("parent_id", flat=True).first()
+        return ancestor_ids
+
+    @staticmethod
+    def department_scope_covers(scope_department_id, target_department_id):
+        if not scope_department_id or not target_department_id:
+            return False
+        expanded_ids = ScopeService.expand_department_ids([scope_department_id])
+        return int(target_department_id) in set(expanded_ids)
+
+    @staticmethod
     def get_accessible_tenant_ids(user):
         if not user or not user.is_authenticated:
             return []
@@ -38,6 +80,9 @@ class ScopeService:
             return list(qs.values_list("id", flat=True))
 
         roles = UserRole.objects.filter(user=user, is_active=True, role__is_active=True)
+        non_faculty_roles = roles.exclude(role__code="FACULTY")
+        if non_faculty_roles.exists():
+            roles = non_faculty_roles
         if tenant_id:
             roles = roles.filter(tenant_id__in=[tenant_id, None])
 
@@ -76,7 +121,13 @@ class ScopeService:
             if campus_id:
                 qs = qs.filter(campus_id=campus_id)
             return list(qs.values_list("id", flat=True))
-        return list(roles.exclude(department__isnull=True).values_list("department_id", flat=True).distinct())
+        scoped_department_ids = list(
+            roles.exclude(department__isnull=True)
+            .filter(department__is_active=True)
+            .values_list("department_id", flat=True)
+            .distinct()
+        )
+        return ScopeService.expand_department_ids(scoped_department_ids, tenant_id=tenant_id, campus_id=campus_id)
 
     @classmethod
     def build_scope(cls, user, tenant_id: int | None = None, campus_id: int | None = None):

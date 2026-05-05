@@ -2,9 +2,11 @@ from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 
+from django.conf import settings
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.urls import reverse
 from django.utils import timezone
 
 from PIL import Image
@@ -12,11 +14,13 @@ from apps.accounts.models import User
 from apps.accounts.models import UserSignatureUsageLog
 from apps.accounts.services import UserSignatureService
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.auditlog.models import AuditLog
 from apps.enrollment.models import Enrollment
 from apps.faculty_portal.forms import GradeCorrectionRequestForm
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
+    CourseBaseValueOverride,
     CourseTemplateAssignment,
     FacultyFinalClearanceReport,
     GradeActivity,
@@ -26,16 +30,18 @@ from apps.grading.models import (
     GradingPeriodLock,
     GradingTemplate,
     GradingTemplateComponent,
+    GradingTemplateSubcomponent,
     GradingTemplatePeriod,
     StudentActivityScore,
     StudentFinalGrade,
     StudentPeriodGrade,
     TenantGradingProfile,
 )
+from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService
 from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
-from apps.rbac.models import Role, UserRole
+from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
 from apps.core.services.features import FeatureSettingsService
@@ -283,6 +289,68 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(form.cleaned_data["items"][0]["old_value"], "30")
         self.assertEqual(form.cleaned_data["items"][0]["new_value"], "35")
 
+    def test_on_behalf_correction_can_be_created_for_inactive_faculty(self):
+        self.faculty_user.is_active = False
+        self.faculty_user.save(update_fields=["is_active"])
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            initiated_by_user=self.reviewer_user,
+            request_source=GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF,
+            on_behalf_reason="Original faculty is no longer connected.",
+            offering=self.offering,
+            template_period=self.period,
+            justification="Correct submitted quiz score for former faculty.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "old_value": "30",
+                    "new_value": "35",
+                }
+            ],
+        )
+
+        self.assertEqual(correction.requested_by_user, self.faculty_user)
+        self.assertEqual(correction.initiated_by_user, self.reviewer_user)
+        self.assertEqual(correction.request_source, GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF)
+        self.assertEqual(correction.faculty_department, self.department)
+        self.assertEqual(correction.approval_route, self.route_rule)
+
+    def test_on_behalf_initiator_cannot_review_same_petition(self):
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            initiated_by_user=self.reviewer_user,
+            request_source=GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF,
+            on_behalf_reason="Original faculty is unavailable.",
+            offering=self.offering,
+            template_period=self.period,
+            justification="Correct submitted quiz score for former faculty.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "old_value": "30",
+                    "new_value": "35",
+                }
+            ],
+        )
+
+        can_review, _step, reason = GradingGovernanceService.can_user_review_correction_request(
+            request_obj=correction,
+            user=self.reviewer_user,
+        )
+        super_can_review, _super_step, _super_reason = GradingGovernanceService.can_user_review_correction_request(
+            request_obj=correction,
+            user=self.super_admin_user,
+        )
+
+        self.assertFalse(can_review)
+        self.assertIn("initiated an on-behalf correction petition", reason)
+        self.assertTrue(super_can_review)
+
     def test_create_correction_request_normalizes_old_values_from_gradebook(self):
         correction = GradingGovernanceService.create_correction_request(
             user=self.faculty_user,
@@ -338,6 +406,114 @@ class CorrectionWorkflowTests(TestCase):
         pending_step = correction.approval_steps.order_by("step_order").first()
         self.assertEqual(correction.approval_route_id, self.route_rule.id)
         self.assertEqual(pending_step.approver_role.code, "NCBA_CAO")
+
+    def test_correction_route_falls_back_to_parent_department_rule(self):
+        parent_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="COLLEGE",
+            name="College",
+            unit_type=Department.UnitType.DIVISION,
+        )
+        self.department.parent = parent_department
+        self.department.save(update_fields=["parent", "updated_at"])
+        self.route_rule.faculty_department = parent_department
+        self.route_rule.save(update_fields=["faculty_department", "updated_at"])
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Parent route should cover child department.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "40",
+                }
+            ],
+        )
+
+        self.assertEqual(correction.faculty_department_id, self.department.id)
+        self.assertEqual(correction.approval_route_id, self.route_rule.id)
+
+    def test_correction_route_ignores_same_code_parent_department_from_other_campus(self):
+        other_campus = Campus.objects.create(tenant=self.tenant, code="OTHER", name="Other Campus")
+        other_parent_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="COLLEGE",
+            name="Other Campus College",
+            unit_type=Department.UnitType.DIVISION,
+        )
+        self.route_rule.faculty_department = other_parent_department
+        self.route_rule.save(update_fields=["faculty_department", "updated_at"])
+        default_role = Role.objects.create(code="TENANT_DEFAULT_APPROVER", name="Tenant Default Approver")
+        default_route = CorrectionApprovalRouteRule.objects.create(
+            tenant=self.tenant,
+            faculty_department=None,
+            route_mode=CorrectionApprovalRouteRule.RouteMode.DIRECT_TO_FINAL,
+            step1_role=default_role,
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Other campus parent must not govern this faculty department.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "40",
+                }
+            ],
+        )
+
+        self.assertEqual(correction.approval_route_id, default_route.id)
+        self.assertNotEqual(correction.approval_route_id, self.route_rule.id)
+
+    def test_same_department_correction_review_allows_parent_department_approver(self):
+        parent_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="COLLEGE",
+            name="College",
+            unit_type=Department.UnitType.DIVISION,
+        )
+        self.department.parent = parent_department
+        self.department.save(update_fields=["parent", "updated_at"])
+        self.reviewer_user.default_department = parent_department
+        self.reviewer_user.save(update_fields=["default_department", "updated_at"])
+        self.route_rule.faculty_department = parent_department
+        self.route_rule.step1_requires_same_department = True
+        self.route_rule.save(update_fields=["faculty_department", "step1_requires_same_department", "updated_at"])
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Parent reviewer should cover child faculty department.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "40",
+                }
+            ],
+        )
+
+        can_review, pending_step, reason = GradingGovernanceService.can_user_review_correction_request(
+            request_obj=correction,
+            user=self.reviewer_user,
+        )
+
+        self.assertTrue(can_review)
+        self.assertIsNotNone(pending_step)
+        self.assertIsNone(reason)
 
     def test_correction_request_form_rejects_corrected_value_above_activity_total(self):
         form = GradeCorrectionRequestForm(
@@ -1133,6 +1309,91 @@ class FinalGradeFormulaTests(TestCase):
         self.assertEqual(resolved, faster)
         self.assertNotEqual(resolved, slower)
 
+    def test_parent_department_profile_applies_to_child_offering(self):
+        parent_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="COLLEGE",
+            name="College",
+            unit_type=Department.UnitType.DIVISION,
+        )
+        self.department.parent = parent_department
+        self.department.save(update_fields=["parent", "updated_at"])
+        parent_profile = TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=parent_department,
+            profile_code="PARENT",
+            profile_name="Parent Department Profile",
+            grading_template=self.template,
+            priority=100,
+            is_active=True,
+        )
+
+        resolved = FacultyGradingService.resolve_grading_profile_for_offering(self.offering)
+
+        self.assertEqual(resolved, parent_profile)
+
+    def test_parent_department_profile_from_other_campus_does_not_apply_to_child_offering(self):
+        other_campus = Campus.objects.create(tenant=self.tenant, code="OTHER", name="Other Campus")
+        other_parent_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="COLLEGE",
+            name="Other Campus College",
+            unit_type=Department.UnitType.DIVISION,
+        )
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_parent_department,
+            profile_code="OTHER-PARENT",
+            profile_name="Other Parent Department Profile",
+            grading_template=self.template,
+            priority=1,
+            is_active=True,
+        )
+
+        resolved = FacultyGradingService.resolve_grading_profile_for_offering(self.offering)
+
+        self.assertIsNone(resolved)
+
+    def test_child_department_profile_wins_over_parent_department_profile(self):
+        parent_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="COLLEGE",
+            name="College",
+            unit_type=Department.UnitType.DIVISION,
+        )
+        self.department.parent = parent_department
+        self.department.save(update_fields=["parent", "updated_at"])
+        parent_profile = TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=parent_department,
+            profile_code="PARENT",
+            profile_name="Parent Department Profile",
+            grading_template=self.template,
+            priority=1,
+            is_active=True,
+        )
+        child_profile = TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            profile_code="CHILD",
+            profile_name="Child Department Profile",
+            grading_template=self.template,
+            priority=100,
+            is_active=True,
+        )
+
+        resolved = FacultyGradingService.resolve_grading_profile_for_offering(self.offering)
+
+        self.assertEqual(resolved, child_profile)
+        self.assertNotEqual(resolved, parent_profile)
+
     def test_passing_threshold_falls_back_to_template_threshold(self):
         self.template.passing_grade_threshold = Decimal("80.00")
         self.template.save(update_fields=["passing_grade_threshold"])
@@ -1161,6 +1422,454 @@ class FinalGradeFormulaTests(TestCase):
         self.assertEqual(
             FacultyGradingService.resolve_passing_threshold(self.offering),
             Decimal("78.00"),
+        )
+
+
+class GradeExplanationServiceTests(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(code="TEN", name="Tenant")
+        self.campus = Campus.objects.create(tenant=self.tenant, code="MAIN", name="Main")
+        self.department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="CS",
+            name="Computer Studies",
+        )
+        self.program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="BSCS",
+            name="BSCS",
+        )
+        self.academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2025-2026",
+            name="AY 2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        self.term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="1ST",
+            name="First Term",
+            sequence_no=1,
+            start_date=date(2025, 6, 1),
+            end_date=date(2025, 10, 31),
+        )
+        self.course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="CS101",
+            title="Intro to Computing",
+        )
+        self.section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSCS-1A",
+            name="BSCS 1A",
+        )
+        self.offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=self.section,
+        )
+        self.faculty_user = User.objects.create_user(
+            username="facultyx",
+            email="facultyx@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        self.faculty_role = Role.objects.create(code="FACULTY", name="Faculty")
+        faculty_access = Permission.objects.create(
+            code="faculty_portal.access",
+            module="faculty",
+            action="access",
+        )
+        RolePermission.objects.create(role=self.faculty_role, permission=faculty_access)
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=self.faculty_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+            is_primary=True,
+        )
+        self.template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TEMP",
+            name="Standard Template",
+            default_base_value=Decimal("50.00"),
+            passing_grade_threshold=Decimal("75.00"),
+            is_published=True,
+        )
+        self.prelim = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+        )
+        self.midterm = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="MIDTERM",
+            name="Midterm",
+            sequence_no=2,
+        )
+        self.prefinal = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PREFINAL",
+            name="Pre-Final",
+            sequence_no=3,
+        )
+        self.final_period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="FINAL",
+            name="Final",
+            sequence_no=4,
+        )
+        self.class_standing = GradingTemplateComponent.objects.create(
+            template_period=self.prelim,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=Decimal("60.00"),
+            sort_order=1,
+        )
+        self.exam = GradingTemplateComponent.objects.create(
+            template_period=self.prelim,
+            code="EXAM",
+            name="Exam",
+            weight_percentage=Decimal("40.00"),
+            sort_order=2,
+            is_exam_component=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=self.template,
+            effective_from_term=self.term,
+        )
+        self.student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-100",
+            last_name="Rizal",
+            first_name="Jose",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            course_offering=self.offering,
+            student=self.student,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            is_active=True,
+        )
+
+    def _activity_with_score(self, *, component, raw, total=Decimal("100.00"), title="Activity"):
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=component,
+            title=title,
+            total_score=total,
+            activity_date=date(2025, 7, 1),
+            created_by_user=self.faculty_user,
+        )
+        StudentActivityScore.objects.create(
+            activity=activity,
+            student=self.student,
+            raw_score=Decimal(raw),
+            computed_score=FacultyGradingService.compute_activity_score(
+                raw_score=Decimal(raw),
+                total_score=total,
+                base_value=Decimal("50.00"),
+            ),
+            encoded_by_user=self.faculty_user,
+        )
+        return activity
+
+    def test_period_explanation_uses_official_component_path(self):
+        self._activity_with_score(component=self.class_standing, raw="80.00", title="Quiz")
+        self._activity_with_score(component=self.exam, raw="75.00", title="Prelim Exam")
+        FacultyGradingService.recompute_period_summary(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.prelim,
+            audit_reason=None,
+        )
+
+        explanation = GradeExplanationService.build(
+            offering=self.offering,
+            student=self.student,
+            template_period=self.prelim,
+            grade_type=GradeExplanationService.GRADE_TYPE_PERIOD,
+        )
+
+        stored = StudentPeriodGrade.objects.get(offering=self.offering, student=self.student, template_period=self.prelim)
+        self.assertEqual(explanation["official_value"], stored.period_grade)
+        self.assertEqual(explanation["computed_official_value"], stored.period_grade)
+        self.assertEqual(explanation["base_value"]["source"], "template_default")
+        self.assertEqual(len(explanation["component_breakdown"]), 2)
+
+    def test_explanation_reports_profile_threshold_source(self):
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            profile_code="PROFILE-THRESHOLD",
+            profile_name="Profile Threshold",
+            grading_template=self.template,
+            passing_grade_threshold=Decimal("78.00"),
+            is_active=True,
+        )
+
+        explanation = GradeExplanationService.build(
+            offering=self.offering,
+            student=self.student,
+            template_period=self.prelim,
+            grade_type=GradeExplanationService.GRADE_TYPE_PERIOD,
+        )
+
+        self.assertEqual(explanation["passing_threshold"]["source"], "tenant_grading_profile")
+        self.assertEqual(explanation["passing_threshold"]["value"], Decimal("78.00"))
+
+    def test_explanation_reports_course_base_value_override_source(self):
+        CourseBaseValueOverride.objects.create(
+            course=self.course,
+            effective_from_term=self.term,
+            base_value=Decimal("60.00"),
+        )
+
+        explanation = GradeExplanationService.build(
+            offering=self.offering,
+            student=self.student,
+            template_period=self.prelim,
+            grade_type=GradeExplanationService.GRADE_TYPE_PERIOD,
+        )
+
+        self.assertEqual(explanation["base_value"]["source"], "course_override")
+        self.assertEqual(explanation["base_value"]["value"], Decimal("60.00"))
+
+    def test_final_explanation_shows_average_missing_period_behavior(self):
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            student=self.student,
+            period_grade=Decimal("92.00"),
+            computed_by_user=self.faculty_user,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.midterm,
+            student=self.student,
+            period_grade=Decimal("88.00"),
+            computed_by_user=self.faculty_user,
+        )
+        FacultyGradingService.recompute_final_grades_from_stored_periods(
+            user=self.faculty_user,
+            offering=self.offering,
+            template=self.template,
+        )
+
+        explanation = GradeExplanationService.build(
+            offering=self.offering,
+            student=self.student,
+            grade_type=GradeExplanationService.GRADE_TYPE_FINAL,
+        )
+
+        self.assertEqual(explanation["official_value"], Decimal("45.00"))
+        self.assertEqual(explanation["final_formula"]["mode"], TenantGradingProfile.FinalGradeFormulaMode.AVERAGE_ACTIVE_PERIODS)
+        self.assertTrue(any("included as 0" in warning for warning in explanation["warnings"]))
+
+    def test_final_explanation_uses_weighted_profile_source(self):
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            profile_code="WEIGHTED",
+            profile_name="Weighted",
+            grading_template=self.template,
+            final_grade_formula_mode=TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
+            final_grade_formula_json={
+                "period_weights": [
+                    {"period_code": "PRELIM", "weight": "50.00"},
+                    {"period_code": "MIDTERM", "weight": "50.00"},
+                ]
+            },
+            is_active=True,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            student=self.student,
+            period_grade=Decimal("90.00"),
+            computed_by_user=self.faculty_user,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.midterm,
+            student=self.student,
+            period_grade=Decimal("80.00"),
+            computed_by_user=self.faculty_user,
+        )
+        FacultyGradingService.recompute_final_grades_from_stored_periods(
+            user=self.faculty_user,
+            offering=self.offering,
+            template=self.template,
+        )
+
+        explanation = GradeExplanationService.build(
+            offering=self.offering,
+            student=self.student,
+            grade_type=GradeExplanationService.GRADE_TYPE_FINAL,
+        )
+
+        self.assertEqual(explanation["official_value"], Decimal("85.00"))
+        self.assertEqual(explanation["final_formula"]["source"], "tenant_grading_profile")
+
+    def test_attendance_detail_explains_status_mapping(self):
+        attendance_sub = GradingTemplateSubcomponent.objects.create(
+            template_component=self.class_standing,
+            code="ATT",
+            name="Attendance",
+            weight_percentage=Decimal("100.00"),
+            is_attendance_component=True,
+            sort_order=1,
+        )
+        AttendanceSession.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            session_date=date(2025, 7, 1),
+            title="Meeting 1",
+        )
+        late_session = AttendanceSession.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            session_date=date(2025, 7, 2),
+            title="Meeting 2",
+        )
+        AttendanceRecord.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            session=late_session,
+            student=self.student,
+            status_code=AttendanceRecord.Status.LATE,
+            recorded_by_user=self.faculty_user,
+        )
+
+        explanation = GradeExplanationService.build(
+            offering=self.offering,
+            student=self.student,
+            template_period=self.prelim,
+            grade_type=GradeExplanationService.GRADE_TYPE_PERIOD,
+        )
+
+        attendance_rows = explanation["component_breakdown"][0]["subcomponents"][0]["attendance_records"]
+        self.assertEqual(attendance_rows[1]["mapped_score"], Decimal("90"))
+        self.assertTrue(attendance_rows[0]["missing"])
+        self.assertEqual(attendance_sub.name, "Attendance")
+
+    def test_correction_history_marks_correction_affected_grade(self):
+        activity = self._activity_with_score(component=self.class_standing, raw="80.00", title="Quiz")
+        correction = GradeCorrectionRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            requested_by_user=self.faculty_user,
+            status=GradeCorrectionRequest.Status.CLOSED,
+            justification="Correct encoded score.",
+            reviewed_by_user=self.faculty_user,
+            reviewed_at=timezone.now(),
+        )
+        GradeCorrectionRequestItem.objects.create(
+            correction_request=correction,
+            student=self.student,
+            grade_activity=activity,
+            old_value="80.00",
+            new_value="90.00",
+        )
+
+        explanation = GradeExplanationService.build(
+            offering=self.offering,
+            student=self.student,
+            template_period=self.prelim,
+            grade_type=GradeExplanationService.GRADE_TYPE_PERIOD,
+        )
+
+        self.assertEqual(len(explanation["correction_history"]), 1)
+        self.assertTrue(any("Approved correction history exists" in warning for warning in explanation["warnings"]))
+        self.assertEqual(explanation["correction_history"][0]["old_value"], "80.00")
+        self.assertEqual(explanation["correction_history"][0]["new_value"], "90.00")
+
+    def test_faculty_explanation_view_logs_audit_event(self):
+        self._activity_with_score(component=self.class_standing, raw="90.00", title="Quiz")
+        FacultyGradingService.recompute_period_summary(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.prelim,
+            audit_reason=None,
+        )
+        self.client.force_login(self.faculty_user)
+        url = reverse(
+            "faculty_portal:grade_explanation",
+            kwargs={
+                "offering_id": self.offering.id,
+                "period_id": self.prelim.id,
+                "student_id": self.student.id,
+                "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+            },
+        )
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="READ",
+                entity_type="GradeExplanation",
+                metadata_json__grade_type=GradeExplanationService.GRADE_TYPE_PERIOD,
+            ).exists()
         )
 
 

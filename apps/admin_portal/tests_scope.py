@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
+from django.http import Http404
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
@@ -14,6 +15,7 @@ from apps.admin_portal.views import (
     _mask_student_name,
     _mask_student_number,
     faculty_activity_monitor_view,
+    faculty_gradebook_explanation_view,
     faculty_gradebook_monitor_view,
 )
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
@@ -150,6 +152,74 @@ class FacultyMonitoringScopeTests(TestCase):
         ScopeService.attach_scope_to_request(request)
         return request
 
+    def _seed_gradebook_explanation_fixture(self):
+        template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="GENED_EXPLAIN",
+            name="General Education Explain",
+            is_published=True,
+        )
+        period = GradingTemplatePeriod.objects.create(
+            template=template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+            weight_percentage=Decimal("100.00"),
+        )
+        component = GradingTemplateComponent.objects.create(
+            template_period=period,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        CourseTemplateAssignment.objects.create(course=self.course, grading_template=template)
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_is,
+            program=self.program,
+            student_no="2025-10777",
+            last_name="SANTOS",
+            first_name="ANA",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            template_component=component,
+            title="Quiz",
+            total_score=Decimal("100.00"),
+            created_by_user=self.faculty_user,
+        )
+        StudentActivityScore.objects.create(
+            activity=activity,
+            student=student,
+            raw_score=Decimal("87.00"),
+            computed_score=Decimal("87.00"),
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            student=student,
+            class_standing_grade=Decimal("87.00"),
+            period_grade=Decimal("87.00"),
+            is_finalized=True,
+        )
+        return period, student
+
     def test_scoped_faculty_users_uses_faculty_default_department_when_role_department_is_blank(self):
         request = self._build_request()
 
@@ -163,6 +233,96 @@ class FacultyMonitoringScopeTests(TestCase):
         assignment_ids = list(AdminScopeService.scoped_faculty_assignments(request).values_list("id", flat=True))
 
         self.assertIn(self.assignment.id, assignment_ids)
+
+    def test_parent_department_role_scope_includes_child_departments(self):
+        self.department_is.parent = self.department_college
+        self.department_is.save(update_fields=["parent", "updated_at"])
+        dean_user = User.objects.create_user(
+            username="college_dean_scope",
+            email="college_dean_scope@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department_college,
+        )
+        UserRole.objects.create(
+            user=dean_user,
+            role=self.ac_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_college,
+        )
+
+        request = self.factory.get("/")
+        request.user = dean_user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+
+        self.assertIn(self.department_college.id, request.scope["department_ids"])
+        self.assertIn(self.department_is.id, request.scope["department_ids"])
+        faculty_ids = list(AdminScopeService.scoped_faculty_users(request))
+        self.assertIn(self.faculty_user.id, faculty_ids)
+
+    def test_child_department_role_scope_does_not_include_parent_or_sibling_departments(self):
+        sibling_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="FVW_COLL_BA",
+            name="Fairview Business Administration",
+            parent=self.department_college,
+        )
+        self.department_is.parent = self.department_college
+        self.department_is.save(update_fields=["parent", "updated_at"])
+
+        request = self._build_request()
+
+        self.assertIn(self.department_is.id, request.scope["department_ids"])
+        self.assertNotIn(self.department_college.id, request.scope["department_ids"])
+        self.assertNotIn(sibling_department.id, request.scope["department_ids"])
+
+    def test_parent_department_role_scope_excludes_inactive_child_departments(self):
+        self.department_is.parent = self.department_college
+        self.department_is.is_active = False
+        self.department_is.save(update_fields=["parent", "is_active", "updated_at"])
+        dean_user = User.objects.create_user(
+            username="college_dean_inactive_child",
+            email="college_dean_inactive_child@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department_college,
+        )
+        UserRole.objects.create(
+            user=dean_user,
+            role=self.ac_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_college,
+        )
+
+        request = self.factory.get("/")
+        request.user = dean_user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+
+        self.assertIn(self.department_college.id, request.scope["department_ids"])
+        self.assertNotIn(self.department_is.id, request.scope["department_ids"])
+
+    def test_admin_scope_campus_ignores_faculty_role_when_admin_role_exists(self):
+        second_campus = Campus.objects.create(tenant=self.tenant, code="NCBA-CUBAO", name="Cubao")
+        UserRole.objects.create(
+            user=self.ac_user,
+            role=self.faculty_role,
+            tenant=self.tenant,
+            campus=second_campus,
+            department=None,
+        )
+
+        scope = ScopeService.build_scope(self.ac_user, tenant_id=self.tenant.id, campus_id=second_campus.id)
+
+        self.assertIn(self.campus.id, scope["campus_ids"])
+        self.assertNotIn(second_campus.id, scope["campus_ids"])
+        self.assertEqual(scope["campus_id"], self.campus.id)
 
     def test_campus_wide_reviewer_can_see_faculty_with_blank_department_role_in_same_campus(self):
         second_campus = Campus.objects.create(tenant=self.tenant, code="NCBA-CUBAO", name="Cubao")
@@ -536,6 +696,229 @@ class FacultyMonitoringScopeTests(TestCase):
         self.assertEqual(audit_log.portal, AuditLog.Portal.ADMIN)
         self.assertEqual(audit_log.metadata_json.get("masked_student_identity"), True)
 
+    def test_gradebook_monitor_unmasks_student_identity_for_authorized_reviewer(self):
+        template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="GENED_UNMASK",
+            name="General Education Unmask",
+            is_published=True,
+        )
+        period = GradingTemplatePeriod.objects.create(
+            template=template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+            weight_percentage=Decimal("100.00"),
+        )
+        class_standing = GradingTemplateComponent.objects.create(
+            template_period=period,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=Decimal("60.00"),
+            sort_order=1,
+        )
+        exam = GradingTemplateComponent.objects.create(
+            template_period=period,
+            code="EXAM",
+            name="Prelim Exam",
+            weight_percentage=Decimal("40.00"),
+            sort_order=2,
+        )
+        CourseTemplateAssignment.objects.create(course=self.course, grading_template=template)
+
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_is,
+            program=self.program,
+            student_no="2025-10606",
+            last_name="BAUTISTA",
+            first_name="KENJIE",
+            middle_name="ALFONSO",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+        )
+
+        class_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            template_component=class_standing,
+            title="Q1",
+            total_score=Decimal("30.00"),
+            created_by_user=self.faculty_user,
+        )
+        exam_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            template_component=exam,
+            title="Prelim Exam",
+            total_score=Decimal("100.00"),
+            created_by_user=self.faculty_user,
+        )
+        StudentActivityScore.objects.create(
+            activity=class_activity,
+            student=student,
+            raw_score=Decimal("27.00"),
+            computed_score=Decimal("90.00"),
+        )
+        StudentActivityScore.objects.create(
+            activity=exam_activity,
+            student=student,
+            raw_score=Decimal("88.00"),
+            computed_score=Decimal("88.00"),
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            student=student,
+            class_standing_grade=Decimal("90.00"),
+            exam_grade=Decimal("88.00"),
+            period_grade=Decimal("89.20"),
+            is_finalized=True,
+        )
+        permission, _ = Permission.objects.get_or_create(
+            code="gradebook.view_student_identity",
+            defaults={
+                "module": "gradebook",
+                "action": "view_student_identity",
+            },
+        )
+        RolePermission.objects.get_or_create(role=self.ac_role, permission=permission)
+
+        request = self.factory.get(
+            "/admin-portal/academics/faculty-gradebook/",
+            {
+                "faculty_user_id": self.faculty_user.id,
+                "offering_id": self.offering.id,
+                "period_id": period.id,
+            },
+        )
+        request.user = self.ac_user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+
+        response = faculty_gradebook_monitor_view.__wrapped__.__wrapped__(request)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn("Authorized Student Identity View", content)
+        self.assertIn(student.student_no, content)
+        self.assertIn(f"{student.last_name}, {student.first_name}", content)
+        self.assertNotIn(_mask_student_number(student.student_no), content)
+        self.assertNotIn(_mask_student_name(student), content)
+
+        audit_log = AuditLog.objects.filter(entity_type="FacultyGradebookMonitor").latest("id")
+        self.assertEqual(audit_log.actor_user, self.ac_user)
+        self.assertEqual(audit_log.metadata_json.get("masked_student_identity"), False)
+        self.assertEqual(audit_log.metadata_json.get("student_identity_visible"), True)
+
+    def test_gradebook_explanation_masks_identity_and_logs_safe_audit(self):
+        period, student = self._seed_gradebook_explanation_fixture()
+        request = self.factory.get(
+            f"/admin-portal/academics/faculty-gradebook/explain/{self.offering.id}/{period.id}/{student.id}/PERIOD/"
+        )
+        request.user = self.ac_user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+
+        response = faculty_gradebook_explanation_view.__wrapped__.__wrapped__(
+            request,
+            offering_id=self.offering.id,
+            period_id=period.id,
+            student_id=student.id,
+            grade_type="PERIOD",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn("Masked Student", content)
+        self.assertIn("identity masked", content)
+        self.assertNotIn(f"{student.last_name}, {student.first_name}", content)
+        self.assertNotIn(student.student_no, content)
+        audit_log = AuditLog.objects.filter(entity_type="GradeExplanation").latest("id")
+        self.assertEqual(audit_log.metadata_json.get("masked_student_identity"), True)
+        self.assertNotIn("raw_value", audit_log.metadata_json)
+        self.assertIsNone(audit_log.before_json)
+        self.assertIsNone(audit_log.after_json)
+
+    def test_gradebook_explanation_denies_cross_scope_offering(self):
+        period, student = self._seed_gradebook_explanation_fixture()
+        other_tenant = Tenant.objects.create(code="OTHER", name="Other")
+        other_campus = Campus.objects.create(tenant=other_tenant, code="OTHER-MAIN", name="Other Main")
+        other_department = Department.objects.create(tenant=other_tenant, campus=other_campus, code="OTHER-CS", name="Other CS")
+        other_program = Program.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            department=other_department,
+            code="OBSCS",
+            name="Other BSCS",
+        )
+        other_year = AcademicYear.objects.create(
+            tenant=other_tenant,
+            code="2025-2026-O",
+            name="Other AY",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        other_term = Term.objects.create(
+            tenant=other_tenant,
+            academic_year=other_year,
+            code="1ST-O",
+            name="Other First Term",
+            sequence_no=1,
+            start_date=date(2025, 6, 1),
+            end_date=date(2025, 10, 31),
+        )
+        other_course = Course.objects.create(tenant=other_tenant, code="OTH101", title="Other Course")
+        other_section = Section.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            department=other_department,
+            program=other_program,
+            code="OTH-1A",
+            name="OTH 1A",
+        )
+        other_offering = CourseOffering.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            department=other_department,
+            program=other_program,
+            academic_year=other_year,
+            term=other_term,
+            course=other_course,
+            section=other_section,
+        )
+        request = self.factory.get(
+            f"/admin-portal/academics/faculty-gradebook/explain/{other_offering.id}/{period.id}/{student.id}/PERIOD/"
+        )
+        request.user = self.ac_user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+
+        with self.assertRaises(Http404):
+            faculty_gradebook_explanation_view.__wrapped__.__wrapped__(
+                request,
+                offering_id=other_offering.id,
+                period_id=period.id,
+                student_id=student.id,
+                grade_type="PERIOD",
+            )
+
     def test_faculty_activity_monitor_surfaces_login_activity_and_gradebook_work(self):
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
         self.assignment.accepted_at = timezone.now()
@@ -660,6 +1043,32 @@ class FacultyMonitoringScopeTests(TestCase):
         self.assertIn("Open Grade Book", content)
         self.assertIn("Active", content)
         self.assertIn("No Grade Encoding", content)
+
+    def test_faculty_activity_monitor_department_filter_follows_faculty_scope_not_offering_department(self):
+        self.department_is.parent = self.department_college
+        self.department_is.save(update_fields=["parent", "updated_at"])
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.save(update_fields=["response_status", "accepted_at"])
+
+        request = self.factory.get(
+            "/admin-portal/academics/faculty-activity-monitor/",
+            {
+                "term_id": self.term.id,
+                "department_id": self.department_is.id,
+                "window": "7d",
+            },
+        )
+        request.user = self.ac_user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+
+        response = faculty_activity_monitor_view.__wrapped__.__wrapped__(request)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn("faculty_monitor", content)
+        self.assertIn("Faculty Activity Monitor", content)
 
     def test_admin_portal_root_redirects_to_login_for_anonymous_users(self):
         response = self.client.get("/admin-portal", follow=False)

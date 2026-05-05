@@ -110,6 +110,23 @@ def _academic_year_label(obj):
     return name or code or str(obj)
 
 
+def _campus_label(obj):
+    code = (getattr(obj, "code", "") or "").strip()
+    name = (getattr(obj, "name", "") or "").strip()
+    if code and name and code != name:
+        return f"{code} - {name}"
+    return code or name or str(obj)
+
+
+def _department_with_campus_label(obj):
+    campus = getattr(obj, "campus", None)
+    campus_code = (getattr(campus, "code", "") or "").strip()
+    code = (getattr(obj, "code", "") or "").strip()
+    name = (getattr(obj, "name", "") or "").strip()
+    department_label = f"{code} - {name}" if code and name else code or name or str(obj)
+    return f"{campus_code} | {department_label}" if campus_code else department_label
+
+
 def _offering_label(obj):
     course_label = _course_label(getattr(obj, "course", None))
     section_label = _section_label(getattr(obj, "section", None))
@@ -200,15 +217,31 @@ class CampusForm(forms.ModelForm):
 class DepartmentForm(forms.ModelForm):
     class Meta:
         model = Department
-        fields = ["tenant", "campus", "code", "name", "is_active"]
+        fields = ["tenant", "campus", "parent", "code", "name", "operation_branch", "unit_type", "is_active"]
 
-    def __init__(self, *args, tenant_queryset=None, campus_queryset=None, **kwargs):
+    def __init__(self, *args, tenant_queryset=None, campus_queryset=None, parent_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if tenant_queryset is not None:
             self.fields["tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["campus"].queryset = campus_queryset
+        _configure_campus_dependent_parent_department_field(self, parent_queryset=parent_queryset)
+        self.fields["operation_branch"].help_text = "Academic is used for grading governance. Administrative is for non-academic office grouping."
+        self.fields["unit_type"].help_text = "Use Division for broad groups and Area for BA, IS/CS, Elementary, JHS, SHS, and similar owners."
         _enforce_active_reference_choices(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        tenant = cleaned.get("tenant")
+        campus = cleaned.get("campus")
+        parent = cleaned.get("parent")
+        if campus and tenant and campus.tenant_id != tenant.id:
+            raise forms.ValidationError("Campus does not belong to selected tenant.")
+        if parent and tenant and parent.tenant_id != tenant.id:
+            raise forms.ValidationError("Parent department must belong to the selected tenant.")
+        if parent and campus and parent.campus_id != campus.id:
+            raise forms.ValidationError("Parent department must belong to the selected campus.")
+        return cleaned
 
 
 class ProgramForm(forms.ModelForm):
@@ -224,9 +257,112 @@ class ProgramForm(forms.ModelForm):
             self.fields["tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["campus"].queryset = campus_queryset
-        if department_queryset is not None:
-            self.fields["department"].queryset = department_queryset
+        _configure_campus_dependent_department_field(
+            self,
+            campus_field_name="campus",
+            department_field_name="department",
+            department_queryset=department_queryset,
+        )
         _enforce_active_reference_choices(self)
+
+
+def _configure_campus_dependent_department_field(
+    form,
+    *,
+    campus_field_name: str,
+    department_field_name: str,
+    department_queryset,
+):
+    department_field = form.fields[department_field_name]
+    if department_queryset is not None:
+        department_field.queryset = department_queryset
+    department_field.queryset = _active_only_queryset(department_field.queryset)
+
+    raw_campus_id = None
+    if form.is_bound:
+        raw_campus_id = form.data.get(form.add_prefix(campus_field_name))
+    if raw_campus_id in (None, ""):
+        raw_campus_id = form.initial.get(campus_field_name)
+    if hasattr(raw_campus_id, "id"):
+        raw_campus_id = raw_campus_id.id
+    if raw_campus_id in (None, ""):
+        raw_campus_id = getattr(getattr(form, "instance", None), f"{campus_field_name}_id", None)
+
+    try:
+        selected_campus_id = int(raw_campus_id) if raw_campus_id not in (None, "") else None
+    except (TypeError, ValueError):
+        selected_campus_id = None
+
+    full_queryset = department_field.queryset.select_related("campus", "parent").order_by(
+        "campus__code", "parent__code", "code"
+    )
+    department_options = [
+        {
+            "id": department.id,
+            "campus_id": department.campus_id,
+            "label": (
+                f"{department.campus.code} | {department.code} - {department.name}"
+                if department.campus_id
+                else f"{department.code} - {department.name}"
+            ),
+        }
+        for department in full_queryset
+    ]
+
+    if selected_campus_id:
+        department_field.queryset = full_queryset.filter(campus_id=selected_campus_id)
+    else:
+        department_field.queryset = full_queryset.none()
+
+    department_field.label_from_instance = _department_with_campus_label
+    department_field.widget.attrs["data-campus-dependent"] = "true"
+    department_field.widget.attrs["data-campus-field-id"] = f"id_{campus_field_name}"
+    department_field.widget.attrs["data-department-options"] = json.dumps(department_options)
+    department_field.widget.attrs["data-placeholder"] = "---------"
+    department_field.help_text = "Select the campus first to show only that campus' departments."
+
+
+def _configure_campus_dependent_parent_department_field(form, *, parent_queryset):
+    parent_field = form.fields["parent"]
+    if parent_queryset is not None:
+        parent_field.queryset = parent_queryset
+    if form.instance and form.instance.pk:
+        parent_field.queryset = parent_field.queryset.exclude(pk=form.instance.pk)
+    parent_field.queryset = _active_only_queryset(parent_field.queryset)
+
+    raw_campus_id = None
+    if form.is_bound:
+        raw_campus_id = form.data.get(form.add_prefix("campus"))
+    if raw_campus_id in (None, ""):
+        raw_campus_id = form.initial.get("campus")
+    if hasattr(raw_campus_id, "id"):
+        raw_campus_id = raw_campus_id.id
+    if raw_campus_id in (None, ""):
+        raw_campus_id = getattr(getattr(form, "instance", None), "campus_id", None)
+
+    try:
+        selected_campus_id = int(raw_campus_id) if raw_campus_id not in (None, "") else None
+    except (TypeError, ValueError):
+        selected_campus_id = None
+
+    full_queryset = parent_field.queryset.select_related("campus").order_by("campus__code", "code", "name")
+    parent_options = [
+        {
+            "id": department.id,
+            "campus_id": department.campus_id,
+            "label": _department_with_campus_label(department),
+        }
+        for department in full_queryset
+    ]
+    parent_field.queryset = full_queryset.filter(campus_id=selected_campus_id) if selected_campus_id else full_queryset.none()
+    parent_field.label_from_instance = _department_with_campus_label
+    parent_field.widget.attrs["data-campus-dependent"] = "true"
+    parent_field.widget.attrs["data-campus-field-id"] = "id_campus"
+    parent_field.widget.attrs["data-department-options"] = json.dumps(parent_options)
+    parent_field.widget.attrs["data-placeholder"] = "---------"
+    parent_field.help_text = (
+        "Optional. Select the campus first to show only that campus' possible parent departments."
+    )
 
 
 class UserCreateForm(forms.ModelForm):
@@ -253,8 +389,12 @@ class UserCreateForm(forms.ModelForm):
             self.fields["default_tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["default_campus"].queryset = campus_queryset
-        if department_queryset is not None:
-            self.fields["default_department"].queryset = department_queryset
+        _configure_campus_dependent_department_field(
+            self,
+            campus_field_name="default_campus",
+            department_field_name="default_department",
+            department_queryset=department_queryset,
+        )
         allowed_domains = self._allowed_domains_for_tenant(self._resolve_selected_tenant_id())
         self.fields["email"].help_text = (
             "Allowed email domain(s): " + ", ".join(allowed_domains)
@@ -355,8 +495,12 @@ class UserUpdateForm(forms.ModelForm):
             self.fields["default_tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["default_campus"].queryset = campus_queryset
-        if department_queryset is not None:
-            self.fields["default_department"].queryset = department_queryset
+        _configure_campus_dependent_department_field(
+            self,
+            campus_field_name="default_campus",
+            department_field_name="default_department",
+            department_queryset=department_queryset,
+        )
         _enforce_active_reference_choices(self)
 
     def clean(self):
@@ -480,6 +624,38 @@ class UserRoleAssignmentForm(forms.Form):
             self.fields["campus"].queryset = campus_queryset
         if department_queryset is not None:
             self.fields["department"].queryset = department_queryset
+        department_field = self.fields["department"]
+        department_field.queryset = _active_only_queryset(department_field.queryset)
+        selected_campus_id = None
+        raw_campus_id = self.data.get(self.add_prefix("campus")) if self.is_bound else self.initial.get("campus")
+        try:
+            selected_campus_id = int(raw_campus_id) if raw_campus_id not in (None, "") else None
+        except (TypeError, ValueError):
+            selected_campus_id = None
+
+        department_queryset = department_field.queryset.select_related("campus", "parent").order_by(
+            "campus__code", "parent__code", "code"
+        )
+        department_options = [
+            {
+                "id": department.id,
+                "campus_id": department.campus_id,
+                "label": (
+                    f"{department.code} - {department.name}"
+                    if selected_campus_id
+                    else f"{department.campus.code} / {department.code} - {department.name}"
+                ),
+            }
+            for department in department_queryset
+        ]
+        if selected_campus_id:
+            department_field.queryset = department_queryset.filter(campus_id=selected_campus_id)
+        else:
+            department_field.queryset = department_queryset.none()
+        department_field.widget.attrs["data-campus-dependent"] = "true"
+        department_field.widget.attrs["data-department-options"] = json.dumps(department_options)
+        department_field.widget.attrs["data-placeholder"] = "---------"
+        department_field.help_text = "Select the campus first to show only that campus' departments."
         _enforce_active_reference_choices(self)
 
     def clean(self):
@@ -554,6 +730,17 @@ class RolePermissionsForm(forms.Form):
         queryset=Permission.objects.filter(is_active=True).order_by("module", "action", "code"),
         required=False,
         widget=forms.CheckboxSelectMultiple,
+    )
+    change_reason = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        label="Reason for critical permission change",
+        help_text="Required only when critical access is added or removed.",
+    )
+    confirmation_phrase = forms.CharField(
+        required=False,
+        label="Typed confirmation",
+        help_text="Required only for critical permission changes.",
     )
 
     def __init__(self, *args, role=None, **kwargs):
@@ -677,6 +864,7 @@ class CourseForm(forms.ModelForm):
         if department_queryset is not None:
             self.fields["department"].queryset = department_queryset
         department_field = self.fields["department"]
+        department_field.queryset = _active_only_queryset(department_field.queryset)
         selected_campus_id = None
         raw_campus_id = (
             self.data.get(self.add_prefix("campus"))
@@ -725,6 +913,8 @@ class CourseForm(forms.ModelForm):
             raise forms.ValidationError("Department does not belong to selected tenant.")
         if campus and department and department.campus_id != campus.id:
             raise forms.ValidationError("Department does not belong to selected campus.")
+        if department and not department.is_active:
+            raise forms.ValidationError("Department is inactive and cannot be used for courses.")
         return cleaned
 
 
@@ -741,8 +931,12 @@ class SectionForm(forms.ModelForm):
             self.fields["tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["campus"].queryset = campus_queryset
-        if department_queryset is not None:
-            self.fields["department"].queryset = department_queryset
+        _configure_campus_dependent_department_field(
+            self,
+            campus_field_name="campus",
+            department_field_name="department",
+            department_queryset=department_queryset,
+        )
         if program_queryset is not None:
             self.fields["program"].queryset = program_queryset
         _enforce_active_reference_choices(self)
@@ -810,6 +1004,11 @@ class CourseOfferingForm(forms.ModelForm):
             self.fields["course"].queryset = course_queryset
         if section_queryset is not None:
             self.fields["section"].queryset = section_queryset
+        self.fields["department"].required = False
+        self.fields["department"].help_text = (
+            "Optional when the department can be inferred from the selected section or course. "
+            "Keep it explicit when the offering owner differs from the course default owner."
+        )
         self.fields["program"].help_text = "Optional if section_code is globally unique. Required when section codes repeat per program."
         self.fields["academic_year"].help_text = "Must match Academic Year used in CSV import (use AY code values from master)."
         self.fields["term"].help_text = "Must match Term code in CSV (example: 1ST, 2ND)."
@@ -839,20 +1038,49 @@ class CourseOfferingForm(forms.ModelForm):
         course = cleaned.get("course")
         section = cleaned.get("section")
 
+        if not department:
+            if section:
+                department = section.department
+                cleaned["department"] = department
+            elif course and course.department_id:
+                department = course.department
+                cleaned["department"] = department
+        if section and not program:
+            program = section.program
+            cleaned["program"] = program
+
         if campus and tenant and campus.tenant_id != tenant.id:
             raise forms.ValidationError("Campus does not belong to tenant.")
+        if not department:
+            self.add_error("department", "Select a department, or select a section/course that has a department.")
+        if department and tenant and department.tenant_id != tenant.id:
+            raise forms.ValidationError("Department does not belong to tenant.")
         if department and campus and department.campus_id != campus.id:
             raise forms.ValidationError("Department does not belong to campus.")
         if program and department and program.department_id != department.id:
             raise forms.ValidationError("Program does not belong to department.")
+        if department and not department.is_active:
+            raise forms.ValidationError("Department is inactive and cannot be used for course offerings.")
         if academic_year and tenant and academic_year.tenant_id != tenant.id:
             raise forms.ValidationError("Academic year does not belong to tenant.")
         if term and academic_year and term.academic_year_id != academic_year.id:
             raise forms.ValidationError("Term does not belong to selected academic year.")
         if course and tenant and course.tenant_id != tenant.id:
             raise forms.ValidationError("Course does not belong to tenant.")
+        if course and course.campus_id and campus and course.campus_id != campus.id:
+            raise forms.ValidationError("Course campus does not match the offering campus.")
         if section and tenant and section.tenant_id != tenant.id:
             raise forms.ValidationError("Section does not belong to tenant.")
+        if section and campus and section.campus_id != campus.id:
+            raise forms.ValidationError("Section does not belong to campus.")
+        if section and department and section.department_id != department.id:
+            raise forms.ValidationError("Section does not belong to department.")
+        if section and section.department_id and not section.department.is_active:
+            raise forms.ValidationError("Section belongs to an inactive department.")
+        if course and course.department_id and not course.department.is_active:
+            raise forms.ValidationError("Course belongs to an inactive department.")
+        if section and program and section.program_id != program.id:
+            raise forms.ValidationError("Section does not belong to program.")
         return cleaned
 
 
@@ -993,7 +1221,8 @@ class TemplateHotfixRequestForm(forms.Form):
             )
         self.fields["apply_mode"].help_text = (
             "Choose how far the published-template hotfix should reach. "
-            "Use Selected Offerings when you need a tightly controlled live patch."
+            "Use Selected Offerings for a tightly controlled live patch, or Requesting Faculty's Accepted Offerings "
+            "when the request should affect only classes handled by the requester."
         )
         self.fields["justification"].help_text = (
             "Explain the academic or governance reason for the hotfix so reviewers can assess impact quickly."
@@ -1019,7 +1248,17 @@ class TemplateHotfixReviewForm(forms.Form):
         REJECT = "REJECT", "Reject"
 
     decision = forms.ChoiceField(choices=Decision.choices)
-    review_remarks = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    review_remarks = forms.CharField(
+        required=True,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        label="Decision reason",
+        help_text="Required for audit accountability.",
+    )
+    confirmation_phrase = forms.CharField(
+        required=False,
+        label="Typed confirmation",
+        help_text="Required only when this approval applies the hotfix. Type APPLY HOTFIX.",
+    )
 
 
 class GradingTemplatePeriodForm(forms.ModelForm):
@@ -1444,7 +1683,12 @@ class GradeSubmissionReopenReviewForm(forms.Form):
         REJECT = "REJECT", "Reject"
 
     decision = forms.ChoiceField(choices=Decision.choices)
-    review_remarks = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    review_remarks = forms.CharField(
+        required=True,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        label="Decision reason",
+        help_text="Required for audit accountability.",
+    )
 
 
 class GradeCorrectionReviewForm(forms.Form):
@@ -1453,7 +1697,12 @@ class GradeCorrectionReviewForm(forms.Form):
         REJECT = "REJECT", "Reject"
 
     decision = forms.ChoiceField(choices=Decision.choices)
-    review_remarks = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    review_remarks = forms.CharField(
+        required=True,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        label="Decision reason",
+        help_text="Required for audit accountability.",
+    )
     window_start = forms.DateTimeField(
         required=False,
         widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
@@ -1483,6 +1732,86 @@ class GradeCorrectionReviewForm(forms.Form):
             if window_start and window_end and window_end <= window_start:
                 self.add_error("window_end", "Window end must be later than window start.")
         return cleaned
+
+
+class GradeCorrectionOnBehalfSetupForm(forms.Form):
+    campus = forms.ModelChoiceField(
+        queryset=Campus.objects.none(),
+        required=False,
+        label="Correction campus",
+    )
+    academic_year = forms.ModelChoiceField(
+        queryset=AcademicYear.objects.none(),
+        required=False,
+        label="Academic year",
+    )
+    term = forms.ModelChoiceField(
+        queryset=Term.objects.none(),
+        required=False,
+        label="Term",
+    )
+    faculty_user = forms.ModelChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        label="Original faculty member",
+        help_text="Select the faculty member responsible for the submitted gradebook, even if the account is inactive.",
+    )
+    section = forms.ModelChoiceField(
+        queryset=Section.objects.none(),
+        required=False,
+        label="Section",
+    )
+    course = forms.ModelChoiceField(
+        queryset=Course.objects.none(),
+        required=False,
+        label="Course",
+    )
+    template_period = forms.ModelChoiceField(
+        queryset=GradingTemplatePeriod.objects.none(),
+        required=False,
+        label="Grading period",
+    )
+    on_behalf_reason = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        label="On-behalf reason",
+        help_text="Optional operational note, for example: original faculty is no longer connected.",
+    )
+
+    def __init__(
+        self,
+        *args,
+        campus_queryset=None,
+        academic_year_queryset=None,
+        term_queryset=None,
+        faculty_queryset=None,
+        section_queryset=None,
+        course_queryset=None,
+        period_queryset=None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if campus_queryset is not None:
+            self.fields["campus"].queryset = campus_queryset
+        if academic_year_queryset is not None:
+            self.fields["academic_year"].queryset = academic_year_queryset
+        if term_queryset is not None:
+            self.fields["term"].queryset = term_queryset
+        if faculty_queryset is not None:
+            self.fields["faculty_user"].queryset = faculty_queryset
+        if section_queryset is not None:
+            self.fields["section"].queryset = section_queryset
+        if course_queryset is not None:
+            self.fields["course"].queryset = course_queryset
+        if period_queryset is not None:
+            self.fields["template_period"].queryset = period_queryset
+        _set_choice_label(self.fields.get("campus"), _campus_label)
+        _set_choice_label(self.fields.get("academic_year"), _academic_year_label)
+        _set_choice_label(self.fields.get("term"), _term_label)
+        self.fields["faculty_user"].label_from_instance = _faculty_label
+        _set_choice_label(self.fields.get("section"), _section_label)
+        _set_choice_label(self.fields.get("course"), _course_label)
+        self.fields["template_period"].label_from_instance = lambda obj: obj.name or obj.code
 
 
 class TenantGradingProfileForm(forms.ModelForm):
@@ -1541,12 +1870,18 @@ class TenantGradingProfileForm(forms.ModelForm):
             self.fields["tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["campus"].queryset = campus_queryset
-        if department_queryset is not None:
-            self.fields["department"].queryset = department_queryset
+        _configure_campus_dependent_department_field(
+            self,
+            campus_field_name="campus",
+            department_field_name="department",
+            department_queryset=department_queryset,
+        )
         if program_queryset is not None:
             self.fields["program"].queryset = program_queryset
         if course_queryset is not None:
-            self.fields["course"].queryset = course_queryset
+            self.fields["course"].queryset = course_queryset.select_related("campus", "department").order_by(
+                "title", "code", "campus__code"
+            )
         if template_queryset is not None:
             self.fields["grading_template"].queryset = template_queryset
         if term_queryset is not None:
@@ -1559,7 +1894,7 @@ class TenantGradingProfileForm(forms.ModelForm):
             "Optional campus scope. Leave blank if this profile should apply across the whole tenant."
         )
         self.fields["department"].help_text = (
-            "Optional narrower scope under the selected campus. Use this when one department follows a different grading policy."
+            "Optional narrower scope under the selected campus. Select the campus first so duplicate department names from other campuses are not shown."
         )
         self.fields["program"].help_text = (
             "Optional narrower scope under the selected department. Use this when one program needs its own grading rule."
@@ -2182,6 +2517,13 @@ class ConfigurableFeatureSettingForm(forms.Form):
         label="Email OTP expiry (minutes)",
         help_text="How long a login verification code remains valid.",
     )
+    session_timeout_minutes = forms.IntegerField(
+        required=False,
+        min_value=1,
+        max_value=1440,
+        label="Session timeout (minutes)",
+        help_text="How long an authenticated Admin or Faculty Portal session may stay active between requests.",
+    )
     faculty_assignment_response_window_days = forms.IntegerField(
         required=True,
         min_value=1,
@@ -2253,6 +2595,11 @@ class ConfigurableFeatureSettingForm(forms.Form):
         required=False,
         label="Restrict official periodic grades until period deadline",
         help_text="When turned on, official computed period grades such as PG, MG, and PFG stay hidden from faculty until the deadline of that specific period has already passed. When turned off, they remain visible by default.",
+    )
+    faculty_official_period_grades_after_submission = forms.BooleanField(
+        required=False,
+        label="Restrict periodic grade visibility until submission",
+        help_text="When turned on, official computed periodic grades such as PG, MG, PFG, and FX stay hidden from faculty until that period gradebook is submitted. When turned off, periodic grades may be visible during review before submission, subject to the deadline release setting.",
     )
     faculty_official_final_grades_after_deadline = forms.BooleanField(
         required=False,
@@ -2435,6 +2782,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
             cleaned["login_email_otp_enabled"] = False
         if cleaned.get("login_email_otp_expiry_minutes") is None:
             cleaned["login_email_otp_expiry_minutes"] = 10
+        if cleaned.get("session_timeout_minutes") is None:
+            cleaned["session_timeout_minutes"] = 60
 
         selected_term = cleaned.get("class_master_list_term")
         selected_offerings = cleaned.get("class_master_list_offering")
@@ -2497,36 +2846,42 @@ class TemplateGovernanceSettingForm(forms.Form):
         required=False,
         label="Roles allowed to create and edit draft templates",
         help_text="These roles may prepare draft templates and adjust draft structure before submission.",
+        widget=forms.CheckboxSelectMultiple,
     )
     submit_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
         required=False,
         label="Roles allowed to submit templates for approval",
         help_text="These roles may move a draft template into the approval queue.",
+        widget=forms.CheckboxSelectMultiple,
     )
     approval_review_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
         required=False,
         label="Roles allowed to review template approval",
         help_text="These roles may approve or reject a submitted template in Phase 1.",
+        widget=forms.CheckboxSelectMultiple,
     )
     publish_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
         required=False,
         label="Roles allowed to publish approved templates",
         help_text="Publishing activates the template for use by course offerings.",
+        widget=forms.CheckboxSelectMultiple,
     )
     hotfix_request_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
         required=False,
         label="Roles allowed to request a template hotfix",
         help_text="These roles may open a hotfix request on a published template.",
+        widget=forms.CheckboxSelectMultiple,
     )
     hotfix_review_apply_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
         required=False,
         label="Roles allowed to review and apply a hotfix",
         help_text="In Phase 1, this role performs the approve/apply step for hotfixes.",
+        widget=forms.CheckboxSelectMultiple,
     )
     sequential_approval_enabled = forms.BooleanField(
         required=False,
@@ -2538,12 +2893,14 @@ class TemplateGovernanceSettingForm(forms.Form):
         required=False,
         label="Roles allowed for Template Review",
         help_text="Step 1 of the Phase 2 approval chain. These roles can review and endorse the template forward.",
+        widget=forms.CheckboxSelectMultiple,
     )
     approval_final_step_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
         required=False,
         label="Roles allowed for Final Approval",
         help_text="Step 2 of the Phase 2 approval chain. These roles issue the final approval or rejection.",
+        widget=forms.CheckboxSelectMultiple,
     )
     sequential_hotfix_enabled = forms.BooleanField(
         required=False,
@@ -2555,12 +2912,14 @@ class TemplateGovernanceSettingForm(forms.Form):
         required=False,
         label="Roles allowed for Hotfix Review",
         help_text="Step 1 of the hotfix chain. These roles review the requested change before final application.",
+        widget=forms.CheckboxSelectMultiple,
     )
     hotfix_apply_step_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
         required=False,
         label="Roles allowed for Hotfix Final Apply",
         help_text="Step 2 of the hotfix chain. These roles perform the final approve/apply or rejection step.",
+        widget=forms.CheckboxSelectMultiple,
     )
     require_approval_before_publish = forms.BooleanField(
         required=False,

@@ -1,6 +1,31 @@
 {% extends "admin_portal/base.html" %}
 
 {% block admin_content %}
+<style>
+  .tenant-profile-action-group {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+    justify-content: flex-end;
+  }
+  .tenant-profile-action-btn {
+    align-items: center;
+    display: inline-flex;
+    height: 2rem;
+    justify-content: center;
+    padding: 0;
+    width: 2rem;
+  }
+  .tenant-profile-action-btn svg {
+    height: 1rem;
+    width: 1rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+  }
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Tenant Grading Profiles</h2>
   {% if "tenant_grading_profiles.create" in effective_permissions %}
@@ -25,13 +50,6 @@
     </select>
   </div>
   <div class="col-md-2">
-    <select class="form-select" name="active">
-      <option value="">All</option>
-      <option value="1" {% if active == "1" %}selected{% endif %}>Active</option>
-      <option value="0" {% if active == "0" %}selected{% endif %}>Inactive</option>
-    </select>
-  </div>
-  <div class="col-md-2">
     <select class="form-select" name="term_type">
       <option value="">All Term Types</option>
       {% for value, label in term_type_choices %}
@@ -39,7 +57,7 @@
       {% endfor %}
     </select>
   </div>
-  <div class="col-md-2">
+  <div class="col-md-4">
     <input class="form-control" name="q" value="{{ q }}" placeholder="Search profile/course/template">
   </div>
   <div class="col-md-2">
@@ -47,78 +65,20 @@
   </div>
 </form>
 
-<div class="card border-0 shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover mb-0 align-middle">
-      <thead>
-        <tr>
-          <th>Code</th>
-          <th>Name</th>
-          <th>Scope</th>
-          <th>Target</th>
-          <th>Term Type</th>
-          <th>Template</th>
-          <th>Base Override</th>
-          <th>Passing Threshold</th>
-          <th>Final Grade Formula</th>
-          <th>Priority</th>
-          <th>Status</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for row in page_obj %}
-        <tr>
-          <td>{{ row.profile_code }}</td>
-          <td>{{ row.profile_name }}</td>
-          <td>
-            Tenant: {{ row.tenant.code }}<br>
-            Campus: {{ row.campus.code|default:"ALL" }}<br>
-            Department: {{ row.department.code|default:"ALL" }}<br>
-            Program: {{ row.program.code|default:"ALL" }}
-          </td>
-          <td>
-            Course: {{ row.course.code|default:"ALL" }}<br>
-            Course Type: {{ row.course_type|default:"ANY" }}
-          </td>
-          <td>{{ row.get_term_type_display|default:"All Terms" }}</td>
-          <td>{{ row.grading_template.code }} - {{ row.grading_template.name }}</td>
-          <td>{{ row.default_base_value|default:"-" }}</td>
-          <td>{{ row.passing_grade_threshold|default:"Tenant Default" }}</td>
-          <td>
-            {{ row.get_final_grade_formula_mode_display }}<br>
-            {% if row.final_grade_formula_json and row.final_grade_formula_json.period_weights %}
-              <small class="text-muted">
-                {% for item in row.final_grade_formula_json.period_weights %}
-                  {{ item.period_code }}={{ item.weight }}{% if not forloop.last %}, {% endif %}
-                {% endfor %}
-              </small>
-            {% else %}
-              <small class="text-muted">Uses all active template periods.</small>
-            {% endif %}
-          </td>
-          <td>{{ row.priority }}</td>
-          <td>
-            {% if row.is_active %}
-              <span class="badge text-bg-success">Active</span>
-            {% else %}
-              <span class="badge text-bg-warning text-dark">Inactive</span>
-            {% endif %}
-            {% if row.is_default %}<span class="badge text-bg-info">Default</span>{% endif %}
-          </td>
-          <td class="text-end">
-            {% if "tenant_grading_profiles.update" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:tenant_grading_profile_update' row.id %}">Edit</a>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="12" class="text-center text-muted py-4">No tenant grading profiles found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
-</div>
+{% include "admin_portal/shared/active_inactive_sections.html" with section_label="Tenant Grading Profiles" table_template="admin_portal/grading/tenant_grading_profile_table.html" active_empty_message="No active tenant grading profiles found." inactive_empty_message="No inactive tenant grading profiles found." %}
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    if (typeof bootstrap === "undefined" || !bootstrap.Tooltip) {
+      return;
+    }
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (element) {
+      bootstrap.Tooltip.getOrCreateInstance(element, {
+        trigger: "hover focus",
+        boundary: "window"
+      });
+    });
+  });
+</script>
 {% endblock %}
 

@@ -27,6 +27,7 @@ class FeatureSettingsService:
     LOGIN_LOCKOUT_DURATION_MINUTES_KEY = "FEATURE_LOGIN_LOCKOUT_DURATION_MINUTES"
     LOGIN_EMAIL_OTP_ENABLED_KEY = "FEATURE_LOGIN_EMAIL_OTP_ENABLED"
     LOGIN_EMAIL_OTP_EXPIRY_MINUTES_KEY = "FEATURE_LOGIN_EMAIL_OTP_EXPIRY_MINUTES"
+    SESSION_TIMEOUT_MINUTES_KEY = "FEATURE_SESSION_TIMEOUT_MINUTES"
     GRADE_PREDICTION_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_ENABLED"
     GRADE_PREDICTION_ROLE_CODES_KEY = "FEATURE_GRADE_PREDICTION_ROLE_CODES"
     GRADE_PREDICTION_WHAT_IF_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_WHAT_IF_ENABLED"
@@ -37,6 +38,7 @@ class FeatureSettingsService:
     GRADE_PREDICTION_SHOW_TARGET_NEEDED_KEY = "FEATURE_GRADE_PREDICTION_SHOW_TARGET_NEEDED"
     GRADE_PREDICTION_DEFAULT_ASSUMPTION_KEY = "FEATURE_GRADE_PREDICTION_DEFAULT_ASSUMPTION"
     FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE_KEY = "FEATURE_FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE"
+    FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY = "FEATURE_FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION"
     FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE_KEY = "FEATURE_FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE"
     USER_SIGNATURES_ENABLED_KEY = "FEATURE_USER_SIGNATURES_ENABLED"
     USER_SIGNATURES_FINAL_CLEARANCE_ENABLED_KEY = "FEATURE_USER_SIGNATURES_FINAL_CLEARANCE_ENABLED"
@@ -310,6 +312,18 @@ class FeatureSettingsService:
         )
 
     @classmethod
+    def get_session_timeout_minutes(cls, *, tenant_id: int | None, default: int = 60) -> int:
+        return cls._positive_int(
+            SystemSettingService.get(
+                cls.SESSION_TIMEOUT_MINUTES_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            ),
+            default=default,
+            minimum=1,
+        )
+
+    @classmethod
     def get_faculty_assignment_response_window_days(cls, *, tenant_id: int | None, default: int = 3) -> int:
         return cls._positive_int(
             SystemSettingService.get(
@@ -462,6 +476,21 @@ class FeatureSettingsService:
         return bool(
             SystemSettingService.get(
                 cls.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def show_faculty_official_period_grades_after_submission(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: bool = False,
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
                 tenant_id=tenant_id,
                 default=default,
             )

@@ -22,6 +22,7 @@ from apps.admin_portal.services import model_before_after
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
+from apps.core.services.permissions import PermissionService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 from apps.enrollment.services import EnrollmentService
@@ -30,11 +31,13 @@ from apps.faculty_portal.forms import (
     FacultyEnrollmentForm,
     FacultyMemoForm,
     FacultyReminderForm,
+    FacultyTemplateIssueReportForm,
     GradeActivityForm,
     GradeCorrectionRequestForm,
 )
 from apps.faculty_portal.services import FacultyDashboardService
 from apps.grading.models import (
+    CourseTemplateAssignment,
     FacultyFinalClearanceReport,
     GradeCorrectionAttachment,
     GradeCorrectionRequest,
@@ -50,10 +53,18 @@ from apps.grading.models import (
     StudentActivityScore,
     StudentFinalGrade,
     StudentPeriodGrade,
+    TemplateHotfixRequest,
 )
+from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService
 from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
-from apps.grading.services import FacultyGradingService, GradingGovernanceService
+from apps.grading.services import (
+    FacultyGradingService,
+    GradingGovernanceService,
+    GradingTemplateTestingCalculatorService,
+    TemplateGovernanceWorkflowService,
+    TemplateHotfixService,
+)
 from apps.predictions.services import (
     PredictionAuditService,
     PredictionComputationService,
@@ -78,6 +89,70 @@ def _activity_before_data(activity: GradeActivity):
         "template_subcomponent_id": activity.template_subcomponent_id,
         "template_detail_id": activity.template_detail_id,
     }
+
+
+def _has_active_published_course_template_assignment(offering):
+    return (
+        CourseTemplateAssignment.objects.filter(
+            course_id=offering.course_id,
+            is_active=True,
+            grading_template__is_active=True,
+            grading_template__is_published=True,
+        )
+        .filter(Q(effective_from_term_id=offering.term_id) | Q(effective_from_term__isnull=True))
+        .exists()
+    )
+
+
+def _faculty_offering_has_submitted_grades(offering, template):
+    period_ids = list(template.periods.filter(is_active=True).values_list("id", flat=True))
+    if not period_ids:
+        return False
+    return GradeSubmission.objects.filter(
+        offering_id=offering.id,
+        template_period_id__in=period_ids,
+        status__in=[
+            GradeSubmission.Status.SUBMITTED,
+            GradeSubmission.Status.REOPENED,
+        ],
+    ).exists()
+
+
+def _tenant_passing_threshold_or_default(tenant_id) -> Decimal:
+    tenant_value = SystemSettingService.get(
+        "PASSING_GRADE_THRESHOLD",
+        tenant_id=tenant_id,
+        default="75",
+    )
+    try:
+        return GradingGovernanceService._round(Decimal(str(tenant_value)))
+    except Exception:
+        return Decimal("75.00")
+
+
+def _can_report_template_issue(user, offering, template):
+    if not template or not getattr(template, "is_published", False):
+        return False
+    if getattr(offering, "faculty_is_read_only", False):
+        return False
+    if offering.status != CourseOffering.Status.OPEN:
+        return False
+    if not PermissionService.has_permission(
+        user,
+        "template_hotfixes.create",
+        tenant_id=offering.tenant_id,
+        campus_id=offering.campus_id,
+    ):
+        return False
+    if not TemplateGovernanceWorkflowService.user_has_stage_role(
+        user=user,
+        stage_code=TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST,
+        tenant_id=offering.tenant_id,
+    ):
+        return False
+    if _faculty_offering_has_submitted_grades(offering, template):
+        return False
+    return True
 
 
 def _faculty_final_clearance_report_filename(report_obj: FacultyFinalClearanceReport) -> str:
@@ -132,6 +207,20 @@ def _faculty_assignment_queryset(user):
         faculty_user_id=user.id,
         is_active=True,
         offering__is_active=True,
+        offering__tenant__is_active=True,
+        offering__campus__is_active=True,
+        offering__academic_year__is_active=True,
+        offering__term__is_active=True,
+        offering__department__is_active=True,
+        offering__program__is_active=True,
+        offering__program__department__is_active=True,
+        offering__course__is_active=True,
+        offering__section__is_active=True,
+        offering__section__department__is_active=True,
+        offering__section__program__is_active=True,
+        offering__section__program__department__is_active=True,
+    ).filter(
+        Q(offering__course__department__isnull=True) | Q(offering__course__department__is_active=True)
     ).select_related(
         "tenant",
         "campus",
@@ -152,6 +241,20 @@ def _faculty_offering_queryset(user):
         faculty_assignments__is_active=True,
         faculty_assignments__accepted_at__isnull=False,
         is_active=True,
+        tenant__is_active=True,
+        campus__is_active=True,
+        academic_year__is_active=True,
+        term__is_active=True,
+        department__is_active=True,
+        program__is_active=True,
+        program__department__is_active=True,
+        course__is_active=True,
+        section__is_active=True,
+        section__department__is_active=True,
+        section__program__is_active=True,
+        section__program__department__is_active=True,
+    ).filter(
+        Q(course__department__isnull=True) | Q(course__department__is_active=True)
     ).select_related("tenant", "campus", "department", "term", "course", "section")
 
 
@@ -188,6 +291,52 @@ def _safe_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _faculty_offering_scope_state(offering):
+    active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=offering.tenant_id)
+    has_active_scope = bool(active_academic_year and active_term)
+    in_active_scope = True
+    if has_active_scope:
+        in_active_scope = offering.academic_year_id == active_academic_year.id and offering.term_id == active_term.id
+    forced_archive = offering.status == CourseOffering.Status.ARCHIVED
+    read_only = forced_archive or not in_active_scope
+    if forced_archive:
+        reason = "This class is archived and is available for reference only."
+    elif not in_active_scope and has_active_scope:
+        reason = (
+            f"This class is outside the active academic scope "
+            f"({active_academic_year.code} / {active_term.code}) and is available for reference only."
+        )
+    else:
+        reason = ""
+    return {
+        "active_academic_year": active_academic_year,
+        "active_term": active_term,
+        "has_active_scope": has_active_scope,
+        "in_active_scope": in_active_scope,
+        "forced_archive": forced_archive,
+        "read_only": read_only,
+        "reason": reason,
+    }
+
+
+def _attach_faculty_offering_scope_state(offering):
+    state = _faculty_offering_scope_state(offering)
+    offering.faculty_scope_state = state
+    offering.faculty_is_read_only = state["read_only"]
+    offering.faculty_read_only_reason = state["reason"]
+    return offering
+
+
+def _faculty_current_offering_queryset(user, *, tenant_id=None):
+    queryset = _faculty_offering_queryset(user)
+    if tenant_id:
+        queryset = queryset.filter(tenant_id=tenant_id)
+        _active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
+        if active_term:
+            queryset = queryset.filter(academic_year_id=active_term.academic_year_id, term_id=active_term.id)
+    return queryset.exclude(status=CourseOffering.Status.ARCHIVED)
 
 
 def _format_decimal_display(value):
@@ -228,12 +377,23 @@ def _correction_activity_label(activity: GradeActivity):
 
 
 def _require_faculty_offering_or_404(request, offering_id: int):
-    return get_object_or_404(_faculty_offering_queryset(request.user), id=offering_id)
+    offering = get_object_or_404(_faculty_offering_queryset(request.user), id=offering_id)
+    return _attach_faculty_offering_scope_state(offering)
 
 
 def _require_pending_faculty_assignment_or_404(request, assignment_id: int):
     return get_object_or_404(
         _faculty_assignment_queryset(request.user).filter(accepted_at__isnull=True),
+        id=assignment_id,
+    )
+
+
+def _require_accepted_faculty_assignment_or_404(request, assignment_id: int):
+    return get_object_or_404(
+        _faculty_assignment_queryset(request.user).filter(
+            accepted_at__isnull=False,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+        ),
         id=assignment_id,
     )
 
@@ -248,6 +408,20 @@ def _require_faculty_reminder_or_404(request, reminder_id: int):
 
 def _find_faculty_assignment(user, offering_id: int):
     return _faculty_assignment_queryset(user).filter(offering_id=offering_id).first()
+
+
+def _faculty_assignment_started_work(assignment) -> bool:
+    offering_id = assignment.offering_id
+    return (
+        GradeActivity.objects.filter(offering_id=offering_id, is_active=True).exists()
+        or AttendanceSession.objects.filter(offering_id=offering_id, is_active=True).exists()
+        or GradeSubmission.objects.filter(offering_id=offering_id).exists()
+        or Enrollment.objects.filter(
+            course_offering_id=offering_id,
+            encoded_by_user=assignment.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.FACULTY,
+        ).exists()
+    )
 
 
 def _apply_assignment_response(*, request, assignment, response_status: str, success_message: str, faculty_note: str = ""):
@@ -384,6 +558,7 @@ def _resolve_offering_period(request, offering_id: int, period_id: int, *, allow
 
 
 def _period_edit_state(offering, period):
+    scope_state = getattr(offering, "faculty_scope_state", None) or _faculty_offering_scope_state(offering)
     GradingGovernanceService.auto_lock_expired_reopened_gradebook(offering=offering, template_period=period)
     is_locked = GradingGovernanceService.is_locked(offering=offering, template_period=period)
     submission = GradingGovernanceService.get_submission(offering=offering, template_period=period)
@@ -422,6 +597,8 @@ def _period_edit_state(offering, period):
     correction_mode = GradingGovernanceService.get_correction_mode(tenant_id=offering.tenant_id)
     system_correction_enabled = correction_mode == GradingGovernanceService.CORRECTION_MODE_SYSTEM_REQUEST
     return {
+        "faculty_scope_state": scope_state,
+        "is_read_only_class": scope_state["read_only"],
         "is_locked": is_locked,
         "is_submitted": is_submitted,
         "submission_status": submission.status if submission else None,
@@ -443,10 +620,10 @@ def _period_edit_state(offering, period):
         "can_request_late_completion": False,
         "is_correction_active": is_correction_active,
         "active_correction_request": active_correction_request,
-        "is_editable": is_editable,
-        "can_submit_period": can_submit_period,
+        "is_editable": is_editable and not scope_state["read_only"],
+        "can_submit_period": can_submit_period and not scope_state["read_only"],
         "is_auto_locked_reopened_after_deadline": is_auto_locked_reopened_after_deadline,
-        "can_self_reopen": can_self_reopen,
+        "can_self_reopen": can_self_reopen and not scope_state["read_only"],
         "governance_state": governance_state,
         "is_governance_closed": governance_state["is_closed_by_active_period"],
         "governance_message": governance_state["message"],
@@ -633,9 +810,21 @@ def _has_passed_period_deadline(*, offering, template_period, now=None) -> bool:
     return lock.deadline_at <= now
 
 
-def _official_grade_release_state(*, offering, template, template_period, now=None):
+def _official_grade_release_state(
+    *,
+    offering,
+    template,
+    template_period,
+    is_period_submitted=False,
+    submission_status=None,
+    now=None,
+):
     now = now or timezone.now()
     period_restricted = FeatureSettingsService.show_faculty_official_period_grades_after_deadline(
+        tenant_id=offering.tenant_id,
+        default=False,
+    )
+    submission_restricted = FeatureSettingsService.show_faculty_official_period_grades_after_submission(
         tenant_id=offering.tenant_id,
         default=False,
     )
@@ -643,7 +832,17 @@ def _official_grade_release_state(*, offering, template, template_period, now=No
         tenant_id=offering.tenant_id,
         default=False,
     )
-    show_period = (not period_restricted) or _has_passed_period_deadline(offering=offering, template_period=template_period, now=now)
+    allow_pre_submission_summary = (not submission_restricted) and submission_status is None
+    period_visibility_allowed = is_period_submitted or allow_pre_submission_summary
+    period_deadline_passed = _has_passed_period_deadline(
+        offering=offering,
+        template_period=template_period,
+        now=now,
+    )
+    show_period = (
+        period_visibility_allowed
+        and ((not period_restricted) or period_deadline_passed)
+    )
 
     final_period = (
         template.periods.filter(is_active=True).order_by("-sequence_no", "-id").first()
@@ -653,6 +852,7 @@ def _official_grade_release_state(*, offering, template, template_period, now=No
     is_final_period_view = bool(final_period is not None and template_period.id == final_period.id)
     show_final = bool(
         is_final_period_view
+        and is_period_submitted
         and (
             (not final_restricted)
             or _has_passed_period_deadline(offering=offering, template_period=final_period, now=now)
@@ -660,11 +860,17 @@ def _official_grade_release_state(*, offering, template, template_period, now=No
     )
 
     notes = []
-    if period_restricted and not show_period:
+    if submission_restricted and not is_period_submitted:
+        notes.append(
+            f"Official {template_period.name} grade is hidden until this gradebook is submitted."
+        )
+    if period_restricted and not period_deadline_passed:
         notes.append(
             f"Official {template_period.name} grade is hidden until the {template_period.name} deadline has passed."
         )
-    if final_restricted and is_final_period_view and not show_final:
+    if is_final_period_view and not is_period_submitted:
+        notes.append("Official final grade is hidden until the Final gradebook is submitted.")
+    elif final_restricted and is_final_period_view and not show_final:
         notes.append(
             f"Official final grade is hidden until the {final_period.name} deadline has passed."
         )
@@ -675,6 +881,8 @@ def _official_grade_release_state(*, offering, template, template_period, now=No
         "notes": notes,
         "final_period": final_period,
         "is_final_period_view": is_final_period_view,
+        "allow_pre_submission_summary": allow_pre_submission_summary,
+        "submission_restricted": submission_restricted,
     }
 
 
@@ -895,12 +1103,15 @@ def dashboard_view(request):
     def _is_in_active_scope(offering):
         tenant_id = offering.tenant_id
         if tenant_id not in active_term_cache:
-            _, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
-            active_term_cache[tenant_id] = active_term.id if active_term else None
-        active_term_id = active_term_cache[tenant_id]
-        if not active_term_id:
+            active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
+            active_term_cache[tenant_id] = (
+                active_academic_year.id if active_academic_year else None,
+                active_term.id if active_term else None,
+            )
+        active_academic_year_id, active_term_id = active_term_cache[tenant_id]
+        if not active_academic_year_id or not active_term_id:
             return True
-        return offering.term_id == active_term_id
+        return offering.academic_year_id == active_academic_year_id and offering.term_id == active_term_id
 
     active_offerings = []
     archived_offerings = []
@@ -1064,12 +1275,15 @@ def analytics_view(request):
     def _is_in_active_scope(offering):
         tenant_id = offering.tenant_id
         if tenant_id not in active_term_cache:
-            _, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
-            active_term_cache[tenant_id] = active_term.id if active_term else None
-        active_term_id = active_term_cache[tenant_id]
-        if not active_term_id:
+            active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
+            active_term_cache[tenant_id] = (
+                active_academic_year.id if active_academic_year else None,
+                active_term.id if active_term else None,
+            )
+        active_academic_year_id, active_term_id = active_term_cache[tenant_id]
+        if not active_academic_year_id or not active_term_id:
             return True
-        return offering.term_id == active_term_id
+        return offering.academic_year_id == active_academic_year_id and offering.term_id == active_term_id
 
     active_offerings = []
     archived_offerings = []
@@ -1101,12 +1315,14 @@ def analytics_view(request):
         return round((value / total) * 100, 1)
 
     expected_periods_by_offering = {}
+    missing_template_offering_ids = set()
     for offering in selected_offerings:
         try:
             template = FacultyGradingService.resolve_template_for_offering(offering)
             expected_periods_by_offering[offering.id] = len(list(FacultyGradingService.get_template_periods(template)))
         except ValidationError:
             expected_periods_by_offering[offering.id] = 0
+            missing_template_offering_ids.add(offering.id)
 
     submission_map = {
         row["offering_id"]: row
@@ -1125,7 +1341,14 @@ def analytics_view(request):
     failed_count = 0
     total_grade_sum = Decimal("0")
     for offering in selected_offerings:
-        offering_threshold_map[offering.id] = FacultyGradingService.resolve_passing_threshold(offering)
+        if offering.id in missing_template_offering_ids:
+            offering_threshold_map[offering.id] = _tenant_passing_threshold_or_default(offering.tenant_id)
+            continue
+        try:
+            offering_threshold_map[offering.id] = FacultyGradingService.resolve_passing_threshold(offering)
+        except ValidationError:
+            offering_threshold_map[offering.id] = _tenant_passing_threshold_or_default(offering.tenant_id)
+            missing_template_offering_ids.add(offering.id)
 
     for row in grade_qs.values("offering_id", "period_grade"):
         offering_id = row["offering_id"]
@@ -1171,6 +1394,7 @@ def analytics_view(request):
                 "avg_grade": grade_row.get("avg_grade"),
                 "failed_rows": failed_rows,
                 "pass_rate": _pct(max(graded_rows - failed_rows, 0), graded_rows),
+                "missing_template": offering.id in missing_template_offering_ids,
             }
         )
     class_rows.sort(key=lambda item: (-item["pending_periods"], -item["failed_rows"], item["offering"].course.code))
@@ -1213,6 +1437,7 @@ def analytics_view(request):
         "passed_rows": passed_count,
         "failed_rows": failed_count,
         "pass_rate": _pct(passed_count, graded_count),
+        "missing_template_classes": len(missing_template_offering_ids),
         "avg_grade": (
             GradingGovernanceService._round(total_grade_sum / Decimal(graded_count))
             if graded_count
@@ -1640,7 +1865,7 @@ def reminder_center_view(request):
 
     now = timezone.now()
     FacultyAssignmentWorkflowService.expire_overdue_assignments(tenant_id=tenant_id)
-    offering_qs = _faculty_offering_queryset(request.user).filter(tenant_id=tenant_id).distinct()
+    offering_qs = _faculty_current_offering_queryset(request.user, tenant_id=tenant_id).distinct()
     send_email_enabled = FeatureSettingsService.is_faculty_reminder_email_enabled(tenant_id=tenant_id, default=False)
     center_enabled = FeatureSettingsService.is_faculty_reminder_center_enabled(tenant_id=tenant_id, default=True)
     form = FacultyReminderForm(
@@ -1851,7 +2076,7 @@ def memo_center_view(request):
         messages.error(request, "Faculty memo center is disabled by configuration.")
         return redirect("faculty_portal:dashboard")
 
-    offering_qs = _faculty_offering_queryset(request.user).filter(tenant_id=tenant_id).distinct()
+    offering_qs = _faculty_current_offering_queryset(request.user, tenant_id=tenant_id).distinct()
     student_qs = Student.objects.filter(
         id__in=Enrollment.objects.filter(course_offering__in=offering_qs, is_active=True)
         .values_list("student_id", flat=True)
@@ -1964,7 +2189,9 @@ def memo_edit_view(request, memo_id: int):
         messages.error(request, "Faculty memo center is disabled by configuration.")
         return redirect("faculty_portal:memo_center")
 
-    offering_qs = _faculty_offering_queryset(request.user).filter(tenant_id=tenant_id).distinct()
+    offering_qs = _faculty_current_offering_queryset(request.user, tenant_id=tenant_id).distinct()
+    if memo.offering_id:
+        offering_qs = (offering_qs | _faculty_offering_queryset(request.user).filter(id=memo.offering_id)).distinct()
     student_qs = Student.objects.filter(
         id__in=Enrollment.objects.filter(course_offering__in=offering_qs, is_active=True)
         .values_list("student_id", flat=True)
@@ -2099,12 +2326,15 @@ def student_at_risk_monitor_view(request):
     def _is_in_active_scope(offering):
         tenant_key = offering.tenant_id
         if tenant_key not in active_term_cache:
-            _, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_key)
-            active_term_cache[tenant_key] = active_term.id if active_term else None
-        active_term_id = active_term_cache[tenant_key]
-        if not active_term_id:
+            active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_key)
+            active_term_cache[tenant_key] = (
+                active_academic_year.id if active_academic_year else None,
+                active_term.id if active_term else None,
+            )
+        active_academic_year_id, active_term_id = active_term_cache[tenant_key]
+        if not active_academic_year_id or not active_term_id:
             return True
-        return offering.term_id == active_term_id
+        return offering.academic_year_id == active_academic_year_id and offering.term_id == active_term_id
 
     monitored_offerings = []
     for assignment in assignment_qs:
@@ -2325,20 +2555,30 @@ def my_courses_view(request):
     def _is_in_active_scope(offering):
         tenant_id = offering.tenant_id
         if tenant_id not in active_term_cache:
-            _, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
-            active_term_cache[tenant_id] = active_term.id if active_term else None
-        active_term_id = active_term_cache[tenant_id]
-        if not active_term_id:
+            active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
+            active_term_cache[tenant_id] = (
+                active_academic_year.id if active_academic_year else None,
+                active_term.id if active_term else None,
+            )
+        active_academic_year_id, active_term_id = active_term_cache[tenant_id]
+        if not active_academic_year_id or not active_term_id:
             return True
-        return offering.term_id == active_term_id
+        return offering.academic_year_id == active_academic_year_id and offering.term_id == active_term_id
 
     pending_assignments = []
     active_offerings = []
     archived_offerings = []
     for assignment in assignment_qs:
-        offering = assignment.offering
+        offering = _attach_faculty_offering_scope_state(assignment.offering)
         offering.assignment = assignment
         offering.enrollment_count = assignment.enrollment_count
+        offering.can_undo_acceptance = assignment.is_accepted and not _faculty_assignment_started_work(assignment)
+        offering.has_course_template_assignment = _has_active_published_course_template_assignment(offering)
+        offering.template_assignment_warning = (
+            "No grading template is assigned to this course offering yet. Please coordinate with the MIS Department."
+            if not offering.has_course_template_assignment
+            else ""
+        )
         try:
             resolved_template = FacultyGradingService.resolve_template_for_offering(offering)
         except ValidationError:
@@ -2359,6 +2599,16 @@ def my_courses_view(request):
             active_offerings.append(offering)
 
     selected_offerings = archived_offerings if show_archived else active_offerings
+    missing_template_assignment_offerings = [
+        offering
+        for offering in active_offerings
+        if not offering.has_course_template_assignment
+    ]
+    missing_template_assignment_pending = [
+        assignment
+        for assignment in pending_assignments
+        if not assignment.offering.has_course_template_assignment
+    ]
 
     grouped_offerings = []
     final_clearance_targets = []
@@ -2408,6 +2658,11 @@ def my_courses_view(request):
         "deadline_banner": deadline_banner if not show_archived else None,
         "active_grading_period_rows": active_grading_period_rows if not show_archived else [],
         "final_clearance_targets": final_clearance_targets if not show_archived else [],
+        "missing_template_assignment_count": (
+            len(missing_template_assignment_offerings) + len(missing_template_assignment_pending)
+            if not show_archived
+            else 0
+        ),
     }
     return render(request, "faculty_portal/my_courses.html", context)
 
@@ -2432,6 +2687,56 @@ def faculty_assignment_accept_view(request, assignment_id: int):
         response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
         success_message=f"Assignment accepted for {assignment.offering.course.code} / {assignment.offering.section.code}.",
     )
+    return redirect("faculty_portal:my_courses")
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def faculty_assignment_undo_accept_view(request, assignment_id: int):
+    if request.method != "POST":
+        return redirect("faculty_portal:my_courses")
+
+    assignment = _require_accepted_faculty_assignment_or_404(request, assignment_id)
+    if _faculty_assignment_started_work(assignment):
+        messages.error(
+            request,
+            "Acceptance cannot be undone because grading, attendance, submission, or class-list work already exists.",
+        )
+        return redirect("faculty_portal:my_courses")
+
+    before = model_before_after(assignment)
+    FacultyAssignmentWorkflowService.reset_response_window(assignment)
+    assignment.save(
+        update_fields=[
+            "assignment_note",
+            "accepted_at",
+            "accepted_by",
+            "response_status",
+            "faculty_response_note",
+            "responded_at",
+            "response_due_at",
+            "last_reminded_at",
+            "reminder_count",
+            "updated_at",
+        ]
+    )
+    AuditService.log_event(
+        action="UNDO_ACCEPTANCE",
+        portal="FACULTY",
+        entity_type="FacultyAssignment",
+        entity_id=assignment.id,
+        actor=request.user,
+        tenant=assignment.tenant,
+        campus=assignment.campus,
+        before_data=before,
+        after_data=model_before_after(assignment),
+        metadata={
+            "event": "faculty_assignment_acceptance_undone",
+            "offering_id": assignment.offering_id,
+        },
+        request=request,
+    )
+    messages.success(request, "Assignment acceptance undone. The class is back under Pending Faculty Assignments.")
     return redirect("faculty_portal:my_courses")
 
 
@@ -2526,6 +2831,7 @@ def offering_periods_view(request, offering_id: int):
         period_cards.append(
             {
                 "period": p,
+                "is_read_only_class": offering.faculty_is_read_only,
                 "is_locked": bool(lock and lock.is_locked),
                 "is_submitted": GradingGovernanceService.is_submitted(offering=offering, template_period=p),
                 "submission_status": submission.status if submission else None,
@@ -2555,6 +2861,7 @@ def offering_periods_view(request, offering_id: int):
 
     context = {
         "offering": offering,
+        "faculty_scope_state": offering.faculty_scope_state,
         "template": template,
         "periods": periods,
         "period_cards": period_cards,
@@ -2596,13 +2903,167 @@ def offering_grading_template_view(request, offering_id: int):
         return redirect("faculty_portal:offering_periods", offering_id=offering.id)
 
     preview = _build_faculty_template_preview(template)
+    can_report_template_issue = _can_report_template_issue(request.user, offering, template)
+    template_issue_reports = (
+        TemplateHotfixRequest.objects.filter(
+            template_id=template.id,
+            requested_by_user=request.user,
+        )
+        .prefetch_related("workflow_steps")
+        .order_by("-created_at")[:5]
+    )
+    for report in template_issue_reports:
+        report.current_step = TemplateGovernanceWorkflowService.get_current_hotfix_step(hotfix_request=report)
     context = {
         "offering": offering,
         "template": template,
         "period_rows": preview["period_rows"],
         "final_formula": preview["final_formula"],
+        "can_report_template_issue": can_report_template_issue,
+        "template_issue_reports": template_issue_reports,
     }
     return render(request, "faculty_portal/offering_grading_template.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def offering_grading_calculator_view(request, offering_id: int):
+    assignment = _find_faculty_assignment(request.user, offering_id)
+    if assignment and not assignment.is_accepted:
+        messages.error(request, "Please accept this faculty assignment first before opening the class.")
+        return redirect("faculty_portal:my_courses")
+    offering = _require_faculty_offering_or_404(request, offering_id)
+    try:
+        resolved_template = FacultyGradingService.resolve_template_for_offering(offering)
+    except ValidationError as exc:
+        messages.error(request, str(exc))
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    template = _load_template_preview(resolved_template.id)
+    if not template:
+        messages.error(request, "The grading template for this class could not be loaded.")
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    sample_input = (request.POST.get("sample_value") if request.method == "POST" else request.GET.get("sample_value")) or "85.00"
+    try:
+        sample_value = Decimal(str(sample_input))
+        if sample_value < Decimal("0") or sample_value > Decimal("100"):
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        sample_value = GradingTemplateTestingCalculatorService.DEFAULT_SAMPLE_VALUE
+        messages.warning(request, "The sample value was invalid, so EduGradesPro used 85.00 instead.")
+
+    calculation = GradingTemplateTestingCalculatorService.build_calculation(
+        template=template,
+        offering=offering,
+        raw_inputs=request.POST if request.method == "POST" else None,
+        default_sample=sample_value,
+    )
+    if calculation["input_errors"]:
+        messages.warning(
+            request,
+            "Some sample rows had invalid percentages, so EduGradesPro temporarily used the default sample value for those rows.",
+        )
+
+    context = {
+        "offering": offering,
+        "template": template,
+        "calculation": calculation,
+        "sample_value": calculation["default_sample"],
+    }
+    return render(request, "faculty_portal/offering_grading_calculator.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def report_template_issue_view(request, offering_id: int):
+    assignment = _find_faculty_assignment(request.user, offering_id)
+    if assignment and not assignment.is_accepted:
+        messages.error(request, "Please accept this faculty assignment first before reporting a template issue.")
+        return redirect("faculty_portal:my_courses")
+    offering = _require_faculty_offering_or_404(request, offering_id)
+    try:
+        resolved_template = FacultyGradingService.resolve_template_for_offering(offering)
+    except ValidationError as exc:
+        messages.error(request, str(exc))
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    template = _load_template_preview(resolved_template.id)
+    if not template:
+        messages.error(request, "The grading template for this class could not be loaded.")
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    if not _can_report_template_issue(request.user, offering, template):
+        messages.error(request, "Template issue reporting is not available for this class under the current governance settings.")
+        return redirect("faculty_portal:offering_grading_template", offering_id=offering.id)
+
+    existing_pending = TemplateHotfixRequest.objects.filter(
+        template_id=template.id,
+        requested_by_user=request.user,
+        status=TemplateHotfixRequest.Status.PENDING,
+    ).first()
+    if existing_pending:
+        messages.info(
+            request,
+            "You already have a pending template issue report for this template. Please wait for governance review.",
+        )
+        return redirect("faculty_portal:offering_grading_template", offering_id=offering.id)
+
+    form = FacultyTemplateIssueReportForm(request.POST or None)
+    _style_form(form)
+    if request.method == "POST" and form.is_valid():
+        issue_label = dict(FacultyTemplateIssueReportForm.IssueType.choices).get(form.cleaned_data["issue_type"])
+        justification = (
+            f"Faculty-reported template issue\n\n"
+            f"Issue Type: {issue_label}\n"
+            f"Class: {offering.course.code} / {offering.section.code} / {offering.term.code}\n\n"
+            f"Details:\n{form.cleaned_data['details'].strip()}"
+        )
+        try:
+            TemplateGovernanceWorkflowService.ensure_user_can_perform_stage(
+                user=request.user,
+                stage_code=TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST,
+                tenant_id=offering.tenant_id,
+            )
+            hotfix = TemplateHotfixService.create_request(
+                template=template,
+                requested_by=request.user,
+                apply_mode=TemplateHotfixRequest.ApplyMode.REQUESTING_FACULTY_OFFERINGS,
+                justification=justification,
+            )
+        except ValidationError as exc:
+            messages.error(request, str(exc))
+            return redirect("faculty_portal:offering_grading_template", offering_id=offering.id)
+
+        AuditService.log_event(
+            action="CREATE",
+            portal="FACULTY",
+            entity_type="TemplateHotfixRequest",
+            entity_id=hotfix.id,
+            actor=request.user,
+            tenant=offering.tenant,
+            campus=offering.campus,
+            after_data=model_before_after(hotfix),
+            metadata={
+                "workflow": "FACULTY_TEMPLATE_ISSUE_REPORT",
+                "offering_id": offering.id,
+                "template_id": template.id,
+                "apply_mode": hotfix.apply_mode,
+            },
+            request=request,
+        )
+        messages.success(
+            request,
+            "Template issue report submitted. Governance reviewers will decide if it becomes an applied hotfix.",
+        )
+        return redirect("faculty_portal:offering_grading_template", offering_id=offering.id)
+
+    context = {
+        "form": form,
+        "offering": offering,
+        "template": template,
+    }
+    return render(request, "faculty_portal/report_template_issue.html", context)
 
 
 @portal_required("FACULTY")
@@ -3329,7 +3790,12 @@ def period_attendance_view(request, offering_id: int, period_id: int):
         "pending_late_completion_request": state["pending_late_completion_request"],
         "active_late_completion_request": state["active_late_completion_request"],
         "can_request_late_completion": state["can_request_late_completion"],
-        "can_manage_sessions": not state["is_locked"] and not state["is_submitted"] and not state["is_governance_closed"],
+        "can_manage_sessions": (
+            not state["is_locked"]
+            and not state["is_submitted"]
+            and not state["is_governance_closed"]
+            and not state["is_read_only_class"]
+        ),
     }
     return render(request, "faculty_portal/period_attendance.html", context)
 
@@ -3345,14 +3811,15 @@ def period_summary_view(request, offering_id: int, period_id: int):
     )
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+    state = _period_edit_state(offering, period)
     official_grade_release = _official_grade_release_state(
         offering=offering,
         template=template,
         template_period=period,
+        is_period_submitted=state["is_submitted"],
+        submission_status=state["submission_status"],
         now=timezone.now(),
     )
-
-    state = _period_edit_state(offering, period)
     def _stored_period_summary():
         period_enrollments = list(
             Enrollment.objects.filter(course_offering_id=offering.id, is_active=True).select_related("student")
@@ -3497,6 +3964,28 @@ def period_summary_view(request, offering_id: int, period_id: int):
     enriched_rows = []
     for row in rows:
         summary_values = _build_summary_row_values(row, summary_layout, score_by_activity)
+        period_explain_url = None
+        final_explain_url = None
+        if official_grade_release["show_period_grade"] and row["period_grade"] is not None:
+            period_explain_url = reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": offering.id,
+                    "period_id": period.id,
+                    "student_id": row["student"].id,
+                    "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+                },
+            )
+        if official_grade_release["show_final_grade"] and final_grade_map.get(row["student"].id) is not None:
+            final_explain_url = reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": offering.id,
+                    "period_id": period.id,
+                    "student_id": row["student"].id,
+                    "grade_type": GradeExplanationService.GRADE_TYPE_FINAL,
+                },
+            )
         enriched_rows.append(
             {
                 "student": row["student"],
@@ -3517,6 +4006,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
                     if official_grade_release["show_final_grade"]
                     else None
                 ),
+                "period_explain_url": period_explain_url,
+                "final_explain_url": final_explain_url,
                 "print_grade_status": (
                     "PASSED"
                     if official_grade_release["show_period_grade"]
@@ -3584,6 +4075,9 @@ def period_summary_view(request, offering_id: int, period_id: int):
     if official_grade_release["show_final_grade"]:
         print_sheet_colspan += 1
 
+    can_view_gradebook_summary = state["is_submitted"] or official_grade_release["allow_pre_submission_summary"]
+    can_print_gradebook_summary = state["is_submitted"]
+
     context = {
         "offering": offering,
         "template": template,
@@ -3599,7 +4093,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "is_locked": state["is_locked"],
         "is_submitted": state["is_submitted"],
         "can_self_reopen": state["can_self_reopen"],
-        "can_view_gradebook_summary": state["is_submitted"],
+        "can_view_gradebook_summary": can_view_gradebook_summary,
+        "can_print_gradebook_summary": can_print_gradebook_summary,
         "can_submit_period": state["can_submit_period"],
         "is_auto_locked_reopened_after_deadline": state["is_auto_locked_reopened_after_deadline"],
         "is_correction_active": state["is_correction_active"],
@@ -3701,6 +4196,92 @@ def period_summary_view(request, offering_id: int, period_id: int):
             ]
         )
     return render(request, "faculty_portal/period_summary.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def grade_explanation_view(request, offering_id: int, period_id: int, student_id: int, grade_type: str):
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
+    if period is None:
+        return render(
+            request,
+            "grading/grade_explanation_detail.html",
+            {
+                "restricted_message": "Grade explanation is unavailable because the grading template or period could not be resolved.",
+            },
+        )
+    state = _period_edit_state(offering, period)
+    official_grade_release = _official_grade_release_state(
+        offering=offering,
+        template=template,
+        template_period=period,
+        is_period_submitted=state["is_submitted"],
+        submission_status=state["submission_status"],
+        now=timezone.now(),
+    )
+    normalized_grade_type = (grade_type or "").upper()
+    if normalized_grade_type == GradeExplanationService.GRADE_TYPE_FINAL:
+        if not official_grade_release["show_final_grade"]:
+            return render(
+                request,
+                "grading/grade_explanation_detail.html",
+                {
+                    "restricted_message": "Final-grade explanation is hidden by the same official-grade visibility policy.",
+                    "official_grade_release_notes": official_grade_release["notes"],
+                },
+            )
+    elif not official_grade_release["show_period_grade"]:
+        return render(
+            request,
+            "grading/grade_explanation_detail.html",
+            {
+                "restricted_message": "Period-grade explanation is hidden by the same official-grade visibility policy.",
+                "official_grade_release_notes": official_grade_release["notes"],
+            },
+        )
+
+    enrollment = get_object_or_404(
+        Enrollment.objects.filter(course_offering=offering, is_active=True).select_related("student"),
+        student_id=student_id,
+    )
+    try:
+        explanation = GradeExplanationService.build(
+            offering=offering,
+            student=enrollment.student,
+            template_period=period,
+            grade_type=normalized_grade_type,
+            mask_identity=False,
+        )
+    except ValidationError as exc:
+        return render(
+            request,
+            "grading/grade_explanation_detail.html",
+            {"restricted_message": "; ".join(exc.messages)},
+        )
+    AuditService.log_event(
+        action="READ",
+        portal="FACULTY",
+        entity_type="GradeExplanation",
+        entity_id=f"{offering.id}:{period.id}:{student_id}:{normalized_grade_type}",
+        actor=request.user,
+        tenant=offering.tenant,
+        campus=offering.campus,
+        metadata={
+            "offering_id": offering.id,
+            "period_id": period.id,
+            "student_id": student_id,
+            "grade_type": normalized_grade_type,
+            "student_identity_visible": True,
+            "masked_student_identity": False,
+        },
+        request=request,
+    )
+    return render(request, "grading/grade_explanation_detail.html", {"explanation": explanation})
 
 
 @portal_required("FACULTY")
@@ -4222,6 +4803,14 @@ def period_submit_view(request, offering_id: int, period_id: int):
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering_id)
 
+    state = _period_edit_state(offering, period)
+    if state["is_read_only_class"]:
+        messages.error(request, state["faculty_scope_state"]["reason"])
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+    if not state["can_submit_period"]:
+        messages.error(request, "This period is not available for faculty submission.")
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+
     readiness = GradingGovernanceService.evaluate_submission_readiness(
         offering=offering,
         template_period=period,
@@ -4310,6 +4899,14 @@ def period_self_reopen_view(request, offering_id: int, period_id: int):
     )
     if period is None:
         return redirect("faculty_portal:offering_periods", offering_id=offering_id)
+
+    state = _period_edit_state(offering, period)
+    if state["is_read_only_class"]:
+        messages.error(request, state["faculty_scope_state"]["reason"])
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+    if not state["can_self_reopen"]:
+        messages.error(request, "This gradebook is not available for faculty self-reopen.")
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
 
     before_submission = model_before_after(
         GradingGovernanceService.get_submission(offering=offering, template_period=period)
@@ -4810,25 +5407,24 @@ def offering_enrollment_view(request, offering_id: int):
     if assignment and not assignment.is_accepted:
         messages.error(request, "Please accept this faculty assignment first before opening the class.")
         return redirect("faculty_portal:my_courses")
-    offering = get_object_or_404(
-        CourseOffering.objects.select_related("term", "course", "section", "campus", "department", "tenant"),
-        id=offering_id,
-        is_active=True,
-        faculty_assignments__faculty_user_id=request.user.id,
-        faculty_assignments__is_active=True,
-        faculty_assignments__accepted_at__isnull=False,
-    )
+    offering = _require_faculty_offering_or_404(request, offering_id)
     mode = EnrollmentService.get_enrollment_mode(offering.tenant_id, offering_id=offering.id)
-    can_create_enrollment = EnrollmentService.can_create_or_update(
-        user=request.user,
-        offering=offering,
-        portal=Enrollment.SourcePortal.FACULTY,
-        action="create",
+    can_create_enrollment = (
+        not offering.faculty_is_read_only
+        and EnrollmentService.can_create_or_update(
+            user=request.user,
+            offering=offering,
+            portal=Enrollment.SourcePortal.FACULTY,
+            action="create",
+        )
     )
-    can_update_status = EnrollmentService.can_update_classlist_status(
-        user=request.user,
-        offering=offering,
-        portal=Enrollment.SourcePortal.FACULTY,
+    can_update_status = (
+        not offering.faculty_is_read_only
+        and EnrollmentService.can_update_classlist_status(
+            user=request.user,
+            offering=offering,
+            portal=Enrollment.SourcePortal.FACULTY,
+        )
     )
     student_qs = Student.objects.filter(
         tenant_id=offering.tenant_id,
@@ -4838,6 +5434,9 @@ def offering_enrollment_view(request, offering_id: int):
 
     form = FacultyEnrollmentForm(student_queryset=student_qs)
     if request.method == "POST":
+        if offering.faculty_is_read_only:
+            messages.error(request, offering.faculty_read_only_reason)
+            return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
         action = (request.POST.get("action") or "upsert_student").strip().lower()
         if action == "remove_from_class":
             if not can_create_enrollment:
@@ -4970,6 +5569,8 @@ def offering_enrollment_view(request, offering_id: int):
         "mode": mode,
         "can_manage": can_create_enrollment,
         "can_update_status": can_update_status,
+        "is_read_only_class": offering.faculty_is_read_only,
+        "read_only_reason": offering.faculty_read_only_reason,
         "form": form,
         "enrollments": enrollments,
         "removed_enrollments": removed_enrollments,

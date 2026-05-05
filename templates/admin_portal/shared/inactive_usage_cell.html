@@ -1,0 +1,12 @@
+{% if row.inactive_usage_dependencies %}
+  <div class="small">
+    {% for item in row.inactive_usage_dependencies|slice:":4" %}
+      <div>{{ item.label }} <span class="badge text-bg-secondary">{{ item.count }}</span></div>
+    {% endfor %}
+    {% if row.inactive_usage_dependencies|length > 4 %}
+      <div class="text-muted">+{{ row.inactive_usage_dependencies|length|add:"-4" }} more</div>
+    {% endif %}
+  </div>
+{% else %}
+  <span class="badge text-bg-light text-dark">Not assigned</span>
+{% endif %}

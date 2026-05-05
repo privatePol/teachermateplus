@@ -1,0 +1,114 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .issue-shell {
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  .issue-card {
+    border: 1px solid #d9e5d8;
+    border-radius: 1rem;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(22, 58, 36, 0.07);
+  }
+  .issue-card-header {
+    border-radius: 1rem 1rem 0 0;
+    background: linear-gradient(125deg, #1f6a40 0%, #2f8a53 58%, #b9ae49 100%);
+    color: #fff;
+    padding: 1.1rem 1.2rem;
+  }
+  .issue-card-header h2 {
+    font-size: 1.25rem;
+    font-weight: 800;
+    margin: 0 0 0.25rem;
+  }
+  .issue-card-header p {
+    color: rgba(255, 255, 255, 0.9);
+    margin: 0;
+  }
+  .issue-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.75rem;
+  }
+  .issue-summary-item {
+    border: 1px solid #e1ebe0;
+    border-radius: 0.8rem;
+    padding: 0.75rem;
+    background: #fcfdfb;
+  }
+  .issue-summary-item span {
+    display: block;
+    color: #617668;
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .issue-summary-item strong {
+    color: #173d27;
+  }
+</style>
+
+<div class="issue-shell">
+  <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <h2 class="h4 mb-1">Report Template Issue</h2>
+      <div class="text-muted small">This report goes to the governed template hotfix workflow for review.</div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_grading_template' offering.id %}">Back to Template</a>
+  </div>
+
+  <div class="issue-card">
+    <div class="issue-card-header">
+      <h2>{{ template.name }}</h2>
+      <p>Use this only for grading-template structure concerns. Score or submitted-grade changes should use correction requests.</p>
+    </div>
+    <div class="card-body">
+      <div class="issue-summary mb-3">
+        <div class="issue-summary-item">
+          <span>Course</span>
+          <strong>{{ offering.course.title }} ({{ offering.course.code }})</strong>
+        </div>
+        <div class="issue-summary-item">
+          <span>Section</span>
+          <strong>{{ offering.section.code }}</strong>
+        </div>
+        <div class="issue-summary-item">
+          <span>Term</span>
+          <strong>{{ offering.academic_year.code }} / {{ offering.term.code }}</strong>
+        </div>
+        <div class="issue-summary-item">
+          <span>Scope</span>
+          <strong>Your accepted classes using this template</strong>
+        </div>
+      </div>
+
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+        {% endif %}
+        <div class="mb-3">
+          <label class="form-label" for="{{ form.issue_type.id_for_label }}">{{ form.issue_type.label }}</label>
+          {{ form.issue_type }}
+          {% for error in form.issue_type.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="{{ form.details.id_for_label }}">{{ form.details.label }}</label>
+          {{ form.details }}
+          {% if form.details.help_text %}<div class="form-text">{{ form.details.help_text }}</div>{% endif %}
+          {% for error in form.details.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="alert alert-light border small">
+          Submitting this does not change grades immediately. Governance reviewers decide whether the report becomes an applied template hotfix.
+        </div>
+        <div class="d-flex gap-2 justify-content-end">
+          <a class="btn btn-outline-secondary" href="{% url 'faculty_portal:offering_grading_template' offering.id %}">Cancel</a>
+          <button class="btn btn-success" type="submit">Submit Report</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -6,10 +6,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.academics.models import AcademicYear, Course, Term
+from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
 from apps.grading.models import CourseTemplateAssignment, GradingTemplate
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
-from apps.tenants.models import Campus, Department, Tenant
+from apps.tenants.models import Campus, Department, Program, Tenant
 
 
 class CourseTemplateAssignmentListTests(TestCase):
@@ -52,6 +52,21 @@ class CourseTemplateAssignmentListTests(TestCase):
             code="A102",
             title="Course Without Template",
         )
+        self.program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="BSIT",
+            name="BS Information Technology",
+        )
+        self.section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIT-1A",
+            name="BSIT 1A",
+        )
         template = GradingTemplate.objects.create(
             tenant=self.tenant,
             code="TMP1",
@@ -64,6 +79,19 @@ class CourseTemplateAssignmentListTests(TestCase):
             grading_template=template,
             effective_from_term=self.term,
             is_active=True,
+        )
+        self.inactive_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="A103",
+            title="Inactive Assignment Course",
+        )
+        self.inactive_assignment = CourseTemplateAssignment.objects.create(
+            course=self.inactive_course,
+            grading_template=template,
+            effective_from_term=self.term,
+            is_active=False,
         )
 
         self.user = User.objects.create_user(
@@ -117,5 +145,42 @@ class CourseTemplateAssignmentListTests(TestCase):
         self.assertContains(response, "Course Without Template")
         self.assertContains(response, "No grading template assigned")
         rows = list(response.context["page_obj"].object_list)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0].course.id, self.course_without_template.id)
+        self.assertEqual({row.course.id for row in rows}, {self.course_without_template.id, self.inactive_course.id})
+
+    def test_can_filter_current_offerings_without_course_grading_template(self):
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course_without_template,
+            section=self.section,
+            status=CourseOffering.Status.OPEN,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("admin_portal:course_template_assignment_list"),
+            {"offerings_without_template": "1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Offerings Without Course Template")
+        self.assertContains(response, "Course Without Template")
+        self.assertContains(response, "BSIT-1A")
+        rows = list(response.context["offering_page_obj"].object_list)
+        self.assertEqual([row.offering.id for row in rows], [offering.id])
+
+    def test_assignment_list_separates_active_and_inactive_records(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("admin_portal:course_template_assignment_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Active Course Template Assignments")
+        self.assertContains(response, "Inactive Course Template Assignments")
+        active_rows = list(response.context["active_page_obj"].object_list)
+        inactive_rows = list(response.context["inactive_page_obj"].object_list)
+        self.assertEqual([row.course_id for row in active_rows], [self.course_with_template.id])
+        self.assertEqual([row.course_id for row in inactive_rows], [self.inactive_course.id])

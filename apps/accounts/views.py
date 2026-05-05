@@ -21,6 +21,8 @@ from django.views.generic import RedirectView
 from django.views.generic import FormView, TemplateView
 
 from apps.accounts.forms import (
+    AdminForgotPasswordForm,
+    AdminPasswordResetSetForm,
     AdminSelfChangePasswordForm,
     AdminLoginForm,
     FacultyForgotPasswordForm,
@@ -32,9 +34,10 @@ from apps.accounts.forms import (
     UserSignatureDeleteForm,
     UserSignatureUploadForm,
 )
-from apps.accounts.services import LoginLockoutService, LoginOtpService, UserSignatureService
+from apps.accounts.services import AdminPasswordResetOtpService, LoginLockoutService, LoginOtpService, UserSignatureService
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 
@@ -45,12 +48,17 @@ def _send_faculty_password_reset_email(request, user, reset_url: str) -> int:
     subject = "EduGradesPro Faculty Password Reset"
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
     recipient = [user.email]
-    logo_url = request.build_absolute_uri(f"{settings.MEDIA_URL}logos/egp_logo_official.png")
+    logo_context = build_email_logo_context(
+        filename="egp_logo_official.png",
+        cid="edugradespro-logo",
+        external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
+        configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+    )
 
     context = {
         "user": user,
         "reset_url": reset_url,
-        "logo_url": logo_url,
+        **logo_context,
         "privacy_notice_url": "https://ncba.edu.ph/ncba-privacy-notice/",
     }
     text_body = render_to_string("faculty_portal/emails/password_reset.txt", context)
@@ -61,6 +69,13 @@ def _send_faculty_password_reset_email(request, user, reset_url: str) -> int:
         body=text_body,
         from_email=from_email,
         to=recipient,
+    )
+    attach_logo_for_src(
+        message,
+        src=logo_context["email_logo_src"],
+        filename="egp_logo_official.png",
+        cid="edugradespro-logo",
+        configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
     )
     message.attach_alternative(html_body, "text/html")
     return message.send(fail_silently=True)
@@ -115,6 +130,9 @@ def _enforce_single_device_session(request, user, portal_code: str):
 PENDING_OTP_USER_ID_KEY = "pending_login_otp_user_id"
 PENDING_OTP_PORTAL_KEY = "pending_login_otp_portal"
 PENDING_OTP_BACKEND_KEY = "pending_login_otp_backend"
+PENDING_ADMIN_RESET_USER_ID_KEY = "pending_admin_password_reset_user_id"
+PENDING_ADMIN_RESET_CHALLENGE_ID_KEY = "pending_admin_password_reset_challenge_id"
+VERIFIED_ADMIN_RESET_USER_ID_KEY = "verified_admin_password_reset_user_id"
 
 
 def _otp_verify_url_name(portal_code: str) -> str:
@@ -138,6 +156,16 @@ def _store_pending_otp_login(request, *, user, portal_code: str) -> None:
 
 def _clear_pending_otp_login(request) -> None:
     for key in (PENDING_OTP_USER_ID_KEY, PENDING_OTP_PORTAL_KEY, PENDING_OTP_BACKEND_KEY):
+        request.session.pop(key, None)
+    request.session.modified = True
+
+
+def _clear_admin_password_reset_session(request) -> None:
+    for key in (
+        PENDING_ADMIN_RESET_USER_ID_KEY,
+        PENDING_ADMIN_RESET_CHALLENGE_ID_KEY,
+        VERIFIED_ADMIN_RESET_USER_ID_KEY,
+    ):
         request.session.pop(key, None)
     request.session.modified = True
 
@@ -328,6 +356,139 @@ def faculty_logout_view(request):
     logout(request)
     messages.success(request, "You have been logged out.")
     return redirect("faculty_portal:public_index")
+
+
+@method_decorator(ensure_csrf_cookie, name="dispatch")
+class AdminForgotPasswordView(FormView):
+    template_name = "admin_portal/password_forgot.html"
+    form_class = AdminForgotPasswordForm
+
+    def form_valid(self, form):
+        identifier = form.cleaned_data["identifier"].strip()
+        user = (
+            User.objects.filter(Q(username__iexact=identifier) | Q(email__iexact=identifier), is_active=True)
+            .order_by("id")
+            .first()
+        )
+        delivered = False
+        reset_result = None
+        if user and user.email and PermissionService.has_permission(user, "admin_portal.access"):
+            reset_result = AdminPasswordResetOtpService.create_and_send(request=self.request, user=user)
+            delivered = reset_result.success
+            if delivered:
+                self.request.session[PENDING_ADMIN_RESET_USER_ID_KEY] = user.id
+                self.request.session[PENDING_ADMIN_RESET_CHALLENGE_ID_KEY] = reset_result.challenge.id
+                self.request.session.pop(VERIFIED_ADMIN_RESET_USER_ID_KEY, None)
+                self.request.session.modified = True
+        AuditService.log_event(
+            action="PASSWORD_RESET_REQUEST",
+            portal="ADMIN",
+            entity_type="User",
+            entity_id=user.id if user else None,
+            actor=None,
+            metadata={
+                "identifier": identifier,
+                "delivered": delivered,
+                "target_username": user.username if user else None,
+                "allowed_admin_portal": bool(user and PermissionService.has_permission(user, "admin_portal.access")),
+            },
+            request=self.request,
+        )
+        if reset_result and not reset_result.success:
+            messages.error(self.request, reset_result.message)
+            return redirect("accounts:admin_forgot_password")
+        messages.success(
+            self.request,
+            "If the account exists and is allowed for Admin Portal access, a reset verification code has been sent to the registered email.",
+        )
+        if delivered:
+            return redirect("accounts:admin_password_reset_otp")
+        return redirect("accounts:admin_forgot_password_done")
+
+
+@ensure_csrf_cookie
+def admin_forgot_password_done_view(request):
+    return render(request, "admin_portal/password_forgot_done.html")
+
+
+@method_decorator(ensure_csrf_cookie, name="dispatch")
+class AdminPasswordResetOtpView(FormView):
+    template_name = "admin_portal/password_reset_otp.html"
+    form_class = LoginOtpVerificationForm
+
+    def dispatch(self, request, *args, **kwargs):
+        self.pending_user = None
+        pending_user_id = request.session.get(PENDING_ADMIN_RESET_USER_ID_KEY)
+        pending_challenge_id = request.session.get(PENDING_ADMIN_RESET_CHALLENGE_ID_KEY)
+        if not pending_user_id or not pending_challenge_id:
+            messages.error(request, "Please request a new admin password reset code.")
+            return redirect("accounts:admin_forgot_password")
+        self.pending_user = User.objects.filter(id=pending_user_id, is_active=True).first()
+        if not self.pending_user or not PermissionService.has_permission(self.pending_user, "admin_portal.access"):
+            _clear_admin_password_reset_session(request)
+            messages.error(request, "Please request a new admin password reset code.")
+            return redirect("accounts:admin_forgot_password")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(
+            {
+                "masked_email": LoginOtpService._masked_email(self.pending_user.email),
+            }
+        )
+        return context
+
+    def form_valid(self, form):
+        result = AdminPasswordResetOtpService.verify(
+            user=self.pending_user,
+            code=form.cleaned_data["otp_code"],
+            challenge_id=self.request.session.get(PENDING_ADMIN_RESET_CHALLENGE_ID_KEY),
+            request=self.request,
+        )
+        if not result.success:
+            form.add_error("otp_code", result.message)
+            return self.form_invalid(form)
+        self.request.session[VERIFIED_ADMIN_RESET_USER_ID_KEY] = self.pending_user.id
+        self.request.session.pop(PENDING_ADMIN_RESET_USER_ID_KEY, None)
+        self.request.session.modified = True
+        messages.success(self.request, "Verification complete. Create a new admin password.")
+        return redirect("accounts:admin_password_reset_confirm")
+
+
+@ensure_csrf_cookie
+def admin_password_reset_confirm_view(request):
+    user_id = request.session.get(VERIFIED_ADMIN_RESET_USER_ID_KEY)
+    user = User.objects.filter(id=user_id, is_active=True).first() if user_id else None
+    if not user or not PermissionService.has_permission(user, "admin_portal.access"):
+        _clear_admin_password_reset_session(request)
+        messages.error(request, "Please request a new admin password reset code.")
+        return redirect("accounts:admin_forgot_password")
+
+    form = AdminPasswordResetSetForm(user, request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        updated_user = form.save()
+        updated_user.must_change_password = False
+        updated_user.save(update_fields=["must_change_password"])
+        _clear_admin_password_reset_session(request)
+        AuditService.log_event(
+            action="RESET_PASSWORD",
+            portal="ADMIN",
+            entity_type="User",
+            entity_id=user.id,
+            actor=None,
+            metadata={"target_username": user.username},
+            request=request,
+        )
+        messages.success(request, "Password has been reset. You can now sign in to the Admin Portal.")
+        return redirect("accounts:admin_password_reset_complete")
+
+    return render(request, "admin_portal/password_reset_confirm.html", {"form": form})
+
+
+@ensure_csrf_cookie
+def admin_password_reset_complete_view(request):
+    return render(request, "admin_portal/password_reset_complete.html")
 
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")

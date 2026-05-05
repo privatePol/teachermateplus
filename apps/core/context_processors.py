@@ -1,7 +1,41 @@
 from apps.core.services.menu import MenuService
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
+from apps.academics.services import AcademicGovernanceService
 from apps.rbac.models import UserRole
+
+
+def _admin_role_label(user, *, tenant_id=None, campus_id=None):
+    if user.is_superuser:
+        return "Superadmin"
+
+    roles_qs = (
+        UserRole.objects.filter(
+            user=user,
+            is_active=True,
+            role__is_active=True,
+            role__role_permissions__permission__code="admin_portal.access",
+            role__role_permissions__permission__is_active=True,
+        )
+        .select_related("role")
+        .order_by("role__name", "role__code")
+    )
+    if tenant_id is not None:
+        roles_qs = roles_qs.filter(tenant_id__in=[tenant_id, None])
+    if campus_id is not None:
+        roles_qs = roles_qs.filter(campus_id__in=[campus_id, None])
+
+    role_names = []
+    for user_role in roles_qs:
+        label = user_role.role.name or user_role.role.code
+        if label not in role_names:
+            role_names.append(label)
+
+    if not role_names:
+        return ""
+    if len(role_names) > 3:
+        return ", ".join(role_names[:3]) + f" +{len(role_names) - 3}"
+    return ", ".join(role_names)
 
 
 def portal_menu(request):
@@ -47,10 +81,37 @@ def portal_menu(request):
                 "Browser tabs share the same login session. Use an incognito window, separate browser, or separate "
                 "browser profile when testing a different faculty account."
             )
+    admin_active_academic_year = None
+    admin_active_term = None
+    admin_user_role_label = ""
+    faculty_active_academic_year = None
+    faculty_active_term = None
+    if portal == "ADMIN" and scope.get("tenant_id"):
+        admin_active_academic_year, admin_active_term = AcademicGovernanceService.resolve_active_scope(
+            tenant_id=scope.get("tenant_id")
+        )
+    if portal == "ADMIN":
+        admin_user_role_label = _admin_role_label(
+            request.user,
+            tenant_id=scope.get("tenant_id"),
+            campus_id=scope.get("campus_id"),
+        )
+    if portal == "FACULTY":
+        faculty_tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+        if faculty_tenant_id:
+            faculty_active_academic_year, faculty_active_term = AcademicGovernanceService.resolve_active_scope(
+                tenant_id=faculty_tenant_id
+            )
+
     return {
         "current_portal": portal,
         "portal_menu": menu,
         "effective_permissions": permissions,
         "faculty_quick_tour_enabled": faculty_quick_tour_enabled,
         "faculty_portal_identity_warning": faculty_portal_identity_warning,
+        "admin_active_academic_year": admin_active_academic_year,
+        "admin_active_term": admin_active_term,
+        "admin_user_role_label": admin_user_role_label,
+        "faculty_active_academic_year": faculty_active_academic_year,
+        "faculty_active_term": faculty_active_term,
     }

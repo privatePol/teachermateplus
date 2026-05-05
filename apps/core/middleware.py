@@ -5,6 +5,7 @@ from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
 from django.urls import reverse
 
+from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.scope import ScopeService
 
@@ -18,11 +19,45 @@ class ScopeResolutionMiddleware:
         return self.get_response(request)
 
 
+class SessionTimeoutMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    @staticmethod
+    def _default_timeout_minutes() -> int:
+        try:
+            seconds = int(getattr(settings, "SESSION_COOKIE_AGE", 3600) or 3600)
+        except (TypeError, ValueError):
+            seconds = 3600
+        return max(seconds // 60, 1)
+
+    def __call__(self, request):
+        user = getattr(request, "user", None)
+        session = getattr(request, "session", None)
+        if session is not None and getattr(user, "is_authenticated", False):
+            tenant_id = getattr(request, "scope", {}).get("tenant_id")
+            timeout_minutes = FeatureSettingsService.get_session_timeout_minutes(
+                tenant_id=tenant_id,
+                default=self._default_timeout_minutes(),
+            )
+            session.set_expiry(timeout_minutes * 60)
+        return self.get_response(request)
+
+
 class PortalAccessMiddleware:
     ADMIN_PREFIX = "/admin-portal/"
     FACULTY_PREFIX = "/faculty/"
     ADMIN_LOGIN_PATH = "/admin-portal/login/"
     ADMIN_LOGIN_OTP_PATH = "/admin-portal/login/otp/"
+    ADMIN_PUBLIC_PATHS = {
+        "/admin-portal/login/",
+        "/admin-portal/login/otp/",
+        "/admin-portal/forgot-password/",
+        "/admin-portal/forgot-password/sent/",
+        "/admin-portal/reset/verify/",
+        "/admin-portal/reset/confirm/",
+        "/admin-portal/reset/done/",
+    }
     FACULTY_LOGIN_PATH = "/faculty/login/"
     FACULTY_PUBLIC_PATHS = {
         "/faculty/",
@@ -45,7 +80,7 @@ class PortalAccessMiddleware:
         tenant_id = scope.get("tenant_id")
         campus_id = scope.get("campus_id")
 
-        if path.startswith(self.ADMIN_PREFIX) and path not in {self.ADMIN_LOGIN_PATH, self.ADMIN_LOGIN_OTP_PATH}:
+        if path.startswith(self.ADMIN_PREFIX) and path not in self.ADMIN_PUBLIC_PATHS:
             if not request.user.is_authenticated:
                 return redirect(reverse("accounts:admin_login"))
             if not PermissionService.has_permission(
@@ -76,6 +111,11 @@ class PostLoginSecurityMiddleware:
     ADMIN_ALLOWED_PATHS = {
         "/admin-portal/login/",
         "/admin-portal/login/otp/",
+        "/admin-portal/forgot-password/",
+        "/admin-portal/forgot-password/sent/",
+        "/admin-portal/reset/verify/",
+        "/admin-portal/reset/confirm/",
+        "/admin-portal/reset/done/",
         "/admin-portal/logout/",
         "/admin-portal/change-password/",
         "/admin-portal/privacy-consent/",

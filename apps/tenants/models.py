@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.core.models import ActivatableModel, TimeStampedModel
@@ -33,10 +34,33 @@ class Campus(TimeStampedModel, ActivatableModel):
 
 
 class Department(TimeStampedModel, ActivatableModel):
+    class OperationBranch(models.TextChoices):
+        ACADEMIC = "ACADEMIC", "Academic"
+        ADMINISTRATIVE = "ADMINISTRATIVE", "Administrative"
+
+    class UnitType(models.TextChoices):
+        DIVISION = "DIVISION", "Division"
+        AREA = "AREA", "Area"
+        OFFICE = "OFFICE", "Office"
+        OTHER = "OTHER", "Other"
+
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="departments")
     campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT, related_name="departments")
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        related_name="children",
+        blank=True,
+        null=True,
+    )
     code = models.CharField(max_length=50)
     name = models.CharField(max_length=150)
+    operation_branch = models.CharField(
+        max_length=20,
+        choices=OperationBranch.choices,
+        default=OperationBranch.ACADEMIC,
+    )
+    unit_type = models.CharField(max_length=20, choices=UnitType.choices, default=UnitType.AREA)
 
     class Meta:
         db_table = "departments"
@@ -47,6 +71,23 @@ class Department(TimeStampedModel, ActivatableModel):
 
     def __str__(self):
         return f"{self.code} - {self.name}"
+
+    def clean(self):
+        super().clean()
+        if not self.parent_id:
+            return
+        if self.pk and self.parent_id == self.pk:
+            raise ValidationError("Department cannot be its own parent.")
+        if self.parent.tenant_id != self.tenant_id:
+            raise ValidationError("Parent department must belong to the same tenant.")
+        if self.parent.campus_id != self.campus_id:
+            raise ValidationError("Parent department must belong to the same campus.")
+
+        ancestor = self.parent
+        while ancestor:
+            if self.pk and ancestor.pk == self.pk:
+                raise ValidationError("Department hierarchy cannot contain a cycle.")
+            ancestor = ancestor.parent
 
 
 class Program(TimeStampedModel, ActivatableModel):
@@ -93,3 +134,36 @@ class SystemSetting(models.Model):
     def __str__(self):
         scope = self.tenant.code if self.tenant_id else "GLOBAL"
         return f"{scope}:{self.setting_key}"
+
+
+class TenantApiKey(TimeStampedModel):
+    class Purpose(models.TextChoices):
+        SIS = "SIS", "SIS Integration"
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="api_keys")
+    name = models.CharField(max_length=120)
+    purpose = models.CharField(max_length=20, choices=Purpose.choices, default=Purpose.SIS)
+    key_prefix = models.CharField(max_length=32, unique=True)
+    key_hash = models.CharField(max_length=128, unique=True)
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(blank=True, null=True)
+    revoked_at = models.DateTimeField(blank=True, null=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+    created_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="created_tenant_api_keys",
+    )
+
+    class Meta:
+        db_table = "tenant_api_keys"
+        ordering = ["tenant__code", "purpose", "name"]
+        indexes = [
+            models.Index(fields=["key_prefix", "is_active"], name="idx_tapikey_prefix_active"),
+            models.Index(fields=["tenant", "purpose", "is_active"], name="idx_tapikey_tenant_purpose"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant.code}:{self.purpose}:{self.name}"

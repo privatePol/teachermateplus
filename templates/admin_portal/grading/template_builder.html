@@ -6,10 +6,9 @@
   .builder-muted { color: #6c757d; }
   .builder-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   .builder-node {
-    border-left: 3px solid #dbe2d7;
-    padding-left: 1rem;
-    margin-left: 0.15rem;
+    position: relative;
   }
+  .builder-node::before { content: none; }
   .builder-chip { font-size: 0.75rem; }
   .builder-level-badge {
     display: inline-flex;
@@ -22,15 +21,113 @@
     letter-spacing: 0.03em;
     text-transform: uppercase;
   }
-  .builder-level-period { background: #d7efe2; color: #175233; }
-  .builder-level-1 { background: #dfeee2; color: #1f5a35; }
-  .builder-level-2 { background: #eef4db; color: #6f5a12; }
-  .builder-level-3 { background: #eef2f6; color: #45576b; }
+  .builder-level-period { background: #d8f0ee; color: #0e5d58; }
+  .builder-level-1 { background: #dff4e7; color: #11633d; }
+  .builder-level-2 { background: #fff0bf; color: #765a00; }
+  .builder-level-3 { background: #e3f0ff; color: #23527b; }
+  .builder-period-item {
+    --period-accent: #1d8a81;
+    --period-bg: #eef8f6;
+    --period-bg-collapsed: #f8fcfb;
+    --period-border: #cfe7e4;
+    --period-text: #143f3c;
+    --period-icon-filter: none;
+    border-color: var(--period-border);
+  }
+  .builder-period-item .accordion-button {
+    background: var(--period-bg);
+    border-left: 6px solid var(--period-accent);
+    color: var(--period-text);
+  }
+  .builder-period-item .accordion-button.collapsed {
+    background: var(--period-bg-collapsed);
+  }
+  .builder-period-item .accordion-button::after {
+    filter: var(--period-icon-filter);
+  }
+  .builder-period-item .builder-level-period {
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(20, 63, 60, 0.12);
+    color: var(--period-text);
+  }
+  .builder-period-item .builder-shell {
+    border-color: var(--period-border);
+  }
+  .builder-period-theme-teal {
+    --period-accent: #1d8a81;
+    --period-bg: #eef8f6;
+    --period-bg-collapsed: #f8fcfb;
+    --period-border: #cfe7e4;
+    --period-text: #143f3c;
+    --period-icon-filter: none;
+  }
+  .builder-period-theme-green {
+    --period-accent: #2f9e44;
+    --period-bg: #eefaf2;
+    --period-bg-collapsed: #f8fdf9;
+    --period-border: #cfead7;
+    --period-text: #143f2a;
+    --period-icon-filter: none;
+  }
+  .builder-period-theme-gold {
+    --period-accent: #d69e2e;
+    --period-bg: #fff8e6;
+    --period-bg-collapsed: #fffdf6;
+    --period-border: #f1dfae;
+    --period-text: #5c4308;
+    --period-icon-filter: none;
+  }
+  .builder-period-theme-blue {
+    --period-accent: #2f80c2;
+    --period-bg: #eef6ff;
+    --period-bg-collapsed: #f8fbff;
+    --period-border: #cfe2f3;
+    --period-text: #173f61;
+    --period-icon-filter: none;
+  }
+  .builder-period-theme-plum {
+    --period-accent: #7b61a8;
+    --period-bg: #f4effb;
+    --period-bg-collapsed: #fbf8ff;
+    --period-border: #ded3ef;
+    --period-text: #3e2d5b;
+    --period-icon-filter: none;
+  }
+  .builder-period-theme-slate {
+    --period-accent: #52606d;
+    --period-bg: #f2f5f7;
+    --period-bg-collapsed: #fbfcfd;
+    --period-border: #d9e0e5;
+    --period-text: #27323b;
+    --period-icon-filter: none;
+  }
+  .builder-inactive-period .accordion-button {
+    background: #f8f9fa;
+    color: #68717a;
+    --period-icon-filter: none;
+  }
+  .builder-inactive-period .builder-shell {
+    border-color: #d6d8db;
+    background: #fbfbfb;
+  }
+  .builder-inactive-period .builder-level-period {
+    background: #e9ecef;
+    border-color: #ced4da;
+    color: #495057;
+  }
+  .builder-inactive-badge {
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+  }
   .builder-scope-card {
     background: linear-gradient(135deg, #f7fbf8 0%, #fcfdf8 100%);
     border: 1px solid #e0e9df;
     border-radius: 1rem;
     padding: 1rem 1.1rem;
+  }
+  .builder-scope-card .text-dark,
+  .builder-scope-card .builder-section-note {
+    color: #34483a !important;
   }
   .builder-legend {
     display: flex;
@@ -45,9 +142,11 @@
     margin-top: 0.45rem;
   }
   .builder-meta-card {
-    background: #f8fbf7;
-    border: 1px solid #e2ebe0;
-    border-radius: 0.75rem;
+    background: linear-gradient(135deg, #ffffff 0%, #eef8f6 100%);
+    border: 1px solid #d6e9e5;
+    border-left: 4px solid #1d8a81;
+    border-radius: 0.5rem;
+    box-shadow: 0 6px 14px rgba(24, 78, 70, 0.08);
     padding: 0.5rem 0.7rem;
   }
   .builder-meta-label {
@@ -65,11 +164,130 @@
     color: #21352a;
   }
   .builder-shell {
-    background: #ffffff;
-    border: 1px solid #e6ece4;
-    border-radius: 1rem;
+    background: #fafffd;
+    border: 1px solid #d6e9e5;
+    border-radius: 0.75rem;
     padding: 1rem 1rem 0.9rem;
-    box-shadow: 0 10px 28px rgba(35, 56, 41, 0.04);
+    box-shadow: 0 10px 28px rgba(24, 78, 70, 0.05);
+  }
+  .builder-component-card {
+    border: 1px solid #cfe6d7;
+    border-left: 7px solid #2f9e44;
+    border-radius: 0.75rem;
+    background: linear-gradient(135deg, #ffffff 0%, #f8fcf9 100%);
+    box-shadow: 0 12px 24px rgba(31, 105, 64, 0.07);
+    padding: 1rem;
+  }
+  .builder-component-card + .builder-component-card { margin-top: 1rem; }
+  .builder-component-body {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.95fr) minmax(360px, 1.55fr);
+    gap: 1rem;
+    align-items: start;
+  }
+  .builder-component-main {
+    background: #eef9f2;
+    border: 1px solid #c9e7d3;
+    border-radius: 0.65rem;
+    padding: 0.9rem;
+    position: sticky;
+    top: 1rem;
+  }
+  .builder-component-main .builder-hierarchy-label,
+  .builder-component-main .builder-node-title-text,
+  .builder-component-main .builder-node-subtitle,
+  .builder-component-main .builder-weight-label {
+    color: #183d2a;
+  }
+  .builder-component-main .builder-weight-line,
+  .builder-component-main .builder-meta-card {
+    background: linear-gradient(135deg, #ffffff 0%, #e3f6e9 100%);
+    border-color: #b8dcc5;
+    border-left-color: #2f9e44;
+    color: #183d2a;
+  }
+  .builder-component-main .builder-meta-label {
+    color: #2e6b45;
+  }
+  .builder-component-main .builder-meta-value,
+  .builder-component-main .builder-weight-line,
+  .builder-component-main .builder-weight-line .builder-weight-label {
+    color: #183d2a;
+  }
+  .builder-component-main .builder-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .builder-subcomponent-zone {
+    border: 1px solid #ead99b;
+    border-radius: 0.65rem;
+    background: #fff8df;
+    padding: 0.85rem;
+  }
+  .builder-zone-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid rgba(31, 26, 0, 0.35);
+  }
+  .builder-zone-title {
+    font-size: 0.82rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #1f1a00;
+  }
+  .builder-subcomponent-card {
+    border: 1px solid #ead99b;
+    border-left: 5px solid #d69e2e;
+    border-radius: 0.65rem;
+    background: linear-gradient(135deg, #ffffff 0%, #fffaf0 100%);
+    padding: 0.85rem;
+  }
+  .builder-subcomponent-card .builder-node-title-text,
+  .builder-subcomponent-card .builder-node-subtitle,
+  .builder-subcomponent-card .builder-weight-label,
+  .builder-subcomponent-card .builder-weight-line {
+    color: #4f3c0d;
+  }
+  .builder-subcomponent-card .builder-meta-card,
+  .builder-subcomponent-card .builder-weight-line {
+    background: linear-gradient(135deg, #ffffff 0%, #fff0bf 100%);
+    border-color: #ead99b;
+    border-left-color: #d69e2e;
+  }
+  .builder-subcomponent-card .builder-meta-label {
+    color: #87620e;
+  }
+  .builder-subcomponent-card .builder-meta-value {
+    color: #4f3c0d;
+  }
+  .builder-subcomponent-card + .builder-subcomponent-card { margin-top: 0.85rem; }
+  .builder-subcomponent-layout {
+    display: grid;
+    grid-template-columns: minmax(230px, 0.85fr) minmax(280px, 1.15fr);
+    gap: 0.85rem;
+    align-items: start;
+  }
+  .builder-detail-zone {
+    border-radius: 0.6rem;
+    background: #eef6ff;
+    border: 1px solid #cfe2f3;
+    padding: 0.75rem;
+  }
+  .builder-detail-zone-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.65rem;
+    color: #173f61;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.78rem;
   }
   .builder-node-header {
     display: flex;
@@ -84,8 +302,10 @@
     gap: 0.55rem;
   }
   .builder-node-title-text {
-    font-size: 1.02rem;
-    font-weight: 700;
+    font-size: 1.75rem;
+    font-weight: 800;
+    line-height: 1.2;
+    text-transform: uppercase;
     color: #203728;
   }
   .builder-node-subtitle {
@@ -96,9 +316,11 @@
   .builder-weight-line {
     margin-top: 0.65rem;
     padding: 0.6rem 0.8rem;
-    border-radius: 0.8rem;
-    background: #f8fbf7;
-    border: 1px solid #e5ece3;
+    border-radius: 0.55rem;
+    background: linear-gradient(135deg, #ffffff 0%, #eef8f6 100%);
+    border: 1px solid #d6e9e5;
+    border-left: 4px solid #1d8a81;
+    box-shadow: 0 6px 14px rgba(24, 78, 70, 0.07);
     font-size: 0.9rem;
     color: #31473a;
   }
@@ -116,19 +338,18 @@
     margin-top: 0.75rem;
     padding: 0.7rem 0.85rem;
     border-radius: 0.8rem;
-    background: #f8faf8;
+    background: #f9fbfb;
     color: #6c7a70;
     font-size: 0.88rem;
   }
   .builder-detail-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
     padding: 0.7rem 0.85rem;
-    border-radius: 0.8rem;
-    background: #fbfcfd;
-    border: 1px solid #e6eaef;
+    border-radius: 0.55rem;
+    background: linear-gradient(135deg, #ffffff 0%, #e3f0ff 100%);
+    border: 1px solid #cfe2f3;
+    border-left: 5px solid #2f80c2;
+    box-shadow: 0 8px 18px rgba(47, 128, 194, 0.12);
+    height: 100%;
   }
   .builder-detail-main {
     display: flex;
@@ -136,8 +357,11 @@
     gap: 0.25rem;
   }
   .builder-detail-name {
-    font-weight: 600;
-    color: #24333f;
+    font-size: 1.75rem;
+    font-weight: 800;
+    line-height: 1.2;
+    text-transform: uppercase;
+    color: #173f61;
   }
   .builder-section-note {
     font-size: 0.84rem;
@@ -145,9 +369,72 @@
   }
   .builder-detail-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 0.85rem;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.7rem;
     align-items: start;
+  }
+  .builder-detail-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 0.65rem;
+  }
+  .builder-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: flex-start;
+    justify-content: flex-end;
+  }
+  .builder-detail-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 0.5rem;
+  }
+  .builder-hierarchy-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    color: #66756c;
+    font-weight: 700;
+  }
+  .builder-hierarchy-label span {
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 999px;
+    display: inline-grid;
+    place-items: center;
+    background: #e5efe8;
+    color: #1e5b34;
+  }
+  .builder-component-main .builder-hierarchy-label span {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+  }
+  .builder-subcomponent-zone .builder-hierarchy-label span {
+    background: rgba(31, 26, 0, 0.14);
+    color: #1f1a00;
+  }
+  .builder-subcomponent-zone .builder-hierarchy-label {
+    color: #1f1a00;
+  }
+  .builder-detail-zone .builder-meta-card {
+    background: linear-gradient(135deg, #ffffff 0%, #e3f0ff 100%);
+    border-color: #cfe2f3;
+    border-left-color: #2f80c2;
+  }
+  .builder-detail-heading {
+    font-size: 1.75rem;
+    line-height: 1.2;
+  }
+  @media (max-width: 1199.98px) {
+    .builder-component-body,
+    .builder-subcomponent-layout {
+      grid-template-columns: 1fr;
+    }
+    .builder-component-main {
+      position: static;
+    }
   }
   @media (max-width: 767.98px) {
     .builder-node-header,
@@ -157,6 +444,12 @@
     .builder-node-header > div:last-child,
     .builder-detail-grid > div:last-child {
       margin-top: 0.85rem;
+    }
+    .builder-component-card,
+    .builder-subcomponent-card,
+    .builder-subcomponent-zone,
+    .builder-detail-zone {
+      padding: 0.75rem;
     }
   }
 </style>
@@ -222,16 +515,25 @@
 
 <div class="accordion" id="builder-accordion">
   {% for period in period_rows %}
-  <div class="accordion-item">
+  {% cycle 'builder-period-theme-teal' 'builder-period-theme-green' 'builder-period-theme-gold' 'builder-period-theme-blue' 'builder-period-theme-plum' 'builder-period-theme-slate' as period_theme silent %}
+  <div class="accordion-item builder-period-item {{ period_theme }} {% if not period.row.is_active %}builder-inactive-period{% endif %}">
     <h2 class="accordion-header" id="period-heading-{{ period.row.id }}">
-      <button class="accordion-button {% if not forloop.first %}collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#period-collapse-{{ period.row.id }}" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}" aria-controls="period-collapse-{{ period.row.id }}">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#period-collapse-{{ period.row.id }}" aria-expanded="false" aria-controls="period-collapse-{{ period.row.id }}">
         <span class="builder-level-badge builder-level-period me-2">Period Container</span>
         <span class="fw-semibold">{{ period.row.name }}</span>
+        {% if not period.row.is_active %}
+        <span class="badge text-bg-warning text-dark builder-inactive-badge ms-2">INACTIVE</span>
+        {% endif %}
       </button>
     </h2>
-    <div id="period-collapse-{{ period.row.id }}" class="accordion-collapse collapse {% if forloop.first %}show{% endif %}" aria-labelledby="period-heading-{{ period.row.id }}" data-bs-parent="#builder-accordion">
+    <div id="period-collapse-{{ period.row.id }}" class="accordion-collapse collapse" aria-labelledby="period-heading-{{ period.row.id }}" data-bs-parent="#builder-accordion">
       <div class="accordion-body">
         <div class="builder-shell">
+        {% if not period.row.is_active %}
+        <div class="alert alert-warning border-warning-subtle py-2 mb-3">
+          <strong>Inactive period.</strong> This period is hidden from live grading computation, but it is shown here so admins can review or reactivate it from Edit Period.
+        </div>
+        {% endif %}
         <div class="builder-section-note mb-3">
           <strong>What this level means:</strong> This period contains the top-level grading groups for this stage of the term. The combined weight of the major components under this period should define how the period grade is formed.
         </div>
@@ -249,11 +551,11 @@
 
         {% if period.components %}
           {% for component in period.components %}
-          <div class="builder-node mb-3">
-            <div class="builder-node-header">
-              <div>
+          <div class="builder-node builder-component-card">
+            <div class="builder-component-body">
+              <div class="builder-component-main">
+                <div class="builder-hierarchy-label mb-2"><span>1</span> Major Component</div>
                 <div class="builder-node-title">
-                  <span class="builder-level-badge builder-level-1">Major Component</span>
                   <span class="builder-node-title-text">{{ component.row.name }}</span>
                 </div>
                 <div class="builder-node-subtitle">
@@ -281,15 +583,14 @@
                   </div>
                   <div class="builder-meta-card">
                     <span class="builder-meta-label">Score Entry Method</span>
-                    <span class="builder-meta-value">{{ component.get_score_input_mode_display }}</span>
+                    <span class="builder-meta-value">{{ component.row.get_score_input_mode_display }}</span>
                   </div>
                   <div class="builder-meta-card">
                     <span class="builder-meta-label">Exam Component</span>
                     <span class="builder-meta-value">{% if component.row.is_exam_component %}Yes{% else %}No{% endif %}</span>
                   </div>
                 </div>
-              </div>
-              <div class="d-flex gap-2">
+                <div class="builder-action-row mt-3">
                 {% if "template_components.update" in effective_permissions %}
                 <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_component_update' component.row.id %}">Edit</a>
                 {% endif %}
@@ -299,17 +600,23 @@
                 {% if "template_subcomponents.create" in effective_permissions %}
                 <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_subcomponent_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}">Add Subcomponent</a>
                 {% endif %}
+                </div>
               </div>
-            </div>
 
+              <div class="builder-subcomponent-zone">
+                <div class="builder-zone-heading">
+                  <div>
+                    <div class="builder-hierarchy-label mb-1"><span>2</span> Subcomponents</div>
+                    <div class="builder-zone-title">Breakdown of {{ component.row.name }}</div>
+                  </div>
+                  <span class="badge text-bg-light border">{{ component.subcomponents|length }} item(s)</span>
+                </div>
             {% if component.subcomponents %}
-              <div class="builder-child-stack">
                 {% for sub in component.subcomponents %}
-                <div class="builder-node mb-2">
-                  <div class="builder-node-header">
+                <div class="builder-node builder-subcomponent-card">
+                  <div class="builder-subcomponent-layout">
                     <div>
                       <div class="builder-node-title">
-                        <span class="builder-level-badge builder-level-2">Subcomponent</span>
                         <span class="builder-node-title-text">{{ sub.row.name }}</span>
                       </div>
                       <div class="builder-node-subtitle">
@@ -340,48 +647,51 @@
                           <span class="builder-meta-value">{{ sub.row.get_score_input_mode_display }}</span>
                         </div>
                       </div>
+                      <div class="builder-action-row mt-3">
+                        {% if "template_subcomponents.update" in effective_permissions %}
+                        <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_subcomponent_update' sub.row.id %}">Edit</a>
+                        {% endif %}
+                        {% if "template_details.read" in effective_permissions %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_detail_list' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}&subcomponent_id={{ sub.row.id }}">Details</a>
+                        {% endif %}
+                        {% if "template_details.create" in effective_permissions %}
+                        <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_detail_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}&subcomponent_id={{ sub.row.id }}">Add Detail</a>
+                        {% endif %}
+                      </div>
                     </div>
-                    <div class="d-flex gap-2">
-                      {% if "template_subcomponents.update" in effective_permissions %}
-                      <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_subcomponent_update' sub.row.id %}">Edit</a>
-                      {% endif %}
-                      {% if "template_details.read" in effective_permissions %}
-                      <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_detail_list' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}&subcomponent_id={{ sub.row.id }}">Details</a>
-                      {% endif %}
-                      {% if "template_details.create" in effective_permissions %}
-                      <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_detail_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}&subcomponent_id={{ sub.row.id }}">Add Detail</a>
-                      {% endif %}
-                    </div>
-                  </div>
 
+                    <div class="builder-detail-zone">
+                      <div class="builder-detail-zone-title">
+                        <span class="builder-detail-heading">Detail Items</span>
+                        <span class="badge text-bg-light border">{{ sub.details|length }}</span>
+                      </div>
                   {% if sub.details %}
-                  <div class="builder-child-stack">
+                  <div class="builder-detail-card-grid">
                     {% for detail in sub.details %}
                     <div class="builder-node">
                       <div class="builder-detail-row">
                         <div class="builder-detail-grid w-100">
-                        <div class="builder-detail-main">
-                          <div class="builder-node-title">
-                            <span class="builder-level-badge builder-level-3">Detail Item</span>
-                            <span class="builder-detail-name">{{ detail.name }}</span>
+                          <div class="builder-detail-main">
+                            <div class="builder-node-title">
+                              <span class="builder-detail-name">{{ detail.name }}</span>
+                            </div>
+                            <div class="builder-node-subtitle">
+                              Lowest scoring line under <strong>{{ sub.row.name }}</strong>. Activities encoded here roll up into the subcomponent total.
+                            </div>
                           </div>
-                          <div class="builder-node-subtitle">
-                            Lowest scoring line under <strong>{{ sub.row.name }}</strong>. Activities encoded here roll up into the subcomponent total.
+                          <div class="builder-detail-actions">
+                            <div class="builder-meta-card">
+                              <span class="builder-meta-label">Weight</span>
+                              <span class="builder-meta-value">{{ detail.weight_percentage }}%</span>
+                            </div>
+                            <div class="builder-meta-card">
+                              <span class="builder-meta-label">Score Entry Method</span>
+                              <span class="builder-meta-value">{{ detail.get_score_input_mode_display }}</span>
+                            </div>
+                            {% if "template_details.update" in effective_permissions %}
+                            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_detail_update' detail.id %}">Edit</a>
+                            {% endif %}
                           </div>
-                        </div>
-                        <div class="d-flex align-items-start gap-2">
-                          <div class="builder-meta-card">
-                            <span class="builder-meta-label">Weight</span>
-                            <span class="builder-meta-value">{{ detail.weight_percentage }}%</span>
-                          </div>
-                          <div class="builder-meta-card">
-                            <span class="builder-meta-label">Score Entry Method</span>
-                            <span class="builder-meta-value">{{ detail.get_score_input_mode_display }}</span>
-                          </div>
-                          {% if "template_details.update" in effective_permissions %}
-                          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_detail_update' detail.id %}">Edit</a>
-                          {% endif %}
-                        </div>
                         </div>
                       </div>
                     </div>
@@ -390,12 +700,15 @@
                   {% else %}
                   <div class="builder-empty">No detail items yet. Activities encoded under this subcomponent will compute directly here.</div>
                   {% endif %}
+                    </div>
+                  </div>
                 </div>
                 {% endfor %}
-              </div>
             {% else %}
               <div class="builder-empty">No subcomponents yet. This major component is currently set up for direct activity entry.</div>
             {% endif %}
+              </div>
+            </div>
           </div>
           {% endfor %}
         {% else %}

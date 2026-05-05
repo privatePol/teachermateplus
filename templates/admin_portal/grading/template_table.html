@@ -1,0 +1,231 @@
+<div class="table-responsive">
+  <table class="table table-hover mb-0">
+    <thead>
+      <tr>
+        <th>Tenant</th>
+        <th>Code</th>
+        <th>Name</th>
+        <th>Base Value</th>
+        <th>Passing Threshold</th>
+        <th>Periods</th>
+        <th>Record State</th>
+        <th>Publish</th>
+        <th>Approval</th>
+        {% if show_inactive_tools %}<th>Used In</th>{% endif %}
+        <th class="text-center template-action-cell{% if show_inactive_tools %} template-action-cell-inactive{% endif %}">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in page_obj %}
+      <tr>
+        <td>{{ row.tenant.code }}</td>
+        <td>{{ row.code }}</td>
+        <td>{{ row.name }}</td>
+        <td>{{ row.default_base_value }}</td>
+        <td>{{ row.passing_grade_threshold|default:"Tenant/Profile Default" }}</td>
+        <td>
+          <div>{{ row.period_count }}</div>
+          {% if row.active_period_codes %}
+            <div class="small text-muted">
+              {% for code in row.active_period_codes %}
+                <code>{{ code }}</code>{% if not forloop.last %}, {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.is_active %}
+            <span class="badge text-bg-success">Active</span>
+          {% else %}
+            <span class="badge text-bg-warning text-dark">Inactive</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.is_published %}
+            <span class="badge text-bg-success">Published</span>
+          {% else %}
+            <span class="badge text-bg-secondary">Draft</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.approval_status == "APPROVED" %}
+            <span class="badge text-bg-success">Approved</span>
+          {% elif row.approval_status == "FOR_APPROVAL" %}
+            <span class="badge text-bg-warning">For Approval</span>
+          {% elif row.approval_status == "REJECTED" %}
+            <span class="badge text-bg-danger">Rejected</span>
+          {% else %}
+            <span class="badge text-bg-secondary">Draft</span>
+          {% endif %}
+          {% if row.current_approval_step_label %}
+          <div class="small text-muted mt-1">Current Step: {{ row.current_approval_step_label }}</div>
+          {% endif %}
+        </td>
+        {% if show_inactive_tools %}<td>{% include "admin_portal/shared/inactive_usage_cell.html" %}</td>{% endif %}
+        <td class="text-end template-action-cell{% if show_inactive_tools %} template-action-cell-inactive{% endif %}">
+          <div class="template-action-group{% if show_inactive_tools %} template-action-group-inactive{% endif %}" aria-label="Grading template actions">
+          {% if "grading_templates.read" in effective_permissions %}
+          <a
+            class="btn btn-sm btn-outline-dark template-action-btn"
+            href="{% url 'admin_portal:grading_template_builder' row.id %}"
+            aria-label="Open builder for {{ row.code }}"
+            title="Builder"
+            data-bs-toggle="tooltip"
+            data-bs-title="Builder"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+            </svg>
+          </a>
+          {% endif %}
+          <a
+            class="btn btn-sm btn-outline-dark template-action-btn"
+            href="{% url 'admin_portal:grading_template_structure' row.id %}"
+            aria-label="View structure for {{ row.code }}"
+            title="Structure"
+            data-bs-toggle="tooltip"
+            data-bs-title="Structure"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+              <path d="M8 6h13"></path>
+              <path d="M8 12h13"></path>
+              <path d="M8 18h13"></path>
+              <path d="M3 6h.01"></path>
+              <path d="M3 12h.01"></path>
+              <path d="M3 18h.01"></path>
+            </svg>
+          </a>
+          {% if "grading_templates.read" in effective_permissions %}
+          <a
+            class="btn btn-sm btn-outline-success template-action-btn"
+            href="{% url 'admin_portal:grading_template_calculator' %}?grading_template={{ row.id }}&sample_value=85.00"
+            aria-label="Open test calculator for {{ row.code }}"
+            title="Test Calculator"
+            data-bs-toggle="tooltip"
+            data-bs-title="Test Calculator"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+              <rect x="4" y="2" width="16" height="20" rx="2"></rect>
+              <path d="M8 6h8"></path>
+              <path d="M8 10h.01"></path>
+              <path d="M12 10h.01"></path>
+              <path d="M16 10h.01"></path>
+              <path d="M8 14h.01"></path>
+              <path d="M12 14h.01"></path>
+              <path d="M16 14h.01"></path>
+              <path d="M8 18h.01"></path>
+              <path d="M12 18h.01"></path>
+              <path d="M16 18h.01"></path>
+            </svg>
+          </a>
+          {% endif %}
+          {% if "grading_templates.update" in effective_permissions %}
+          <a
+            class="btn btn-sm btn-outline-primary template-action-btn"
+            href="{% url 'admin_portal:grading_template_update' row.id %}"
+            aria-label="Edit {{ row.code }}"
+            title="Edit"
+            data-bs-toggle="tooltip"
+            data-bs-title="Edit"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+              <path d="M12 20h9"></path>
+              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+            </svg>
+          </a>
+          {% endif %}
+          {% if "grading_templates.create" in effective_permissions %}
+          <form method="post" action="{% url 'admin_portal:grading_template_duplicate' row.id %}" class="d-inline" onsubmit="return confirm('Duplicate this grading template as a new draft copy?');">
+            {% csrf_token %}
+            <button
+              type="submit"
+              class="btn btn-sm btn-outline-secondary template-action-btn"
+              aria-label="Duplicate {{ row.code }}"
+              title="Duplicate"
+              data-bs-toggle="tooltip"
+              data-bs-title="Duplicate"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+                <rect x="8" y="8" width="12" height="12" rx="2"></rect>
+                <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+              </svg>
+            </button>
+          </form>
+          {% endif %}
+          {% if row.can_submit %}
+          <a
+            class="btn btn-sm btn-outline-secondary template-action-btn"
+            href="{% url 'admin_portal:grading_template_submit_for_approval' row.id %}"
+            aria-label="Submit {{ row.code }} for approval"
+            title="Submit for Approval"
+            data-bs-toggle="tooltip"
+            data-bs-title="Submit for Approval"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+              <path d="m22 2-7 20-4-9-9-4Z"></path>
+              <path d="M22 2 11 13"></path>
+            </svg>
+          </a>
+          {% endif %}
+          {% if row.can_review_approval %}
+          <a
+            class="btn btn-sm btn-outline-warning template-action-btn"
+            href="{% url 'admin_portal:grading_template_review_approval' row.id %}"
+            aria-label="Review approval for {{ row.code }}"
+            title="Review Approval"
+            data-bs-toggle="tooltip"
+            data-bs-title="Review Approval"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+              <path d="M12 3 4 6v6c0 5 3.4 8.2 8 9 4.6-.8 8-4 8-9V6Z"></path>
+              <path d="m9 12 2 2 4-4"></path>
+            </svg>
+          </a>
+          {% endif %}
+          {% if row.can_publish_workflow %}
+          <form method="post" action="{% url 'admin_portal:grading_template_publish' row.id %}" class="d-inline">
+            {% csrf_token %}
+            <button
+              type="submit"
+              class="btn btn-sm btn-success template-action-btn"
+              aria-label="Publish {{ row.code }}"
+              title="Publish"
+              data-bs-toggle="tooltip"
+              data-bs-title="Publish"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+                <path d="M12 3v12"></path>
+                <path d="m7 8 5-5 5 5"></path>
+                <path d="M5 21h14"></path>
+              </svg>
+            </button>
+          </form>
+          {% endif %}
+          {% if row.can_hotfix_request %}
+          <a
+            class="btn btn-sm btn-outline-danger template-action-btn"
+            href="{% url 'admin_portal:template_hotfix_create' row.id %}"
+            aria-label="Request hotfix for {{ row.code }}"
+            title="Hotfix"
+            data-bs-toggle="tooltip"
+            data-bs-title="Hotfix"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+              <path d="M14.7 6.3a4 4 0 0 0-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5"></path>
+              <path d="m15 5 4 4"></path>
+            </svg>
+          </a>
+          {% endif %}
+          {% if show_inactive_tools %}{% include "admin_portal/shared/inactive_delete_action.html" %}{% endif %}
+          </div>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="{% if show_inactive_tools %}11{% else %}10{% endif %}" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

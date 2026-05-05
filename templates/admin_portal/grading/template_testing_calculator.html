@@ -231,7 +231,7 @@
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
   <div>
     <h2 class="h5 mb-1">Grading Template Testing Calculator</h2>
-    <div class="text-muted small">Use sample raw scores and totals to validate how EduGradesPro computes each period grade from the selected grading template. Final-grade output here is a template-only preview and may differ from the live tenant profile formula.</div>
+    <div class="text-muted small">Use sample raw scores and totals to validate how EduGradesPro computes each period grade and the final grade from the selected grading template and its matched tenant grading profile.</div>
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:grading_template_list' %}">Back to Grading Templates</a>
@@ -304,15 +304,33 @@
       </div>
       {% endfor %}
       <div class="period-summary-card final-card">
-        <div class="period-summary-label">Template Final Preview</div>
+        <div class="period-summary-label">Final Grade</div>
         <div class="period-summary-value">{{ calculation.final_grade|default:"-" }}</div>
-        <div class="small text-muted mt-2">Template-only average preview. Live class final grade may follow a tenant grading profile formula.</div>
+        <div class="small text-muted mt-2">
+          {{ calculation.final_grade_detail.strategy.mode_label }}
+          {% if calculation.final_grade_detail.profile %}
+            via {{ calculation.final_grade_detail.profile.profile_code }}
+          {% else %}
+            fallback
+          {% endif %}
+        </div>
+        {% if calculation.final_grade_detail.official_value %}
+        <div class="small text-muted">Official rounded grade: <strong>{{ calculation.final_grade_detail.official_value }}</strong></div>
+        {% endif %}
       </div>
     </div>
 
     <div class="formula-box mb-4">
       <div class="fw-semibold mb-1">Final Grade Formula Used</div>
-      <div class="small text-muted mb-1">This calculator previews the selected template only. Live class final grade may instead follow the matched tenant grading profile formula.</div>
+      <div class="small text-muted mb-1">
+        {% if calculation.final_grade_detail.profile %}
+          Matched tenant grading profile:
+          <strong>{{ calculation.final_grade_detail.profile.profile_code }}</strong>
+          - {{ calculation.final_grade_detail.profile.profile_name }}.
+        {% else %}
+          No active tenant grading profile matched this template, so the calculator uses the active-period average fallback.
+        {% endif %}
+      </div>
       <div class="calc-walkthrough mt-3">
         <div class="calc-step-card">
           <div class="calc-step-title">Step 1: Gather active period grades</div>
@@ -324,8 +342,39 @@
           {% endfor %}
         </div>
         <div class="calc-step-card">
-          <div class="calc-step-title">Step 2: Template-only average preview</div>
+          <div class="calc-step-title">Step 2: Apply {{ calculation.final_grade_detail.strategy.mode_label }}</div>
+          <div class="small text-muted mb-2">{{ calculation.final_grade_detail.strategy.source_label }}</div>
+          {% for entry in calculation.final_grade_detail.entries %}
+          <div class="calc-step-line">
+            <span>
+              {{ entry.period_name }}
+              <span class="text-muted">({{ entry.period_code }})</span>
+              {% if entry.weight %}<span class="text-muted">x {{ entry.weight }}%</span>{% endif %}
+            </span>
+            <strong>
+              {{ entry.value_used|default:"0.00" }}
+              {% if entry.contribution is not None %}
+                <span class="text-muted">= {{ entry.contribution }}</span>
+              {% endif %}
+            </strong>
+          </div>
+          {% endfor %}
           <div class="calc-eq">{{ calculation.final_formula }}</div>
+          {% if calculation.final_grade_detail.official_value %}
+          <div class="calc-result-box mt-3">
+            <div class="result-label">Official Rounded Final Grade</div>
+            <div class="result-value">{{ calculation.final_grade_detail.official_value }}</div>
+          </div>
+          {% endif %}
+          {% if calculation.final_grade_detail.warnings %}
+          <div class="alert alert-warning small mb-0 mt-3">
+            <ul class="mb-0 ps-3">
+              {% for warning in calculation.final_grade_detail.warnings %}
+              <li>{{ warning }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -570,6 +619,79 @@
           </div>
         </div>
       </div>
+      {% if forloop.last %}
+      <div class="card period-breakdown-card">
+        <div class="card-header period-header period-default d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div>
+            <div class="fw-semibold">Final Grade Computation</div>
+            <div class="small text-muted">
+              {% if calculation.final_grade_detail.profile %}
+                {{ calculation.final_grade_detail.profile.profile_code }} - {{ calculation.final_grade_detail.profile.profile_name }}
+              {% else %}
+                Active-period average fallback
+              {% endif %}
+            </div>
+          </div>
+          <div class="text-end small">
+            <div>Formula Mode: <strong>{{ calculation.final_grade_detail.strategy.mode_label }}</strong></div>
+            <div>Final Grade: <strong>{{ calculation.final_grade|default:"-" }}</strong></div>
+            {% if calculation.final_grade_detail.official_value %}
+            <div>Official Rounded: <strong>{{ calculation.final_grade_detail.official_value }}</strong></div>
+            {% endif %}
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="builder-summary mb-3">
+            <div class="builder-formula mb-2">FINAL GRADE = {{ calculation.final_grade_detail.strategy.formula_label }}</div>
+            <div class="small text-muted">
+              This final step uses the matched Tenant Grading Profile for the selected template. If no active profile matches, EduGradesPro previews the active-period average fallback.
+            </div>
+          </div>
+
+          <div class="simple-calc-list">
+            <div class="simple-calc-item">
+              <div class="simple-calc-label">4. Final Grade From Period Grades</div>
+              {% for entry in calculation.final_grade_detail.entries %}
+              <div class="calc-step-line">
+                <div>
+                  <strong>{{ entry.period_name }}</strong>
+                  <div class="text-muted-small">
+                    {{ entry.period_code }}
+                    {% if entry.weight %}| Weight: {{ entry.weight }}%{% endif %}
+                  </div>
+                </div>
+                <div class="text-end">
+                  <div><strong>{{ entry.value_used|default:"0.00" }}</strong></div>
+                  {% if entry.contribution is not None %}
+                  <div class="text-muted-small">Contribution: {{ entry.contribution }}</div>
+                  {% endif %}
+                </div>
+              </div>
+              {% endfor %}
+              <div class="calc-eq mt-3">{{ calculation.final_formula }}</div>
+            </div>
+
+            <div class="calc-result-box">
+              <div class="result-label">Computed Final Grade</div>
+              <div class="result-value">{{ calculation.final_grade|default:"-" }}</div>
+              {% if calculation.final_grade_detail.official_value %}
+              <div class="small text-muted mt-2">Official rounded final grade: <strong>{{ calculation.final_grade_detail.official_value }}</strong></div>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if calculation.final_grade_detail.warnings %}
+          <div class="alert alert-warning small mb-0 mt-3">
+            <ul class="mb-0 ps-3">
+              {% for warning in calculation.final_grade_detail.warnings %}
+              <li>{{ warning }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
       {% endfor %}
     </div>
     {% endif %}

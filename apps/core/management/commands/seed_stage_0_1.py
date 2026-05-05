@@ -69,6 +69,7 @@ class Command(BaseCommand):
         ("faculty_assignments.create", "faculty_assignments", "create"),
         ("faculty_assignments.update", "faculty_assignments", "update"),
         ("faculty_assignments.import", "faculty_assignments", "import"),
+        ("gradebook.view_student_identity", "gradebook", "view_student_identity"),
         ("students.read", "students", "read"),
         ("students.create", "students", "create"),
         ("students.update", "students", "update"),
@@ -77,6 +78,8 @@ class Command(BaseCommand):
         ("enrollment.update", "enrollment", "update"),
         ("enrollment.import", "enrollment", "import"),
         ("import_batches.read", "import_batches", "read"),
+        ("actual_data_reset.run", "actual_data_reset", "run"),
+        ("inactive_records.delete", "inactive_records", "delete"),
         ("system_settings.update", "system_settings", "update"),
         ("grading_governance_settings.update", "grading_governance_settings", "update"),
         ("grading_templates.read", "grading_templates", "read"),
@@ -121,6 +124,7 @@ class Command(BaseCommand):
         ("corrections.read", "corrections", "read"),
         ("corrections.review", "corrections", "review"),
         ("corrections.create", "corrections", "create"),
+        ("corrections.create_on_behalf", "corrections", "create_on_behalf"),
         ("audit_logs.read", "audit_logs", "read"),
     ]
 
@@ -577,6 +581,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "ACTUAL_DATA_RESET",
+                groups["IMPORTS"],
+                "Actual Data Reset",
+                "admin_portal:actual_data_reset",
+                70,
+                "actual_data_reset.run",
+            ),
+            (
+                "ADMIN",
                 "GRADING_TEMPLATES",
                 groups["GRADING"],
                 "Grading Templates",
@@ -703,6 +716,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "GRADE_CORRECTION_ON_BEHALF",
+                groups["GRADING"],
+                "Create Correction On Behalf",
+                "admin_portal:grade_correction_request_create_on_behalf",
+                91,
+                "corrections.create_on_behalf",
+            ),
+            (
+                "ADMIN",
                 "TEMPLATE_HOTFIX_REQUESTS",
                 groups["GRADING"],
                 "Template Hotfix Requests",
@@ -821,6 +843,7 @@ class Command(BaseCommand):
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
 
         correction_monitor_permissions = ["corrections.read"]
+        correction_on_behalf_permissions = ["corrections.read", "corrections.create_on_behalf"]
         correction_reviewer_permissions = ["corrections.review"]
         reopen_requestor_permissions = ["reopen_requests.read", "reopen_requests.create"]
         reopen_reviewer_permissions = [
@@ -832,6 +855,20 @@ class Command(BaseCommand):
             role_obj = role_map[role_code]
             for perm_code in correction_monitor_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
+        for role_code in ["AC", "DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN"]:
+            role_obj = role_map.get(role_code)
+            if not role_obj:
+                continue
+            for perm_code in correction_on_behalf_permissions:
+                RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
+        for role_code in ["SUPER_ADMIN", "DEAN"]:
+            role_obj = role_map.get(role_code)
+            if not role_obj:
+                continue
+            RolePermission.objects.get_or_create(
+                role=role_obj,
+                permission=perm_map["gradebook.view_student_identity"],
+            )
         for role_code in ["REGISTRAR"]:
             role_obj = role_map[role_code]
             for perm_code in correction_reviewer_permissions:

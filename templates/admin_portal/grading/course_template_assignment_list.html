@@ -69,7 +69,15 @@
       {% endfor %}
     </select>
   </div>
-  <div class="col-md-4">
+  <div class="col-md-2">
+    <select class="form-select" name="term_id">
+      <option value="">All Terms</option>
+      {% for term in terms %}
+      <option value="{{ term.id }}" {% if term.id|stringformat:'s' == request.GET.term_id %}selected{% endif %}>{{ term.academic_year.code }} / {{ term.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
     <input class="form-control" name="q" value="{{ q }}" placeholder="Search course/template">
   </div>
   <div class="col-md-2 d-flex align-items-center">
@@ -78,68 +86,36 @@
       <label class="form-check-label" for="id_without_template">Courses with no grading template</label>
     </div>
   </div>
+  <div class="col-md-2 d-flex align-items-center">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" name="offerings_without_template" value="1" id="id_offerings_without_template" {% if offerings_without_template %}checked{% endif %}>
+      <label class="form-check-label" for="id_offerings_without_template">Offerings with no grading template</label>
+    </div>
+  </div>
   <div class="col-md-1">
     <button class="btn btn-outline-secondary w-100">Filter</button>
   </div>
 </form>
-{% if without_template %}
+{% if offerings_without_template %}
+<div class="alert alert-warning">
+  Showing <strong>{{ offerings_without_template_count }}</strong> current course offering(s) whose course has no active published template assignment for the offering term.
+</div>
+{% elif without_template %}
 <div class="alert alert-info">
   Showing <strong>{{ filtered_without_template_count }}</strong> course(s) with no active grading template assignment in the current filtered scope.
 </div>
 {% endif %}
+{% if offerings_without_template %}
 <div class="card border-0 shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover mb-0">
-      <thead>
-        <tr>
-          <th>Course</th>
-          <th>Template</th>
-          <th>Effective Term</th>
-          <th>Active</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for row in page_obj %}
-        <tr>
-          <td>{{ row.course.title }} <span class="text-muted">({{ row.course.code }})</span></td>
-          <td>
-            {% if row.grading_template %}
-              {{ row.grading_template.name }} <span class="text-muted">({{ row.grading_template.code }})</span>
-            {% else %}
-              <span class="badge text-bg-warning text-dark">No grading template assigned</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if row.effective_from_term %}
-              {{ row.effective_from_term.name|default:row.effective_from_term.code }}
-            {% else %}
-              -
-            {% endif %}
-          </td>
-          <td>
-            {% if row.grading_template and row.is_active %}
-              <span class="badge text-bg-success">Active</span>
-            {% elif row.grading_template %}
-              <span class="badge text-bg-warning text-dark">Inactive</span>
-            {% else %}
-              <span class="badge text-bg-secondary">Missing</span>
-            {% endif %}
-          </td>
-          <td class="text-end">
-            {% if row.grading_template and "course_template_assignments.update" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:course_template_assignment_update' row.id %}">Edit</a>
-            {% elif "course_template_assignments.create" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:course_template_assignment_create' %}">Assign Now</a>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="5" class="text-center text-muted py-4">No course template assignments found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  {% include "admin_portal/grading/offering_without_template_table.html" with empty_message="No current course offerings without grading templates found." %}
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" with page_obj=offering_page_obj %}</div>
+</div>
+{% elif without_template %}
+<div class="card border-0 shadow-sm">
+  {% include "admin_portal/grading/course_template_assignment_table.html" with page_obj=page_obj empty_message="No courses without grading templates found." %}
   <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
 </div>
+{% else %}
+{% include "admin_portal/shared/active_inactive_sections.html" with section_label="Course Template Assignments" table_template="admin_portal/grading/course_template_assignment_table.html" active_empty_message="No active course template assignments found." inactive_empty_message="No inactive course template assignments found." %}
+{% endif %}
 {% endblock %}

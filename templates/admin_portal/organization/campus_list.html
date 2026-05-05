@@ -23,30 +23,6 @@
     <button class="btn btn-outline-secondary w-100">Filter</button>
   </div>
 </form>
-<div class="card border-0 shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover mb-0">
-      <thead><tr><th>Tenant</th><th>Code</th><th>Name</th><th>Status</th><th></th></tr></thead>
-      <tbody>
-      {% for row in page_obj %}
-        <tr>
-          <td>{{ row.tenant.code }}</td>
-          <td>{{ row.code }}</td>
-          <td>{{ row.name }}</td>
-          <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
-          <td class="text-end">
-            {% if "campuses.update" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:campus_update' row.id %}">Edit</a>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="5" class="text-center text-muted py-4">No campuses found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
-</div>
+{% include "admin_portal/shared/active_inactive_sections.html" with section_label="Campuses" table_template="admin_portal/organization/campus_table.html" active_empty_message="No active campuses found." inactive_empty_message="No inactive campuses found." %}
 {% endblock %}
 

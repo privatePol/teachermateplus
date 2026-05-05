@@ -1,6 +1,45 @@
 {% extends "admin_portal/base.html" %}
 
 {% block admin_content %}
+<style>
+  .import-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(18, 28, 22, 0.35);
+    backdrop-filter: blur(1px);
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .import-confirm-overlay.show {
+    display: flex;
+  }
+  .import-confirm-overlay-card {
+    background: #fff;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    padding: 1.15rem 1.25rem;
+    width: min(420px, calc(100vw - 2rem));
+    color: #1f3f2d;
+  }
+  .import-confirm-overlay-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+  }
+  .import-confirm-overlay-note {
+    color: #607267;
+    font-size: 0.88rem;
+    margin-bottom: 0.75rem;
+  }
+  .import-confirm-progress {
+    height: 0.55rem;
+  }
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Import Batch #{{ batch.id }}</h2>
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_batch_list' %}">Back to Batches</a>
@@ -31,9 +70,12 @@
       <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_template_download' import_slug %}">Download Template</a>
       <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:import_upload' import_slug %}">Upload Another CSV</a>
       {% if can_confirm %}
-      <form method="post" action="{% url 'admin_portal:import_batch_confirm' batch.id %}">
+      <form id="import-confirm-form" method="post" action="{% url 'admin_portal:import_batch_confirm' batch.id %}">
         {% csrf_token %}
-        <button class="btn btn-sm btn-success" type="submit">Confirm Import</button>
+        <button class="btn btn-sm btn-success d-inline-flex align-items-center gap-2" id="import-confirm-submit" type="submit">
+          <span class="spinner-border spinner-border-sm d-none" id="import-confirm-btn-spinner" role="status" aria-hidden="true"></span>
+          <span id="import-confirm-btn-text">Confirm Import</span>
+        </button>
       </form>
       {% endif %}
     </div>
@@ -124,4 +166,39 @@
   </div>
   <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
 </div>
+
+<div class="import-confirm-overlay" id="import-confirm-overlay" aria-hidden="true">
+  <div class="import-confirm-overlay-card">
+    <div class="import-confirm-overlay-title">
+      <span class="spinner-border spinner-border-sm text-success" role="status" aria-hidden="true"></span>
+      <span>Importing validated records</span>
+    </div>
+    <div class="import-confirm-overlay-note">
+      Please keep this tab open while EduGradesPro writes valid rows and records the import audit trail.
+    </div>
+    <div class="progress import-confirm-progress" role="progressbar" aria-label="Importing records">
+      <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="width: 100%"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("import-confirm-form");
+    const submitBtn = document.getElementById("import-confirm-submit");
+    const btnSpinner = document.getElementById("import-confirm-btn-spinner");
+    const btnText = document.getElementById("import-confirm-btn-text");
+    const overlay = document.getElementById("import-confirm-overlay");
+
+    if (!form || !submitBtn || !overlay) return;
+
+    form.addEventListener("submit", function () {
+      submitBtn.disabled = true;
+      if (btnSpinner) btnSpinner.classList.remove("d-none");
+      if (btnText) btnText.textContent = "Importing...";
+      overlay.classList.add("show");
+      overlay.setAttribute("aria-hidden", "false");
+    });
+  });
+</script>
 {% endblock %}

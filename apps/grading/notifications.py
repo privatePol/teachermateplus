@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from base64 import b64encode
-from email.mime.image import MIMEImage
-from pathlib import Path
-
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
 from apps.core.services.features import FeatureSettingsService
 from apps.grading.models import GradeCorrectionRequest
 from apps.grading.reporting import CorrectionOfficialReportService
@@ -22,28 +19,13 @@ class CorrectionNotificationService:
     SUBJECT_MESSAGE = "Petition for Correction of Grades Awaiting Your Approval"
 
     @classmethod
-    def _logo_data_uri(cls) -> str:
-        logo_path = Path(settings.BASE_DIR) / "media" / "logos" / "ncba-logo.png"
-        if not logo_path.exists():
-            return ""
-        encoded = b64encode(logo_path.read_bytes()).decode("ascii")
-        return f"data:image/png;base64,{encoded}"
-
-    @classmethod
-    def _attach_logo_and_get_src(cls, *, message: EmailMultiAlternatives) -> str:
-        logo_path = Path(settings.BASE_DIR) / "media" / "logos" / "ncba-logo.png"
-        if not logo_path.exists():
-            return ""
-        logo_bytes = logo_path.read_bytes()
-        try:
-            logo_part = MIMEImage(logo_bytes)
-            logo_part.add_header("Content-ID", "<ncba-logo>")
-            logo_part.add_header("Content-Disposition", "inline", filename=logo_path.name)
-            message.attach(logo_part)
-            return "cid:ncba-logo"
-        except Exception:  # pragma: no cover - defensive fallback for unexpected MIME failures
-            encoded = b64encode(logo_bytes).decode("ascii")
-            return f"data:image/png;base64,{encoded}"
+    def _logo_context(cls) -> dict[str, str]:
+        return build_email_logo_context(
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            external_url=getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+        )
 
     @classmethod
     def _role_recipient_rows(cls, *, request_obj: GradeCorrectionRequest):
@@ -138,7 +120,15 @@ class CorrectionNotificationService:
                 from_email=from_email,
                 to=[recipient["email"]],
             )
-            context["logo_src"] = cls._attach_logo_and_get_src(message=message) or cls._logo_data_uri()
+            logo_context = cls._logo_context()
+            context.update(logo_context)
+            attach_logo_for_src(
+                message,
+                src=logo_context["email_logo_src"],
+                filename="ncba-logo.png",
+                cid="ncba-logo",
+                configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+            )
             text_body = render_to_string("grading/emails/correction_submission_notification.txt", context)
             html_body = render_to_string("grading/emails/correction_submission_notification.html", context)
             message.body = text_body
@@ -212,7 +202,15 @@ class CorrectionNotificationService:
             from_email=from_email,
             to=recipient_emails,
         )
-        context["logo_src"] = cls._attach_logo_and_get_src(message=message) or cls._logo_data_uri()
+        logo_context = cls._logo_context()
+        context.update(logo_context)
+        attach_logo_for_src(
+            message,
+            src=logo_context["email_logo_src"],
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+        )
         text_body = render_to_string("grading/emails/registrar_official_report.txt", context)
         html_body = render_to_string("grading/emails/registrar_official_report.html", context)
         message.body = text_body

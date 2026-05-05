@@ -729,6 +729,7 @@
             <li>Check the <strong>Pending Faculty Assignments</strong> section.</li>
             <li>Read the course, section, schedule, and admin instructions.</li>
             <li>Open the <strong>Grading Template</strong> if you want to review the grading structure.</li>
+            <li>Use <strong>Open Grade Calculator</strong> on the grading-template page when you want a read-only sample computation for period grades and final grade.</li>
             <li>If the load is correct, click <strong>Accept Assignment</strong>.</li>
             <li>If the load needs discussion, add a note and choose <strong>Request Clarification</strong> or <strong>Decline</strong>.</li>
             <li>After acceptance, grading and class-list tools become available.</li>
@@ -902,7 +903,8 @@
             <li>EduGradesPro blocks submission if active students have no encoded grade or attendance records.</li>
             <li>If ACTIVE students still have required missing records, complete the records or update the student status to DRP/WITHDRAWN/INC where appropriate.</li>
             <li>If you try to leave score entry with unsaved scores, EduGradesPro warns you first.</li>
-            <li>The official Summary of Grades table and printout appear only after submission.</li>
+            <li>Computed periodic grades may be visible before submission when admin allows draft review visibility.</li>
+            <li>The official Summary of Grades printout appears only after submission.</li>
             <li>If you submitted before the deadline, you may reopen before the deadline, revise, and resubmit.</li>
             <li>If a reopened gradebook reaches the deadline without resubmission, editing is locked, but you can still finalize and resubmit existing records from Summary.</li>
             <li>Readiness cards show ACTIVE, complete records, missing records, coverage, DRP, WITHDRAWN, and INC.</li>
@@ -1036,7 +1038,8 @@
           <ul class="guide-list">
             <li><strong>Active Classes</strong> are your current class workload.</li>
             <li><strong>Archived Classes</strong> are older or archived offerings.</li>
-            <li>Archived classes are kept for review and records.</li>
+            <li>Archived classes are kept for review and records. They are read-only for normal encoding, attendance updates, submission, self-reopen, and class-list changes.</li>
+            <li>If an old class needs a grade change, use the governed correction process instead of editing the archived class directly.</li>
           </ul>
           <h6 class="mt-3 mb-2 fw-bold text-success">How to View Archived Classes</h6>
           <ol class="guide-list">
@@ -1115,7 +1118,7 @@
         </details>
         <details class="guide-faq-item">
           <summary>Why are official grades hidden or not printable yet?</summary>
-          <p>In this setup, faculty can see or print official grades only after submission.</p>
+          <p>Admin can choose whether periodic grades are visible before submission. The official printout is available only after submission, and deadline-release settings may still hide period or final grades until the configured release point.</p>
         </details>
         <details class="guide-faq-item">
           <summary>What should I do if the current active period is not the period I expected?</summary>
@@ -1136,6 +1139,14 @@
         <details class="guide-faq-item">
           <summary>What happens if I do not create an activity for a grading component?</summary>
           <p>If the template requires that component, submission readiness may block submission because EduGradesPro has no activity or attendance setup to compute that part of the grade. Create the needed activity, encode scores, then recompute or review Summary again.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>What should I do if My Classes says the grading template is not assigned yet?</summary>
+          <p>Do not start encoding grades for that class yet. Coordinate with the MIS Department so the correct grading template can be assigned to the course offering.</p>
+        </details>
+        <details class="guide-faq-item">
+          <summary>What should I do if the assigned grading template looks wrong?</summary>
+          <p>Open the class grading-template page and use <strong>Report Template Issue</strong> if the button is available. The report goes to governance review and does not change grades immediately. If the button is not shown, coordinate with your academic head or MIS because template issue reporting is controlled by governance settings.</p>
         </details>
         <details class="guide-faq-item">
           <summary>What should I do if a class in My Classes is not mine?</summary>

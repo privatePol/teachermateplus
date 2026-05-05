@@ -69,6 +69,34 @@
     font-size: 0.84rem;
     margin-bottom: 0.15rem;
   }
+  .template-warning-banner,
+  .template-warning-note {
+    border: 1px solid #f0cf73;
+    background: #fff7df;
+    color: #6b4d06;
+  }
+  .template-warning-banner {
+    border-radius: 1rem;
+    padding: 0.9rem 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 10px 20px rgba(112, 88, 21, 0.08);
+  }
+  .template-warning-title {
+    font-weight: 800;
+    margin-bottom: 0.2rem;
+  }
+  .template-warning-note {
+    border-radius: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    font-size: 0.84rem;
+    line-height: 1.35;
+    margin-top: 0.7rem;
+  }
+  .template-warning-note strong {
+    display: block;
+    color: #5a3f04;
+    margin-bottom: 0.15rem;
+  }
   .pending-card textarea {
     min-height: 82px;
     resize: vertical;
@@ -364,6 +392,15 @@
 {% if active_grading_period_rows %}
 {% include "faculty_portal/partials/active_period_banner.html" with rows=active_grading_period_rows %}
 {% endif %}
+{% if missing_template_assignment_count %}
+<section class="template-warning-banner">
+  <div class="template-warning-title">Some assigned classes have no grading template yet.</div>
+  <div>
+    {{ missing_template_assignment_count }} assigned class{% if missing_template_assignment_count != 1 %}es{% endif %}
+    still need a grading template assignment before grading can proceed properly. Please coordinate with the MIS Department.
+  </div>
+</section>
+{% endif %}
 {% if deadline_banner %}
 {% include "faculty_portal/partials/deadline_banner.html" with reminder=deadline_banner %}
 {% endif %}
@@ -411,12 +448,20 @@
         <div class="meta">Assigned: {{ assignment.assigned_at|date:"M d, Y h:i A" }}</div>
         <div class="meta">
           Grading Template:
-          {% if assignment.offering.resolved_template %}
+          {% if not assignment.offering.has_course_template_assignment %}
+            <span>Not assigned yet</span>
+          {% elif assignment.offering.resolved_template %}
             <strong>{{ assignment.offering.resolved_template.name }}</strong>
           {% else %}
             <span>Not available yet</span>
           {% endif %}
         </div>
+        {% if assignment.offering.template_assignment_warning %}
+        <div class="template-warning-note">
+          <strong>Grading template needed</strong>
+          {{ assignment.offering.template_assignment_warning }}
+        </div>
+        {% endif %}
         {% if assignment.response_due_at %}
         <div class="meta">Respond by: {{ assignment.response_due_at|date:"M d, Y h:i A" }}</div>
         {% elif assignment.response_status == "EXPIRED" and assignment.responded_at %}
@@ -481,13 +526,21 @@
             <div class="course-card-row">
               <span class="label">Grading Template</span>
               <span>
-                {% if offering.resolved_template %}
+                {% if not offering.has_course_template_assignment %}
+                  Not assigned yet
+                {% elif offering.resolved_template %}
                   {{ offering.resolved_template.name }}
                 {% else %}
                   Not available
                 {% endif %}
               </span>
             </div>
+            {% if offering.template_assignment_warning %}
+            <div class="template-warning-note">
+              <strong>Grading template needed</strong>
+              {{ offering.template_assignment_warning }}
+            </div>
+            {% endif %}
           </div>
 
           <footer class="course-card-footer">
@@ -500,6 +553,18 @@
             <a class="btn btn-outline-secondary" href="{% url 'faculty_portal:offering_enrollment' offering.id %}">
               Class List
             </a>
+            {% if offering.can_undo_acceptance %}
+            <form method="post" action="{% url 'faculty_portal:faculty_assignment_undo_accept' offering.assignment.id %}" class="d-inline">
+              {% csrf_token %}
+              <button
+                type="submit"
+                class="btn btn-outline-danger"
+                onclick="return confirm('Undo acceptance for this faculty assignment? The class will return to Pending Faculty Assignments.');"
+              >
+                Undo Acceptance
+              </button>
+            </form>
+            {% endif %}
           </footer>
         </article>
       </div>

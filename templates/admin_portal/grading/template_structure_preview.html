@@ -3,20 +3,135 @@
 {% block extra_head %}
 {{ block.super }}
 <style>
+  .structure-preview {
+    --structure-teal: #1d8a81;
+    --structure-green: #2f9e44;
+    --structure-gold: #d69e2e;
+    --structure-blue: #2f80c2;
+    --structure-plum: #7b61a8;
+    --structure-slate: #52606d;
+  }
   .structure-preview .meta-muted {
-    color: #6c757d;
+    color: #60717c;
+    font-size: 0.84rem;
+  }
+  .structure-preview .structure-summary-card {
+    background: linear-gradient(135deg, #f7fbf8 0%, #fcfdf8 100%);
+    border: 1px solid #e0e9df;
+    border-radius: 0.9rem;
+  }
+  .structure-preview .structure-period-card {
+    --period-accent: var(--structure-teal);
+    --period-bg: #eef8f6;
+    --period-border: #cfe7e4;
+    --period-text: #143f3c;
+    border: 1px solid var(--period-border);
+    border-left: 7px solid var(--period-accent);
+    border-radius: 0.85rem;
+    overflow: hidden;
+  }
+  .structure-preview .structure-period-theme-teal {
+    --period-accent: var(--structure-teal);
+    --period-bg: #eef8f6;
+    --period-border: #cfe7e4;
+    --period-text: #143f3c;
+  }
+  .structure-preview .structure-period-theme-green {
+    --period-accent: var(--structure-green);
+    --period-bg: #eefaf2;
+    --period-border: #cfead7;
+    --period-text: #143f2a;
+  }
+  .structure-preview .structure-period-theme-gold {
+    --period-accent: var(--structure-gold);
+    --period-bg: #fff8e6;
+    --period-border: #f1dfae;
+    --period-text: #5c4308;
+  }
+  .structure-preview .structure-period-theme-blue {
+    --period-accent: var(--structure-blue);
+    --period-bg: #eef6ff;
+    --period-border: #cfe2f3;
+    --period-text: #173f61;
+  }
+  .structure-preview .structure-period-theme-plum {
+    --period-accent: var(--structure-plum);
+    --period-bg: #f4effb;
+    --period-border: #ded3ef;
+    --period-text: #3e2d5b;
+  }
+  .structure-preview .structure-period-theme-slate {
+    --period-accent: var(--structure-slate);
+    --period-bg: #f2f5f7;
+    --period-border: #d9e0e5;
+    --period-text: #27323b;
+  }
+  .structure-preview .structure-period-header {
+    background: var(--period-bg);
+    color: var(--period-text);
+    border-bottom: 1px solid var(--period-border);
+  }
+  .structure-preview .structure-total-card {
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(20, 63, 60, 0.1);
+    border-radius: 0.55rem;
+    padding: 0.35rem 0.55rem;
+  }
+  .structure-preview .structure-component-card {
+    border: 1px solid #cfe6d7;
+    border-left: 6px solid var(--structure-green);
+    border-radius: 0.75rem;
+    background: linear-gradient(135deg, #ffffff 0%, #f8fcf9 100%);
+    box-shadow: 0 10px 22px rgba(31, 105, 64, 0.07);
+    padding: 0.9rem;
+  }
+  .structure-preview .structure-component-header {
+    gap: 0.75rem;
+  }
+  .structure-preview .structure-weight-card {
+    background: linear-gradient(135deg, #ffffff 0%, #e3f6e9 100%);
+    border: 1px solid #b8dcc5;
+    border-left: 4px solid var(--structure-green);
+    border-radius: 0.55rem;
+    box-shadow: 0 6px 14px rgba(24, 78, 70, 0.07);
+    color: #183d2a;
+    padding: 0.45rem 0.65rem;
+    white-space: nowrap;
+  }
+  .structure-preview .structure-sub-total {
+    background: #fff8df;
+    border: 1px solid #ead99b;
+    border-left: 4px solid var(--structure-gold);
+    border-radius: 0.55rem;
+    color: #5c4308;
+    padding: 0.5rem 0.65rem;
   }
   .structure-preview .sub-table th {
-    color: #5f6b76;
-    font-weight: 600;
-    font-size: 0.92rem;
-    background: #f8f9fa;
+    color: #5c4308;
+    font-weight: 800;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: #fff0bf;
+    border-bottom-color: #ead99b;
   }
   .structure-preview .sub-table td {
     vertical-align: top;
+    background: #fffdf6;
+    border-color: #f1dfae;
+  }
+  .structure-preview .subcomponent-name {
+    color: #4f3c0d;
+    font-weight: 700;
+  }
+  .structure-preview .detail-panel {
+    background: #eef6ff;
+    border: 1px solid #cfe2f3;
+    border-radius: 0.65rem;
+    padding: 0.45rem 0.55rem;
   }
   .structure-preview .detail-mini-table th {
-    color: #7b8590;
+    color: #23527b;
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.02em;
@@ -26,14 +141,26 @@
   .structure-preview .detail-mini-table td {
     padding-top: 0.22rem;
     padding-bottom: 0.22rem;
+    border-top: 1px solid rgba(47, 128, 194, 0.12);
   }
   .structure-preview .detail-code {
-    color: #8a949e;
+    color: #607e99;
     font-size: 0.82rem;
   }
+  .structure-preview .detail-name {
+    color: #173f61;
+    font-weight: 700;
+  }
   .structure-preview .no-detail-text {
-    color: #7a848e;
+    color: #607e99;
     font-size: 0.93rem;
+  }
+  .structure-preview .structure-empty {
+    background: #f9fbfb;
+    border: 1px dashed #d6e2df;
+    border-radius: 0.65rem;
+    color: #60717c;
+    padding: 0.75rem 0.9rem;
   }
 </style>
 {% endblock %}
@@ -48,7 +175,7 @@
   </div>
 </div>
 
-<div class="card border-0 shadow-sm mb-3">
+<div class="card border-0 shadow-sm mb-3 structure-summary-card">
   <div class="card-body">
     <div class="row g-2">
       <div class="col-md-3"><strong>Tenant:</strong> {{ template_obj.tenant.code }}</div>
@@ -74,13 +201,14 @@
 {% endif %}
 
 {% for period in period_rows %}
-<div class="card border-0 shadow-sm mb-3">
-  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+{% cycle 'structure-period-theme-teal' 'structure-period-theme-green' 'structure-period-theme-gold' 'structure-period-theme-blue' 'structure-period-theme-plum' 'structure-period-theme-slate' as period_theme silent %}
+<div class="card shadow-sm mb-3 structure-period-card {{ period_theme }}">
+  <div class="card-header structure-period-header d-flex justify-content-between align-items-center">
     <div>
       <strong>{{ period.row.name }}</strong>
-      <span class="text-muted">({{ period.row.code }})</span>
+      <span class="meta-muted">({{ period.row.code }})</span>
     </div>
-    <div>
+    <div class="structure-total-card">
       Component Total:
       <strong>{{ period.component_total }}%</strong>
       {% if period.component_total_ok %}
@@ -92,14 +220,14 @@
   </div>
   <div class="card-body">
     {% for component in period.components %}
-    <div class="border rounded p-2 mb-3">
-      <div class="d-flex justify-content-between align-items-center">
+    <div class="structure-component-card mb-3">
+      <div class="d-flex justify-content-between align-items-start structure-component-header">
         <div><strong>{{ component.row.name }}</strong> ({{ component.row.code }})</div>
-        <div>Weight: <strong>{{ component.weight }}%</strong></div>
+        <div class="structure-weight-card">Weight: <strong>{{ component.weight }}%</strong></div>
       </div>
 
       {% if component.subcomponents %}
-      <div class="small text-muted mt-1 mb-2">
+      <div class="small structure-sub-total mt-2 mb-2">
         Subcomponent Total: {{ component.subcomponent_total }}%
         {% if component.subcomponent_total_ok %}
         <span class="badge text-bg-success">OK</span>
@@ -121,7 +249,7 @@
             {% for sub in component.subcomponents %}
             <tr>
               <td>
-                <div>{{ sub.row.name }}</div>
+                <div class="subcomponent-name">{{ sub.row.name }}</div>
                 <div class="meta-muted">{{ sub.row.code }}</div>
                 {% if sub.row.is_attendance_component %}
                 <span class="badge text-bg-info mt-1">Attendance</span>
@@ -142,7 +270,7 @@
               </td>
               <td>
                 {% if sub.details %}
-                  <div class="table-responsive">
+                  <div class="table-responsive detail-panel">
                     <table class="table table-sm table-borderless mb-0 detail-mini-table">
                       <thead>
                         <tr>
@@ -154,7 +282,7 @@
                         {% for detail in sub.details %}
                         <tr>
                           <td>
-                            <div>{{ detail.row.name }}</div>
+                            <div class="detail-name">{{ detail.row.name }}</div>
                             <div class="detail-code">{{ detail.row.code }}</div>
                           </td>
                           <td class="text-end fw-semibold">{{ detail.weight }}%</td>
@@ -173,11 +301,11 @@
         </table>
       </div>
       {% else %}
-      <div class="small text-muted mt-2">No subcomponents. This component uses direct activities (1-layer path).</div>
+      <div class="structure-empty mt-2">No subcomponents. This component uses direct activities (1-layer path).</div>
       {% endif %}
     </div>
     {% empty %}
-      <div class="text-muted">No components yet.</div>
+      <div class="structure-empty">No components yet.</div>
     {% endfor %}
   </div>
 </div>

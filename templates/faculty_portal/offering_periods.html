@@ -265,6 +265,12 @@
 </div>
 {% endif %}
 
+{% if faculty_scope_state.read_only %}
+<div class="alert alert-warning mb-3">
+  {{ faculty_scope_state.reason }}
+</div>
+{% endif %}
+
 {% if active_grading_period %}
 <div class="period-active-banner">
   <div class="small text-uppercase text-muted fw-semibold mb-1">Current Active Grading Period</div>
@@ -281,7 +287,7 @@
   {% for item in period_cards %}
     {% with code=item.period.code|upper %}
     <div class="col-md-6 col-xl-4">
-      <article class="period-card {% if item.is_closed_by_active_period %}period-card-closed{% endif %}">
+      <article class="period-card {% if item.is_closed_by_active_period or item.is_read_only_class %}period-card-closed{% endif %}">
         <header class="period-card-header
           {% if 'PREFINAL' in code %}period-head-prefinal
           {% elif 'MIDTERM' in code %}period-head-midterm
@@ -301,8 +307,8 @@
           <div class="period-head-code">Code: {{ item.period.code }}</div>
           {% if item.is_active_period %}
           <div class="period-active-badge">Active Period</div>
-          {% elif item.is_closed_by_active_period %}
-          <div class="period-closed-badge">Closed</div>
+          {% elif item.is_closed_by_active_period or item.is_read_only_class %}
+          <div class="period-closed-badge">{% if item.is_read_only_class %}Read-only{% else %}Closed{% endif %}</div>
           {% endif %}
           <span class="period-gear" title="Period setup and workflow">&#9881;</span>
         </header>
@@ -365,10 +371,10 @@
           </div>
 
           <div class="period-actions">
-            {% if item.is_closed_by_active_period %}
+            {% if item.is_closed_by_active_period or item.is_read_only_class %}
               <span
                 class="btn btn-sm btn-outline-success btn-disabled"
-                title="This period is closed until it becomes active or is reopened for correction."
+                title="{% if item.is_read_only_class %}This class is read-only because it is outside the active academic scope.{% else %}This period is closed until it becomes active or is reopened for correction.{% endif %}"
                 aria-label="Grade Activities Closed"
               >
                 &#9881;

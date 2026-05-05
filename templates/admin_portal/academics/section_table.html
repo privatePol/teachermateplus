@@ -1,0 +1,26 @@
+<div class="table-responsive">
+  <table class="table table-hover mb-0">
+    <thead><tr><th>Code</th><th>Name</th><th>Campus</th><th>Program</th><th>Year</th><th>Record State</th>{% if show_inactive_tools %}<th>Used In</th>{% endif %}<th></th></tr></thead>
+    <tbody>
+    {% for row in page_obj %}
+      <tr>
+        <td>{{ row.code }}</td>
+        <td>{{ row.name }}</td>
+        <td>{{ row.campus.code }}</td>
+        <td>{{ row.program.code }}</td>
+        <td>{{ row.year_level|default:"-" }}</td>
+        <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+        {% if show_inactive_tools %}<td>{% include "admin_portal/shared/inactive_usage_cell.html" %}</td>{% endif %}
+        <td class="text-end">
+          {% if "sections.update" in effective_permissions %}
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:section_update' row.id %}">Edit</a>
+          {% endif %}
+          {% if show_inactive_tools %}{% include "admin_portal/shared/inactive_delete_action.html" %}{% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="{% if show_inactive_tools %}8{% else %}7{% endif %}" class="text-center text-muted py-4">{{ empty_message|default:"No sections found." }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

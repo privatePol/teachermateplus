@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import csv
+import re
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
@@ -15,7 +16,9 @@ from django import forms as django_forms
 from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Avg, Count, Max, Prefetch, Q, Sum
+from django.db.models.deletion import ProtectedError, RestrictedError
 from io import BytesIO
 
 from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden
@@ -45,6 +48,7 @@ from apps.admin_portal.forms import (
     DepartmentForm,
     FacultyAssignmentForm,
     FacultyDeactivationScheduleForm,
+    GradeCorrectionOnBehalfSetupForm,
     GradeCorrectionReviewForm,
     GradeSubmissionReopenRequestForm,
     GradeSubmissionReopenReviewForm,
@@ -75,7 +79,9 @@ from apps.admin_portal.forms import (
     UserRoleAssignmentForm,
     UserUpdateForm,
 )
+from apps.faculty_portal.forms import GradeCorrectionRequestForm
 from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
+from apps.admin_portal.data_reset import ActualDataResetService
 from apps.admin_portal.services import AdminScopeService, model_before_after
 from apps.admin_portal.grade_distribution import GradeDistributionMonitorService
 from apps.academics.models import (
@@ -91,8 +97,10 @@ from apps.academics.models import (
 from apps.auditlog.models import AuditLog
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
+from apps.core.services.scope import ScopeService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.forms import EnrollmentForm
 from apps.enrollment.models import Enrollment
@@ -116,10 +124,14 @@ from apps.grading.models import (
     GradingTemplatePeriod,
     GradingTemplateSubcomponent,
     StudentActivityScore,
+    StudentFinalGrade,
     StudentPeriodGrade,
     TemplateHotfixRequest,
+    TemplateHotfixWorkflowStep,
     TenantGradingProfile,
 )
+from apps.grading.duplication import GradingTemplateDuplicationService
+from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService
 from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
 from apps.grading.services import (
@@ -139,6 +151,40 @@ from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
 
 User = get_user_model()
+INACTIVE_RECORD_DELETE_PERMISSION = "inactive_records.delete"
+CRITICAL_ROLE_CONFIRMATION = "CHANGE PERMISSIONS"
+HOTFIX_APPLY_CONFIRMATION = "APPLY HOTFIX"
+BROAD_PERIOD_REOPEN_CONFIRMATION = "REOPEN"
+CRITICAL_PERMISSION_CODES = {
+    "actual_data_reset.run",
+    "admin_portal.access",
+    "audit_logs.read",
+    "corrections.create_on_behalf",
+    "corrections.review",
+    "grade_submissions.reopen",
+    "grade_submissions.revert_before_deadline",
+    "gradebook.view_student_identity",
+    "grading_periods.lock",
+    "grading_periods.reopen",
+    "inactive_records.delete",
+    "roles.update",
+    "system_settings.update",
+    "template_hotfixes.create",
+    "template_hotfixes.review",
+    "users.update",
+}
+CRITICAL_AUDIT_FILTER = (
+    Q(metadata_json__critical_action=True)
+    | Q(metadata_json__has_anomaly_flags=True)
+    | (
+        Q(portal="ADMIN")
+        & (
+            Q(entity_type__in=["ActualDataReset", "TemplateHotfixRequest", "GradingPeriodLock", "RolePermission"])
+            | (Q(entity_type="GradeCorrectionRequest") & Q(action__in=["APPROVE", "REJECT"]))
+            | (Q(entity_type="GradeSubmissionReopenRequest") & Q(action__in=["APPROVE", "REJECT"]))
+        )
+    )
+)
 
 
 def _official_correction_report_filename(correction_request: GradeCorrectionRequest) -> str:
@@ -155,17 +201,177 @@ def _faculty_final_clearance_report_filename(report_obj: FacultyFinalClearanceRe
     return f"faculty-final-clearance-{campus_code}-{term_code}-{faculty_code}-{report_obj.id}.pdf"
 
 
+def _permission_codes_for_ids(permission_ids) -> list[str]:
+    if not permission_ids:
+        return []
+    return list(
+        Permission.objects.filter(id__in=permission_ids)
+        .order_by("module", "action", "code")
+        .values_list("code", flat=True)
+    )
+
+
+def _role_permission_impact(role: Role, to_add, to_remove) -> dict:
+    added_codes = _permission_codes_for_ids(to_add)
+    removed_codes = _permission_codes_for_ids(to_remove)
+    critical_added = [code for code in added_codes if code in CRITICAL_PERMISSION_CODES]
+    critical_removed = [code for code in removed_codes if code in CRITICAL_PERMISSION_CODES]
+    affected_users = (
+        UserRole.objects.filter(role=role, is_active=True, user__is_active=True)
+        .values("user_id")
+        .distinct()
+        .count()
+    )
+    return {
+        "role_code": role.code,
+        "added_permission_count": len(added_codes),
+        "removed_permission_count": len(removed_codes),
+        "added_permission_codes": added_codes,
+        "removed_permission_codes": removed_codes,
+        "critical_added_permission_codes": critical_added,
+        "critical_removed_permission_codes": critical_removed,
+        "critical_permission_count": len(critical_added) + len(critical_removed),
+        "has_critical_change": bool(critical_added or critical_removed),
+        "affected_active_user_count": affected_users,
+    }
+
+
+def _template_hotfix_impact_preview(hotfix_request: TemplateHotfixRequest) -> dict:
+    target_offerings = TemplateHotfixService._resolve_target_offerings(hotfix_request)
+    submitted_count = 0
+    near_or_after_deadline_count = 0
+    campus_codes = set()
+    term_codes = set()
+    sample_offerings = []
+    target_offering_ids = []
+    near_deadline_cutoff = timezone.now() + timedelta(days=3)
+    for offering in target_offerings:
+        target_offering_ids.append(offering.id)
+        if TemplateHotfixService._offering_has_submitted_grades(offering):
+            submitted_count += 1
+        if GradingPeriodLock.objects.filter(
+            tenant_id=offering.tenant_id,
+            campus_id=offering.campus_id,
+            academic_year_id=offering.academic_year_id,
+            term_id=offering.term_id,
+            is_active=True,
+            deadline_at__isnull=False,
+            deadline_at__lte=near_deadline_cutoff,
+        ).exists():
+            near_or_after_deadline_count += 1
+        campus_codes.add(offering.campus.code if offering.campus_id else "")
+        term_codes.add(offering.term.code if offering.term_id else "")
+        if len(sample_offerings) < 8:
+            sample_offerings.append(
+                {
+                    "id": offering.id,
+                    "label": f"{offering.course.title} ({offering.course.code}) / "
+                    f"{offering.section.name or offering.section.code}",
+                }
+            )
+    return {
+        "template_code": hotfix_request.template.code,
+        "apply_mode": hotfix_request.apply_mode,
+        "target_offering_count": len(target_offerings),
+        "submitted_or_reopened_offering_count": submitted_count,
+        "near_or_after_deadline_offering_count": near_or_after_deadline_count,
+        "campus_count": len([code for code in campus_codes if code]),
+        "term_count": len([code for code in term_codes if code]),
+        "target_offering_ids": target_offering_ids[:100],
+        "sample_offerings": sample_offerings,
+    }
+
+
+def _is_hotfix_apply_step(hotfix_request: TemplateHotfixRequest, current_step) -> bool:
+    if not current_step:
+        return False
+    return not hotfix_request.workflow_steps.filter(
+        step_no__gt=current_step.step_no,
+        status__in=[TemplateHotfixWorkflowStep.Status.QUEUED, TemplateHotfixWorkflowStep.Status.PENDING],
+    ).exists()
+
+
+def _period_lock_reopen_impact(row: GradingPeriodLock, request) -> dict:
+    if row.scope_type == GradingPeriodLock.ScopeType.CAMPUS:
+        target_count = AdminScopeService.scoped_course_offerings(request).filter(
+            tenant_id=row.tenant_id,
+            campus_id=row.campus_id,
+            academic_year_id=row.academic_year_id,
+            term_id=row.term_id,
+            is_active=True,
+        ).count()
+        scope_label = "Campus-wide"
+    else:
+        target_count = 1 if row.course_offering_id else 0
+        scope_label = "Single offering"
+    return {
+        "is_broad": row.scope_type == GradingPeriodLock.ScopeType.CAMPUS,
+        "scope_type": row.scope_type,
+        "scope_label": scope_label,
+        "period_code": row.period_code,
+        "target_offering_count": target_count,
+        "course_offering_id": row.course_offering_id,
+        "campus_code": row.campus.code if row.campus_id else "",
+        "term_code": row.term.code if row.term_id else "",
+        "deadline_at": row.deadline_at.isoformat() if row.deadline_at else None,
+    }
+
+
+def _critical_audit_reason(metadata: dict | None) -> str:
+    metadata = metadata or {}
+    return (
+        metadata.get("reason")
+        or metadata.get("review_reason")
+        or metadata.get("reset_reason")
+        or metadata.get("review_remarks")
+        or ""
+    )
+
+
+def _critical_audit_impact_label(metadata: dict | None) -> str:
+    metadata = metadata or {}
+    impact = metadata.get("impact_summary") or {}
+    if not impact:
+        return ""
+    if "target_offering_count" in impact:
+        return f"{impact.get('target_offering_count', 0)} offering(s)"
+    if "delete_total" in impact:
+        return f"{impact.get('delete_total', 0)} row(s) targeted"
+    if "affected_active_user_count" in impact:
+        return f"{impact.get('affected_active_user_count', 0)} active user(s)"
+    return ""
+
+
+def _audit_anomaly_flags(metadata: dict | None) -> list:
+    metadata = metadata or {}
+    flags = metadata.get("anomaly_flags_json") or []
+    return flags if isinstance(flags, list) else []
+
+
+def _governance_alert_rows(request, limit=20):
+    rows = list(
+        _scoped_audit_queryset(request)
+        .filter(metadata_json__has_anomaly_flags=True)
+        .order_by("-created_at")[:limit]
+    )
+    for row in rows:
+        flags = _audit_anomaly_flags(row.metadata_json)
+        row.anomaly_flags = flags
+        row.primary_anomaly = flags[0] if flags else {}
+        row.max_anomaly_severity = (row.metadata_json or {}).get("max_anomaly_severity", "")
+        row.safe_impact_label = _critical_audit_impact_label(row.metadata_json)
+        row.scope_summary = f"{row.tenant.code if row.tenant_id else 'GLOBAL'} / {row.campus.code if row.campus_id else 'ALL'}"
+    return rows
+
+
 def _scope_context(request):
     tenant_ids = getattr(request, "scope", {}).get("tenant_ids", [])
     campus_ids = getattr(request, "scope", {}).get("campus_ids", [])
     current_tenant_id = getattr(request, "scope", {}).get("tenant_id")
     current_campus_id = getattr(request, "scope", {}).get("campus_id")
 
-    scope_tenants = Tenant.objects.filter(id__in=tenant_ids).order_by("name")
-    scope_campuses = Campus.objects.filter(id__in=campus_ids).order_by("name")
-    if not request.user.is_superuser:
-        scope_tenants = scope_tenants.filter(is_active=True)
-        scope_campuses = scope_campuses.filter(is_active=True)
+    scope_tenants = Tenant.objects.filter(id__in=tenant_ids, is_active=True).order_by("name")
+    scope_campuses = Campus.objects.filter(id__in=campus_ids, is_active=True, tenant__is_active=True).order_by("name")
 
     return {
         "scope_tenants": scope_tenants,
@@ -209,13 +415,212 @@ def _style_form(form):
     return form
 
 
-def _get_page(request, queryset, per_page=20):
+def _get_page(request, queryset, per_page=20, page_param="page"):
     paginator = Paginator(queryset, per_page)
-    page_obj = paginator.get_page(request.GET.get("page", 1))
+    page_obj = paginator.get_page(request.GET.get(page_param, 1))
     query_params = request.GET.copy()
-    query_params.pop("page", None)
+    query_params.pop(page_param, None)
     page_obj.querystring = query_params.urlencode()
+    page_obj.page_param = page_param
     return page_obj
+
+
+def _audit_reason_from_metadata(log):
+    metadata = log.metadata_json or {}
+    return (
+        metadata.get("reason")
+        or metadata.get("review_remarks")
+        or metadata.get("change_reason")
+        or metadata.get("reset_reason")
+        or ""
+    )
+
+
+def _critical_audit_summary(log):
+    metadata = log.metadata_json or {}
+    impact = metadata.get("impact_summary") or {}
+    parts = []
+    for key, label in (
+        ("affected_offering_count", "Offerings"),
+        ("affected_student_count", "Students"),
+        ("affected_user_count", "Users"),
+        ("added_critical_count", "Critical added"),
+        ("removed_critical_count", "Critical removed"),
+        ("audit_export_count", "Audit rows exported"),
+    ):
+        value = impact.get(key, metadata.get(key))
+        if value not in (None, ""):
+            parts.append(f"{label}: {value}")
+    if metadata.get("confirmation_required"):
+        parts.append("Confirmation required")
+    if metadata.get("audit_export_path"):
+        parts.append("Audit export created")
+    return " | ".join(parts)
+
+
+def _critical_permission_change_preview(*, role, to_add, to_remove):
+    added = list(Permission.objects.filter(id__in=to_add).order_by("code"))
+    removed = list(Permission.objects.filter(id__in=to_remove).order_by("code"))
+    added_critical = [permission for permission in added if permission.code in CRITICAL_PERMISSION_CODES]
+    removed_critical = [permission for permission in removed if permission.code in CRITICAL_PERMISSION_CODES]
+    affected_user_count = role.user_roles.filter(is_active=True, user__is_active=True).values("user_id").distinct().count()
+    return {
+        "added": added,
+        "removed": removed,
+        "added_critical": added_critical,
+        "removed_critical": removed_critical,
+        "has_critical_change": bool(added_critical or removed_critical),
+        "affected_user_count": affected_user_count,
+    }
+
+
+def _period_lock_reopen_preview_for_request(request, row):
+    affected_offering_count = 1 if row.scope_type == GradingPeriodLock.ScopeType.COURSE and row.course_offering_id else 0
+    if row.scope_type == GradingPeriodLock.ScopeType.CAMPUS:
+        affected_offering_count = (
+            AdminScopeService.scoped_course_offerings(request)
+            .filter(
+                tenant_id=row.tenant_id,
+                campus_id=row.campus_id,
+                academic_year_id=row.academic_year_id,
+                term_id=row.term_id,
+                is_active=True,
+            )
+            .count()
+        )
+    return {
+        "scope_type": row.scope_type,
+        "is_broad_scope": row.scope_type == GradingPeriodLock.ScopeType.CAMPUS,
+        "campus": row.campus.code,
+        "term": row.term.code,
+        "period_code": row.period_code,
+        "deadline_at": row.deadline_at,
+        "course_offering_id": row.course_offering_id,
+        "affected_offering_count": affected_offering_count,
+    }
+
+
+def _active_inactive_pages(request, queryset, per_page=20):
+    active_page_obj = _get_page(request, queryset.filter(is_active=True), per_page=per_page, page_param="active_page")
+    inactive_page_obj = _get_page(
+        request,
+        queryset.filter(is_active=False),
+        per_page=per_page,
+        page_param="inactive_page",
+    )
+    return {
+        "page_obj": active_page_obj,
+        "active_page_obj": active_page_obj,
+        "inactive_page_obj": inactive_page_obj,
+    }
+
+
+def _record_delete_confirmation_code(row) -> str:
+    for attr in (
+        "code",
+        "profile_code",
+        "student_no",
+        "student_number",
+        "username",
+        "section_code",
+        "period_code",
+        "name",
+        "title",
+    ):
+        value = getattr(row, attr, None)
+        if value:
+            return str(value)
+    return str(row.pk)
+
+
+def _inactive_record_dependency_rows(row):
+    dependencies = []
+    for relation in row._meta.related_objects:
+        accessor_name = relation.get_accessor_name()
+        if not accessor_name:
+            continue
+        try:
+            related_accessor = getattr(row, accessor_name)
+            if relation.one_to_one:
+                count = 1 if related_accessor else 0
+            else:
+                count = related_accessor.count()
+        except relation.related_model.DoesNotExist:
+            count = 0
+        except Exception:
+            count = 1
+        if count:
+            dependencies.append(
+                {
+                    "label": " ".join(re.findall(r"[A-Z][a-z0-9]*", relation.related_model._meta.object_name))
+                    or relation.related_model._meta.object_name,
+                    "count": count,
+                }
+            )
+    dependencies.sort(key=lambda item: item["label"])
+    return dependencies
+
+
+def _inactive_record_usage_label(dependencies):
+    if not dependencies:
+        return "Not assigned"
+    visible_items = dependencies[:3]
+    label = ", ".join(f"{item['label']} ({item['count']})" for item in visible_items)
+    if len(dependencies) > len(visible_items):
+        label += f", +{len(dependencies) - len(visible_items)} more"
+    return label
+
+
+def _can_permanently_delete_inactive_records(request, *, model_key: str) -> bool:
+    config = _inactive_delete_configs().get(model_key)
+    if not config:
+        return False
+    return request.user.is_superuser or PermissionService.has_permission(request.user, INACTIVE_RECORD_DELETE_PERMISSION)
+
+
+def _attach_inactive_record_metadata(page_obj, *, model_key: str, allow_delete: bool):
+    for row in page_obj:
+        dependencies = _inactive_record_dependency_rows(row)
+        row.hard_delete_model_key = model_key
+        row.hard_delete_confirmation_code = _record_delete_confirmation_code(row)
+        row.inactive_usage_dependencies = dependencies
+        row.inactive_usage_label = _inactive_record_usage_label(dependencies)
+        row.can_show_hard_delete = allow_delete
+        row.can_hard_delete = allow_delete and not dependencies
+    return page_obj
+
+
+def _with_inactive_record_metadata(request, context, *, model_key: str):
+    inactive_page_obj = context.get("inactive_page_obj")
+    if inactive_page_obj:
+        _attach_inactive_record_metadata(
+            inactive_page_obj,
+            model_key=model_key,
+            allow_delete=_can_permanently_delete_inactive_records(request, model_key=model_key),
+        )
+    return context
+
+
+def _user_dependency_count(user):
+    dependencies = _inactive_record_dependency_rows(user)
+    schedules = UserDeactivationSchedule.objects.filter(user=user).count()
+    if schedules:
+        dependencies.append({"label": "User Deactivation Schedules", "count": schedules})
+    dependencies.sort(key=lambda item: item["label"])
+    return dependencies
+
+
+def _attach_inactive_user_metadata(request, users):
+    allow_delete = _can_permanently_delete_inactive_records(request, model_key="user")
+    for row in users:
+        dependencies = _user_dependency_count(row)
+        row.hard_delete_model_key = "user"
+        row.hard_delete_confirmation_code = _record_delete_confirmation_code(row)
+        row.inactive_usage_dependencies = dependencies
+        row.inactive_usage_label = _inactive_record_usage_label(dependencies)
+        row.can_show_hard_delete = allow_delete
+        row.can_hard_delete = allow_delete and not dependencies
+    return users
 
 
 def _safe_int(value):
@@ -223,6 +628,281 @@ def _safe_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _maintenance_scope_tenant_ids(request):
+    if request.user.is_superuser:
+        return Tenant.objects.values_list("id", flat=True)
+    return getattr(request, "scope", {}).get("tenant_ids", [])
+
+
+def _maintenance_scope_campus_ids(request):
+    if request.user.is_superuser:
+        return Campus.objects.values_list("id", flat=True)
+    campus_ids = getattr(request, "scope", {}).get("campus_ids", [])
+    if campus_ids:
+        return campus_ids
+    return Campus.objects.filter(tenant_id__in=_maintenance_scope_tenant_ids(request)).values_list("id", flat=True)
+
+
+def _maintenance_scope_department_ids(request):
+    if request.user.is_superuser:
+        return Department.objects.values_list("id", flat=True)
+    department_ids = getattr(request, "scope", {}).get("department_ids", [])
+    if department_ids:
+        return department_ids
+    return Department.objects.filter(
+        tenant_id__in=_maintenance_scope_tenant_ids(request),
+        campus_id__in=_maintenance_scope_campus_ids(request),
+    ).values_list("id", flat=True)
+
+
+def _maintenance_scoped_tenants_for_delete(request):
+    return Tenant.objects.filter(id__in=_maintenance_scope_tenant_ids(request)).order_by("name")
+
+
+def _maintenance_scoped_campuses_for_delete(request):
+    return Campus.objects.filter(
+        tenant_id__in=_maintenance_scope_tenant_ids(request),
+        id__in=_maintenance_scope_campus_ids(request),
+    ).select_related("tenant").order_by("tenant__name", "name")
+
+
+def _maintenance_scoped_departments_for_delete(request):
+    return Department.objects.filter(
+        tenant_id__in=_maintenance_scope_tenant_ids(request),
+        campus_id__in=_maintenance_scope_campus_ids(request),
+        id__in=_maintenance_scope_department_ids(request),
+    ).select_related("tenant", "campus", "parent").order_by("tenant__name", "campus__name", "name")
+
+
+def _maintenance_scoped_programs_for_delete(request):
+    return Program.objects.filter(
+        tenant_id__in=_maintenance_scope_tenant_ids(request),
+        campus_id__in=_maintenance_scope_campus_ids(request),
+        department_id__in=_maintenance_scope_department_ids(request),
+    ).select_related("tenant", "campus", "department").order_by("tenant__name", "campus__name", "name")
+
+
+def _maintenance_scoped_academic_years_for_delete(request):
+    return AcademicYear.objects.filter(tenant_id__in=_maintenance_scope_tenant_ids(request)).select_related("tenant")
+
+
+def _maintenance_scoped_terms_for_delete(request):
+    return Term.objects.filter(tenant_id__in=_maintenance_scope_tenant_ids(request)).select_related("tenant", "academic_year")
+
+
+def _maintenance_scoped_courses_for_delete(request):
+    return Course.objects.filter(
+        tenant_id__in=_maintenance_scope_tenant_ids(request),
+    ).filter(
+        Q(campus_id__in=_maintenance_scope_campus_ids(request)) | Q(campus__isnull=True),
+    ).select_related("tenant", "campus", "department")
+
+
+def _maintenance_scoped_sections_for_delete(request):
+    return Section.objects.filter(
+        tenant_id__in=_maintenance_scope_tenant_ids(request),
+        campus_id__in=_maintenance_scope_campus_ids(request),
+    ).select_related("tenant", "campus", "department", "program")
+
+
+def _maintenance_scoped_offerings_for_delete(request):
+    return CourseOffering.objects.filter(
+        tenant_id__in=_maintenance_scope_tenant_ids(request),
+        campus_id__in=_maintenance_scope_campus_ids(request),
+    ).select_related("tenant", "campus", "academic_year", "term", "course", "section")
+
+
+def _maintenance_scoped_students_for_delete(request):
+    return Student.objects.filter(
+        tenant_id__in=_maintenance_scope_tenant_ids(request),
+        campus_id__in=_maintenance_scope_campus_ids(request),
+    ).select_related("tenant", "campus", "department", "program")
+
+
+def _maintenance_scoped_enrollments_for_delete(request):
+    return Enrollment.objects.filter(
+        tenant_id__in=_maintenance_scope_tenant_ids(request),
+        campus_id__in=_maintenance_scope_campus_ids(request),
+    ).select_related("tenant", "campus", "student", "course_offering")
+
+
+def _inactive_delete_configs():
+    return {
+        "tenant": {
+            "queryset": _maintenance_scoped_tenants_for_delete,
+            "permission": "tenants.update",
+            "redirect": "admin_portal:tenant_list",
+        },
+        "campus": {
+            "queryset": _maintenance_scoped_campuses_for_delete,
+            "permission": "campuses.update",
+            "redirect": "admin_portal:campus_list",
+        },
+        "department": {
+            "queryset": _maintenance_scoped_departments_for_delete,
+            "permission": "departments.update",
+            "redirect": "admin_portal:department_list",
+        },
+        "program": {
+            "queryset": _maintenance_scoped_programs_for_delete,
+            "permission": "programs.update",
+            "redirect": "admin_portal:program_list",
+        },
+        "academic_year": {
+            "queryset": _maintenance_scoped_academic_years_for_delete,
+            "permission": "academic_years.update",
+            "redirect": "admin_portal:academic_year_list",
+        },
+        "term": {
+            "queryset": _maintenance_scoped_terms_for_delete,
+            "permission": "terms.update",
+            "redirect": "admin_portal:term_list",
+        },
+        "course": {
+            "queryset": _maintenance_scoped_courses_for_delete,
+            "permission": "courses.update",
+            "redirect": "admin_portal:course_list",
+        },
+        "section": {
+            "queryset": _maintenance_scoped_sections_for_delete,
+            "permission": "sections.update",
+            "redirect": "admin_portal:section_list",
+        },
+        "offering": {
+            "queryset": _maintenance_scoped_offerings_for_delete,
+            "permission": "course_offerings.update",
+            "redirect": "admin_portal:offering_list",
+        },
+        "student": {
+            "queryset": _maintenance_scoped_students_for_delete,
+            "permission": "students.update",
+            "redirect": "admin_portal:student_list",
+        },
+        "enrollment": {
+            "queryset": _maintenance_scoped_enrollments_for_delete,
+            "permission": "enrollments.update",
+            "redirect": "admin_portal:enrollment_list",
+        },
+        "grading_template": {
+            "queryset": lambda request: AdminScopeService.maintenance_scoped_grading_templates(request),
+            "permission": "grading_templates.update",
+            "redirect": "admin_portal:grading_template_list",
+        },
+        "template_period": {
+            "queryset": lambda request: AdminScopeService.maintenance_scoped_template_periods(request),
+            "permission": "template_periods.update",
+            "redirect": "admin_portal:template_period_list",
+        },
+        "template_component": {
+            "queryset": lambda request: AdminScopeService.maintenance_scoped_template_components(request),
+            "permission": "template_components.update",
+            "redirect": "admin_portal:template_component_list",
+        },
+        "template_subcomponent": {
+            "queryset": lambda request: AdminScopeService.maintenance_scoped_template_subcomponents(request),
+            "permission": "template_subcomponents.update",
+            "redirect": "admin_portal:template_subcomponent_list",
+        },
+        "template_detail": {
+            "queryset": lambda request: AdminScopeService.maintenance_scoped_template_details(request),
+            "permission": "template_details.update",
+            "redirect": "admin_portal:template_detail_list",
+        },
+        "tenant_grading_profile": {
+            "queryset": lambda request: AdminScopeService.maintenance_scoped_tenant_grading_profiles(request),
+            "permission": "tenant_grading_profiles.update",
+            "redirect": "admin_portal:tenant_grading_profile_list",
+        },
+        "course_template_assignment": {
+            "queryset": lambda request: AdminScopeService.maintenance_scoped_course_template_assignments(request),
+            "permission": "course_template_assignments.update",
+            "redirect": "admin_portal:course_template_assignment_list",
+        },
+        "course_base_override": {
+            "queryset": lambda request: AdminScopeService.maintenance_scoped_course_base_value_overrides(request),
+            "permission": "course_base_overrides.update",
+            "redirect": "admin_portal:course_base_override_list",
+        },
+        "period_lock": {
+            "queryset": lambda request: AdminScopeService.maintenance_scoped_grading_period_locks(request),
+            "permission": "grading_periods.lock",
+            "redirect": "admin_portal:grading_period_lock_list",
+        },
+        "user": {
+            "queryset": lambda request: _scoped_users_queryset(request),
+            "permission": "users.update",
+            "redirect": "admin_portal:user_list",
+        },
+    }
+
+
+@portal_required("ADMIN")
+def inactive_record_delete_view(request, model_key: str, object_id: int):
+    config = _inactive_delete_configs().get(model_key)
+    if not config:
+        raise Http404("Unsupported maintenance record type.")
+    if request.method != "POST":
+        return redirect(config["redirect"])
+    if not request.user.is_superuser and not PermissionService.has_permission(
+        request.user,
+        INACTIVE_RECORD_DELETE_PERMISSION,
+    ):
+        raise PermissionDenied
+
+    row = get_object_or_404(config["queryset"](request), id=object_id)
+    if not hasattr(row, "is_active") or row.is_active:
+        messages.error(request, "Only inactive records can be permanently deleted.")
+        return redirect(config["redirect"])
+
+    confirmation = (request.POST.get("confirmation_code") or "").strip()
+    expected_confirmation = _record_delete_confirmation_code(row)
+    if confirmation != expected_confirmation:
+        messages.error(request, f"Record was not deleted. Type {expected_confirmation} exactly to confirm.")
+        return redirect(config["redirect"])
+
+    dependencies = _user_dependency_count(row) if model_key == "user" else _inactive_record_dependency_rows(row)
+    if dependencies:
+        messages.error(
+            request,
+            f"Record was not deleted because it is already assigned: {_inactive_record_usage_label(dependencies)}.",
+        )
+        return redirect(config["redirect"])
+
+    before = model_before_after(row)
+    model_name = row.__class__.__name__
+    record_label = expected_confirmation
+    record_id = row.id
+    try:
+        with transaction.atomic():
+            row.delete()
+    except (ProtectedError, RestrictedError) as exc:
+        protected_count = len(getattr(exc, "protected_objects", []) or [])
+        restricted_count = len(getattr(exc, "restricted_objects", []) or [])
+        blocked_count = protected_count + restricted_count
+        message = "Record was not deleted because another table still references it."
+        if blocked_count:
+            message = f"{message} Blocking rows: {blocked_count}."
+        messages.error(request, message)
+        return redirect(config["redirect"])
+
+    AuditService.log_event(
+        action="DELETE",
+        portal="ADMIN",
+        entity_type=model_name,
+        entity_id=record_id,
+        actor=request.user,
+        before_data=before,
+        metadata={
+            "hard_delete": True,
+            "model_key": model_key,
+            "record_label": record_label,
+        },
+        request=request,
+    )
+    messages.success(request, f"Inactive record {record_label} was permanently deleted.")
+    return redirect(config["redirect"])
 
 
 def _format_decimal_display(value):
@@ -233,6 +913,19 @@ def _format_decimal_display(value):
     if "." in formatted:
         formatted = formatted.rstrip("0").rstrip(".")
     return formatted
+
+
+def _correction_activity_label(activity: GradeActivity):
+    parts = []
+    if activity.title:
+        parts.append(activity.title)
+    if activity.template_detail and activity.template_detail.name and activity.template_detail.name != activity.title:
+        parts.append(activity.template_detail.name)
+    elif activity.template_subcomponent and activity.template_subcomponent.name and activity.template_subcomponent.name != activity.title:
+        parts.append(activity.template_subcomponent.name)
+    elif activity.template_component and activity.template_component.name and activity.template_component.name != activity.title:
+        parts.append(activity.template_component.name)
+    return " - ".join(parts) if parts else "Grading Item"
 
 
 def _redirect_back_or_default(request, fallback_route_name: str, **kwargs):
@@ -256,7 +949,20 @@ def _user_has_role_code(user, *role_codes):
     ).exists()
 
 
-def _should_mask_gradebook_student_identity(user):
+def _can_view_gradebook_student_identity(user, *, tenant_id=None, campus_id=None):
+    if getattr(user, "is_superuser", False):
+        return True
+    return PermissionService.has_permission(
+        user,
+        "gradebook.view_student_identity",
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    )
+
+
+def _should_mask_gradebook_student_identity(user, *, tenant_id=None, campus_id=None):
+    if _can_view_gradebook_student_identity(user, tenant_id=tenant_id, campus_id=campus_id):
+        return False
     active_role_codes = {
         code.upper()
         for code in UserRole.objects.filter(
@@ -656,13 +1362,18 @@ def _faculty_assignment_scope_snapshot(assignment):
 def _send_new_user_credentials_email(request, user, temporary_password: str) -> int:
     admin_login_url = request.build_absolute_uri(reverse("accounts:admin_login"))
     faculty_public_url = request.build_absolute_uri(reverse("faculty_portal:public_index"))
-    logo_url = request.build_absolute_uri(f"{settings.MEDIA_URL}logos/egp_logo_official.png")
+    logo_context = build_email_logo_context(
+        filename="egp_logo_official.png",
+        cid="edugradespro-logo",
+        external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
+        configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+    )
     context = {
         "user": user,
         "temporary_password": temporary_password,
         "admin_login_url": admin_login_url,
         "faculty_public_url": faculty_public_url,
-        "logo_url": logo_url,
+        **logo_context,
         "privacy_notice_url": "https://ncba.edu.ph/ncba-privacy-notice/",
     }
     text_body = render_to_string("admin_portal/emails/new_user_credentials.txt", context)
@@ -672,6 +1383,13 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
         body=text_body,
         from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local"),
         to=[user.email],
+    )
+    attach_logo_for_src(
+        message,
+        src=logo_context["email_logo_src"],
+        filename="egp_logo_official.png",
+        cid="edugradespro-logo",
+        configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
     )
     message.attach_alternative(html_body, "text/html")
     return message.send(fail_silently=False)
@@ -725,6 +1443,12 @@ def dashboard_view(request):
     has_grading_period_lock = PermissionService.has_permission(
         request.user,
         "grading_periods.lock",
+        tenant_id=current_tenant_id,
+        campus_id=current_campus_id,
+    )
+    has_governance_alerts = PermissionService.has_permission(
+        request.user,
+        "audit_logs.read",
         tenant_id=current_tenant_id,
         campus_id=current_campus_id,
     )
@@ -807,8 +1531,8 @@ def dashboard_view(request):
 
     context = {
         "stats": {
-            "tenants": AdminScopeService.scoped_tenants(request).count(),
-            "campuses": AdminScopeService.scoped_campuses(request).count(),
+            "tenants": AdminScopeService.active_scoped_tenants(request).count(),
+            "campuses": AdminScopeService.active_scoped_campuses(request).count(),
             "users": _scoped_users_queryset(request).count(),
             "audit_logs": _scoped_audit_queryset(request).count(),
         },
@@ -825,6 +1549,8 @@ def dashboard_view(request):
         "active_grading_period_auto_advance": active_grading_period_auto_advance,
         "has_grading_period_lock": has_grading_period_lock,
         "lock_monitor": lock_monitor,
+        "has_governance_alerts": has_governance_alerts,
+        "governance_alerts": _governance_alert_rows(request, limit=20) if has_governance_alerts else [],
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/dashboard.html", context)
@@ -835,9 +1561,9 @@ def dashboard_view(request):
 def faculty_activity_monitor_view(request):
     now = timezone.now()
     is_print_mode = request.GET.get("print") == "1"
-    term_options = AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
-    campus_options = AdminScopeService.scoped_campuses(request).order_by("code")
-    department_options = AdminScopeService.scoped_departments(request).order_by("name")
+    term_options = AdminScopeService.active_scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
+    campus_options = AdminScopeService.active_scoped_campuses(request).order_by("code")
+    department_options = AdminScopeService.active_scoped_departments(request).order_by("name")
 
     selected_term_id = _safe_int(request.GET.get("term_id"))
     selected_campus_id = _safe_int(request.GET.get("campus_id"))
@@ -865,24 +1591,11 @@ def faculty_activity_monitor_view(request):
         assignments_qs = assignments_qs.filter(offering__term_id=selected_term_id)
     if selected_campus_id:
         assignments_qs = assignments_qs.filter(offering__campus_id=selected_campus_id)
-    if selected_department_id:
-        assignments_qs = assignments_qs.filter(offering__department_id=selected_department_id)
-
-    faculty_ids = list(assignments_qs.values_list("faculty_user_id", flat=True).distinct())
-    faculty_qs = User.objects.filter(id__in=faculty_ids, is_active=True).order_by("last_name", "first_name", "username")
-    faculty_candidates = faculty_qs
-    if faculty_q:
-        faculty_candidates = faculty_candidates.filter(
-            Q(username__icontains=faculty_q)
-            | Q(email__icontains=faculty_q)
-            | Q(first_name__icontains=faculty_q)
-            | Q(last_name__icontains=faculty_q)
-        )
-    selected_faculty = faculty_qs.filter(id=selected_faculty_id).first() if selected_faculty_id else None
-
     assignments = list(
         assignments_qs.select_related(
             "faculty_user",
+            "faculty_user__default_campus",
+            "faculty_user__default_department",
             "offering",
             "offering__course",
             "offering__section",
@@ -897,6 +1610,29 @@ def faculty_activity_monitor_view(request):
             "offering__section__code",
         )
     )
+    if selected_department_id:
+        selected_department_ids = AdminScopeService.expand_department_filter_ids(
+            selected_department_id,
+            campus_id=selected_campus_id,
+        )
+        assignments = [
+            assignment
+            for assignment in assignments
+            if _faculty_assignment_scope_snapshot(assignment)["department_id"] in selected_department_ids
+        ]
+
+    faculty_ids = sorted({assignment.faculty_user_id for assignment in assignments})
+    faculty_qs = User.objects.filter(id__in=faculty_ids, is_active=True).order_by("last_name", "first_name", "username")
+    faculty_candidates = faculty_qs
+    if faculty_q:
+        faculty_candidates = faculty_candidates.filter(
+            Q(username__icontains=faculty_q)
+            | Q(email__icontains=faculty_q)
+            | Q(first_name__icontains=faculty_q)
+            | Q(last_name__icontains=faculty_q)
+        )
+    selected_faculty = faculty_qs.filter(id=selected_faculty_id).first() if selected_faculty_id else None
+
     offering_map = {assignment.offering_id: assignment.offering for assignment in assignments}
     faculty_assignment_map = defaultdict(list)
     for assignment in assignments:
@@ -1231,9 +1967,9 @@ def faculty_activity_monitor_view(request):
 @permission_required("grading_analytics.read")
 def grading_analytics_view(request):
     offerings_qs = AdminScopeService.scoped_course_offerings(request)
-    campus_options = AdminScopeService.scoped_campuses(request).order_by("code")
-    academic_year_options = AdminScopeService.scoped_academic_years(request).order_by("-start_date")
-    term_options = AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
+    campus_options = AdminScopeService.active_scoped_campuses(request).order_by("code")
+    academic_year_options = AdminScopeService.active_scoped_academic_years(request).order_by("-start_date")
+    term_options = AdminScopeService.active_scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
 
     selected_campus_id = _safe_int(request.GET.get("campus_id"))
     selected_ay_id = _safe_int(request.GET.get("academic_year_id"))
@@ -1287,29 +2023,13 @@ def grading_analytics_view(request):
 
     offering_threshold_map = {}
     offering_threshold_source_map = {}
+    missing_template_offering_ids = set()
     tenant_threshold_cache = {}
     profile_threshold_offerings = 0
     template_threshold_offerings = 0
     tenant_threshold_offerings = 0
-    for offering in offerings:
-        profile = FacultyGradingService.resolve_grading_profile_for_offering(offering)
-        profile_threshold = None
-        if profile and profile.passing_grade_threshold is not None:
-            profile_threshold = GradingGovernanceService._round(Decimal(profile.passing_grade_threshold))
-        if profile_threshold is not None:
-            offering_threshold_map[offering.id] = profile_threshold
-            offering_threshold_source_map[offering.id] = f"Profile {profile.profile_code}"
-            profile_threshold_offerings += 1
-            continue
-        template = FacultyGradingService.resolve_template_for_offering(offering)
-        template_threshold = None
-        if template and template.passing_grade_threshold is not None:
-            template_threshold = GradingGovernanceService._round(Decimal(template.passing_grade_threshold))
-        if template_threshold is not None:
-            offering_threshold_map[offering.id] = template_threshold
-            offering_threshold_source_map[offering.id] = f"Template {template.code}"
-            template_threshold_offerings += 1
-            continue
+
+    def _tenant_passing_threshold(offering):
         if offering.tenant_id not in tenant_threshold_cache:
             tenant_raw = SystemSettingService.get(
                 "PASSING_GRADE_THRESHOLD",
@@ -1319,7 +2039,32 @@ def grading_analytics_view(request):
             tenant_threshold_cache[offering.tenant_id] = GradingGovernanceService._round(
                 _to_decimal(tenant_raw, Decimal("75.00"))
             )
-        offering_threshold_map[offering.id] = tenant_threshold_cache[offering.tenant_id]
+        return tenant_threshold_cache[offering.tenant_id]
+
+    for offering in offerings:
+        profile = FacultyGradingService.resolve_grading_profile_for_offering(offering)
+        profile_threshold = None
+        if profile and profile.passing_grade_threshold is not None:
+            profile_threshold = GradingGovernanceService._round(Decimal(profile.passing_grade_threshold))
+        try:
+            template = FacultyGradingService.resolve_template_for_offering(offering)
+        except ValidationError:
+            template = None
+            missing_template_offering_ids.add(offering.id)
+        if profile_threshold is not None:
+            offering_threshold_map[offering.id] = profile_threshold
+            offering_threshold_source_map[offering.id] = f"Profile {profile.profile_code}"
+            profile_threshold_offerings += 1
+            continue
+        template_threshold = None
+        if template and template.passing_grade_threshold is not None:
+            template_threshold = GradingGovernanceService._round(Decimal(template.passing_grade_threshold))
+        if template_threshold is not None:
+            offering_threshold_map[offering.id] = template_threshold
+            offering_threshold_source_map[offering.id] = f"Template {template.code}"
+            template_threshold_offerings += 1
+            continue
+        offering_threshold_map[offering.id] = _tenant_passing_threshold(offering)
         offering_threshold_source_map[offering.id] = "Tenant Default"
         tenant_threshold_offerings += 1
 
@@ -1356,6 +2101,7 @@ def grading_analytics_view(request):
         "profile_threshold_offerings": profile_threshold_offerings,
         "template_threshold_offerings": template_threshold_offerings,
         "tenant_threshold_offerings": tenant_threshold_offerings,
+        "missing_template_offerings": len(missing_template_offering_ids),
         "threshold_policy": "Profile threshold -> Template threshold -> Tenant PASSING_GRADE_THRESHOLD -> 75.00",
     }
 
@@ -1503,6 +2249,7 @@ def grading_analytics_view(request):
                 "avg_grade": avg_grade,
                 "threshold": offering_threshold_map.get(offering.id, Decimal("75.00")),
                 "threshold_source": offering_threshold_source_map.get(offering.id, "Default"),
+                "missing_template": offering.id in missing_template_offering_ids,
             }
         )
     top_failing_offerings.sort(
@@ -1768,6 +2515,7 @@ def grading_analytics_view(request):
                 "failed": 0,
                 "threshold_min": None,
                 "threshold_max": None,
+                "missing_template": offering.id in missing_template_offering_ids,
             },
         )
         bucket["graded"] += 1
@@ -1929,7 +2677,7 @@ def grade_distribution_monitor_view(request):
 
     paginator = Paginator(context["rows"], 25)
     page_obj = paginator.get_page(request.GET.get("page"))
-    page_query = request.GET.copy()
+    page_query = GradeDistributionMonitorService.sanitized_query(request)
     page_query.pop("page", None)
     context["page_obj"] = page_obj
     context["rows"] = page_obj.object_list
@@ -2296,7 +3044,7 @@ def correction_governance_settings_view(request):
 
     current_correction_mode = GradingGovernanceService.get_correction_mode(tenant_id=tenant_id)
     tenant_obj = Tenant.objects.filter(id=tenant_id).first()
-    department_qs = AdminScopeService.scoped_departments(request).filter(tenant_id=tenant_id)
+    department_qs = AdminScopeService.active_scoped_departments(request).filter(tenant_id=tenant_id)
     role_qs = Role.objects.filter(is_active=True).order_by("name")
 
     mode_form = CorrectionGovernanceSettingForm(
@@ -2706,6 +3454,10 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default=10,
     )
+    current_session_timeout_minutes = FeatureSettingsService.get_session_timeout_minutes(
+        tenant_id=tenant_id,
+        default=max((getattr(settings, "SESSION_COOKIE_AGE", 3600) or 3600) // 60, 1),
+    )
     current_response_window_days = FeatureSettingsService.get_faculty_assignment_response_window_days(
         tenant_id=tenant_id,
         default=3,
@@ -2752,6 +3504,12 @@ def configurable_features_settings_view(request):
     )
     current_faculty_official_period_grades_after_deadline = (
         FeatureSettingsService.show_faculty_official_period_grades_after_deadline(
+            tenant_id=tenant_id,
+            default=False,
+        )
+    )
+    current_faculty_official_period_grades_after_submission = (
+        FeatureSettingsService.show_faculty_official_period_grades_after_submission(
             tenant_id=tenant_id,
             default=False,
         )
@@ -2823,6 +3581,7 @@ def configurable_features_settings_view(request):
             "login_lockout_duration_minutes": current_login_lockout_duration_minutes,
             "login_email_otp_enabled": current_login_email_otp_enabled,
             "login_email_otp_expiry_minutes": current_login_email_otp_expiry_minutes,
+            "session_timeout_minutes": current_session_timeout_minutes,
             "faculty_assignment_response_window_days": current_response_window_days,
             "faculty_assignment_first_reminder_days": current_first_reminder_days,
             "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
@@ -2836,6 +3595,7 @@ def configurable_features_settings_view(request):
             "grade_prediction_show_target_needed": current_grade_prediction_show_target_needed,
             "grade_prediction_default_assumption": current_grade_prediction_default_assumption,
             "faculty_official_period_grades_after_deadline": current_faculty_official_period_grades_after_deadline,
+            "faculty_official_period_grades_after_submission": current_faculty_official_period_grades_after_submission,
             "faculty_official_final_grades_after_deadline": current_faculty_official_final_grades_after_deadline,
         },
         role_queryset=role_queryset,
@@ -3134,6 +3894,13 @@ def configurable_features_settings_view(request):
             is_active=True,
         )
         SystemSettingService.set(
+            FeatureSettingsService.SESSION_TIMEOUT_MINUTES_KEY,
+            int(form.cleaned_data["session_timeout_minutes"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
             FeatureSettingsService.FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY,
             int(form.cleaned_data["faculty_assignment_response_window_days"]),
             tenant_id=tenant_id,
@@ -3225,6 +3992,13 @@ def configurable_features_settings_view(request):
             is_active=True,
         )
         SystemSettingService.set(
+            FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
+            bool(form.cleaned_data["faculty_official_period_grades_after_submission"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
             FeatureSettingsService.FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE_KEY,
             bool(form.cleaned_data["faculty_official_final_grades_after_deadline"]),
             tenant_id=tenant_id,
@@ -3272,6 +4046,7 @@ def configurable_features_settings_view(request):
                 "login_lockout_duration_minutes": current_login_lockout_duration_minutes,
                 "login_email_otp_enabled": current_login_email_otp_enabled,
                 "login_email_otp_expiry_minutes": current_login_email_otp_expiry_minutes,
+                "session_timeout_minutes": current_session_timeout_minutes,
                 "faculty_assignment_response_window_days": current_response_window_days,
                 "faculty_assignment_first_reminder_days": current_first_reminder_days,
                 "faculty_assignment_repeat_reminder_days": current_repeat_reminder_days,
@@ -3285,6 +4060,7 @@ def configurable_features_settings_view(request):
                 "grade_prediction_show_target_needed": current_grade_prediction_show_target_needed,
                 "grade_prediction_default_assumption": current_grade_prediction_default_assumption,
                 "faculty_official_period_grades_after_deadline": current_faculty_official_period_grades_after_deadline,
+                "faculty_official_period_grades_after_submission": current_faculty_official_period_grades_after_submission,
                 "faculty_official_final_grades_after_deadline": current_faculty_official_final_grades_after_deadline,
             },
             after_data={
@@ -3355,6 +4131,7 @@ def configurable_features_settings_view(request):
                 "login_lockout_duration_minutes": int(form.cleaned_data["login_lockout_duration_minutes"]),
                 "login_email_otp_enabled": bool(form.cleaned_data["login_email_otp_enabled"]),
                 "login_email_otp_expiry_minutes": int(form.cleaned_data["login_email_otp_expiry_minutes"]),
+                "session_timeout_minutes": int(form.cleaned_data["session_timeout_minutes"]),
                 "faculty_assignment_response_window_days": int(form.cleaned_data["faculty_assignment_response_window_days"]),
                 "faculty_assignment_first_reminder_days": int(form.cleaned_data["faculty_assignment_first_reminder_days"]),
                 "faculty_assignment_repeat_reminder_days": int(form.cleaned_data["faculty_assignment_repeat_reminder_days"]),
@@ -3369,6 +4146,9 @@ def configurable_features_settings_view(request):
                 "grade_prediction_default_assumption": str(form.cleaned_data["grade_prediction_default_assumption"]),
                 "faculty_official_period_grades_after_deadline": bool(
                     form.cleaned_data["faculty_official_period_grades_after_deadline"]
+                ),
+                "faculty_official_period_grades_after_submission": bool(
+                    form.cleaned_data["faculty_official_period_grades_after_submission"]
                 ),
                 "faculty_official_final_grades_after_deadline": bool(
                     form.cleaned_data["faculty_official_final_grades_after_deadline"]
@@ -3412,6 +4192,7 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.LOGIN_LOCKOUT_DURATION_MINUTES_KEY,
                     FeatureSettingsService.LOGIN_EMAIL_OTP_ENABLED_KEY,
                     FeatureSettingsService.LOGIN_EMAIL_OTP_EXPIRY_MINUTES_KEY,
+                    FeatureSettingsService.SESSION_TIMEOUT_MINUTES_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_REPEAT_REMINDER_DAYS_KEY,
@@ -3425,6 +4206,7 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.GRADE_PREDICTION_SHOW_TARGET_NEEDED_KEY,
                     FeatureSettingsService.GRADE_PREDICTION_DEFAULT_ASSUMPTION_KEY,
                     FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE_KEY,
+                    FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
                     FeatureSettingsService.FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE_KEY,
                 ],
             },
@@ -3458,6 +4240,67 @@ def configurable_features_settings_view(request):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/tools/configurable_features.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("actual_data_reset.run")
+def actual_data_reset_view(request):
+    result = None
+    production_safety_error = ActualDataResetService.production_safety_error(request.user)
+    if request.method == "POST":
+        confirmation = (request.POST.get("confirmation_phrase") or "").strip()
+        reset_reason = (request.POST.get("reset_reason") or "").strip()
+        understood = request.POST.get("understood") == "on"
+        if production_safety_error:
+            messages.error(request, production_safety_error)
+        elif not reset_reason:
+            messages.error(request, "Data reset was not run. Enter the operational reason for audit accountability.")
+        elif confirmation != ActualDataResetService.CONFIRMATION_PHRASE or not understood:
+            messages.error(
+                request,
+                "Data reset was not run. Tick the acknowledgement and type the exact confirmation phrase.",
+            )
+        else:
+            preview = ActualDataResetService.preview()
+            result = ActualDataResetService.reset(
+                preserve_session_key=getattr(request.session, "session_key", None)
+            )
+            AuditService.log_event(
+                action="RESET",
+                portal="ADMIN",
+                entity_type="ActualDataReset",
+                actor=request.user,
+                after_data={
+                    "deleted_table_count": len(result.get("deleted") or []),
+                    "removed_files": result.get("removed_files", 0),
+                },
+                metadata={
+                    "critical_action": True,
+                    "reason": reset_reason,
+                    "confirmation_required": True,
+                    "confirmation_phrase": ActualDataResetService.CONFIRMATION_PHRASE,
+                    "impact_summary": {
+                        "delete_total": preview.get("delete_total", 0),
+                        "tenant_settings_count": preview.get("tenant_settings_count", 0),
+                        "users_kept": preview.get("users_count", 0),
+                    },
+                    "audit_export_path": result.get("audit_export_path"),
+                    "audit_export_count": result.get("audit_export_count", 0),
+                    "backup_path": result.get("backup_path"),
+                    "backup_validation": result.get("backup_validation"),
+                    "audit_export_validation": result.get("audit_export_validation"),
+                },
+                request=None,
+            )
+            messages.success(request, "Actual data reset completed.")
+
+    context = {
+        "preview": ActualDataResetService.preview(),
+        "result": result,
+        "production_safety_error": production_safety_error,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/tools/actual_data_reset.html", context)
 
 
 @portal_required("ADMIN")
@@ -3846,7 +4689,14 @@ def _scoped_audit_queryset(request):
 
 def _active_user_activity_rows(request, limit=25):
     now = timezone.now()
-    session_timeout = timedelta(seconds=getattr(settings, "SESSION_COOKIE_AGE", 0) or 0)
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    default_timeout_minutes = max((getattr(settings, "SESSION_COOKIE_AGE", 3600) or 3600) // 60, 1)
+    session_timeout = timedelta(
+        minutes=FeatureSettingsService.get_session_timeout_minutes(
+            tenant_id=tenant_id,
+            default=default_timeout_minutes,
+        )
+    )
     active_sessions = Session.objects.filter(expire_date__gte=now).order_by("-expire_date")[:500]
 
     active_user_ids = []
@@ -3975,7 +4825,9 @@ def tenant_list_view(request):
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {"q": q}
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="tenant")
     context.update(_scope_context(request))
     return render(request, "admin_portal/organization/tenant_list.html", context)
 
@@ -4038,7 +4890,9 @@ def campus_list_view(request):
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {"q": q}
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="campus")
     context.update(_scope_context(request))
     return render(request, "admin_portal/organization/campus_list.html", context)
 
@@ -4100,14 +4954,40 @@ def campus_update_view(request, campus_id: int):
 @permission_required("departments.read")
 def department_list_view(request):
     queryset = AdminScopeService.scoped_departments(request)
-    if request.GET.get("tenant_id"):
-        queryset = queryset.filter(tenant_id=request.GET.get("tenant_id"))
-    if request.GET.get("campus_id"):
-        queryset = queryset.filter(campus_id=request.GET.get("campus_id"))
+    selected_tenant_id = _safe_int(request.GET.get("tenant_id"))
+    selected_campus_id = _safe_int(request.GET.get("campus_id"))
+    if selected_tenant_id:
+        queryset = queryset.filter(tenant_id=selected_tenant_id)
+    if selected_campus_id:
+        queryset = queryset.filter(campus_id=selected_campus_id)
+    if request.GET.get("parent_id"):
+        parent_ids = AdminScopeService.expand_department_filter_ids(
+            request.GET.get("parent_id"),
+            campus_id=_safe_int(request.GET.get("campus_id")),
+        )
+        queryset = queryset.filter(Q(id__in=parent_ids) | Q(parent_id__in=parent_ids))
+    if request.GET.get("operation_branch"):
+        queryset = queryset.filter(operation_branch=request.GET.get("operation_branch"))
+    if request.GET.get("unit_type"):
+        queryset = queryset.filter(unit_type=request.GET.get("unit_type"))
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    parent_departments = AdminScopeService.scoped_departments(request).filter(parent__isnull=True)
+    if selected_tenant_id:
+        parent_departments = parent_departments.filter(tenant_id=selected_tenant_id)
+    if selected_campus_id:
+        parent_departments = parent_departments.filter(campus_id=selected_campus_id)
+
+    context = {
+        **_active_inactive_pages(request, queryset),
+        "q": q,
+        "operation_branch_choices": Department.OperationBranch.choices,
+        "unit_type_choices": Department.UnitType.choices,
+        "parent_departments": parent_departments.order_by("campus__code", "code"),
+        "selected_campus_id": selected_campus_id,
+    }
+    _with_inactive_record_metadata(request, context, model_key="department")
     context.update(_scope_context(request))
     return render(request, "admin_portal/organization/department_list.html", context)
 
@@ -4119,6 +4999,7 @@ def department_create_view(request):
         request.POST or None,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
+        parent_queryset=AdminScopeService.scoped_departments(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -4149,6 +5030,7 @@ def department_update_view(request, department_id: int):
         instance=department,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
+        parent_queryset=AdminScopeService.scoped_departments(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -4181,7 +5063,9 @@ def program_list_view(request):
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {"q": q}
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="program")
     context.update(_scope_context(request))
     return render(request, "admin_portal/organization/program_list.html", context)
 
@@ -4193,7 +5077,7 @@ def program_create_view(request):
         request.POST or None,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -4224,7 +5108,7 @@ def program_update_view(request, program_id: int):
         instance=program,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -4252,10 +5136,15 @@ def user_list_view(request):
     queryset = _scoped_users_queryset(request).select_related("default_tenant", "default_campus", "default_department")
     tenant_filter = request.GET.get("tenant_id", "").strip()
     campus_filter = request.GET.get("campus_id", "").strip()
+    staff_filter = request.GET.get("is_staff", "").strip()
     if tenant_filter:
         queryset = queryset.filter(Q(default_tenant_id=tenant_filter) | Q(user_roles__tenant_id=tenant_filter)).distinct()
     if campus_filter:
         queryset = queryset.filter(Q(default_campus_id=campus_filter) | Q(user_roles__campus_id=campus_filter)).distinct()
+    if staff_filter == "1":
+        queryset = queryset.filter(is_staff=True)
+    elif staff_filter == "0":
+        queryset = queryset.filter(is_staff=False)
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(
@@ -4264,11 +5153,15 @@ def user_list_view(request):
             | Q(first_name__icontains=q)
             | Q(last_name__icontains=q)
         )
+    inactive_users = list(queryset.filter(is_active=False).order_by("username"))
+    _attach_inactive_user_metadata(request, inactive_users)
     context = {
-        "page_obj": _get_page(request, queryset),
+        "active_users": queryset.filter(is_active=True).order_by("username"),
+        "inactive_users": inactive_users,
         "q": q,
         "tenant_filter": tenant_filter,
         "campus_filter": campus_filter,
+        "staff_filter": staff_filter,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/security/user_list.html", context)
@@ -4453,9 +5346,18 @@ def faculty_deactivation_schedule_view(request):
 def user_create_view(request):
     tenant_qs = AdminScopeService.scoped_tenants(request)
     campus_qs = AdminScopeService.scoped_campuses(request)
-    department_qs = AdminScopeService.scoped_departments(request)
+    department_qs = AdminScopeService.active_scoped_departments(request)
+    initial_scope = {}
+    if request.method != "POST":
+        scoped_tenant_id = getattr(request, "scope", {}).get("tenant_id")
+        scoped_campus_id = getattr(request, "scope", {}).get("campus_id")
+        if scoped_tenant_id and tenant_qs.filter(id=scoped_tenant_id).exists():
+            initial_scope["default_tenant"] = scoped_tenant_id
+        if scoped_campus_id and campus_qs.filter(id=scoped_campus_id).exists():
+            initial_scope["default_campus"] = scoped_campus_id
     form = UserCreateForm(
         request.POST or None,
+        initial=initial_scope,
         tenant_queryset=tenant_qs,
         campus_queryset=campus_qs,
         department_queryset=department_qs,
@@ -4530,7 +5432,7 @@ def user_update_view(request, user_id: int):
     before = model_before_after(user)
     tenant_qs = AdminScopeService.scoped_tenants(request)
     campus_qs = AdminScopeService.scoped_campuses(request)
-    department_qs = AdminScopeService.scoped_departments(request)
+    department_qs = AdminScopeService.active_scoped_departments(request)
     form = UserUpdateForm(
         request.POST or None,
         instance=user,
@@ -4592,7 +5494,7 @@ def user_roles_view(request, user_id: int):
     user = get_object_or_404(_scoped_users_queryset(request), id=user_id)
     tenant_qs = AdminScopeService.scoped_tenants(request)
     campus_qs = AdminScopeService.scoped_campuses(request)
-    department_qs = AdminScopeService.scoped_departments(request)
+    department_qs = AdminScopeService.active_scoped_departments(request)
 
     if request.method == "POST" and request.POST.get("action") == "deactivate":
         assignment = get_object_or_404(UserRole, id=request.POST.get("assignment_id"), user=user)
@@ -4685,7 +5587,12 @@ def user_roles_view(request, user_id: int):
         ).filter(
             Q(department_id__in=department_ids) | Q(department__isnull=True)
         )
-    context = {"target_user": user, "form": form, "assignments": assignments}
+    context = {
+        "target_user": user,
+        "form": form,
+        "active_assignments": assignments.filter(is_active=True),
+        "inactive_assignments": assignments.filter(is_active=False),
+    }
     context.update(_scope_context(request))
     return render(request, "admin_portal/security/user_roles.html", context)
 
@@ -4693,8 +5600,17 @@ def user_roles_view(request, user_id: int):
 @portal_required("ADMIN")
 @permission_required("roles.read")
 def role_list_view(request):
-    roles = Role.objects.annotate(permission_count=Count("role_permissions")).order_by("name")
-    context = {"roles": roles}
+    roles = (
+        Role.objects.annotate(
+            permission_count=Count("role_permissions", distinct=True),
+            assignment_count=Count("user_roles", distinct=True),
+        )
+        .order_by("name")
+    )
+    context = {
+        "active_roles": roles.filter(is_active=True),
+        "inactive_roles": roles.filter(is_active=False),
+    }
     context.update(_scope_context(request))
     return render(request, "admin_portal/security/role_list.html", context)
 
@@ -4772,34 +5688,128 @@ def role_update_view(request, role_id: int):
 
 @portal_required("ADMIN")
 @permission_required("roles.update")
+def role_delete_view(request, role_id: int):
+    role = get_object_or_404(Role, id=role_id)
+    if request.method != "POST":
+        return redirect("admin_portal:role_list")
+
+    confirmation = (request.POST.get("confirmation_code") or "").strip()
+    if role.is_active:
+        messages.error(request, "Only inactive roles can be hard-deleted.")
+        return redirect("admin_portal:role_list")
+    if role.is_system:
+        messages.error(request, "System roles cannot be hard-deleted.")
+        return redirect("admin_portal:role_list")
+    if confirmation != role.code:
+        messages.error(request, f"Role was not deleted. Type {role.code} exactly to confirm.")
+        return redirect("admin_portal:role_list")
+
+    before = model_before_after(role)
+    permission_count = role.role_permissions.count()
+    assignment_count = role.user_roles.count()
+    role_code = role.code
+    role_id_for_audit = role.id
+
+    with transaction.atomic():
+        RolePermission.objects.filter(role=role).delete()
+        UserRole.objects.filter(role=role).delete()
+        role.delete()
+
+    AuditService.log_event(
+        action="DELETE",
+        portal="ADMIN",
+        entity_type="Role",
+        entity_id=role_id_for_audit,
+        actor=request.user,
+        before_data=before,
+        metadata={
+            "role_code": role_code,
+            "deleted_role_permissions": permission_count,
+            "deleted_user_role_assignments": assignment_count,
+            "hard_delete": True,
+        },
+        request=request,
+    )
+    messages.success(request, f"Inactive role {role_code} was hard-deleted.")
+    return redirect("admin_portal:role_list")
+
+
+@portal_required("ADMIN")
+@permission_required("roles.update")
 def role_permissions_view(request, role_id: int):
     role = get_object_or_404(Role, id=role_id)
     form = RolePermissionsForm(request.POST or None, role=role)
+    _style_form(form)
+    critical_permission_impact = None
     if request.method == "POST" and form.is_valid():
+        module_to_save = (request.POST.get("save_module") or "").strip()
         before = list(role.role_permissions.values_list("permission_id", flat=True))
         selected_permissions = set(form.cleaned_data["permissions"].values_list("id", flat=True))
         current_permissions = set(before)
-        to_add = selected_permissions - current_permissions
-        to_remove = current_permissions - selected_permissions
+        update_label = "all"
 
-        for permission_id in to_add:
-            RolePermission.objects.get_or_create(role=role, permission_id=permission_id)
-        if to_remove:
-            RolePermission.objects.filter(role=role, permission_id__in=to_remove).delete()
+        if module_to_save:
+            module_permission_ids = set(
+                Permission.objects.filter(is_active=True, module=module_to_save).values_list("id", flat=True)
+            )
+            if not module_permission_ids:
+                messages.error(request, "Permission section was not found.")
+                return redirect("admin_portal:role_permissions", role_id=role.id)
+            selected_module_permissions = selected_permissions & module_permission_ids
+            current_module_permissions = current_permissions & module_permission_ids
+            to_add = selected_module_permissions - current_module_permissions
+            to_remove = current_module_permissions - selected_module_permissions
+            update_label = module_to_save
+        else:
+            to_add = selected_permissions - current_permissions
+            to_remove = current_permissions - selected_permissions
 
-        after = list(role.role_permissions.values_list("permission_id", flat=True))
-        AuditService.log_event(
-            action="UPDATE",
-            portal="ADMIN",
-            entity_type="RolePermission",
-            entity_id=role.id,
-            actor=request.user,
-            before_data={"permission_ids": before},
-            after_data={"permission_ids": after},
-            request=request,
-        )
-        messages.success(request, "Role permissions updated.")
-        return _redirect_back_or_default(request, "admin_portal:role_list")
+        critical_permission_impact = _role_permission_impact(role, to_add, to_remove)
+        if critical_permission_impact["has_critical_change"]:
+            if not (form.cleaned_data.get("change_reason") or "").strip():
+                form.add_error("change_reason", "Enter the reason for changing critical role access.")
+            if (form.cleaned_data.get("confirmation_phrase") or "").strip() != CRITICAL_ROLE_CONFIRMATION:
+                form.add_error("confirmation_phrase", f"Type {CRITICAL_ROLE_CONFIRMATION} to confirm this critical access change.")
+
+        if not form.errors:
+            for permission_id in to_add:
+                RolePermission.objects.get_or_create(role=role, permission_id=permission_id)
+            if to_remove:
+                RolePermission.objects.filter(role=role, permission_id__in=to_remove).delete()
+
+            after = list(role.role_permissions.values_list("permission_id", flat=True))
+            AuditService.log_event(
+                action="UPDATE",
+                portal="ADMIN",
+                entity_type="RolePermission",
+                entity_id=role.id,
+                actor=request.user,
+                before_data={"permission_ids": before},
+                after_data={"permission_ids": after},
+                metadata={
+                    "critical_action": critical_permission_impact["has_critical_change"],
+                    "reason": (form.cleaned_data.get("change_reason") or "").strip(),
+                    "confirmation_required": critical_permission_impact["has_critical_change"],
+                    "confirmation_phrase": (
+                        CRITICAL_ROLE_CONFIRMATION if critical_permission_impact["has_critical_change"] else ""
+                    ),
+                    "permission_section": update_label,
+                    "added_permission_ids": sorted(to_add),
+                    "removed_permission_ids": sorted(to_remove),
+                    "added_permission_codes": critical_permission_impact["added_permission_codes"],
+                    "removed_permission_codes": critical_permission_impact["removed_permission_codes"],
+                    "impact_summary": critical_permission_impact,
+                },
+                request=request,
+            )
+            if module_to_save:
+                messages.success(
+                    request,
+                    f"{module_to_save.replace('_', ' ').replace('.', ' ').title()} permissions updated.",
+                )
+                return redirect("admin_portal:role_permissions", role_id=role.id)
+            messages.success(request, "Role permissions updated.")
+            return _redirect_back_or_default(request, "admin_portal:role_list")
 
     def _title(value):
         return str(value or "").replace("_", " ").replace(".", " ").title()
@@ -4818,6 +5828,7 @@ def role_permissions_view(request, role_id: int):
             "review": "Review",
             "submit_for_approval": "Submit for Approval",
             "update": "Edit",
+            "view_student_identity": "View Student Identity",
             "revert_before_deadline": "Revert Before Deadline",
         }
         return action_labels.get(permission.action, _title(permission.action))
@@ -4831,6 +5842,7 @@ def role_permissions_view(request, role_id: int):
             "grading_analytics.read": "Allows viewing admin grading analytics.",
             "grade_distribution_monitor.read": "Allows viewing faculty grade distribution monitoring reports.",
             "faculty_analytics.read": "Allows viewing faculty-side analytics.",
+            "gradebook.view_student_identity": "Allows authorized gradebook reviewers to see unmasked student numbers and names within their allowed scope.",
             "system_settings.update": "Allows changing tenant/system configuration settings.",
             "menus.update": "Allows changing portal navigation menu setup.",
             "audit_logs.read": "Allows viewing audit trail records.",
@@ -4897,6 +5909,7 @@ def role_permissions_view(request, role_id: int):
                     "badge_class": action_badge_classes.get(perm.action, "text-bg-light"),
                     "description": _permission_description(perm),
                     "is_selected": perm.id in selected_permission_ids,
+                    "is_critical": perm.code in CRITICAL_PERMISSION_CODES,
                 }
             )
         permissions_by_module.append(
@@ -4916,6 +5929,9 @@ def role_permissions_view(request, role_id: int):
         "permissions_by_module": permissions_by_module,
         "selected_permission_count": len(selected_permission_ids),
         "total_permission_count": Permission.objects.filter(is_active=True).count(),
+        "critical_role_confirmation": CRITICAL_ROLE_CONFIRMATION,
+        "critical_permission_codes": sorted(CRITICAL_PERMISSION_CODES),
+        "critical_permission_impact": critical_permission_impact,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/security/role_permissions.html", context)
@@ -5080,6 +6096,41 @@ def audit_log_list_view(request):
 
 
 @portal_required("ADMIN")
+@permission_required("audit_logs.read")
+def recent_critical_actions_view(request):
+    queryset = _scoped_audit_queryset(request).filter(CRITICAL_AUDIT_FILTER)
+    action = request.GET.get("action", "").strip()
+    entity_type = request.GET.get("entity_type", "").strip()
+    q = request.GET.get("q", "").strip()
+    if action:
+        queryset = queryset.filter(action__icontains=action)
+    if entity_type:
+        queryset = queryset.filter(entity_type__icontains=entity_type)
+    if q:
+        queryset = queryset.filter(
+            Q(entity_type__icontains=q)
+            | Q(entity_id__icontains=q)
+            | Q(actor_user__username__icontains=q)
+            | Q(metadata_json__reason__icontains=q)
+        )
+    page_obj = _get_page(request, queryset, per_page=30)
+    for row in page_obj.object_list:
+        row.safe_reason = _critical_audit_reason(row.metadata_json)
+        row.safe_impact_label = _critical_audit_impact_label(row.metadata_json)
+        row.confirmation_required = bool((row.metadata_json or {}).get("confirmation_required"))
+        row.anomaly_flags = _audit_anomaly_flags(row.metadata_json)
+        row.max_anomaly_severity = (row.metadata_json or {}).get("max_anomaly_severity", "")
+    context = {
+        "page_obj": page_obj,
+        "action": action,
+        "entity_type": entity_type,
+        "q": q,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/audit/recent_critical_actions.html", context)
+
+
+@portal_required("ADMIN")
 @permission_required("academic_years.read")
 def academic_year_list_view(request):
     queryset = AdminScopeService.scoped_academic_years(request)
@@ -5088,7 +6139,9 @@ def academic_year_list_view(request):
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {"q": q}
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="academic_year")
     context.update(_scope_context(request))
     return render(request, "admin_portal/academics/academic_year_list.html", context)
 
@@ -5160,13 +6213,14 @@ def term_list_view(request):
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
     context = {
-        "page_obj": _get_page(request, queryset),
+        **_active_inactive_pages(request, queryset),
         "q": q,
         "term_type": request.GET.get("term_type", ""),
         "term_type_choices": Term.TermType.choices,
     }
+    _with_inactive_record_metadata(request, context, model_key="term")
     context.update(_scope_context(request))
-    context["academic_years"] = AdminScopeService.scoped_academic_years(request)
+    context["academic_years"] = AdminScopeService.active_scoped_academic_years(request)
     return render(request, "admin_portal/academics/term_list.html", context)
 
 
@@ -5237,13 +6291,20 @@ def course_list_view(request):
     if request.GET.get("campus_id"):
         queryset = queryset.filter(campus_id=request.GET.get("campus_id"))
     if request.GET.get("department_id"):
-        queryset = queryset.filter(department_id=request.GET.get("department_id"))
+        queryset = queryset.filter(
+            department_id__in=AdminScopeService.expand_department_filter_ids(
+                request.GET.get("department_id"),
+                campus_id=_safe_int(request.GET.get("campus_id")),
+            )
+        )
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(title__icontains=q))
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {"q": q}
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="course")
     context.update(_scope_context(request))
-    context["departments"] = AdminScopeService.scoped_departments(request)
+    context["departments"] = AdminScopeService.active_scoped_departments(request)
     return render(request, "admin_portal/academics/course_list.html", context)
 
 
@@ -5254,7 +6315,7 @@ def course_create_view(request):
         request.POST or None,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -5285,7 +6346,7 @@ def course_update_view(request, course_id: int):
         instance=row,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -5328,19 +6389,20 @@ def section_list_view(request):
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
     queryset = queryset.distinct()
 
-    terms_queryset = AdminScopeService.scoped_terms(request)
+    terms_queryset = AdminScopeService.active_scoped_terms(request)
     if academic_year_filter:
         terms_queryset = terms_queryset.filter(academic_year_id=academic_year_filter)
 
     context = {
-        "page_obj": _get_page(request, queryset),
+        **_active_inactive_pages(request, queryset),
         "q": q,
         "academic_year_filter": academic_year_filter or "",
         "term_filter": term_filter or "",
     }
+    _with_inactive_record_metadata(request, context, model_key="section")
     context.update(_scope_context(request))
-    context["programs"] = AdminScopeService.scoped_programs(request)
-    context["academic_years"] = AdminScopeService.scoped_academic_years(request)
+    context["programs"] = AdminScopeService.active_scoped_programs(request)
+    context["academic_years"] = AdminScopeService.active_scoped_academic_years(request)
     context["terms"] = terms_queryset
     return render(request, "admin_portal/academics/section_list.html", context)
 
@@ -5352,8 +6414,8 @@ def section_create_view(request):
         request.POST or None,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
-        program_queryset=AdminScopeService.scoped_programs(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
+        program_queryset=AdminScopeService.active_scoped_programs(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -5384,8 +6446,8 @@ def section_update_view(request, section_id: int):
         instance=row,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
-        program_queryset=AdminScopeService.scoped_programs(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
+        program_queryset=AdminScopeService.active_scoped_programs(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -5418,17 +6480,24 @@ def offering_list_view(request):
     if request.GET.get("term_id"):
         queryset = queryset.filter(term_id=request.GET.get("term_id"))
     if request.GET.get("department_id"):
-        queryset = queryset.filter(department_id=request.GET.get("department_id"))
+        queryset = queryset.filter(
+            department_id__in=AdminScopeService.expand_department_filter_ids(
+                request.GET.get("department_id"),
+                campus_id=_safe_int(request.GET.get("campus_id")),
+            )
+        )
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(
             Q(course__code__icontains=q) | Q(section__code__icontains=q) | Q(schedule_text__icontains=q)
         )
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {"q": q}
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="offering")
     context.update(_scope_context(request))
-    context["academic_years"] = AdminScopeService.scoped_academic_years(request)
-    context["terms"] = AdminScopeService.scoped_terms(request)
-    context["departments"] = AdminScopeService.scoped_departments(request)
+    context["academic_years"] = AdminScopeService.active_scoped_academic_years(request)
+    context["terms"] = AdminScopeService.active_scoped_terms(request)
+    context["departments"] = AdminScopeService.active_scoped_departments(request)
     return render(request, "admin_portal/academics/offering_list.html", context)
 
 
@@ -5439,12 +6508,12 @@ def offering_create_view(request):
         request.POST or None,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
-        program_queryset=AdminScopeService.scoped_programs(request),
-        academic_year_queryset=AdminScopeService.scoped_academic_years(request),
-        term_queryset=AdminScopeService.scoped_terms(request),
-        course_queryset=AdminScopeService.scoped_courses(request),
-        section_queryset=AdminScopeService.scoped_sections(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
+        program_queryset=AdminScopeService.active_scoped_programs(request),
+        academic_year_queryset=AdminScopeService.active_scoped_academic_years(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
+        course_queryset=AdminScopeService.active_scoped_courses(request),
+        section_queryset=AdminScopeService.active_scoped_sections(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -5475,12 +6544,12 @@ def offering_update_view(request, offering_id: int):
         instance=row,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
-        program_queryset=AdminScopeService.scoped_programs(request),
-        academic_year_queryset=AdminScopeService.scoped_academic_years(request),
-        term_queryset=AdminScopeService.scoped_terms(request),
-        course_queryset=AdminScopeService.scoped_courses(request),
-        section_queryset=AdminScopeService.scoped_sections(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
+        program_queryset=AdminScopeService.active_scoped_programs(request),
+        academic_year_queryset=AdminScopeService.active_scoped_academic_years(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
+        course_queryset=AdminScopeService.active_scoped_courses(request),
+        section_queryset=AdminScopeService.active_scoped_sections(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -5529,7 +6598,7 @@ def faculty_assignment_list_view(request):
     offering_q = request.GET.get("offering_q", "").strip()
     selected_section_id = _safe_int(request.GET.get("section_id"))
     assignment_note = (request.GET.get("assignment_note") or "").strip()
-    sections = AdminScopeService.scoped_sections(request).filter(is_active=True).order_by("code")
+    sections = AdminScopeService.active_scoped_sections(request).order_by("code")
     assignable_offerings = AdminScopeService.scoped_course_offerings(request).filter(is_active=True).exclude(
         faculty_assignments__is_active=True
     )
@@ -5672,11 +6741,18 @@ def faculty_gradebook_monitor_view(request):
     summary_layout = {"class_standing_blocks": [], "exam_components": []}
     visible_exam_components = []
     q = request.GET.get("q", "").strip()
-    is_masked = _should_mask_gradebook_student_identity(request.user)
+    scope = getattr(request, "scope", {})
+    is_masked = _should_mask_gradebook_student_identity(
+        request.user,
+        tenant_id=scope.get("tenant_id"),
+        campus_id=scope.get("campus_id"),
+    )
+    can_view_student_identity = not is_masked
     period_state = None
     submit_readiness = None
     selected_faculty_assignments = FacultyAssignment.objects.none()
     table_colspan = 5
+    is_final_period_view = False
 
     if selected_faculty:
         selected_faculty_assignments = (
@@ -5764,6 +6840,10 @@ def faculty_gradebook_monitor_view(request):
                     else None
                 )
                 is_final_period_view = bool(final_period is not None and selected_period.id == final_period.id)
+                final_grade_map = {
+                    row.student_id: row.final_grade
+                    for row in StudentFinalGrade.objects.filter(offering_id=selected_offering.id)
+                } if is_final_period_view else {}
                 visible_exam_components = [] if is_final_period_view else summary_layout["exam_components"]
                 score_by_activity = {
                     (score.student_id, score.activity_id): Decimal(score.computed_score)
@@ -5786,6 +6866,28 @@ def faculty_gradebook_monitor_view(request):
 
                 for row in filtered_rows:
                     summary_values = _build_summary_row_values(row, summary_layout, score_by_activity)
+                    period_explain_url = None
+                    final_explain_url = None
+                    if row["period_grade"] is not None:
+                        period_explain_url = reverse(
+                            "admin_portal:faculty_gradebook_explanation",
+                            kwargs={
+                                "offering_id": selected_offering.id,
+                                "period_id": selected_period.id,
+                                "student_id": row["student"].id,
+                                "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+                            },
+                        )
+                    if is_final_period_view and final_grade_map.get(row["student"].id) is not None:
+                        final_explain_url = reverse(
+                            "admin_portal:faculty_gradebook_explanation",
+                            kwargs={
+                                "offering_id": selected_offering.id,
+                                "period_id": selected_period.id,
+                                "student_id": row["student"].id,
+                                "grade_type": GradeExplanationService.GRADE_TYPE_FINAL,
+                            },
+                        )
                     rows.append(
                         {
                             "student": row["student"],
@@ -5795,6 +6897,9 @@ def faculty_gradebook_monitor_view(request):
                             "class_standing_blocks": summary_values["class_standing_blocks"],
                             "exam_values": [] if is_final_period_view else summary_values["exam_values"],
                             "period_grade": row["period_grade"],
+                            "period_explain_url": period_explain_url,
+                            "final_grade": final_grade_map.get(row["student"].id),
+                            "final_explain_url": final_explain_url,
                             "print_grade_status": (
                                 "PASSED"
                                 if row["period_grade"] is not None
@@ -5817,6 +6922,7 @@ def faculty_gradebook_monitor_view(request):
                     + sum(block["colspan"] for block in summary_layout["class_standing_blocks"])
                     + len(visible_exam_components)
                     + 1
+                    + (1 if is_final_period_view else 0)
                 )
                 AuditService.log_event(
                     action="READ",
@@ -5831,6 +6937,10 @@ def faculty_gradebook_monitor_view(request):
                         "offering_id": selected_offering.id,
                         "period_id": selected_period.id,
                         "masked_student_identity": is_masked,
+                        "student_identity_visible": can_view_student_identity,
+                        "student_identity_visibility_reason": (
+                            "gradebook.view_student_identity" if can_view_student_identity else "masked_by_privacy_policy"
+                        ),
                     },
                     request=request,
                 )
@@ -5851,6 +6961,8 @@ def faculty_gradebook_monitor_view(request):
         "submit_readiness": submit_readiness,
         "q": q,
         "is_masked": is_masked,
+        "can_view_student_identity": can_view_student_identity,
+        "is_final_period_view": is_final_period_view,
         "table_colspan": table_colspan,
         "grade_prediction_enabled": FeatureSettingsService.can_user_access_grade_prediction(
             user=request.user,
@@ -5859,6 +6971,78 @@ def faculty_gradebook_monitor_view(request):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/academics/faculty_gradebook_monitor.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("faculty_assignments.read")
+def faculty_gradebook_explanation_view(request, offering_id: int, period_id: int, student_id: int, grade_type: str):
+    scoped_assignment = (
+        AdminScopeService.scoped_faculty_assignments(request)
+        .filter(offering_id=offering_id, is_active=True)
+        .select_related("offering", "offering__course", "offering__section", "offering__term", "offering__academic_year", "offering__campus")
+        .first()
+    )
+    if not scoped_assignment:
+        raise Http404("Grade book row not found in your current scope.")
+    offering = scoped_assignment.offering
+    try:
+        template = FacultyGradingService.resolve_template_for_offering(offering)
+    except ValidationError as exc:
+        return render(
+            request,
+            "grading/grade_explanation_detail.html",
+            {"restricted_message": "; ".join(exc.messages)},
+        )
+    period = template.periods.filter(id=period_id, is_active=True).first()
+    if period is None:
+        raise Http404("Invalid grading period.")
+    enrollment = get_object_or_404(
+        Enrollment.objects.filter(course_offering=offering, is_active=True).select_related("student"),
+        student_id=student_id,
+    )
+    scope = getattr(request, "scope", {})
+    is_masked = _should_mask_gradebook_student_identity(
+        request.user,
+        tenant_id=scope.get("tenant_id"),
+        campus_id=scope.get("campus_id"),
+    )
+    normalized_grade_type = (grade_type or "").upper()
+    try:
+        explanation = GradeExplanationService.build(
+            offering=offering,
+            student=enrollment.student,
+            template_period=period,
+            grade_type=normalized_grade_type,
+            mask_identity=is_masked,
+        )
+    except ValidationError as exc:
+        return render(
+            request,
+            "grading/grade_explanation_detail.html",
+            {"restricted_message": "; ".join(exc.messages)},
+        )
+    AuditService.log_event(
+        action="READ",
+        portal="ADMIN",
+        entity_type="GradeExplanation",
+        entity_id=f"{offering.id}:{period.id}:{student_id}:{normalized_grade_type}",
+        actor=request.user,
+        tenant=offering.tenant,
+        campus=offering.campus,
+        metadata={
+            "offering_id": offering.id,
+            "period_id": period.id,
+            "student_id": student_id,
+            "grade_type": normalized_grade_type,
+            "student_identity_visible": not is_masked,
+            "masked_student_identity": is_masked,
+            "student_identity_visibility_reason": (
+                "gradebook.view_student_identity" if not is_masked else "masked_by_privacy_policy"
+            ),
+        },
+        request=request,
+    )
+    return render(request, "grading/grade_explanation_detail.html", {"explanation": explanation})
 
 
 @portal_required("ADMIN")
@@ -6010,7 +7194,7 @@ def faculty_final_clearance_view(request):
         messages.error(request, "Select the correct tenant and campus scope first.")
         return _redirect_back_or_default(request, "admin_portal:dashboard")
 
-    term_queryset = AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
+    term_queryset = AdminScopeService.active_scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
     selected_term = None
     selected_term_id = request.GET.get("term_id") or request.POST.get("term_id")
     if selected_term_id:
@@ -6146,8 +7330,8 @@ def faculty_assignment_dashboard_view(request):
     selected_department_id = _safe_int(request.GET.get("department_id"))
     faculty_q = (request.GET.get("faculty_q") or "").strip()
 
-    campus_options = AdminScopeService.scoped_campuses(request).order_by("code", "name")
-    department_options = AdminScopeService.scoped_departments(request).order_by("campus__code", "name")
+    campus_options = AdminScopeService.active_scoped_campuses(request).order_by("code", "name")
+    department_options = AdminScopeService.active_scoped_departments(request).order_by("campus__code", "name")
     if selected_campus_id:
         department_options = department_options.filter(campus_id=selected_campus_id)
 
@@ -6168,11 +7352,15 @@ def faculty_assignment_dashboard_view(request):
 
     assignment_rows = []
     lowered_faculty_q = faculty_q.lower()
+    selected_department_ids = AdminScopeService.expand_department_filter_ids(
+        selected_department_id,
+        campus_id=selected_campus_id,
+    )
     for assignment in assignment_queryset:
         scope_snapshot = _faculty_assignment_scope_snapshot(assignment)
         if selected_campus_id and scope_snapshot["campus_id"] != selected_campus_id:
             continue
-        if selected_department_id and scope_snapshot["department_id"] != selected_department_id:
+        if selected_department_id and scope_snapshot["department_id"] not in selected_department_ids:
             continue
         if faculty_q:
             faculty_haystack = " ".join(
@@ -6814,9 +8002,11 @@ def student_list_view(request):
             | Q(last_name__icontains=q)
             | Q(first_name__icontains=q)
         )
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {"q": q}
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="student")
     context.update(_scope_context(request))
-    context["programs"] = AdminScopeService.scoped_programs(request)
+    context["programs"] = AdminScopeService.active_scoped_programs(request)
     return render(request, "admin_portal/students/student_list.html", context)
 
 
@@ -6827,8 +8017,8 @@ def student_create_view(request):
         request.POST or None,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
-        program_queryset=AdminScopeService.scoped_programs(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
+        program_queryset=AdminScopeService.active_scoped_programs(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -6859,8 +8049,8 @@ def student_update_view(request, student_id: int):
         instance=row,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
-        program_queryset=AdminScopeService.scoped_programs(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
+        program_queryset=AdminScopeService.active_scoped_programs(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -6917,7 +8107,7 @@ def enrollment_list_view(request):
             | Q(course_offering__course__code__icontains=q)
             | Q(course_offering__section__code__icontains=q)
         )
-    status_summary = queryset.aggregate(
+    status_summary = queryset.filter(is_active=True).aggregate(
         active_count=Count("id", filter=Q(enrollment_status=Enrollment.Status.ACTIVE)),
         drp_count=Count("id", filter=Q(enrollment_status=Enrollment.Status.DRP)),
         withdrawn_count=Count("id", filter=Q(enrollment_status=Enrollment.Status.W)),
@@ -6939,7 +8129,7 @@ def enrollment_list_view(request):
         offerings = offerings.filter(course_id=course_id)
 
     # Section options in filter dropdown should follow Campus + Academic Year + Term selection.
-    section_options = AdminScopeService.scoped_sections(request)
+    section_options = AdminScopeService.active_scoped_sections(request)
     if campus_id:
         section_options = section_options.filter(campus_id=campus_id)
     if academic_year_id or term_id:
@@ -6953,13 +8143,15 @@ def enrollment_list_view(request):
         section_options = section_options.filter(id__in=offering_scope.values_list("section_id", flat=True))
     section_options = section_options.distinct()
 
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {"q": q}
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="enrollment")
     context.update(_scope_context(request))
     context["offerings"] = offerings
-    context["academic_years"] = AdminScopeService.scoped_academic_years(request)
-    context["terms"] = AdminScopeService.scoped_terms(request)
+    context["academic_years"] = AdminScopeService.active_scoped_academic_years(request)
+    context["terms"] = AdminScopeService.active_scoped_terms(request)
     context["sections"] = section_options
-    context["courses"] = AdminScopeService.scoped_courses(request)
+    context["courses"] = AdminScopeService.active_scoped_courses(request)
     context["status"] = status
     context["campus_id"] = campus_id
     context["academic_year_id"] = academic_year_id
@@ -7115,13 +8307,13 @@ def _ensure_template_draft_access_or_forbidden(request, template, back_route: st
 @portal_required("ADMIN")
 @permission_required("grading_templates.read")
 def grading_template_list_view(request):
-    queryset = AdminScopeService.scoped_grading_templates(request).prefetch_related(
+    queryset = AdminScopeService.maintenance_scoped_grading_templates(request).prefetch_related(
         Prefetch(
             "periods",
             queryset=GradingTemplatePeriod.objects.filter(is_active=True).order_by("sequence_no", "id"),
             to_attr="active_periods",
         )
-    ).annotate(period_count=Count("periods"))
+    ).annotate(period_count=Count("periods", filter=Q(periods__is_active=True)))
     if request.GET.get("tenant_id"):
         queryset = queryset.filter(tenant_id=request.GET.get("tenant_id"))
     if request.GET.get("published") == "yes":
@@ -7134,86 +8326,88 @@ def grading_template_list_view(request):
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q))
-    page_obj = _get_page(request, queryset)
+    split_pages = _active_inactive_pages(request, queryset)
     current_campus_id = getattr(request, "scope", {}).get("campus_id")
-    for row in page_obj:
-        row.active_period_codes = [period.code for period in getattr(row, "active_periods", [])]
-        current_approval_step = TemplateGovernanceWorkflowService.get_current_approval_step(template=row)
-        row.current_approval_step = current_approval_step
-        row.current_approval_step_label = current_approval_step.step_label if current_approval_step else ""
-        row.can_submit = (
-            PermissionService.has_permission(
-                request.user,
-                "grading_templates.submit_for_approval",
-                tenant_id=row.tenant_id,
-                campus_id=current_campus_id,
+    for page_obj in (split_pages["active_page_obj"], split_pages["inactive_page_obj"]):
+        for row in page_obj:
+            row.active_period_codes = [period.code for period in getattr(row, "active_periods", [])]
+            current_approval_step = TemplateGovernanceWorkflowService.get_current_approval_step(template=row)
+            row.current_approval_step = current_approval_step
+            row.current_approval_step_label = current_approval_step.step_label if current_approval_step else ""
+            row.can_submit = (
+                PermissionService.has_permission(
+                    request.user,
+                    "grading_templates.submit_for_approval",
+                    tenant_id=row.tenant_id,
+                    campus_id=current_campus_id,
+                )
+                and not row.is_published
+                and row.approval_status != GradingTemplate.ApprovalStatus.FOR_APPROVAL
+                and TemplateGovernanceWorkflowService.user_has_stage_role(
+                    user=request.user,
+                    stage_code=TemplateGovernanceWorkflowService.STAGE_SUBMIT_FOR_APPROVAL,
+                    tenant_id=row.tenant_id,
+                )
             )
-            and not row.is_published
-            and row.approval_status != GradingTemplate.ApprovalStatus.FOR_APPROVAL
-            and TemplateGovernanceWorkflowService.user_has_stage_role(
-                user=request.user,
-                stage_code=TemplateGovernanceWorkflowService.STAGE_SUBMIT_FOR_APPROVAL,
-                tenant_id=row.tenant_id,
+            row.can_review_approval = (
+                PermissionService.has_permission(
+                    request.user,
+                    "grading_templates.approve",
+                    tenant_id=row.tenant_id,
+                    campus_id=current_campus_id,
+                )
+                and row.approval_status == GradingTemplate.ApprovalStatus.FOR_APPROVAL
+                and TemplateGovernanceWorkflowService.user_can_take_approval_step(
+                    template=row,
+                    actor=request.user,
+                )
             )
-        )
-        row.can_review_approval = (
-            PermissionService.has_permission(
-                request.user,
-                "grading_templates.approve",
-                tenant_id=row.tenant_id,
-                campus_id=current_campus_id,
+            row.can_publish_workflow = (
+                PermissionService.has_permission(
+                    request.user,
+                    "grading_templates.publish",
+                    tenant_id=row.tenant_id,
+                    campus_id=current_campus_id,
+                )
+                and not row.is_published
+                and (
+                    row.approval_status == GradingTemplate.ApprovalStatus.APPROVED
+                    or not TemplateGovernanceWorkflowService.require_approval_before_publish(tenant_id=row.tenant_id)
+                )
+                and row.approval_status != GradingTemplate.ApprovalStatus.FOR_APPROVAL
+                and TemplateGovernanceWorkflowService.user_has_stage_role(
+                    user=request.user,
+                    stage_code=TemplateGovernanceWorkflowService.STAGE_PUBLISH,
+                    tenant_id=row.tenant_id,
+                )
+                and (
+                    TemplateGovernanceWorkflowService.allow_same_user_review_publish(tenant_id=row.tenant_id)
+                    or row.approval_reviewed_by_id != request.user.id
+                )
             )
-            and row.approval_status == GradingTemplate.ApprovalStatus.FOR_APPROVAL
-            and TemplateGovernanceWorkflowService.user_can_take_approval_step(
-                template=row,
-                actor=request.user,
+            row.can_hotfix_request = (
+                PermissionService.has_permission(
+                    request.user,
+                    "template_hotfixes.create",
+                    tenant_id=row.tenant_id,
+                    campus_id=current_campus_id,
+                )
+                and row.is_published
+                and TemplateGovernanceWorkflowService.user_has_stage_role(
+                    user=request.user,
+                    stage_code=TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST,
+                    tenant_id=row.tenant_id,
+                )
             )
-        )
-        row.can_publish_workflow = (
-            PermissionService.has_permission(
-                request.user,
-                "grading_templates.publish",
-                tenant_id=row.tenant_id,
-                campus_id=current_campus_id,
-            )
-            and not row.is_published
-            and (
-                row.approval_status == GradingTemplate.ApprovalStatus.APPROVED
-                or not TemplateGovernanceWorkflowService.require_approval_before_publish(tenant_id=row.tenant_id)
-            )
-            and row.approval_status != GradingTemplate.ApprovalStatus.FOR_APPROVAL
-            and TemplateGovernanceWorkflowService.user_has_stage_role(
-                user=request.user,
-                stage_code=TemplateGovernanceWorkflowService.STAGE_PUBLISH,
-                tenant_id=row.tenant_id,
-            )
-            and (
-                TemplateGovernanceWorkflowService.allow_same_user_review_publish(tenant_id=row.tenant_id)
-                or row.approval_reviewed_by_id != request.user.id
-            )
-        )
-        row.can_hotfix_request = (
-            PermissionService.has_permission(
-                request.user,
-                "template_hotfixes.create",
-                tenant_id=row.tenant_id,
-                campus_id=current_campus_id,
-            )
-            and row.is_published
-            and TemplateGovernanceWorkflowService.user_has_stage_role(
-                user=request.user,
-                stage_code=TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST,
-                tenant_id=row.tenant_id,
-            )
-        )
     context = {
-        "page_obj": page_obj,
         "q": q,
         "published": request.GET.get("published", ""),
         "approval_status": approval_status,
         "approval_status_choices": GradingTemplate.ApprovalStatus.choices,
         "involved_personalities": TemplateHotfixService.involved_personalities(),
     }
+    context.update(split_pages)
+    _with_inactive_record_metadata(request, context, model_key="grading_template")
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/template_list.html", context)
 
@@ -7361,7 +8555,7 @@ def grading_template_calculator_view(request):
             "Enter sample raw score and total score values at the lowest active level of the selected template.",
             "EduGradesPro will first convert raw score to computed percentage, then roll the result upward into component, period, and final grades.",
             "Period grades follow the same current EduGradesPro computation logic used by the official grading engine.",
-            "This calculator previews the template structure only. In live class computation, the official final grade may also follow a tenant grading profile formula.",
+            "The final-grade section uses the matched active tenant grading profile for this template. If no active profile matches, it shows the active-period average fallback.",
         ],
     }
     context.update(_scope_context(request))
@@ -7378,7 +8572,7 @@ def grading_template_builder_view(request, template_id: int):
         .prefetch_related(
             Prefetch(
                 "periods",
-                queryset=GradingTemplatePeriod.objects.filter(is_active=True).order_by("sequence_no", "id").prefetch_related(
+                queryset=GradingTemplatePeriod.objects.order_by("sequence_no", "id").prefetch_related(
                     Prefetch(
                         "components",
                         queryset=GradingTemplateComponent.objects.filter(is_active=True).order_by("sort_order", "id").prefetch_related(
@@ -7530,6 +8724,48 @@ def grading_template_update_view(request, template_id: int):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grading_templates.create")
+def grading_template_duplicate_view(request, template_id: int):
+    if request.method != "POST":
+        return HttpResponseForbidden("Invalid method.")
+    source = get_object_or_404(AdminScopeService.maintenance_scoped_grading_templates(request), id=template_id)
+    stage_response = _ensure_template_workflow_stage_or_forbidden(
+        request,
+        tenant_id=source.tenant_id,
+        stage_code=TemplateGovernanceWorkflowService.STAGE_DRAFT,
+        back_route="admin_portal:grading_template_list",
+    )
+    if stage_response:
+        return stage_response
+
+    duplicate, counts = GradingTemplateDuplicationService.duplicate_template(source=source)
+    AuditService.log_event(
+        action="DUPLICATE",
+        portal="ADMIN",
+        entity_type="GradingTemplate",
+        entity_id=duplicate.id,
+        actor=request.user,
+        tenant=duplicate.tenant,
+        after_data=model_before_after(duplicate),
+        request=request,
+        metadata={
+            "source_template_id": source.id,
+            "source_template_code": source.code,
+            "duplicated_counts": counts,
+            "duplicate_status": "DRAFT",
+        },
+    )
+    messages.success(
+        request,
+        (
+            f"Template {source.code} duplicated as {duplicate.code}. "
+            "The copy is unpublished and in Draft status."
+        ),
+    )
+    return redirect("admin_portal:grading_template_builder", template_id=duplicate.id)
 
 
 @portal_required("ADMIN")
@@ -7823,11 +9059,30 @@ def template_hotfix_create_view(request, template_id: int):
 @permission_required("template_hotfixes.review")
 def template_hotfix_review_view(request, hotfix_id: int):
     hotfix = get_object_or_404(AdminScopeService.scoped_template_hotfix_requests(request), id=hotfix_id)
+    current_step = TemplateGovernanceWorkflowService.get_current_hotfix_step(hotfix_request=hotfix)
+    is_apply_step = _is_hotfix_apply_step(hotfix, current_step)
+    impact_preview = _template_hotfix_impact_preview(hotfix)
     form = TemplateHotfixReviewForm(request.POST or None)
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         before = model_before_after(hotfix)
         approve = form.cleaned_data["decision"] == TemplateHotfixReviewForm.Decision.APPROVE
+        if approve and is_apply_step and (form.cleaned_data.get("confirmation_phrase") or "").strip() != HOTFIX_APPLY_CONFIRMATION:
+            form.add_error("confirmation_phrase", f"Type {HOTFIX_APPLY_CONFIRMATION} to apply this hotfix.")
+        if form.errors:
+            context = {
+                "form": form,
+                "title": f"Review Hotfix Request #{hotfix.id} ({hotfix.template.code})",
+                "hotfix": hotfix,
+                "workflow_steps": list(hotfix.workflow_steps.order_by("step_no")) if hotfix.workflow_steps.exists() else [],
+                "current_step": current_step,
+                "is_apply_step": is_apply_step,
+                "hotfix_apply_confirmation": HOTFIX_APPLY_CONFIRMATION,
+                "impact_preview": impact_preview,
+                "involved_personalities": TemplateHotfixService.involved_personalities(),
+            }
+            context.update(_scope_context(request))
+            return render(request, "admin_portal/grading/template_hotfix_review.html", context)
         try:
             TemplateGovernanceWorkflowService.ensure_can_apply_hotfix(
                 hotfix_request=hotfix,
@@ -7853,9 +9108,14 @@ def template_hotfix_review_view(request, hotfix_id: int):
             after_data=model_before_after(hotfix),
             request=request,
             metadata={
+                "critical_action": approve and is_apply_step,
                 "workflow": "TEMPLATE_HOTFIX",
+                "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
+                "confirmation_required": approve and is_apply_step,
+                "confirmation_phrase": HOTFIX_APPLY_CONFIRMATION if approve and is_apply_step else "",
                 "apply_mode": hotfix.apply_mode,
                 "status": hotfix.status,
+                "impact_summary": impact_preview,
             },
         )
         hotfix.refresh_from_db()
@@ -7877,7 +9137,10 @@ def template_hotfix_review_view(request, hotfix_id: int):
         "title": f"Review Hotfix Request #{hotfix.id} ({hotfix.template.code})",
         "hotfix": hotfix,
         "workflow_steps": list(hotfix.workflow_steps.order_by("step_no")) if hotfix.workflow_steps.exists() else [],
-        "current_step": TemplateGovernanceWorkflowService.get_current_hotfix_step(hotfix_request=hotfix),
+        "current_step": current_step,
+        "is_apply_step": is_apply_step,
+        "hotfix_apply_confirmation": HOTFIX_APPLY_CONFIRMATION,
+        "impact_preview": impact_preview,
         "involved_personalities": TemplateHotfixService.involved_personalities(),
     }
     context.update(_scope_context(request))
@@ -7887,7 +9150,7 @@ def template_hotfix_review_view(request, hotfix_id: int):
 @portal_required("ADMIN")
 @permission_required("template_periods.read")
 def template_period_list_view(request):
-    queryset = AdminScopeService.scoped_template_periods(request)
+    queryset = AdminScopeService.maintenance_scoped_template_periods(request)
     selected_template_id = request.GET.get("template_id", "").strip()
     selected_template_id_int = _safe_int(selected_template_id)
     if selected_template_id_int:
@@ -7896,12 +9159,13 @@ def template_period_list_view(request):
     if q:
         queryset = queryset.filter(Q(code__icontains=q) | Q(name__icontains=q) | Q(template__name__icontains=q))
     context = {
-        "page_obj": _get_page(request, queryset),
         "q": q,
         "selected_template_id": selected_template_id,
     }
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="template_period")
     context.update(_scope_context(request))
-    context["templates"] = AdminScopeService.scoped_grading_templates(request)
+    context["templates"] = AdminScopeService.maintenance_scoped_grading_templates(request)
     return render(request, "admin_portal/grading/period_list.html", context)
 
 
@@ -7986,18 +9250,13 @@ def template_period_update_view(request, period_id: int):
 @portal_required("ADMIN")
 @permission_required("template_components.read")
 def template_component_list_view(request):
-    queryset = AdminScopeService.scoped_template_components(request)
+    queryset = AdminScopeService.maintenance_scoped_template_components(request)
     selected_template_id = _safe_int(request.GET.get("template_id"))
     selected_period_id = _safe_int(request.GET.get("period_id"))
     if selected_template_id:
         queryset = queryset.filter(template_period__template_id=selected_template_id)
     if selected_period_id:
         queryset = queryset.filter(template_period_id=selected_period_id)
-    status = request.GET.get("status", "active")
-    if status == "active":
-        queryset = queryset.filter(is_active=True)
-    elif status == "inactive":
-        queryset = queryset.filter(is_active=False)
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(
@@ -8007,18 +9266,27 @@ def template_component_list_view(request):
             | Q(template_period__template__name__icontains=q)
         )
     context = {
-        "page_obj": _get_page(request, queryset),
         "q": q,
-        "status": status,
         "selected_template_id": str(selected_template_id or ""),
         "selected_period_id": str(selected_period_id or ""),
     }
+    builder_template_id = selected_template_id
+    if not builder_template_id and selected_period_id:
+        builder_template_id = (
+            AdminScopeService.maintenance_scoped_template_periods(request)
+            .filter(id=selected_period_id)
+            .values_list("template_id", flat=True)
+            .first()
+        )
+    context["builder_template_id"] = str(builder_template_id or "")
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="template_component")
     context.update(_scope_context(request))
-    period_qs = AdminScopeService.scoped_template_periods(request)
+    period_qs = AdminScopeService.maintenance_scoped_template_periods(request)
     if selected_template_id:
         period_qs = period_qs.filter(template_id=selected_template_id)
     context["periods"] = period_qs
-    context["templates"] = AdminScopeService.scoped_grading_templates(request)
+    context["templates"] = AdminScopeService.maintenance_scoped_grading_templates(request)
     return render(request, "admin_portal/grading/component_list.html", context)
 
 
@@ -8150,7 +9418,7 @@ def template_component_delete_view(request, component_id: int):
 @portal_required("ADMIN")
 @permission_required("template_subcomponents.read")
 def template_subcomponent_list_view(request):
-    queryset = AdminScopeService.scoped_template_subcomponents(request)
+    queryset = AdminScopeService.maintenance_scoped_template_subcomponents(request)
     selected_component_id = _safe_int(request.GET.get("component_id"))
     selected_period_id = _safe_int(request.GET.get("period_id"))
     selected_template_id = _safe_int(request.GET.get("template_id"))
@@ -8169,14 +9437,31 @@ def template_subcomponent_list_view(request):
             | Q(template_component__template_period__template__name__icontains=q)
         )
     context = {
-        "page_obj": _get_page(request, queryset),
         "q": q,
         "selected_component_id": str(selected_component_id or ""),
         "selected_period_id": str(selected_period_id or ""),
         "selected_template_id": str(selected_template_id or ""),
     }
+    builder_template_id = selected_template_id
+    if not builder_template_id and selected_period_id:
+        builder_template_id = (
+            AdminScopeService.maintenance_scoped_template_periods(request)
+            .filter(id=selected_period_id)
+            .values_list("template_id", flat=True)
+            .first()
+        )
+    if not builder_template_id and selected_component_id:
+        builder_template_id = (
+            AdminScopeService.maintenance_scoped_template_components(request)
+            .filter(id=selected_component_id)
+            .values_list("template_period__template_id", flat=True)
+            .first()
+        )
+    context["builder_template_id"] = str(builder_template_id or "")
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="template_subcomponent")
     context.update(_scope_context(request))
-    component_qs = AdminScopeService.scoped_template_components(request)
+    component_qs = AdminScopeService.maintenance_scoped_template_components(request)
     if selected_template_id:
         component_qs = component_qs.filter(template_period__template_id=selected_template_id)
     if selected_period_id:
@@ -8278,7 +9563,7 @@ def template_subcomponent_update_view(request, subcomponent_id: int):
 @portal_required("ADMIN")
 @permission_required("template_details.read")
 def template_detail_list_view(request):
-    queryset = AdminScopeService.scoped_template_details(request)
+    queryset = AdminScopeService.maintenance_scoped_template_details(request)
     selected_subcomponent_id = _safe_int(request.GET.get("subcomponent_id"))
     selected_component_id = _safe_int(request.GET.get("component_id"))
     selected_period_id = _safe_int(request.GET.get("period_id"))
@@ -8301,15 +9586,39 @@ def template_detail_list_view(request):
             | Q(template_subcomponent__template_component__template_period__template__name__icontains=q)
         )
     context = {
-        "page_obj": _get_page(request, queryset),
         "q": q,
         "selected_subcomponent_id": str(selected_subcomponent_id or ""),
         "selected_component_id": str(selected_component_id or ""),
         "selected_period_id": str(selected_period_id or ""),
         "selected_template_id": str(selected_template_id or ""),
     }
+    builder_template_id = selected_template_id
+    if not builder_template_id and selected_period_id:
+        builder_template_id = (
+            AdminScopeService.maintenance_scoped_template_periods(request)
+            .filter(id=selected_period_id)
+            .values_list("template_id", flat=True)
+            .first()
+        )
+    if not builder_template_id and selected_component_id:
+        builder_template_id = (
+            AdminScopeService.maintenance_scoped_template_components(request)
+            .filter(id=selected_component_id)
+            .values_list("template_period__template_id", flat=True)
+            .first()
+        )
+    if not builder_template_id and selected_subcomponent_id:
+        builder_template_id = (
+            AdminScopeService.maintenance_scoped_template_subcomponents(request)
+            .filter(id=selected_subcomponent_id)
+            .values_list("template_component__template_period__template_id", flat=True)
+            .first()
+        )
+    context["builder_template_id"] = str(builder_template_id or "")
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="template_detail")
     context.update(_scope_context(request))
-    subcomponent_qs = AdminScopeService.scoped_template_subcomponents(request)
+    subcomponent_qs = AdminScopeService.maintenance_scoped_template_subcomponents(request)
     if selected_template_id:
         subcomponent_qs = subcomponent_qs.filter(template_component__template_period__template_id=selected_template_id)
     if selected_period_id:
@@ -8422,15 +9731,13 @@ def template_detail_update_view(request, detail_id: int):
 @portal_required("ADMIN")
 @permission_required("tenant_grading_profiles.read")
 def tenant_grading_profile_list_view(request):
-    queryset = AdminScopeService.scoped_tenant_grading_profiles(request)
+    queryset = AdminScopeService.maintenance_scoped_tenant_grading_profiles(request)
     if request.GET.get("tenant_id"):
         queryset = queryset.filter(tenant_id=request.GET.get("tenant_id"))
     if request.GET.get("campus_id"):
         queryset = queryset.filter(campus_id=request.GET.get("campus_id"))
     if request.GET.get("term_type"):
         queryset = queryset.filter(term_type=request.GET.get("term_type"))
-    if request.GET.get("active") in {"1", "0"}:
-        queryset = queryset.filter(is_active=request.GET.get("active") == "1")
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(
@@ -8442,12 +9749,12 @@ def tenant_grading_profile_list_view(request):
             | Q(grading_template__name__icontains=q)
         )
     context = {
-        "page_obj": _get_page(request, queryset),
         "q": q,
-        "active": request.GET.get("active", ""),
         "term_type": request.GET.get("term_type", ""),
         "term_type_choices": TenantGradingProfile.TermType.choices,
     }
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="tenant_grading_profile")
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/tenant_grading_profile_list.html", context)
 
@@ -8459,11 +9766,11 @@ def tenant_grading_profile_create_view(request):
         request.POST or None,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
-        program_queryset=AdminScopeService.scoped_programs(request),
-        course_queryset=AdminScopeService.scoped_courses(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
+        program_queryset=AdminScopeService.active_scoped_programs(request),
+        course_queryset=AdminScopeService.active_scoped_courses(request),
         template_queryset=AdminScopeService.scoped_grading_templates(request).filter(is_published=True, is_active=True),
-        term_queryset=AdminScopeService.scoped_terms(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -8489,7 +9796,7 @@ def tenant_grading_profile_create_view(request):
 @portal_required("ADMIN")
 @permission_required("tenant_grading_profiles.update")
 def tenant_grading_profile_update_view(request, profile_id: int):
-    row = get_object_or_404(AdminScopeService.scoped_tenant_grading_profiles(request), id=profile_id)
+    row = get_object_or_404(AdminScopeService.maintenance_scoped_tenant_grading_profiles(request), id=profile_id)
     before = model_before_after(row)
     template_queryset = AdminScopeService.scoped_grading_templates(request).filter(
         Q(is_published=True, is_active=True) | Q(id=row.grading_template_id)
@@ -8499,11 +9806,11 @@ def tenant_grading_profile_update_view(request, profile_id: int):
         instance=row,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        department_queryset=AdminScopeService.scoped_departments(request),
-        program_queryset=AdminScopeService.scoped_programs(request),
-        course_queryset=AdminScopeService.scoped_courses(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
+        program_queryset=AdminScopeService.active_scoped_programs(request),
+        course_queryset=AdminScopeService.active_scoped_courses(request),
         template_queryset=template_queryset,
-        term_queryset=AdminScopeService.scoped_terms(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -8528,19 +9835,69 @@ def tenant_grading_profile_update_view(request, profile_id: int):
 
 
 @portal_required("ADMIN")
+@permission_required("tenant_grading_profiles.create")
+def tenant_grading_profile_duplicate_view(request, profile_id: int):
+    if request.method != "POST":
+        return HttpResponseForbidden("Invalid method.")
+    source = get_object_or_404(AdminScopeService.maintenance_scoped_tenant_grading_profiles(request), id=profile_id)
+    duplicate = GradingTemplateDuplicationService.duplicate_profile(source=source)
+    AuditService.log_event(
+        action="DUPLICATE",
+        portal="ADMIN",
+        entity_type="TenantGradingProfile",
+        entity_id=duplicate.id,
+        actor=request.user,
+        tenant=duplicate.tenant,
+        campus=duplicate.campus,
+        after_data=model_before_after(duplicate),
+        request=request,
+        metadata={
+            "source_profile_id": source.id,
+            "source_profile_code": source.profile_code,
+            "duplicate_status": "INACTIVE",
+        },
+    )
+    messages.success(
+        request,
+        (
+            f"Tenant grading profile {source.profile_code} duplicated as {duplicate.profile_code}. "
+            "The copy is inactive and not marked as default until reviewed."
+        ),
+    )
+    return redirect("admin_portal:tenant_grading_profile_update", profile_id=duplicate.id)
+
+
+@portal_required("ADMIN")
 @permission_required("course_template_assignments.read")
 def course_template_assignment_list_view(request):
-    courses_qs = AdminScopeService.scoped_courses(request).select_related("tenant", "campus", "department")
-    assignments_qs = AdminScopeService.scoped_course_template_assignments(request)
+    courses_qs = AdminScopeService.active_scoped_courses(request).select_related("tenant", "campus", "department")
+    assignments_qs = AdminScopeService.maintenance_scoped_course_template_assignments(request)
     tenant_id = request.GET.get("tenant_id")
     course_id = request.GET.get("course_id")
+    term_id = request.GET.get("term_id")
     without_template = request.GET.get("without_template") == "1"
+    offerings_without_template = request.GET.get("offerings_without_template") == "1"
     if tenant_id:
         courses_qs = courses_qs.filter(tenant_id=tenant_id)
         assignments_qs = assignments_qs.filter(course__tenant_id=tenant_id)
     if course_id:
         courses_qs = courses_qs.filter(id=course_id)
         assignments_qs = assignments_qs.filter(course_id=course_id)
+    offerings_qs = AdminScopeService.scoped_course_offerings(request).filter(is_active=True)
+    if tenant_id:
+        offerings_qs = offerings_qs.filter(tenant_id=tenant_id)
+    if course_id:
+        offerings_qs = offerings_qs.filter(course_id=course_id)
+    if term_id:
+        offerings_qs = offerings_qs.filter(term_id=term_id)
+    else:
+        active_scope_term_ids = []
+        for tenant in AdminScopeService.active_scoped_tenants(request):
+            _active_ay, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant.id)
+            if active_term:
+                active_scope_term_ids.append(active_term.id)
+        if active_scope_term_ids:
+            offerings_qs = offerings_qs.filter(term_id__in=active_scope_term_ids)
     q = request.GET.get("q", "").strip()
     if q:
         assignments_qs = assignments_qs.filter(
@@ -8550,9 +9907,15 @@ def course_template_assignment_list_view(request):
             | Q(grading_template__name__icontains=q)
         )
         courses_qs = courses_qs.filter(Q(code__icontains=q) | Q(title__icontains=q))
+        offerings_qs = offerings_qs.filter(
+            Q(course__code__icontains=q)
+            | Q(course__title__icontains=q)
+            | Q(section__code__icontains=q)
+            | Q(section__name__icontains=q)
+        )
 
     active_assignment_course_ids = set(
-        AdminScopeService.scoped_course_template_assignments(request)
+        AdminScopeService.maintenance_scoped_course_template_assignments(request)
         .filter(is_active=True, grading_template__is_active=True)
         .values_list("course_id", flat=True)
         .distinct()
@@ -8565,13 +9928,48 @@ def course_template_assignment_list_view(request):
     filtered_course_ids = set(courses_qs.values_list("id", flat=True))
     courses_without_assignment_count = len(filtered_course_ids - filtered_active_course_ids)
 
-    total_scoped_courses = AdminScopeService.scoped_courses(request).count()
+    total_scoped_courses = AdminScopeService.active_scoped_courses(request).count()
     courses_with_template_count = len(active_assignment_course_ids)
     courses_without_template_total = max(total_scoped_courses - courses_with_template_count, 0)
-    active_assignment_rows = AdminScopeService.scoped_course_template_assignments(request).filter(
+    active_assignment_rows = AdminScopeService.maintenance_scoped_course_template_assignments(request).filter(
         is_active=True,
         grading_template__is_active=True,
     ).count()
+    offering_rows_without_template = []
+    for offering in offerings_qs.select_related(
+        "tenant",
+        "campus",
+        "department",
+        "program",
+        "academic_year",
+        "term",
+        "course",
+        "section",
+    ):
+        has_course_template_assignment = CourseTemplateAssignment.objects.filter(
+            course_id=offering.course_id,
+            is_active=True,
+            grading_template__is_active=True,
+            grading_template__is_published=True,
+        ).filter(
+            Q(effective_from_term_id=offering.term_id) | Q(effective_from_term__isnull=True)
+        ).exists()
+        if has_course_template_assignment:
+            continue
+        faculty_names = [
+            assignment.faculty_user.full_name or assignment.faculty_user.username
+            for assignment in offering.faculty_assignments.filter(is_active=True)
+            .select_related("faculty_user")
+            .order_by("faculty_user__last_name", "faculty_user__first_name", "faculty_user__username")
+        ]
+        offering_rows_without_template.append(
+            SimpleNamespace(
+                offering=offering,
+                faculty_names=", ".join(faculty_names) if faculty_names else "-",
+                issue="No active published course-template assignment for this offering term.",
+            )
+        )
+    offerings_without_template_count = len(offering_rows_without_template)
 
     if without_template:
         rows = [
@@ -8586,17 +9984,22 @@ def course_template_assignment_list_view(request):
             if course.id not in active_assignment_course_ids
         ]
     else:
-        rows = list(assignments_qs)
+        rows = None
 
     context = {
-        "page_obj": _get_page(request, rows),
         "q": q,
         "without_template": without_template,
+        "offerings_without_template": offerings_without_template,
         "metric_cards": [
             {
                 "label": "Courses Without Grading Template",
                 "value": courses_without_template_total,
                 "meta": "Courses in the current scope with no active template assignment yet.",
+            },
+            {
+                "label": "Offerings Without Course Template",
+                "value": offerings_without_template_count,
+                "meta": "Current course offerings whose course has no active published template assignment.",
             },
             {
                 "label": "Courses With Template",
@@ -8610,9 +10013,18 @@ def course_template_assignment_list_view(request):
             },
         ],
         "filtered_without_template_count": courses_without_assignment_count,
+        "offerings_without_template_count": offerings_without_template_count,
     }
+    if offerings_without_template:
+        context["offering_page_obj"] = _get_page(request, offering_rows_without_template)
+    elif without_template:
+        context["page_obj"] = _get_page(request, rows)
+    else:
+        context.update(_active_inactive_pages(request, assignments_qs))
+        _with_inactive_record_metadata(request, context, model_key="course_template_assignment")
     context.update(_scope_context(request))
-    context["courses"] = AdminScopeService.scoped_courses(request)
+    context["courses"] = AdminScopeService.active_scoped_courses(request)
+    context["terms"] = AdminScopeService.active_scoped_terms(request)
     return render(request, "admin_portal/grading/course_template_assignment_list.html", context)
 
 
@@ -8621,9 +10033,9 @@ def course_template_assignment_list_view(request):
 def course_template_assignment_create_view(request):
     form = BulkCourseTemplateAssignmentForm(
         request.POST or None,
-        course_queryset=AdminScopeService.scoped_courses(request),
+        course_queryset=AdminScopeService.active_scoped_courses(request),
         template_queryset=AdminScopeService.scoped_grading_templates(request).filter(is_published=True, is_active=True),
-        term_queryset=AdminScopeService.scoped_terms(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -8731,9 +10143,9 @@ def course_template_assignment_update_view(request, assignment_id: int):
     form = CourseTemplateAssignmentForm(
         request.POST or None,
         instance=row,
-        course_queryset=AdminScopeService.scoped_courses(request),
+        course_queryset=AdminScopeService.active_scoped_courses(request),
         template_queryset=template_queryset,
-        term_queryset=AdminScopeService.scoped_terms(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -8760,7 +10172,7 @@ def course_template_assignment_update_view(request, assignment_id: int):
 @portal_required("ADMIN")
 @permission_required("course_base_overrides.read")
 def course_base_override_list_view(request):
-    queryset = AdminScopeService.scoped_course_base_value_overrides(request)
+    queryset = AdminScopeService.maintenance_scoped_course_base_value_overrides(request)
     if request.GET.get("tenant_id"):
         queryset = queryset.filter(course__tenant_id=request.GET.get("tenant_id"))
     if request.GET.get("course_id"):
@@ -8768,9 +10180,11 @@ def course_base_override_list_view(request):
     q = request.GET.get("q", "").strip()
     if q:
         queryset = queryset.filter(Q(course__code__icontains=q))
-    context = {"page_obj": _get_page(request, queryset), "q": q}
+    context = {"q": q}
+    context.update(_active_inactive_pages(request, queryset))
+    _with_inactive_record_metadata(request, context, model_key="course_base_override")
     context.update(_scope_context(request))
-    context["courses"] = AdminScopeService.scoped_courses(request)
+    context["courses"] = AdminScopeService.active_scoped_courses(request)
     return render(request, "admin_portal/grading/course_base_override_list.html", context)
 
 
@@ -8779,8 +10193,8 @@ def course_base_override_list_view(request):
 def course_base_override_create_view(request):
     form = CourseBaseValueOverrideForm(
         request.POST or None,
-        course_queryset=AdminScopeService.scoped_courses(request),
-        term_queryset=AdminScopeService.scoped_terms(request),
+        course_queryset=AdminScopeService.active_scoped_courses(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -8811,8 +10225,8 @@ def course_base_override_update_view(request, override_id: int):
     form = CourseBaseValueOverrideForm(
         request.POST or None,
         instance=row,
-        course_queryset=AdminScopeService.scoped_courses(request),
-        term_queryset=AdminScopeService.scoped_terms(request),
+        course_queryset=AdminScopeService.active_scoped_courses(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -8839,10 +10253,7 @@ def course_base_override_update_view(request, override_id: int):
 @portal_required("ADMIN")
 @permission_required("grading_periods.read")
 def grading_period_lock_list_view(request):
-    queryset = AdminScopeService.scoped_grading_period_locks(request)
-    active_state = request.GET.get("active", "1")
-    if active_state in {"1", "0"}:
-        queryset = queryset.filter(is_active=active_state == "1")
+    queryset = AdminScopeService.maintenance_scoped_grading_period_locks(request)
     if request.GET.get("campus_id"):
         queryset = queryset.filter(campus_id=request.GET.get("campus_id"))
     if request.GET.get("term_id"):
@@ -8861,11 +10272,18 @@ def grading_period_lock_list_view(request):
         )
 
     context = {
-        "page_obj": _get_page(request, queryset),
         "q": q,
-        "terms": AdminScopeService.scoped_terms(request),
-        "active_state": active_state,
+        "terms": AdminScopeService.active_scoped_terms(request),
+        "broad_period_reopen_confirmation": BROAD_PERIOD_REOPEN_CONFIRMATION,
     }
+    context.update(_active_inactive_pages(request, queryset))
+    for page_key in ("active_page_obj", "inactive_page_obj"):
+        page_obj = context.get(page_key)
+        if not page_obj:
+            continue
+        for lock_row in page_obj.object_list:
+            lock_row.reopen_impact = _period_lock_reopen_impact(lock_row, request)
+    _with_inactive_record_metadata(request, context, model_key="period_lock")
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/period_lock_list.html", context)
 
@@ -8877,8 +10295,8 @@ def grading_period_lock_create_view(request):
         request.POST or None,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        academic_year_queryset=AdminScopeService.scoped_academic_years(request),
-        term_queryset=AdminScopeService.scoped_terms(request),
+        academic_year_queryset=AdminScopeService.active_scoped_academic_years(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
         offering_queryset=AdminScopeService.scoped_course_offerings(request),
     )
     _style_form(form)
@@ -8916,8 +10334,8 @@ def grading_period_lock_update_view(request, lock_id: int):
         instance=row,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
-        academic_year_queryset=AdminScopeService.scoped_academic_years(request),
-        term_queryset=AdminScopeService.scoped_terms(request),
+        academic_year_queryset=AdminScopeService.active_scoped_academic_years(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
         offering_queryset=AdminScopeService.scoped_course_offerings(request),
     )
     _style_form(form)
@@ -8979,6 +10397,15 @@ def grading_period_lock_reopen_view(request, lock_id: int):
     if request.method != "POST":
         return HttpResponseForbidden("Invalid method.")
     row = get_object_or_404(AdminScopeService.scoped_grading_period_locks(request), id=lock_id)
+    reason = (request.POST.get("reopen_reason") or "").strip()
+    confirmation = (request.POST.get("confirmation_phrase") or "").strip()
+    impact_preview = _period_lock_reopen_impact(row, request)
+    if not reason:
+        messages.error(request, "Period was not reopened. Enter the operational reason.")
+        return _redirect_back_or_default(request, "admin_portal:grading_period_lock_list")
+    if impact_preview["is_broad"] and confirmation != BROAD_PERIOD_REOPEN_CONFIRMATION:
+        messages.error(request, f"Campus-wide reopen was not run. Type {BROAD_PERIOD_REOPEN_CONFIRMATION} to confirm.")
+        return _redirect_back_or_default(request, "admin_portal:grading_period_lock_list")
     before = model_before_after(row)
     row.is_locked = False
     row.reopened_by_user = request.user
@@ -8994,6 +10421,13 @@ def grading_period_lock_reopen_view(request, lock_id: int):
         campus=row.campus,
         before_data=before,
         after_data=model_before_after(row),
+        metadata={
+            "critical_action": True,
+            "reason": reason,
+            "confirmation_required": impact_preview["is_broad"],
+            "confirmation_phrase": BROAD_PERIOD_REOPEN_CONFIRMATION if impact_preview["is_broad"] else "",
+            "impact_summary": impact_preview,
+        },
         request=request,
     )
     messages.success(request, "Period reopened.")
@@ -9247,9 +10681,9 @@ def overdue_unsubmitted_report_view(request):
         "summary": summary,
         "q": request.GET.get("q", ""),
         "period_code": request.GET.get("period_code", ""),
-        "campus_options": AdminScopeService.scoped_campuses(request).order_by("code"),
-        "academic_year_options": AdminScopeService.scoped_academic_years(request).order_by("-start_date"),
-        "term_options": AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no"),
+        "campus_options": AdminScopeService.active_scoped_campuses(request).order_by("code"),
+        "academic_year_options": AdminScopeService.active_scoped_academic_years(request).order_by("-start_date"),
+        "term_options": AdminScopeService.active_scoped_terms(request).order_by("-academic_year__start_date", "sequence_no"),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/overdue_unsubmitted_report.html", context)
@@ -9334,7 +10768,7 @@ def grade_submission_list_view(request):
         "page_obj": page_obj,
         "q": q,
         "status": request.GET.get("status", ""),
-        "terms": AdminScopeService.scoped_terms(request),
+        "terms": AdminScopeService.active_scoped_terms(request),
         "can_create_reopen_request": can_create_reopen_request,
         "can_force_reopen": can_force_reopen,
         "can_revert_before_deadline": can_revert_before_deadline,
@@ -9401,13 +10835,14 @@ def grade_submission_reopen_request_list_view(request):
             Q(offering__course__code__icontains=q)
             | Q(offering__section__code__icontains=q)
             | Q(requested_by_user__username__icontains=q)
+            | Q(initiated_by_user__username__icontains=q)
             | Q(justification__icontains=q)
         )
     context = {
         "page_obj": _get_page(request, queryset),
         "q": q,
         "status": request.GET.get("status", ""),
-        "terms": AdminScopeService.scoped_terms(request),
+        "terms": AdminScopeService.active_scoped_terms(request),
         "status_choices": GradeSubmissionReopenRequest.Status.choices,
     }
     context.update(_scope_context(request))
@@ -9483,6 +10918,15 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
                         campus=updated.campus,
                         before_data=before_request,
                         after_data=model_before_after(updated),
+                        metadata={
+                            "critical_action": True,
+                            "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
+                            "impact_summary": {
+                                "offering_id": updated.offering_id,
+                                "period_code": updated.template_period.code if updated.template_period_id else "",
+                                "decision": "APPROVE" if approved else "REJECT",
+                            },
+                        },
                         request=request,
                     )
                     if approved:
@@ -9497,6 +10941,14 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
                             campus=refreshed_submission.campus,
                             before_data=before_submission,
                             after_data=model_before_after(refreshed_submission),
+                            metadata={
+                                "critical_action": True,
+                                "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
+                                "impact_summary": {
+                                    "offering_id": refreshed_submission.offering_id,
+                                    "period_id": refreshed_submission.template_period_id,
+                                },
+                            },
                             request=request,
                         )
                     messages.success(
@@ -9543,11 +10995,348 @@ def grade_correction_request_list_view(request):
         "page_obj": page_obj,
         "q": q,
         "status": request.GET.get("status", ""),
-        "terms": AdminScopeService.scoped_terms(request),
+        "terms": AdminScopeService.active_scoped_terms(request),
         "status_choices": GradeCorrectionRequest.Status.choices,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/correction_request_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("corrections.create_on_behalf")
+def grade_correction_request_create_on_behalf_view(request):
+    GradingGovernanceService.auto_lapse_expired_correction_windows()
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    current_campus_id = getattr(request, "scope", {}).get("campus_id")
+    request_data = request.POST if request.method == "POST" else request.GET
+
+    campus_queryset = AdminScopeService.active_scoped_campuses(request).order_by("code", "name")
+    selected_campus_id = _safe_int(request_data.get("campus")) or current_campus_id
+    selected_campus = campus_queryset.filter(id=selected_campus_id).first() if selected_campus_id else campus_queryset.first()
+    selected_campus_id = selected_campus.id if selected_campus else None
+
+    academic_year_queryset = AdminScopeService.active_scoped_academic_years(request).order_by("-start_date", "code")
+    selected_academic_year_id = _safe_int(request_data.get("academic_year"))
+    selected_academic_year = (
+        academic_year_queryset.filter(id=selected_academic_year_id).first()
+        if selected_academic_year_id
+        else academic_year_queryset.first()
+    )
+    selected_academic_year_id = selected_academic_year.id if selected_academic_year else None
+
+    term_queryset = AdminScopeService.active_scoped_terms(request).select_related("academic_year")
+    if selected_academic_year_id:
+        term_queryset = term_queryset.filter(academic_year_id=selected_academic_year_id)
+    term_queryset = term_queryset.order_by("sequence_no", "code")
+    selected_term_id = _safe_int(request_data.get("term"))
+    selected_term = term_queryset.filter(id=selected_term_id).first() if selected_term_id else term_queryset.first()
+    selected_term_id = selected_term.id if selected_term else None
+
+    selected_scope = ScopeService.build_scope(
+        request.user,
+        tenant_id=tenant_id,
+        campus_id=selected_campus_id,
+    )
+    selected_department_ids = selected_scope.get("department_ids", [])
+    base_offering_queryset = (
+        CourseOffering.objects.filter(
+            tenant_id=tenant_id,
+            campus_id=selected_campus_id,
+            academic_year_id=selected_academic_year_id,
+            term_id=selected_term_id,
+            is_active=True,
+            academic_year__is_active=True,
+            term__is_active=True,
+            campus__is_active=True,
+            tenant__is_active=True,
+            department__is_active=True,
+            program__is_active=True,
+            program__department__is_active=True,
+            course__is_active=True,
+            section__is_active=True,
+            section__department__is_active=True,
+            section__program__is_active=True,
+            section__program__department__is_active=True,
+        )
+        .filter(Q(course__department__isnull=True) | Q(course__department__is_active=True))
+        .filter(
+            Q(department_id__in=selected_department_ids)
+            | Q(faculty_assignments__faculty_user__default_department_id__in=selected_department_ids)
+        )
+        .select_related("course", "section", "term", "academic_year", "campus")
+        .distinct()
+        .order_by("-academic_year__start_date", "term__sequence_no", "course__code", "section__code")
+    )
+
+    assignment_queryset = FacultyAssignment.objects.filter(
+        offering__in=base_offering_queryset,
+        is_active=True,
+    ).select_related("faculty_user", "offering", "offering__section", "offering__course")
+    faculty_ids = assignment_queryset.values_list("faculty_user_id", flat=True).distinct()
+    faculty_queryset = User.objects.filter(id__in=faculty_ids).order_by("last_name", "first_name", "username")
+    selected_faculty_id = _safe_int(request_data.get("faculty_user"))
+    selected_faculty = faculty_queryset.filter(id=selected_faculty_id).first() if selected_faculty_id else None
+
+    scoped_assignment_queryset = assignment_queryset
+    if selected_faculty:
+        scoped_assignment_queryset = scoped_assignment_queryset.filter(faculty_user_id=selected_faculty.id)
+
+    section_ids = scoped_assignment_queryset.values_list("offering__section_id", flat=True).distinct()
+    section_queryset = Section.objects.filter(id__in=section_ids).order_by("code", "name")
+    selected_section_id = _safe_int(request_data.get("section"))
+    selected_section = section_queryset.filter(id=selected_section_id).first() if selected_section_id else None
+
+    if selected_section:
+        scoped_assignment_queryset = scoped_assignment_queryset.filter(offering__section_id=selected_section.id)
+
+    course_ids = scoped_assignment_queryset.values_list("offering__course_id", flat=True).distinct()
+    course_queryset = Course.objects.filter(id__in=course_ids).order_by("code", "title")
+    selected_course_id = _safe_int(request_data.get("course"))
+    selected_course = course_queryset.filter(id=selected_course_id).first() if selected_course_id else None
+
+    selected_offering = None
+    if selected_faculty and selected_section and selected_course:
+        selected_offering = (
+            base_offering_queryset.filter(
+                faculty_assignments__faculty_user_id=selected_faculty.id,
+                faculty_assignments__is_active=True,
+                section_id=selected_section.id,
+                course_id=selected_course.id,
+            )
+            .distinct()
+            .first()
+        )
+
+    period_queryset = GradingTemplatePeriod.objects.none()
+    if selected_offering:
+        try:
+            template = FacultyGradingService.resolve_template_for_offering(selected_offering)
+            period_queryset = template.periods.filter(is_active=True).order_by("sequence_no", "id")
+        except ValidationError:
+            template = None
+    else:
+        template = None
+
+    selected_period_id = _safe_int(request_data.get("template_period"))
+    selected_period = period_queryset.filter(id=selected_period_id).first() if selected_period_id else None
+
+    setup_data = request_data.copy()
+    if selected_campus_id and not setup_data.get("campus"):
+        setup_data["campus"] = str(selected_campus_id)
+    if selected_academic_year_id and not setup_data.get("academic_year"):
+        setup_data["academic_year"] = str(selected_academic_year_id)
+    if selected_term_id and not setup_data.get("term"):
+        setup_data["term"] = str(selected_term_id)
+    setup_form = GradeCorrectionOnBehalfSetupForm(
+        setup_data or None,
+        campus_queryset=campus_queryset,
+        academic_year_queryset=academic_year_queryset,
+        term_queryset=term_queryset,
+        faculty_queryset=faculty_queryset,
+        section_queryset=section_queryset,
+        course_queryset=course_queryset,
+        period_queryset=period_queryset,
+    )
+    _style_form(setup_form)
+
+    enrollments = []
+    student_qs = Student.objects.none()
+    activity_qs = GradeActivity.objects.none()
+    score_lookup = {}
+    correction_form = None
+
+    can_file = bool(selected_offering and selected_period and selected_faculty)
+    if can_file:
+        enrollments = list(FacultyGradingService.get_active_enrollments(selected_offering))
+        student_ids = [row.student_id for row in enrollments]
+        student_qs = Student.objects.filter(id__in=student_ids).order_by("last_name", "first_name", "student_no")
+        activity_qs = (
+            GradeActivity.objects.filter(
+                offering_id=selected_offering.id,
+                template_period_id=selected_period.id,
+                is_active=True,
+            )
+            .select_related("template_component", "template_subcomponent", "template_detail")
+            .order_by(
+                "template_component__sort_order",
+                "template_subcomponent__sort_order",
+                "template_detail__sort_order",
+                "activity_date",
+                "id",
+            )
+        )
+        activity_ids = list(activity_qs.values_list("id", flat=True))
+        score_lookup = {
+            (row.student_id, row.activity_id): _format_decimal_display(row.raw_score)
+            for row in StudentActivityScore.objects.filter(
+                activity_id__in=activity_ids,
+                student_id__in=student_ids,
+                is_active=True,
+            )
+        }
+        correction_form = GradeCorrectionRequestForm(
+            request.POST or None,
+            request.FILES or None,
+            student_queryset=student_qs,
+            activity_queryset=activity_qs,
+            score_lookup=score_lookup,
+        )
+        _style_form(correction_form)
+
+    if request.method == "POST":
+        if not setup_form.is_valid():
+            messages.error(request, "Review the petition setup fields before submitting.")
+        elif not can_file:
+            messages.error(request, "Select a valid offering, grading period, and original faculty member.")
+        elif not GradingGovernanceService.is_system_correction_enabled(tenant_id=selected_offering.tenant_id):
+            messages.error(request, "Correction requests are disabled by tenant policy (MANUAL_ONLY).")
+        elif not GradingGovernanceService.is_submitted(offering=selected_offering, template_period=selected_period):
+            messages.error(request, "On-behalf correction petitions are allowed only after period submission.")
+        elif correction_form and correction_form.is_valid():
+            try:
+                correction = GradingGovernanceService.create_correction_request(
+                    user=selected_faculty,
+                    initiated_by_user=request.user,
+                    request_source=GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF,
+                    on_behalf_reason=setup_form.cleaned_data.get("on_behalf_reason"),
+                    offering=selected_offering,
+                    template_period=selected_period,
+                    justification=correction_form.cleaned_data["justification"],
+                    items=correction_form.cleaned_data["items"],
+                )
+            except ValidationError as exc:
+                correction_form.add_error(None, "; ".join(exc.messages))
+            else:
+                attachment = correction_form.cleaned_data.get("attachment")
+                if attachment:
+                    attachment_validation = correction_form.cleaned_data.get("attachment_validation")
+                    correction_attachment = GradeCorrectionAttachment.objects.create(
+                        correction_request=correction,
+                        file=attachment,
+                        uploaded_by_user=request.user,
+                        original_filename=attachment_validation.original_filename if attachment_validation else attachment.name,
+                        content_type=attachment_validation.content_type if attachment_validation else getattr(attachment, "content_type", ""),
+                        file_size_bytes=attachment_validation.file_size_bytes if attachment_validation else getattr(attachment, "size", 0),
+                    )
+                    AuditService.log_event(
+                        action="UPLOAD_CORRECTION_ATTACHMENT",
+                        portal="ADMIN",
+                        entity_type="GradeCorrectionAttachment",
+                        entity_id=correction_attachment.id,
+                        actor=request.user,
+                        tenant=selected_offering.tenant,
+                        campus=selected_offering.campus,
+                        after_data={
+                            "correction_request_id": correction.id,
+                            "original_filename": correction_attachment.original_filename,
+                            "stored_filename": correction_attachment.file.name,
+                            "content_type": correction_attachment.content_type,
+                            "file_size_bytes": correction_attachment.file_size_bytes,
+                            "on_behalf": True,
+                        },
+                        request=request,
+                    )
+                notification_result = CorrectionNotificationService.send_correction_submission_approval_notifications(
+                    request_obj=correction
+                )
+                AuditService.log_event(
+                    action="CREATE_ON_BEHALF",
+                    portal="ADMIN",
+                    entity_type="GradeCorrectionRequest",
+                    entity_id=correction.id,
+                    actor=request.user,
+                    tenant=selected_offering.tenant,
+                    campus=selected_offering.campus,
+                    after_data={
+                        "offering_id": selected_offering.id,
+                        "period_id": selected_period.id,
+                        "requested_by_user_id": selected_faculty.id,
+                        "initiated_by_user_id": request.user.id,
+                        "request_source": correction.request_source,
+                        "on_behalf_reason": correction.on_behalf_reason,
+                        "correction_item_count": len(correction_form.cleaned_data["items"]),
+                        "approval_notification_email_attempted": notification_result["attempted"],
+                        "approval_notification_email_sent": notification_result["sent"],
+                        "approval_notification_email_recipients": notification_result["recipients"],
+                    },
+                    request=request,
+                )
+                if notification_result["errors"]:
+                    messages.warning(request, "Petition created, but some approval notification emails could not be sent.")
+                messages.success(request, "On-behalf correction petition submitted for review.")
+                return redirect("admin_portal:grade_correction_request_review", request_id=correction.id)
+
+    context = {
+        "title": "Create Correction Petition On Behalf",
+        "setup_form": setup_form,
+        "form": correction_form,
+        "selected_campus": selected_campus,
+        "selected_academic_year": selected_academic_year,
+        "selected_term": selected_term,
+        "offering_count": base_offering_queryset.count(),
+        "faculty_count": faculty_queryset.count(),
+        "selected_offering": selected_offering,
+        "selected_period": selected_period,
+        "selected_faculty": selected_faculty,
+        "selected_section": selected_section,
+        "selected_course": selected_course,
+        "can_file": can_file,
+        "is_submitted": (
+            GradingGovernanceService.is_submitted(offering=selected_offering, template_period=selected_period)
+            if selected_offering and selected_period
+            else False
+        ),
+        "correction_students": [
+            {
+                "id": enrollment.student_id,
+                "label": f"{enrollment.student.student_no} - {enrollment.student.last_name}, {enrollment.student.first_name}",
+                "student_no": enrollment.student.student_no,
+                "name": f"{enrollment.student.last_name}, {enrollment.student.first_name}",
+                "status": enrollment.enrollment_status,
+            }
+            for enrollment in enrollments
+        ],
+        "correction_activities": [
+            {
+                "id": activity.id,
+                "label": _correction_activity_label(activity),
+                "title": activity.title,
+                "component_name": activity.template_component.name,
+                "subcomponent_name": activity.template_subcomponent.name if activity.template_subcomponent else "-",
+                "detail_name": activity.template_detail.name if activity.template_detail else "-",
+                "entry_method_label": FacultyGradingService.score_input_mode_label(
+                    FacultyGradingService.resolve_score_input_mode(
+                        template_component=activity.template_component,
+                        template_subcomponent=activity.template_subcomponent,
+                        template_detail=activity.template_detail,
+                    )
+                ),
+                "score_input_mode": FacultyGradingService.resolve_score_input_mode(
+                    template_component=activity.template_component,
+                    template_subcomponent=activity.template_subcomponent,
+                    template_detail=activity.template_detail,
+                ),
+                "score_input_max": _format_decimal_display(
+                    Decimal("100")
+                    if FacultyGradingService.resolve_score_input_mode(
+                        template_component=activity.template_component,
+                        template_subcomponent=activity.template_subcomponent,
+                        template_detail=activity.template_detail,
+                    )
+                    == "DIRECT_PERCENTAGE"
+                    else activity.total_score
+                ),
+                "total_score": _format_decimal_display(activity.total_score),
+            }
+            for activity in activity_qs
+        ],
+        "correction_score_map": {
+            f"{student_id}:{activity_id}": value for (student_id, activity_id), value in score_lookup.items()
+        },
+        "selected_grade_activity_ids": set(correction_form.data.getlist("grade_activities")) if correction_form and correction_form.is_bound else set(),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/correction_request_create_on_behalf.html", context)
 
 
 @portal_required("ADMIN")
@@ -9631,6 +11420,17 @@ def grade_correction_request_review_view(request, request_id: int):
                 campus=updated.campus,
                 before_data=before,
                 after_data=after,
+                metadata={
+                    "critical_action": True,
+                    "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
+                    "impact_summary": {
+                        "offering_id": updated.offering_id,
+                        "period_id": updated.template_period_id,
+                        "is_final_step": is_final_step,
+                        "auto_apply_on_final_approval": auto_apply_on_final_approval,
+                        "decision": "APPROVE" if approved else "REJECT",
+                    },
+                },
                 request=request,
             )
             registrar_email_result = None

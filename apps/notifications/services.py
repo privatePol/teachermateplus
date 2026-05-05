@@ -11,7 +11,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering, FacultyAssignment
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
 from apps.core.services.features import FeatureSettingsService
+from apps.core.services.scope import ScopeService
 from apps.grading.models import GradeSubmission, GradingPeriodLock
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
 from apps.notifications.models import (
@@ -21,6 +23,23 @@ from apps.notifications.models import (
     SubmissionNonComplianceNotice,
 )
 from apps.rbac.models import UserRole
+
+
+def _active_offering_chain(queryset):
+    return queryset.filter(
+        tenant__is_active=True,
+        campus__is_active=True,
+        academic_year__is_active=True,
+        term__is_active=True,
+        department__is_active=True,
+        program__is_active=True,
+        program__department__is_active=True,
+        course__is_active=True,
+        section__is_active=True,
+        section__department__is_active=True,
+        section__program__is_active=True,
+        section__program__department__is_active=True,
+    ).filter(Q(course__department__isnull=True) | Q(course__department__is_active=True))
 
 
 class ReminderService:
@@ -35,6 +54,7 @@ class ReminderService:
             term_id=lock.term_id,
             is_active=True,
         )
+        qs = _active_offering_chain(qs)
         if lock.scope_type == GradingPeriodLock.ScopeType.COURSE and lock.course_offering_id:
             qs = qs.filter(id=lock.course_offering_id)
         return qs.select_related("course", "section", "term")
@@ -125,11 +145,17 @@ class FacultyReminderService:
     def _build_email_payload(cls, reminder: FacultyReminder):
         portal_url = cls._portal_url("faculty_portal:reminder_center")
         subject = f"NCBA-EDUGRADESPRO: {reminder.title}"
+        logo_context = build_email_logo_context(
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            external_url=getattr(settings, "FACULTY_PORTAL_REMINDER_LOGO_URL", "").strip()
+            or getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+        )
         context = {
             "reminder": reminder,
             "portal_url": portal_url,
-            "logo_url": getattr(settings, "FACULTY_PORTAL_REMINDER_LOGO_URL", "").strip()
-            or "/media/logos/ncba-logo.png",
+            **logo_context,
         }
         text_body = render_to_string("faculty_portal/emails/reminder_notification.txt", context)
         html_body = render_to_string("faculty_portal/emails/reminder_notification.html", context)
@@ -349,6 +375,13 @@ class FacultyReminderService:
                     from_email=from_email,
                     to=[entry.recipient_email],
                 )
+                attach_logo_for_src(
+                    message,
+                    src="cid:ncba-logo" if "cid:ncba-logo" in (entry.html_body or "") else "",
+                    filename="ncba-logo.png",
+                    cid="ncba-logo",
+                    configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+                )
                 message.attach_alternative(entry.html_body, "text/html")
                 message.send(fail_silently=False)
                 entry.status = FacultyReminderEmailQueue.Status.SENT
@@ -465,13 +498,13 @@ class SubmissionNonComplianceNoticeService:
             scope_key = (lock.tenant_id, lock.campus_id, lock.academic_year_id, lock.term_id)
             if scope_key not in offerings_by_scope:
                 offerings_by_scope[scope_key] = list(
-                    CourseOffering.objects.filter(
+                    _active_offering_chain(CourseOffering.objects.filter(
                         tenant_id=lock.tenant_id,
                         campus_id=lock.campus_id,
                         academic_year_id=lock.academic_year_id,
                         term_id=lock.term_id,
                         is_active=True,
-                    )
+                    ))
                 )
             for offering in offerings_by_scope[scope_key]:
                 target_key = (offering.id, period_key)
@@ -483,7 +516,7 @@ class SubmissionNonComplianceNoticeService:
         offering_ids = {offering_id for offering_id, _period_key in lock_targets.keys()}
         offerings = {
             row.id: row
-            for row in CourseOffering.objects.filter(id__in=offering_ids).select_related(
+            for row in _active_offering_chain(CourseOffering.objects.filter(id__in=offering_ids)).select_related(
                 "tenant",
                 "campus",
                 "department",
@@ -607,6 +640,7 @@ class SubmissionNonComplianceNoticeService:
         )
         if not role_codes:
             return []
+        department_scope_ids = ScopeService.department_ancestor_ids(offering.department_id, include_self=True)
         rows = (
             UserRole.objects.filter(
                 is_active=True,
@@ -616,7 +650,7 @@ class SubmissionNonComplianceNoticeService:
             )
             .filter(Q(tenant_id=offering.tenant_id) | Q(tenant__isnull=True))
             .filter(Q(campus_id=offering.campus_id) | Q(campus__isnull=True))
-            .filter(Q(department_id=offering.department_id) | Q(department__isnull=True))
+            .filter(Q(department_id__in=department_scope_ids) | Q(department__isnull=True))
             .select_related("user", "role")
         )
         result = []
@@ -656,12 +690,18 @@ class SubmissionNonComplianceNoticeService:
     def _build_email_payload(cls, *, notice):
         faculty_portal_url = cls._portal_url("faculty_portal:reminder_center")
         admin_report_url = cls._admin_url("admin_portal:overdue_unsubmitted_report")
+        logo_context = build_email_logo_context(
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            external_url=getattr(settings, "FACULTY_PORTAL_REMINDER_LOGO_URL", "").strip()
+            or getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+        )
         context = {
             "notice": notice,
             "faculty_portal_url": faculty_portal_url,
             "admin_report_url": admin_report_url,
-            "logo_url": getattr(settings, "FACULTY_PORTAL_REMINDER_LOGO_URL", "").strip()
-            or "/media/logos/ncba-logo.png",
+            **logo_context,
         }
         text_body = render_to_string("notifications/emails/submission_non_compliance_notice.txt", context)
         html_body = render_to_string("notifications/emails/submission_non_compliance_notice.html", context)
@@ -687,6 +727,13 @@ class SubmissionNonComplianceNoticeService:
                 body=text_body,
                 from_email=from_email,
                 to=recipient_emails,
+            )
+            attach_logo_for_src(
+                message,
+                src="cid:ncba-logo" if "cid:ncba-logo" in (html_body or "") else "",
+                filename="ncba-logo.png",
+                cid="ncba-logo",
+                configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
             )
             message.attach_alternative(html_body, "text/html")
             message.send(fail_silently=False)

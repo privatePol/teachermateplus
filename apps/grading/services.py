@@ -10,8 +10,9 @@ from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
-from apps.academics.models import CourseOffering
+from apps.academics.models import CourseOffering, FacultyAssignment
 from apps.attendance.models import AttendanceRecord, AttendanceSession
+from apps.core.services.scope import ScopeService
 from apps.core.services.settings import SystemSettingService
 from apps.core.services.audit import AuditService
 from apps.enrollment.models import Enrollment
@@ -435,18 +436,239 @@ class GradingTemplateTestingCalculatorService:
         return computed_score, row
 
     @classmethod
+    def _resolve_profile_for_template_preview(cls, template: GradingTemplate):
+        profiles = list(
+            TenantGradingProfile.objects.filter(
+                tenant_id=template.tenant_id,
+                grading_template_id=template.id,
+                is_active=True,
+            )
+        )
+        if not profiles:
+            return None
+
+        profiles.sort(
+            key=lambda profile: (
+                profile.priority,
+                0 if profile.is_default else 1,
+                -profile.id,
+            )
+        )
+        return profiles[0]
+
+    @classmethod
+    def _build_final_grade_strategy_for_template_preview(cls, *, template: GradingTemplate, active_periods: list):
+        profile = cls._resolve_profile_for_template_preview(template)
+        default_entries = [
+            {
+                "period_id": period.id,
+                "period_code": period.code,
+                "period_name": period.name,
+                "weight": None,
+            }
+            for period in active_periods
+        ]
+        default_strategy = {
+            "mode": TenantGradingProfile.FinalGradeFormulaMode.AVERAGE_ACTIVE_PERIODS,
+            "mode_label": TenantGradingProfile.FinalGradeFormulaMode.AVERAGE_ACTIVE_PERIODS.label,
+            "source": "tenant_grading_profile" if profile else "template_active_periods",
+            "source_label": (
+                "Tenant grading profile active-period average"
+                if profile
+                else "Template active-period average fallback"
+            ),
+            "profile": profile,
+            "profile_id": profile.id if profile else None,
+            "entries": default_entries,
+            "formula_label": (
+                "FG = ("
+                + " + ".join(period.code for period in active_periods)
+                + f") / {len(active_periods)}"
+                if active_periods
+                else "No active grading periods configured."
+            ),
+        }
+        if not profile:
+            return default_strategy
+
+        if (
+            profile.final_grade_formula_mode != TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS
+            or not profile.final_grade_formula_json
+        ):
+            return default_strategy
+
+        weight_rows = (profile.final_grade_formula_json or {}).get("period_weights") or []
+        weights_by_code = {}
+        for row in weight_rows:
+            code = (str(row.get("period_code") or "").strip()).upper()
+            if not code:
+                continue
+            try:
+                weight = cls._round(Decimal(str(row.get("weight") or "0")))
+            except Exception:
+                continue
+            if weight <= 0:
+                continue
+            weights_by_code[code] = weight
+
+        weighted_entries = []
+        for period in active_periods:
+            weight = weights_by_code.get((period.code or "").strip().upper())
+            if weight is None:
+                continue
+            weighted_entries.append(
+                {
+                    "period_id": period.id,
+                    "period_code": period.code,
+                    "period_name": period.name,
+                    "weight": weight,
+                }
+            )
+
+        if not weighted_entries:
+            default_strategy["warnings"] = [
+                "The matched tenant grading profile has weighted periods, but none matched this template's active period codes."
+            ]
+            return default_strategy
+
+        return {
+            "mode": TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
+            "mode_label": TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS.label,
+            "source": "tenant_grading_profile",
+            "source_label": "Tenant grading profile weighted-period formula",
+            "profile": profile,
+            "profile_id": profile.id,
+            "entries": weighted_entries,
+            "formula_label": "FG = "
+            + " + ".join(
+                f"({entry['period_code']} x {entry['weight']:.2f}%)"
+                for entry in weighted_entries
+            ),
+        }
+
+    @classmethod
+    def _build_final_grade_detail(
+        cls,
+        *,
+        template: GradingTemplate,
+        active_periods: list,
+        period_rows: list,
+        offering: CourseOffering | None = None,
+    ):
+        if offering:
+            strategy = FacultyGradingService.resolve_final_grade_strategy(offering, template=template)
+            profile = (
+                TenantGradingProfile.objects.filter(id=strategy.get("profile_id")).first()
+                if strategy.get("profile_id")
+                else None
+            )
+            strategy["profile"] = profile
+            strategy["mode_label"] = TenantGradingProfile.FinalGradeFormulaMode(strategy["mode"]).label
+        else:
+            strategy = cls._build_final_grade_strategy_for_template_preview(
+                template=template,
+                active_periods=active_periods,
+            )
+        period_values_by_id = {
+            row["row"].id: row["period_grade"]
+            for row in period_rows
+            if row.get("period_grade") is not None
+        }
+        entries = []
+        warnings = list(strategy.get("warnings") or [])
+        raw_value = None
+        formula = "No period grade available yet."
+
+        if not strategy["entries"]:
+            warnings.append("No active grading periods are configured for final-grade computation.")
+            return {
+                "strategy": strategy,
+                "entries": [],
+                "raw_value": None,
+                "official_value": None,
+                "formula": strategy["formula_label"],
+                "warnings": warnings,
+                "profile": strategy.get("profile"),
+            }
+
+        if strategy["mode"] == TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS:
+            weighted_total = Decimal("0")
+            formula_parts = []
+            for entry in strategy["entries"]:
+                raw_period_value = period_values_by_id.get(entry["period_id"])
+                missing = raw_period_value is None
+                period_value = Decimal(raw_period_value or Decimal("0"))
+                contribution = cls._round(period_value * (Decimal(entry["weight"]) / Decimal("100")))
+                weighted_total += contribution
+                if missing:
+                    warnings.append(f"{entry['period_code']} has no computed period grade and was included as 0.")
+                formula_parts.append(
+                    f"({period_value:.2f} x {Decimal(entry['weight']):.2f}%)"
+                )
+                entries.append(
+                    {
+                        **entry,
+                        "period_grade": raw_period_value,
+                        "value_used": period_value,
+                        "missing": missing,
+                        "contribution": contribution,
+                    }
+                )
+            raw_value = cls._round(weighted_total)
+            formula = " + ".join(formula_parts) + f" = {raw_value:.2f}"
+        else:
+            total_value = Decimal("0")
+            formula_parts = []
+            for entry in strategy["entries"]:
+                raw_period_value = period_values_by_id.get(entry["period_id"])
+                missing = raw_period_value is None
+                period_value = Decimal(raw_period_value or Decimal("0"))
+                total_value += period_value
+                if missing:
+                    warnings.append(
+                        f"{entry['period_code']} has no computed period grade and was included as 0 in the divisor."
+                    )
+                formula_parts.append(f"{period_value:.2f}")
+                entries.append(
+                    {
+                        **entry,
+                        "period_grade": raw_period_value,
+                        "value_used": period_value,
+                        "missing": missing,
+                        "contribution": cls._round(period_value / Decimal(len(strategy["entries"]))),
+                    }
+                )
+            raw_value = cls._round(total_value / Decimal(len(strategy["entries"])))
+            formula = "(" + " + ".join(formula_parts) + f") / {len(strategy['entries'])} = {raw_value:.2f}"
+
+        return {
+            "strategy": strategy,
+            "entries": entries,
+            "raw_value": raw_value,
+            "official_value": FacultyGradingService._round_official_grade(raw_value),
+            "formula": formula,
+            "warnings": warnings,
+            "profile": strategy.get("profile"),
+        }
+
+    @classmethod
     def build_calculation(
         cls,
         *,
         template: GradingTemplate,
         raw_inputs: dict | None = None,
         default_sample: Decimal | None = None,
+        offering: CourseOffering | None = None,
     ):
         default_sample = cls._round(default_sample or cls.DEFAULT_SAMPLE_VALUE)
         period_rows = []
         input_errors = []
         active_periods = list(template.periods.all())
-        base_value = cls._to_decimal(template.default_base_value or Decimal("50.00"))
+        base_value = (
+            cls._to_decimal(FacultyGradingService.resolve_base_value(offering, template))
+            if offering
+            else cls._to_decimal(template.default_base_value or Decimal("50.00"))
+        )
 
         for period in active_periods:
             component_rows = []
@@ -657,19 +879,21 @@ class GradingTemplateTestingCalculatorService:
                 }
             )
 
-        computed_periods = [row for row in period_rows if row["period_grade"] is not None]
-        final_grade = None
-        final_formula = "No period grade available yet."
-        if computed_periods:
-            final_grade = cls._round(
-                sum((row["period_grade"] for row in computed_periods), Decimal("0"))
-                / Decimal(len(computed_periods))
-            )
-            final_formula = (
-                "("
-                + " + ".join(f"{row['period_grade']:.2f}" for row in computed_periods)
-                + f") / {len(computed_periods)} = {final_grade:.2f}"
-            )
+        final_grade_detail = cls._build_final_grade_detail(
+            template=template,
+            active_periods=active_periods,
+            period_rows=period_rows,
+            offering=offering,
+        )
+        final_grade = final_grade_detail["raw_value"]
+        final_formula = final_grade_detail["formula"]
+        final_strategy = final_grade_detail["strategy"]
+        final_profile = final_grade_detail.get("profile")
+        final_meta = (
+            f"{final_profile.profile_code}: {final_profile.profile_name}"
+            if final_profile
+            else "No active tenant grading profile matched this template, so the active-period average fallback is shown."
+        )
 
         return {
             "period_rows": period_rows,
@@ -677,6 +901,7 @@ class GradingTemplateTestingCalculatorService:
             "base_value": base_value,
             "final_grade": final_grade,
             "final_formula": final_formula,
+            "final_grade_detail": final_grade_detail,
             "metric_cards": [
                 {
                     "label": "Active Periods",
@@ -699,9 +924,9 @@ class GradingTemplateTestingCalculatorService:
                     "meta": "Used when EduGradesPro converts raw score to computed percentage for Base-50 items.",
                 },
                 {
-                    "label": "Template Final Preview",
+                    "label": "Final Grade",
                     "value": f"{final_grade:.2f}" if final_grade is not None else "-",
-                    "meta": "Template-only average preview. Live class final grade may follow a tenant grading profile formula.",
+                    "meta": f"{final_strategy['mode_label']} | {final_meta}",
                 },
             ],
             "input_errors": input_errors,
@@ -723,13 +948,31 @@ class TemplateHotfixService:
     def _offering_has_submitted_grades(cls, offering):
         return GradeSubmission.objects.filter(
             offering_id=offering.id,
-            status=GradeSubmission.Status.SUBMITTED,
+            status__in=[
+                GradeSubmission.Status.SUBMITTED,
+                GradeSubmission.Status.REOPENED,
+            ],
         ).exists()
 
     @classmethod
     def _candidate_offerings_for_template(cls, template):
         candidate_qs = (
             CourseOffering.objects.filter(tenant_id=template.tenant_id, is_active=True)
+            .filter(
+                tenant__is_active=True,
+                campus__is_active=True,
+                academic_year__is_active=True,
+                term__is_active=True,
+                department__is_active=True,
+                program__is_active=True,
+                program__department__is_active=True,
+                course__is_active=True,
+                section__is_active=True,
+                section__department__is_active=True,
+                section__program__is_active=True,
+                section__program__department__is_active=True,
+            )
+            .filter(Q(course__department__isnull=True) | Q(course__department__is_active=True))
             .select_related("term", "academic_year", "course", "section", "campus")
             .order_by("-created_at")
         )
@@ -768,6 +1011,19 @@ class TemplateHotfixService:
             selected_ids = hotfix_request.selected_offering_ids_json or []
             selected_ids = {int(x) for x in selected_ids if str(x).isdigit()}
             return [offering for offering in offerings if offering.id in selected_ids]
+
+        if hotfix_request.apply_mode == TemplateHotfixRequest.ApplyMode.REQUESTING_FACULTY_OFFERINGS:
+            faculty_offering_ids = set(
+                FacultyAssignment.objects.filter(
+                    faculty_user_id=hotfix_request.requested_by_user_id,
+                    is_active=True,
+                    response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+                    accepted_at__isnull=False,
+                    offering__status=CourseOffering.Status.OPEN,
+                    offering__is_active=True,
+                ).values_list("offering_id", flat=True)
+            )
+            return [offering for offering in offerings if offering.id in faculty_offering_ids]
 
         return []
 
@@ -903,7 +1159,14 @@ class TemplateHotfixService:
             return hotfix_request
 
         for offering in target_offerings:
-            if hotfix_request.apply_mode == TemplateHotfixRequest.ApplyMode.SELECTED_OFFERINGS and cls._offering_has_submitted_grades(offering):
+            if (
+                hotfix_request.apply_mode
+                in {
+                    TemplateHotfixRequest.ApplyMode.SELECTED_OFFERINGS,
+                    TemplateHotfixRequest.ApplyMode.REQUESTING_FACULTY_OFFERINGS,
+                }
+                and cls._offering_has_submitted_grades(offering)
+            ):
                 skipped.append(
                     {
                         "offering_id": offering.id,
@@ -1578,15 +1841,20 @@ class GradingGovernanceService:
     def resolve_correction_route_rule(cls, *, tenant_id: int, faculty_department_id: int | None):
         dept_rule = None
         if faculty_department_id:
+            department_ids = ScopeService.department_ancestor_ids(faculty_department_id, include_self=True)
             dept_rule = (
                 CorrectionApprovalRouteRule.objects.filter(
                     tenant_id=tenant_id,
-                    faculty_department_id=faculty_department_id,
+                    faculty_department_id__in=department_ids,
                     is_active=True,
                 )
                 .select_related("step1_role", "final_role", "faculty_department")
-                .first()
+                .order_by("id")
             )
+            dept_rule_by_department = {row.faculty_department_id: row for row in dept_rule}
+            for department_id in department_ids:
+                if department_id in dept_rule_by_department:
+                    return dept_rule_by_department[department_id]
         if dept_rule:
             return dept_rule
         default_rule = (
@@ -1784,6 +2052,16 @@ class GradingGovernanceService:
         if not pending_step:
             # Legacy request created before route-matrix rollout.
             return True, None, None
+        if (
+            request_obj.request_source == GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF
+            and request_obj.initiated_by_user_id == getattr(user, "id", None)
+            and not getattr(user, "is_superuser", False)
+        ):
+            return (
+                False,
+                pending_step,
+                "The user who initiated an on-behalf correction petition cannot approve the same petition.",
+            )
         if not cls._user_has_role_for_correction_step(user=user, request_obj=request_obj, step=pending_step):
             step_label = (
                 pending_step.approver_label
@@ -1797,7 +2075,7 @@ class GradingGovernanceService:
             )
         if pending_step.requires_same_department:
             user_dept_id = getattr(user, "default_department_id", None)
-            if not user_dept_id or user_dept_id != request_obj.faculty_department_id:
+            if not user_dept_id or not ScopeService.department_scope_covers(user_dept_id, request_obj.faculty_department_id):
                 return (
                     False,
                     pending_step,
@@ -2022,7 +2300,10 @@ class GradingGovernanceService:
             Enrollment.objects.filter(
                 course_offering_id=offering.id,
                 is_active=True,
+                student__is_active=True,
+                student__department__is_active=True,
             )
+            .filter(Q(student__program__isnull=True) | Q(student__program__is_active=True))
             .exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES)
             .select_related("student")
         )
@@ -2969,6 +3250,9 @@ class GradingGovernanceService:
         template_period: GradingTemplatePeriod,
         justification: str,
         items: list[dict],
+        initiated_by_user=None,
+        request_source: str | None = None,
+        on_behalf_reason: str | None = None,
     ):
         if not cls.is_system_correction_enabled(tenant_id=offering.tenant_id):
             raise ValidationError(
@@ -2989,6 +3273,9 @@ class GradingGovernanceService:
             offering=offering,
             template_period=template_period,
             requested_by_user=user,
+            initiated_by_user=initiated_by_user or user,
+            request_source=request_source or GradeCorrectionRequest.RequestSource.FACULTY_SELF,
+            on_behalf_reason=(on_behalf_reason or "").strip() or None,
             status=GradeCorrectionRequest.Status.PENDING,
             justification=justification.strip(),
         )
@@ -3181,7 +3468,7 @@ class FacultyGradingService:
         return bool(getattr(component, "is_exam_component", False))
 
     @classmethod
-    def resolve_template_for_offering(cls, offering):
+    def resolve_template_for_offering_trace(cls, offering):
         assignments = (
             CourseTemplateAssignment.objects.filter(
                 course_id=offering.course_id,
@@ -3195,15 +3482,30 @@ class FacultyGradingService:
 
         exact = assignments.filter(effective_from_term_id=offering.term_id).first()
         if exact:
-            return exact.grading_template
+            return {
+                "template": exact.grading_template,
+                "source": "course_assignment_exact_term",
+                "source_label": "Course template assignment for this exact term",
+                "assignment_id": exact.id,
+            }
 
         no_effective_term = assignments.filter(effective_from_term__isnull=True).first()
         if no_effective_term:
-            return no_effective_term.grading_template
+            return {
+                "template": no_effective_term.grading_template,
+                "source": "course_assignment_default",
+                "source_label": "Course template assignment without a term limit",
+                "assignment_id": no_effective_term.id,
+            }
 
         profile = cls.resolve_grading_profile_for_offering(offering)
         if profile:
-            return profile.grading_template
+            return {
+                "template": profile.grading_template,
+                "source": "tenant_grading_profile",
+                "source_label": "Tenant grading profile",
+                "profile_id": profile.id,
+            }
 
         fallback = (
             GradingTemplate.objects.filter(
@@ -3215,14 +3517,28 @@ class FacultyGradingService:
             .first()
         )
         if fallback:
-            return fallback
+            return {
+                "template": fallback,
+                "source": "tenant_latest_published_fallback",
+                "source_label": "Latest published tenant template fallback",
+                "fallback": True,
+            }
         raise ValidationError("No published grading template is assigned for this course offering.")
+
+    @classmethod
+    def resolve_template_for_offering(cls, offering):
+        return cls.resolve_template_for_offering_trace(offering)["template"]
 
     @classmethod
     def resolve_grading_profile_for_offering(cls, offering):
         course_type = (offering.course.course_type or "").strip()
         offering_term = getattr(offering, "term", None)
         term_type = (getattr(offering_term, "term_type", "") or "").strip()
+        department_ancestor_ids = ScopeService.department_ancestor_ids(offering.department_id, include_self=True)
+        department_specificity_rank = {
+            department_id: index
+            for index, department_id in enumerate(department_ancestor_ids)
+        }
         # Offerings may be shared/open and keep program null; in that case fall back to section program.
         effective_program_id = offering.program_id
         if not effective_program_id and offering.section_id:
@@ -3239,7 +3555,10 @@ class FacultyGradingService:
                 grading_template__is_published=True,
             )
             .filter(Q(campus_id=offering.campus_id) | Q(campus__isnull=True))
-            .filter(Q(department_id=offering.department_id) | Q(department__isnull=True))
+            .filter(
+                Q(department_id__in=department_ancestor_ids)
+                | Q(department__isnull=True)
+            )
             .filter(Q(program_id=effective_program_id) | Q(program__isnull=True))
             .filter(Q(course_id=offering.course_id) | Q(course__isnull=True))
             .filter(Q(term_type=term_type) | Q(term_type__isnull=True) | Q(term_type=""))
@@ -3275,6 +3594,7 @@ class FacultyGradingService:
                 -score[1],
                 -score[2],
                 -score[3],
+                department_specificity_rank.get(profile.department_id, 999),
                 -score[4],
                 -score[5],
                 -score[6],
@@ -3287,7 +3607,7 @@ class FacultyGradingService:
         return profiles[0]
 
     @classmethod
-    def resolve_base_value(cls, offering, template):
+    def resolve_base_value_trace(cls, offering, template):
         override = (
             CourseBaseValueOverride.objects.filter(
                 course_id=offering.course_id,
@@ -3298,28 +3618,67 @@ class FacultyGradingService:
             .first()
         )
         if override:
-            return Decimal(override.base_value)
+            return {
+                "value": Decimal(override.base_value),
+                "source": "course_override",
+                "source_label": "Course base-value override",
+                "override_id": override.id,
+            }
         profile = cls.resolve_grading_profile_for_offering(offering)
         if profile and profile.default_base_value is not None:
-            return Decimal(profile.default_base_value)
+            return {
+                "value": Decimal(profile.default_base_value),
+                "source": "tenant_grading_profile",
+                "source_label": "Tenant grading profile default base value",
+                "profile_id": profile.id,
+            }
         if offering.course.default_base_value is not None:
-            return Decimal(offering.course.default_base_value)
+            return {
+                "value": Decimal(offering.course.default_base_value),
+                "source": "course_default",
+                "source_label": "Course default base value",
+                "course_id": offering.course_id,
+            }
         if template.default_base_value is not None:
-            return Decimal(template.default_base_value)
-        return Decimal("50")
+            return {
+                "value": Decimal(template.default_base_value),
+                "source": "template_default",
+                "source_label": "Grading template default base value",
+                "template_id": template.id,
+            }
+        return {
+            "value": Decimal("50"),
+            "source": "system_default",
+            "source_label": "System default base value",
+            "fallback": True,
+        }
 
     @classmethod
-    def resolve_passing_threshold(cls, offering) -> Decimal:
+    def resolve_base_value(cls, offering, template):
+        return cls.resolve_base_value_trace(offering, template)["value"]
+
+    @classmethod
+    def resolve_passing_threshold_trace(cls, offering):
         profile = cls.resolve_grading_profile_for_offering(offering)
         if profile and profile.passing_grade_threshold is not None:
             try:
-                return cls._round(Decimal(profile.passing_grade_threshold))
+                return {
+                    "value": cls._round(Decimal(profile.passing_grade_threshold)),
+                    "source": "tenant_grading_profile",
+                    "source_label": "Tenant grading profile passing threshold",
+                    "profile_id": profile.id,
+                }
             except Exception:
                 pass
         template = cls.resolve_template_for_offering(offering)
         if template and template.passing_grade_threshold is not None:
             try:
-                return cls._round(Decimal(template.passing_grade_threshold))
+                return {
+                    "value": cls._round(Decimal(template.passing_grade_threshold)),
+                    "source": "grading_template",
+                    "source_label": "Grading template passing threshold",
+                    "template_id": template.id,
+                }
             except Exception:
                 pass
         tenant_value = SystemSettingService.get(
@@ -3328,9 +3687,22 @@ class FacultyGradingService:
             default="75",
         )
         try:
-            return cls._round(Decimal(str(tenant_value)))
+            return {
+                "value": cls._round(Decimal(str(tenant_value))),
+                "source": "tenant_setting",
+                "source_label": "Tenant PASSING_GRADE_THRESHOLD setting",
+            }
         except Exception:
-            return Decimal("75.00")
+            return {
+                "value": Decimal("75.00"),
+                "source": "system_default",
+                "source_label": "System default passing threshold",
+                "fallback": True,
+            }
+
+    @classmethod
+    def resolve_passing_threshold(cls, offering) -> Decimal:
+        return cls.resolve_passing_threshold_trace(offering)["value"]
 
     @classmethod
     def resolve_final_grade_strategy(cls, offering, template=None):
@@ -3339,6 +3711,9 @@ class FacultyGradingService:
         profile = cls.resolve_grading_profile_for_offering(offering)
         default_strategy = {
             "mode": TenantGradingProfile.FinalGradeFormulaMode.AVERAGE_ACTIVE_PERIODS,
+            "source": "template_active_periods",
+            "source_label": "Template active-period average fallback",
+            "profile_id": profile.id if profile else None,
             "entries": [
                 {
                     "period_id": period.id,
@@ -3398,6 +3773,9 @@ class FacultyGradingService:
 
         return {
             "mode": TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
+            "source": "tenant_grading_profile",
+            "source_label": "Tenant grading profile weighted-period formula",
+            "profile_id": profile.id,
             "entries": weighted_entries,
             "formula_label": "FG = "
             + " + ".join(
@@ -3407,31 +3785,106 @@ class FacultyGradingService:
         }
 
     @classmethod
-    def compute_final_grade_from_period_values(cls, *, offering, template=None, period_values_by_period_id: dict):
+    def compute_final_grade_detail_from_period_values(cls, *, offering, template=None, period_values_by_period_id: dict):
         template = template or cls.resolve_template_for_offering(offering)
         final_grade_strategy = cls.resolve_final_grade_strategy(offering, template=template)
         strategy_entries = final_grade_strategy["entries"]
         if not strategy_entries:
-            return None
+            return {
+                "strategy": final_grade_strategy,
+                "entries": [],
+                "raw_value": None,
+                "official_value": None,
+                "warnings": ["No active grading periods are configured for final-grade computation."],
+            }
 
         has_any_period_grade = any(
             period_values_by_period_id.get(entry["period_id"]) is not None for entry in strategy_entries
         )
         if not has_any_period_grade:
-            return None
+            return {
+                "strategy": final_grade_strategy,
+                "entries": [
+                    {
+                        **entry,
+                        "period_grade": None,
+                        "value_used": None,
+                        "missing": True,
+                        "contribution": None,
+                    }
+                    for entry in strategy_entries
+                ],
+                "raw_value": None,
+                "official_value": None,
+                "warnings": ["No configured period grade is available yet."],
+            }
 
+        detail_entries = []
+        warnings = []
         if final_grade_strategy["mode"] == TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS:
             weighted_total = Decimal("0")
             for entry in strategy_entries:
-                period_value = period_values_by_period_id.get(entry["period_id"]) or Decimal("0")
-                weighted_total += Decimal(period_value) * (Decimal(entry["weight"]) / Decimal("100"))
-            return cls._round_official_grade(weighted_total)
+                raw_period_value = period_values_by_period_id.get(entry["period_id"])
+                missing = raw_period_value is None
+                period_value = Decimal(raw_period_value or Decimal("0"))
+                contribution = period_value * (Decimal(entry["weight"]) / Decimal("100"))
+                weighted_total += contribution
+                if missing:
+                    warnings.append(f"{entry['period_code']} has no stored official grade and was included as 0.")
+                detail_entries.append(
+                    {
+                        **entry,
+                        "period_grade": raw_period_value,
+                        "value_used": period_value,
+                        "missing": missing,
+                        "contribution": contribution,
+                    }
+                )
+            return {
+                "strategy": final_grade_strategy,
+                "entries": detail_entries,
+                "raw_value": weighted_total,
+                "official_value": cls._round_official_grade(weighted_total),
+                "warnings": warnings,
+            }
 
         total_value = sum(
             (Decimal(period_values_by_period_id.get(entry["period_id"]) or Decimal("0")))
             for entry in strategy_entries
         )
-        return cls._round_official_grade(total_value / Decimal(len(strategy_entries)))
+        for entry in strategy_entries:
+            raw_period_value = period_values_by_period_id.get(entry["period_id"])
+            missing = raw_period_value is None
+            period_value = Decimal(raw_period_value or Decimal("0"))
+            if missing:
+                warnings.append(
+                    f"{entry['period_code']} has no stored official grade and was included as 0 in the divisor."
+                )
+            detail_entries.append(
+                {
+                    **entry,
+                    "period_grade": raw_period_value,
+                    "value_used": period_value,
+                    "missing": missing,
+                    "contribution": period_value / Decimal(len(strategy_entries)),
+                }
+            )
+        raw_value = total_value / Decimal(len(strategy_entries))
+        return {
+            "strategy": final_grade_strategy,
+            "entries": detail_entries,
+            "raw_value": raw_value,
+            "official_value": cls._round_official_grade(raw_value),
+            "warnings": warnings,
+        }
+
+    @classmethod
+    def compute_final_grade_from_period_values(cls, *, offering, template=None, period_values_by_period_id: dict):
+        return cls.compute_final_grade_detail_from_period_values(
+            offering=offering,
+            template=template,
+            period_values_by_period_id=period_values_by_period_id,
+        )["official_value"]
 
     @staticmethod
     def get_active_enrollments(offering):
@@ -3451,6 +3904,289 @@ class FacultyGradingService:
             faculty_user_id=user.id,
             is_active=True,
         ).exists()
+
+    @classmethod
+    def build_period_grade_detail_for_student(
+        cls,
+        *,
+        offering,
+        template_period: GradingTemplatePeriod,
+        student_id: int,
+        template=None,
+        base_value: Decimal | None = None,
+        components=None,
+        score_lookup=None,
+        include_details: bool = False,
+    ):
+        template = template or cls.resolve_template_for_offering(offering)
+        base_value = base_value if base_value is not None else cls.resolve_base_value(offering, template)
+        if components is None:
+            components = list(
+                template_period.components.filter(is_active=True)
+                .prefetch_related("subcomponents", "subcomponents__details")
+                .order_by("sort_order", "id")
+            )
+        if score_lookup is None:
+            score_lookup = defaultdict(list)
+            score_rows = StudentActivityScore.objects.filter(
+                activity__offering_id=offering.id,
+                activity__template_period_id=template_period.id,
+                activity__is_active=True,
+                student_id=student_id,
+                is_active=True,
+            ).select_related("activity")
+            for score in score_rows:
+                key = (
+                    score.student_id,
+                    score.activity.template_component_id,
+                    score.activity.template_subcomponent_id,
+                    score.activity.template_detail_id,
+                )
+                score_lookup[key].append(Decimal(score.computed_score or 0))
+
+        score_by_activity_id = {}
+        active_activities = []
+        if include_details:
+            active_activities = list(
+                GradeActivity.objects.filter(
+                    offering_id=offering.id,
+                    template_period_id=template_period.id,
+                    is_active=True,
+                )
+                .select_related("template_component", "template_subcomponent", "template_detail")
+                .order_by(
+                    "template_component__sort_order",
+                    "template_subcomponent__sort_order",
+                    "template_detail__sort_order",
+                    "activity_date",
+                    "id",
+                )
+            )
+            score_by_activity_id = {
+                score.activity_id: score
+                for score in StudentActivityScore.objects.filter(
+                    student_id=student_id,
+                    activity_id__in=[activity.id for activity in active_activities],
+                    is_active=True,
+                    activity__is_active=True,
+                ).select_related("activity")
+            }
+
+        def activity_rows_for(component, subcomponent=None, detail=None):
+            if not include_details:
+                return []
+            rows = []
+            for activity in active_activities:
+                if activity.template_component_id != component.id:
+                    continue
+                if (activity.template_subcomponent_id or None) != (subcomponent.id if subcomponent else None):
+                    continue
+                if (activity.template_detail_id or None) != (detail.id if detail else None):
+                    continue
+                score = score_by_activity_id.get(activity.id)
+                score_input_mode = cls.resolve_score_input_mode(
+                    template_component=activity.template_component,
+                    template_subcomponent=activity.template_subcomponent,
+                    template_detail=activity.template_detail,
+                )
+                rows.append(
+                    {
+                        "id": activity.id,
+                        "title": activity.title,
+                        "total_score": activity.total_score,
+                        "score_input_mode": score_input_mode,
+                        "score_input_mode_label": cls.score_input_mode_label(score_input_mode),
+                        "raw_score": score.raw_score if score else None,
+                        "computed_score": score.computed_score if score else None,
+                        "missing": score is None,
+                    }
+                )
+            return rows
+
+        def attendance_rows():
+            if not include_details:
+                return []
+            sessions = list(
+                AttendanceSession.objects.filter(
+                    offering_id=offering.id,
+                    template_period_id=template_period.id,
+                    is_active=True,
+                ).order_by("session_date", "id")
+            )
+            records_by_session_id = {
+                record.session_id: record
+                for record in AttendanceRecord.objects.filter(
+                    session__offering_id=offering.id,
+                    session__template_period_id=template_period.id,
+                    session__is_active=True,
+                    student_id=student_id,
+                    is_active=True,
+                ).select_related("session")
+            }
+            rows = []
+            for session in sessions:
+                record = records_by_session_id.get(session.id)
+                raw = cls.ATTENDANCE_SCORE_MAP.get(record.status_code, Decimal("0")) if record else None
+                rows.append(
+                    {
+                        "session_id": session.id,
+                        "title": session.title or session.session_date,
+                        "session_date": session.session_date,
+                        "status_code": record.status_code if record else None,
+                        "status_label": record.get_status_code_display() if record else "Missing",
+                        "mapped_score": raw,
+                        "computed_score": (
+                            cls.compute_activity_score(
+                                raw_score=raw,
+                                total_score=Decimal("100"),
+                                base_value=base_value,
+                                score_input_mode="DIRECT_PERCENTAGE",
+                            )
+                            if raw is not None
+                            else None
+                        ),
+                        "missing": record is None,
+                    }
+                )
+            return rows
+
+        component_scores = {}
+        component_breakdown = []
+        class_standing_raw = Decimal("0")
+        exam_grade_raw = None
+        weighted_period_grade = Decimal("0")
+        has_exam_component = False
+        has_exam_data = False
+        warnings = []
+
+        for component in components:
+            subcomponents = list(component.subcomponents.filter(is_active=True).order_by("sort_order", "id"))
+            component_has_data = False
+            subcomponent_breakdown = []
+            if subcomponents:
+                sub_total = sum(Decimal(sub.weight_percentage or 0) for sub in subcomponents)
+                sub_denominator = sub_total if sub_total > 0 else Decimal("100")
+                component_raw = Decimal("0")
+                for sub in subcomponents:
+                    detail_rows = list(sub.details.filter(is_active=True).order_by("sort_order", "id"))
+                    detail_breakdown = []
+                    sub_activity_rows = []
+                    sub_attendance_rows = []
+                    if sub.is_attendance_component:
+                        sub_score = cls._attendance_subcomponent_score(
+                            offering=offering,
+                            template_period=template_period,
+                            student_id=student_id,
+                            base_value=base_value,
+                        )
+                        sub_attendance_rows = attendance_rows()
+                    elif detail_rows:
+                        detail_total = sum(Decimal(detail.weight_percentage or 0) for detail in detail_rows)
+                        detail_denominator = detail_total if detail_total > 0 else Decimal("100")
+                        detail_raw = Decimal("0")
+                        detail_has_data = False
+                        for detail in detail_rows:
+                            detail_score = cls._average_score_or_none(
+                                score_lookup,
+                                (student_id, component.id, sub.id, detail.id),
+                            )
+                            if detail_score is not None:
+                                detail_has_data = True
+                                detail_raw += (Decimal(detail.weight_percentage) / detail_denominator) * detail_score
+                            detail_breakdown.append(
+                                {
+                                    "id": detail.id,
+                                    "code": detail.code,
+                                    "name": detail.name,
+                                    "weight": detail.weight_percentage,
+                                    "score": detail_score,
+                                    "activities": activity_rows_for(component, sub, detail),
+                                }
+                            )
+                        sub_score = cls._round(detail_raw)
+                        if detail_has_data:
+                            component_has_data = True
+                    else:
+                        sub_score = cls._average_score_or_none(
+                            score_lookup,
+                            (student_id, component.id, sub.id, None),
+                        )
+                        sub_activity_rows = activity_rows_for(component, sub, None)
+                        if sub_score is not None:
+                            component_has_data = True
+                    if sub_score is not None:
+                        component_raw += (Decimal(sub.weight_percentage) / sub_denominator) * sub_score
+                    subcomponent_breakdown.append(
+                        {
+                            "id": sub.id,
+                            "code": sub.code,
+                            "name": sub.name,
+                            "weight": sub.weight_percentage,
+                            "score": sub_score,
+                            "is_attendance_component": sub.is_attendance_component,
+                            "details": detail_breakdown,
+                            "activities": sub_activity_rows,
+                            "attendance_records": sub_attendance_rows,
+                        }
+                    )
+                component_score = cls._round(component_raw)
+                component_raw_value = component_raw
+            else:
+                component_score = cls._average_score_or_none(
+                    score_lookup,
+                    (student_id, component.id, None, None),
+                )
+                component_has_data = component_score is not None
+                component_raw_value = component_score
+            component_scores[component.code] = component_score
+
+            if cls.is_exam_component(component):
+                has_exam_component = True
+                if component_has_data:
+                    exam_grade_raw = (exam_grade_raw or Decimal("0")) + component_score
+                    has_exam_data = True
+            else:
+                class_standing_raw += component_score or Decimal("0")
+            weighted_contribution = (Decimal(component.weight_percentage) / Decimal("100")) * (
+                component_score or Decimal("0")
+            )
+            weighted_period_grade += weighted_contribution
+            component_breakdown.append(
+                {
+                    "id": component.id,
+                    "code": component.code,
+                    "name": component.name,
+                    "weight": component.weight_percentage,
+                    "is_exam_component": cls.is_exam_component(component),
+                    "score": component_score,
+                    "raw_score": component_raw_value,
+                    "weighted_contribution": weighted_contribution,
+                    "subcomponents": subcomponent_breakdown,
+                    "activities": activity_rows_for(component, None, None) if not subcomponents else [],
+                }
+            )
+
+        class_standing = cls._round_official_grade(class_standing_raw)
+        exam_grade = cls._round_official_grade(exam_grade_raw)
+        period_grade = None
+        if not has_exam_component or has_exam_data:
+            period_grade = cls._round_official_grade(weighted_period_grade)
+        elif has_exam_component and not has_exam_data:
+            warnings.append("This period has an exam component, but no exam data is available yet.")
+
+        return {
+            "component_scores": component_scores,
+            "component_breakdown": component_breakdown,
+            "class_standing_raw": class_standing_raw,
+            "exam_grade_raw": exam_grade_raw,
+            "period_grade_raw": weighted_period_grade if period_grade is not None else None,
+            "class_standing": class_standing,
+            "exam_grade": exam_grade,
+            "period_grade": period_grade,
+            "has_exam_component": has_exam_component,
+            "has_exam_data": has_exam_data,
+            "warnings": warnings,
+        }
 
     @classmethod
     def compute_activity_score(
@@ -3914,6 +4650,7 @@ class FacultyGradingService:
         final_grade_strategy = cls.resolve_final_grade_strategy(offering, template=template)
         strategy_entries = final_grade_strategy["entries"]
         strategy_period_ids = [entry["period_id"] for entry in strategy_entries]
+        passing_threshold = cls.resolve_passing_threshold(offering)
         target_student_ids = {enrollment.student_id for enrollment in enrollments}
         if not target_student_ids:
             return []
@@ -3980,6 +4717,7 @@ class FacultyGradingService:
                             "template_id": template.id,
                             "formula_mode": final_grade_strategy["mode"],
                             "period_ids": strategy_period_ids,
+                            "passing_threshold": str(passing_threshold),
                         },
                     )
         return changed_rows
@@ -4045,6 +4783,7 @@ class FacultyGradingService:
         )
         template = cls.resolve_template_for_offering(offering)
         base_value = cls.resolve_base_value(offering, template)
+        passing_threshold = cls.resolve_passing_threshold(offering)
 
         normalized_student_ids = None
         if student_ids is not None:
@@ -4131,6 +4870,7 @@ class FacultyGradingService:
                             "offering_id": offering.id,
                             "student_id": student_id,
                             "template_period_id": template_period.id,
+                            "passing_threshold": str(passing_threshold),
                         },
                     )
                 rows.append(
@@ -4145,79 +4885,19 @@ class FacultyGradingService:
                 )
                 continue
 
-            component_scores = {}
-            class_standing = Decimal("0")
-            exam_grade = None
-            weighted_period_grade = Decimal("0")
-            has_exam_component = False
-            has_exam_data = False
-
-            for component in components:
-                subcomponents = list(component.subcomponents.filter(is_active=True).order_by("sort_order", "id"))
-                component_has_data = False
-                if subcomponents:
-                    sub_total = sum(Decimal(sub.weight_percentage or 0) for sub in subcomponents)
-                    sub_denominator = sub_total if sub_total > 0 else Decimal("100")
-                    component_raw = Decimal("0")
-                    for sub in subcomponents:
-                        detail_rows = list(sub.details.filter(is_active=True).order_by("sort_order", "id"))
-                        if sub.is_attendance_component:
-                            sub_score = cls._attendance_subcomponent_score(
-                                offering=offering,
-                                template_period=template_period,
-                                student_id=student_id,
-                                base_value=base_value,
-                            )
-                        elif detail_rows:
-                            detail_total = sum(Decimal(detail.weight_percentage or 0) for detail in detail_rows)
-                            detail_denominator = detail_total if detail_total > 0 else Decimal("100")
-                            detail_raw = Decimal("0")
-                            detail_has_data = False
-                            for detail in detail_rows:
-                                detail_score = cls._average_score_or_none(
-                                    score_lookup,
-                                    (student_id, component.id, sub.id, detail.id),
-                                )
-                                if detail_score is not None:
-                                    detail_has_data = True
-                                    detail_raw += (Decimal(detail.weight_percentage) / detail_denominator) * detail_score
-                            sub_score = cls._round(detail_raw)
-                            if detail_has_data:
-                                component_has_data = True
-                        else:
-                            sub_score = cls._average_score_or_none(
-                                score_lookup,
-                                (student_id, component.id, sub.id, None),
-                            )
-                            if sub_score is not None:
-                                component_has_data = True
-                        if sub_score is not None:
-                            component_raw += (Decimal(sub.weight_percentage) / sub_denominator) * sub_score
-                    component_score = cls._round(component_raw)
-                else:
-                    component_score = cls._average_score_or_none(
-                        score_lookup,
-                        (student_id, component.id, None, None),
-                    )
-                    component_has_data = component_score is not None
-                component_scores[component.code] = component_score
-
-                if cls.is_exam_component(component):
-                    has_exam_component = True
-                    if component_has_data:
-                        exam_grade = (exam_grade or Decimal("0")) + component_score
-                        has_exam_data = True
-                else:
-                    class_standing += component_score or Decimal("0")
-                weighted_period_grade += (Decimal(component.weight_percentage) / Decimal("100")) * (
-                    component_score or Decimal("0")
-                )
-
-            class_standing = cls._round_official_grade(class_standing)
-            exam_grade = cls._round_official_grade(exam_grade)
-            period_grade = None
-            if not has_exam_component or has_exam_data:
-                period_grade = cls._round_official_grade(weighted_period_grade)
+            detail = cls.build_period_grade_detail_for_student(
+                offering=offering,
+                template_period=template_period,
+                student_id=student_id,
+                template=template,
+                base_value=base_value,
+                components=components,
+                score_lookup=score_lookup,
+            )
+            component_scores = detail["component_scores"]
+            class_standing = detail["class_standing"]
+            exam_grade = detail["exam_grade"]
+            period_grade = detail["period_grade"]
 
             period_row, _created = StudentPeriodGrade.objects.update_or_create(
                 offering=offering,
@@ -4251,6 +4931,7 @@ class FacultyGradingService:
                         "offering_id": offering.id,
                         "student_id": student_id,
                         "template_period_id": template_period.id,
+                        "passing_threshold": str(passing_threshold),
                     },
                 )
             rows.append(

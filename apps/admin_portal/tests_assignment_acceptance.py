@@ -460,6 +460,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "login_lockout_max_attempts": "5",
                 "login_lockout_window_minutes": "15",
                 "login_lockout_duration_minutes": "15",
+                "session_timeout_minutes": "45",
                 "faculty_assignment_response_window_days": "5",
                 "faculty_assignment_first_reminder_days": "2",
                 "faculty_assignment_repeat_reminder_days": "1",
@@ -489,6 +490,10 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertFalse(
             FeatureSettingsService.is_faculty_assignment_primary_default_enabled(tenant_id=self.tenant.id)
         )
+        self.assertEqual(
+            FeatureSettingsService.get_session_timeout_minutes(tenant_id=self.tenant.id),
+            45,
+        )
 
     def test_admin_can_enable_official_grade_release_to_faculty(self):
         self.client.force_login(self.admin_user)
@@ -505,6 +510,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "submission_non_compliance_notice_interval_days": 3,
                 "grade_prediction_default_assumption": "IGNORE_MISSING",
                 "faculty_official_period_grades_after_deadline": "on",
+                "faculty_official_period_grades_after_submission": "on",
                 "faculty_official_final_grades_after_deadline": "on",
                 f"campus_recipient_{self.campus.id}": "",
             },
@@ -513,6 +519,9 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(
             FeatureSettingsService.show_faculty_official_period_grades_after_deadline(tenant_id=self.tenant.id)
+        )
+        self.assertTrue(
+            FeatureSettingsService.show_faculty_official_period_grades_after_submission(tenant_id=self.tenant.id)
         )
         self.assertTrue(
             FeatureSettingsService.show_faculty_official_final_grades_after_deadline(tenant_id=self.tenant.id)

@@ -1,0 +1,88 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="h5 mb-1">Recent Critical Actions</h2>
+    <div class="text-muted small">High-impact administrative actions with reasons, scope, and compact impact preview. Grade-level before/after values are not shown here.</div>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:audit_log_list' %}">All Audit Logs</a>
+</div>
+
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <input class="form-control" name="action" value="{{ action }}" placeholder="Action">
+  </div>
+  <div class="col-md-3">
+    <input class="form-control" name="entity_type" value="{{ entity_type }}" placeholder="Entity type">
+  </div>
+  <div class="col-md-5">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Search actor, entity, reason">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Action</th>
+          <th>Entity</th>
+          <th>Actor</th>
+          <th>Scope</th>
+          <th>Reason</th>
+          <th>Impact</th>
+          <th>Flags</th>
+          <th>Confirmation</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for log in page_obj %}
+        <tr>
+          <td>{{ log.created_at|date:"Y-m-d H:i:s" }}</td>
+          <td><span class="badge text-bg-warning">{{ log.action }}</span></td>
+          <td>{{ log.entity_type }}{% if log.entity_id %} #{{ log.entity_id }}{% endif %}</td>
+          <td>
+            {% if log.actor_user %}
+              {{ log.actor_user.full_name|default:log.actor_user.username }}
+              {% if log.actor_user.full_name != log.actor_user.username %}
+                <div class="small text-muted">{{ log.actor_user.username }}</div>
+              {% endif %}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>{{ log.tenant.code|default:"GLOBAL" }} / {{ log.campus.code|default:"ALL" }}</td>
+          <td class="small">{{ log.safe_reason|default:"-" }}</td>
+          <td class="small">{{ log.safe_impact_label|default:"-" }}</td>
+          <td class="small">
+            {% if log.anomaly_flags %}
+              {% for flag in log.anomaly_flags %}
+                <span class="badge text-bg-warning mb-1" title="{{ flag.message }}">&#9888; {{ flag.severity|title }}</span>
+                <div class="text-muted">{{ flag.message }}</div>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted">-</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if log.confirmation_required %}
+              <span class="badge text-bg-success">Confirmed</span>
+            {% else %}
+              <span class="badge text-bg-light border text-dark">Not required</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="9" class="text-center text-muted py-4">No recent critical actions found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

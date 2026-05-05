@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 from apps.grading.models import GradingTemplate, GradingTemplatePeriod, StudentPeriodGrade
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
@@ -124,6 +125,18 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertContains(response, "Accounting 101")
         self.assertContains(response, "High Grade Concentration")
         self.assertContains(response, "80.0%")
+        self.assertContains(response, 'id="gradeDistributionLoadingOverlay"')
+        self.assertContains(response, 'id="gradeDistributionFilterForm"')
+        self.assertNotContains(response, "Course / Subject")
+        self.assertNotContains(response, "Class / Offering")
+        self.assertNotContains(response, "All Components")
+        self.assertNotContains(response, "All Sub-components")
+        self.assertContains(response, 'data-bs-target="#gradeDistributionDetailModal1"')
+        self.assertContains(response, "Masked Student No.")
+        self.assertContains(response, "*******001")
+        self.assertContains(response, "T*** S***")
+        self.assertNotContains(response, "ACC101-001")
+        self.assertNotContains(response, "Student1")
 
     def test_scope_does_not_leak_other_tenant_data(self):
         other_tenant = Tenant.objects.create(code="OTHER", name="Other School")
@@ -213,7 +226,8 @@ class GradeDistributionMonitorTests(TestCase):
         response = self.client.get(self.url, {"offering_id": offering.id})
 
         self.assertEqual(response.status_code, 200)
-        row_flags = [flag["label"] for flag in response.context["rows"][0]["flags"]]
+        target_row = next(row for row in response.context["rows"] if row["course_code"] == "SMALL101")
+        row_flags = [flag["label"] for flag in target_row["flags"]]
         self.assertIn("Small Sample", row_flags)
         self.assertNotIn("High Grade Concentration", row_flags)
 
@@ -225,9 +239,84 @@ class GradeDistributionMonitorTests(TestCase):
         response = self.client.get(self.url, {"offering_id": offering.id})
 
         self.assertEqual(response.status_code, 200)
-        row_flags = [flag["label"] for flag in response.context["rows"][0]["flags"]]
+        target_row = next(row for row in response.context["rows"] if row["course_code"] == "INC101")
+        row_flags = [flag["label"] for flag in target_row["flags"]]
         self.assertIn("Incomplete Data", row_flags)
         self.assertNotIn("High Grade Concentration", row_flags)
+
+    def test_monitor_loads_when_offering_has_no_published_template(self):
+        self.template.is_published = False
+        self.template.save(update_fields=["is_published", "updated_at"])
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "no published grading template assigned")
+        self.assertContains(response, "No template")
+        self.assertEqual(response.context["summary"]["missing_template_offerings"], 1)
+
+    def test_missing_template_monitor_uses_tenant_passing_threshold(self):
+        SystemSettingService.set(
+            "PASSING_GRADE_THRESHOLD",
+            "80",
+            tenant_id=self.tenant.id,
+            value_type="STRING",
+            is_active=True,
+        )
+        self.template.is_published = False
+        self.template.save(update_fields=["is_published", "updated_at"])
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        target_row = next(row for row in response.context["rows"] if row["course_code"] == "ACC101")
+        self.assertEqual(target_row["below_passing_pct"], Decimal("10.0"))
+
+    def test_monitor_scope_follows_faculty_assignment_scope_not_offering_department(self):
+        reviewer_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="FVW_COLL_IS",
+            name="Fairview Information Systems",
+        )
+        scoped_reviewer = self._user(
+            "ac_scope",
+            "Area",
+            "Chair",
+            self.tenant,
+            self.campus,
+            reviewer_department,
+        )
+        scoped_faculty = self._user(
+            "faculty_scope",
+            "Scoped",
+            "Faculty",
+            self.tenant,
+            self.campus,
+            reviewer_department,
+        )
+        self._assign_permissions(scoped_reviewer, include_monitor=True)
+        self._assign_faculty_role(scoped_faculty)
+        offering = self._create_extra_offering("MISMATCH101", "Offering Department Mismatch", "BSA1D")
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=offering,
+            faculty_user=scoped_faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            is_primary=True,
+        )
+        self._seed_grades(offering, [91, 92, 93, 94, 95, 96, 97, 98, 81, 76])
+
+        self.client.force_login(scoped_reviewer)
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "MISMATCH101")
+        self.assertContains(response, "Offering Department Mismatch")
 
     def test_export_csv_uses_same_permission_and_scope(self):
         self.client.force_login(self.admin_user)

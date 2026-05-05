@@ -1,0 +1,91 @@
+<div class="table-responsive">
+  <table class="table table-hover mb-0">
+    <thead>
+      <tr>
+        <th>Campus</th>
+        <th>Term</th>
+        <th>Period</th>
+        <th>Scope</th>
+        <th>Offering</th>
+        <th>Deadline</th>
+        <th>Rule State</th>
+        <th>Status</th>
+        {% if show_inactive_tools %}<th>Used In</th>{% endif %}
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in page_obj %}
+      <tr>
+        <td>{{ row.campus.name|default:row.campus.code }}</td>
+        <td>{{ row.term.name|default:row.term.code }}</td>
+        <td>{{ row.period_code }}</td>
+        <td>{{ row.scope_type }}</td>
+        <td>
+          {% if row.course_offering %}
+            {{ row.course_offering.course.title }} <span class="text-muted">({{ row.course_offering.course.code }})</span>
+            / {{ row.course_offering.section.name|default:row.course_offering.section.code }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>
+          {% if row.deadline_at %}
+            {{ row.deadline_at|date:"Y-m-d H:i" }}
+          {% else %}
+            <span class="text-muted">Not set</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.is_active %}
+            <span class="badge text-bg-success">Active</span>
+          {% else %}
+            <span class="badge text-bg-secondary">Inactive</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if not row.is_active %}
+            <span class="badge text-bg-secondary">Ignored</span>
+          {% elif row.is_locked %}
+            <span class="badge text-bg-danger">Locked</span>
+          {% else %}
+            <span class="badge text-bg-success">Open</span>
+          {% endif %}
+        </td>
+        {% if show_inactive_tools %}<td>{% include "admin_portal/shared/inactive_usage_cell.html" %}</td>{% endif %}
+        <td class="text-end">
+          {% if "grading_periods.lock" in effective_permissions %}
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grading_period_lock_update' row.id %}">Edit</a>
+          {% endif %}
+          {% if row.is_active and row.is_locked and "grading_periods.reopen" in effective_permissions %}
+          <details class="d-inline-block text-start mt-1">
+            <summary class="btn btn-sm btn-outline-warning">Reopen</summary>
+            <form method="post" action="{% url 'admin_portal:grading_period_lock_reopen' row.id %}" class="border rounded p-2 mt-2 bg-white shadow-sm" style="min-width: 280px;">
+              {% csrf_token %}
+              <div class="small text-muted mb-2">
+                Preview: {{ row.reopen_impact.scope_label }} / {{ row.reopen_impact.target_offering_count }} offering(s).
+              </div>
+              <label class="form-label small mb-1" for="reopen_reason_{{ row.id }}">Reason</label>
+              <textarea id="reopen_reason_{{ row.id }}" class="form-control form-control-sm mb-2" name="reopen_reason" rows="2" required></textarea>
+              {% if row.reopen_impact.is_broad %}
+              <label class="form-label small mb-1" for="confirmation_phrase_{{ row.id }}">Type {{ broad_period_reopen_confirmation }}</label>
+              <input id="confirmation_phrase_{{ row.id }}" class="form-control form-control-sm mb-2" name="confirmation_phrase" autocomplete="off">
+              {% endif %}
+              <button class="btn btn-sm btn-warning w-100">Confirm Reopen</button>
+            </form>
+          </details>
+          {% elif row.is_active and not row.is_locked and "grading_periods.lock" in effective_permissions %}
+          <form method="post" action="{% url 'admin_portal:grading_period_lock_close' row.id %}" class="d-inline">
+            {% csrf_token %}
+            <button class="btn btn-sm btn-outline-danger">Lock</button>
+          </form>
+          {% endif %}
+          {% if show_inactive_tools %}{% include "admin_portal/shared/inactive_delete_action.html" %}{% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="{% if show_inactive_tools %}10{% else %}9{% endif %}" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

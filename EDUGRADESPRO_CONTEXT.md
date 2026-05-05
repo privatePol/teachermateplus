@@ -12,30 +12,72 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - forced password change on issued/reset credentials
   - privacy consent acceptance tracking
   - single-device session enforcement
-  - 1-hour session timeout with active-use refresh behavior
+  - configurable tenant-level session timeout with active-use refresh behavior
   - temporary login lockout after repeated failed attempts, configurable from `Tools -> Configuration Management -> Login Security`
   - optional email OTP after a successful password check, configurable from `Tools -> Configuration Management -> Login Security`
   - a `Security -> Login Lockouts` monitor page where authorized admins can review active portal lockouts and clear them when operationally justified
+  - Admin Portal forgot-password recovery using an email OTP; the OTP is sent only for active users who have `admin_portal.access`, and the password reset form is unavailable until the OTP is verified
+- HTML emails use either configured public logo URLs (`EMAIL_LOGO_URL`, `EMAIL_SCHOOL_LOGO_URL`) or inline CID attachments sourced from local logo files, so account onboarding, login OTP, password reset, reminders, non-compliance notices, and correction notifications do not depend on email clients being able to fetch private/local `/media/` URLs.
 - Admin security now supports creating new roles directly in the UI, then assigning permissions and scoped user-role mappings afterward.
+- The Admin Portal topbar shows the current active Academic Year and Term beneath the active tenant/campus selectors, so admins can confirm the operating academic scope while moving across pages.
 - Role creation now supports optional permission-copying from an existing role before final permission fine-tuning.
 - Role management now also supports editing existing roles, including activation/deactivation from the Admin UI.
+- Role management separates active and inactive records. Inactive non-system roles may be hard-deleted from the inactive section only after typing the exact role code; related role-permission and user-role assignment rows are removed and the action is audited.
+- Critical role-permission changes now require a mandatory reason plus the typed phrase `CHANGE PERMISSIONS`. The role-permission page shows critical permission badges and a compact impact preview, including the active users currently assigned to the role, before saving high-impact access changes.
+- User role management separates active `Current Assignments` from `Inactive Assignments` so scoped roles that no longer grant access are easier to distinguish.
+- User role assignment uses a campus-dependent Department dropdown; select the campus first so only that campus's departments are assignable.
+- The Admin Roles list uses icon-based row actions with tooltips for editing roles and managing permissions.
+- The Admin Users list separates active and inactive accounts, keeps the table focused on username, email, default campus, default department, staff flag, status, and icon-based row actions with tooltips, and supports filtering by `is_staff`. User create/edit forms make Default Department campus-dependent through the selected Default Campus.
+- The Admin User create page uses a live Default Campus -> Default Department dependent dropdown, so duplicate-looking department codes from other campuses are not shown after a campus is selected.
 - Role assignment scope now supports department-level granularity (`tenant + campus + department`) for governance use cases such as AC/Dean monitoring boundaries.
+- Admin Portal campus scope is driven by active non-faculty admin roles when such roles exist; faculty-only role assignments do not grant Admin Portal governance visibility for another campus.
 - Application-level data-at-rest protections now include authenticated correction-attachment download views, upload validation, randomized stored filenames for correction attachments and import source files, and audit logging for sensitive upload/download/signature-preview/report-download events.
+- Encrypted user signatures should use a stable `SIGNATURE_ENCRYPTION_KEY` in production; `docs/SIGNATURE_ENCRYPTION_MIGRATION.md` documents final-server migration, decryption failure diagnosis, and re-upload recovery.
 - Server-side data-at-rest work remains an IT responsibility; `docs/DATA_AT_REST_PROTECTION_GUIDE.md` documents the manual checklist for disk encryption, direct media serving restrictions, database users, firewall, backups, and OS permissions.
 - Production settings require a non-default `DJANGO_SECRET_KEY`; production startup fails fast if the secret is missing or left at the development fallback.
 - Application-level performance improvements now include request-level permission reuse for portal menu rendering, optimized Faculty Dashboard aggregate counts, targeted summary-page recomputation for missing rows only, focused composite indexes for common scope/status/gradebook filters, environment-driven Django cache settings, and optional dev-only Debug Toolbar wiring. See `docs/performance_optimization.md`.
 - The Admin `Non-Compliance on Periodic Grades Submission` monitor lists overdue unsubmitted classes only when the faculty assignment has already been accepted. Pagination preserves filters, and missing-record counts are computed for visible page rows to keep large reports responsive.
 - The Admin `Grade Submissions` list includes accepted faculty names and can be searched by faculty name or username in addition to course, section, and period.
 - Organization: tenants, campuses, departments, programs
+- NCBA organizational structure for actual-data setup:
+  - NCBA has two broad branches of operation: Academic and Administrative. EduGradesPro grading governance currently models the Academic side directly; Administrative units may be represented later only if they need grading, approval, reporting, or account-governance scope.
+  - The Academic branch has three broad departments: Graduate, College, and Basic Education.
+  - College is subdivided for governance and data ownership into Business Administration (BA), Information System and Computer Science (IS/CS), Liberal Arts (LA), and Accountancy.
+  - The Academic branch is headed by the Chief Academic Officer (CAO).
+  - Business Administration has a College Dean covering the three campuses.
+  - Academic Chairmen are campus-scoped by college area: BA, Accountancy, LA, and IS/CS. Cubao currently has no BA Academic Chairman.
+  - Basic Education is managed by a Principal per campus, with Academic Coordinators per campus.
+  - Basic Education is subdivided into Elementary, Junior High School, and Senior High School.
+  - For setup discipline, courses, sections, course offerings, students, faculty assignments, grading templates/profiles, and governance roles should be mapped to the most specific department/area that owns the data. This improves filtering, RBAC scope, monitoring, correction routing, and grade-distribution governance.
+  - Departments now support a parent-child hierarchy plus Academic/Administrative branch and Division/Area/Office classification. Use parent Division records such as College, Basic Education, and Graduate Studies when users need broad filters or broad governance scope, then create child Area records such as BA, IS/CS, LA, Accountancy, Elementary, JHS, and SHS.
+  - Department-scoped roles assigned to a parent department include active child departments in Admin Portal scope. This allows a Dean, Principal, or similar broad academic reviewer to cover all child areas without duplicating every child assignment.
+  - Hierarchy coverage is parent-to-child only: a parent division can cover child areas, but a child-area assignment does not cover its parent or sibling areas.
+  - Inactive records are visible only on their own maintenance pages for review/reactivation. Dependent operational scopes, Faculty Portal class access, SIS grade export, deadline reminders, non-compliance notice targeting, template hotfix candidates, and grading/reporting reads require an active tenant/campus/academic-year/term/department/program/course/section chain. For example, an inactive department is managed on the Departments page, but its programs, courses, sections, offerings, students, and grading outputs are excluded from operational lists and processing.
+  - Core maintenance list pages separate active and inactive records into distinct cards with independent pagination, so inactive setup/student/enrollment/grading setup records can be reviewed without being mixed into day-to-day active records. Grading templates, template structure rows, tenant grading profiles, course-template assignments, course base value overrides, and period lock rules follow this same maintenance split. Inactive sections include a `Used In` column showing related-table references; permanent deletion is controlled by the dedicated `inactive_records.delete` permission and is always available to superusers, is enabled only for inactive records with no related usage, requires typing the record's confirmation code, and is blocked server-side if another table still references the record. Enrollment status KPI cards are based on active enrollment records only.
+- Correction approval routes may be configured at the specific child area or at a parent division. EduGradesPro first looks for an exact department route, then the nearest parent route, then the tenant default route.
+- Correction steps that require the same department accept approvers whose default department covers the requesting faculty department through the hierarchy, such as a College Dean with `COLLEGE` default department reviewing a faculty member in `INFOSYS`.
+- Admin users with `corrections.create_on_behalf` can create a Petition for Correction of Grades for the original faculty member when that faculty member is inactive or unavailable. The request keeps the original faculty as the faculty of record, records the admin initiator separately, follows the original faculty/department correction route, and prevents the initiating admin from approving that same on-behalf petition unless the user is superadmin.
+- The Create Correction On Behalf flow uses the setup order Campus -> AY -> Term -> Faculty -> Section -> Course before grading-period selection. This supports AC users whose governance assignments span multiple campuses/departments, such as IS/CS coverage across Cubao, Fairview, and Taytay.
+- Submission non-compliance escalation recipients include configured academic-head roles assigned to the overdue offering's exact department or an ancestor department.
+  - Tenant Grading Profiles may be configured on a parent division to cover child-area offerings. When both parent and child profiles match, the child-area profile is more specific and wins before priority is compared.
+  - Course offerings keep their own department because an offering can have a term/section-specific governance owner. The offering department can be inferred from the selected section or course when safe, while explicit override remains available for legitimate cross-area offering ownership.
+  - Course Offering CSV import can auto-create a reusable Section master record when `section_code` does not yet exist, using the selected tenant/campus/department/program scope. Existing Sections are reused; inactive matching Sections must be reactivated instead of silently recreated.
 - Academics: academic years, terms, courses, sections, offerings, faculty assignments, students
 - Admin student scope includes programless students only when their tenant, campus, and department are accessible to the current admin scope.
 - Faculty assignments now carry acknowledgment fields (`accepted_at`, `accepted_by`) so admin can track whether the faculty member already accepted the load.
+- Faculty can undo an accidental assignment acceptance from My Classes only while no grading, attendance, submission, or faculty-side class-list work exists for that class. Undo returns the assignment to Pending, refreshes the response window, and writes an audit event.
+- Faculty Portal My Classes warns faculty when an active or pending assigned class has no active published course-template assignment for that offering term. The class card labels the grading template as `Not assigned yet` and tells the faculty member to coordinate with the MIS Department, even if a broader fallback template might otherwise resolve internally.
+- Admin Portal Grading Analytics, Admin Portal Grade Distribution Monitor, and Faculty Portal Grading Analytics keep loading when an in-scope class has no published grading template. The pages warn the user, mark affected rows with `No template`/`No Published Template`, and use the tenant passing threshold fallback for any existing grade rows instead of failing the page.
+- Grade Distribution Monitor visibility follows accepted faculty assignments and faculty department scope, which keeps AC/Dean monitoring aligned with the faculty they govern even when legacy course offerings belong to a broader college department.
 - Faculty assignments now also carry instruction/response workflow fields so admin can send notes and faculty can return clarification or decline reasons without leaving the portal.
 - Faculty assignments now also carry response-window fields (`response_due_at`, `last_reminded_at`, `reminder_count`) so pending loads can be reminded and auto-expired when left unanswered.
 - Admin faculty-assignment operations now also include:
   - one-click renewal of expired response windows
   - a dedicated assignment dashboard with campus, department, and faculty rollups.
   - configurable default-primary behavior for newly created faculty assignments, with manual override still available from the assignments list.
+- Faculty Portal class access follows the Admin-configured active Academic Year/Term. Current-scope classes remain editable under normal grading governance, while archived or outside-scope classes are treated as read-only history on direct class pages; edits, submission, self-reopen, and class-list updates are blocked there, with corrections handled through the governed correction workflow.
+- Faculty Portal topbar displays the active Academic Year/Term resolved from the faculty user's current/default tenant scope so faculty can confirm the operating academic scope while navigating.
+- Faculty reminder and memo class selectors default to accepted classes in the current active academic scope so old-term classes do not appear in day-to-day faculty planning dropdowns.
 - Enrollment management
 - Enrollment updates enforce the same tenant/campus match between student and offering as enrollment creation, preventing cross-campus or cross-tenant class-list rows.
 - `Tools -> Configuration Management` now includes a more guided `Class Master List Ownership` area:
@@ -49,32 +91,39 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - cards now open collapsed by default, with `Expand All` and `Collapse All` controls at the top of the page
   - Login Security settings now include optional email OTP and OTP expiry minutes for both Admin Portal and Faculty Portal sign-in
   - Faculty Memo settings now also include a Faculty Portal quick-tour toggle; individual faculty users may disable the tour for their own next logon
-- Grading management:
+- `Tools -> Actual Data Reset` provides a guarded rebuild helper for training/setup cycles. Access is controlled by the assignable `actual_data_reset.run` permission. It requires a mandatory reason, exact confirmation phrase, and acknowledgement checkbox, creates a SQLite backup when applicable, exports audit logs before deletion, deletes tenant/campus/department/program, academic, grading-template/profile, import, enrollment, faculty-loading, grading, prediction, notification, session, audit, and scoped-role data, and preserves the application shell: users, roles, permissions, role-permission mappings, menus, migrations, Django auth metadata, and global settings.
+  - Grading management:
   - templates
+  - grading templates can be duplicated from the Admin list; the copy includes periods, major components, subcomponents, details, weights, scoring modes, exam/attendance flags, and active states, but is reset to unpublished `DRAFT` status for governance review before use. The Grading Templates list uses taller solid active/inactive section headers, with the Active section using the requested `#008000` green, compact icon-based row actions with tooltips for builder, structure, calculator, edit, duplicate, submit, review, publish, and hotfix actions, and a balanced three-column icon grid for active rows; its `Periods` column counts active template periods only. The Builder page opens with all period accordions collapsed by default, applies the softer rotating period color scheme, makes small weight/metadata/detail cards more prominent with accent borders and subtle gradients, removes level badges from major component and subcomponent title rows, renders major component/subcomponent/detail headings in uppercase h3-sized type, displays major component Score Entry Method values, and still displays inactive template periods with an `INACTIVE` badge and warning note so admins can recover from accidental deactivation by opening Edit Period. Template Structure Preview now follows the same softer hierarchy colors with themed period cards, stronger component panels, warm subcomponent sections, and blue-accented detail breakdowns. Template Components, Template Subcomponents, and Template Details pages include a Builder button when the current filter context resolves to a template.
   - template governance workflow (tenant-scoped role matrix for draft, submit, review, publish, and hotfix stages)
 - Faculty activity score sheets default blank active-student raw score cells to `0` and save submitted blanks as zero-score records, ensuring summary averages include every saved activity.
 - Faculty period submission treats the assigned grading template as a required structure: every active non-attendance component, subcomponent, or detail bucket must have at least one activity before submission can proceed.
 - Reopen request review is one-time only for pending requests; duplicate submissions against already-approved or rejected requests are handled with a normal admin message instead of a server error.
-- Faculty can view and print the official Summary of Grades only after submission. Faculty may self-reopen a submitted gradebook before the configured deadline, but the summary/print is hidden again until resubmission; if a reopened gradebook reaches the deadline without resubmission, EduGradesPro auto-locks score/activity/attendance editing while still allowing faculty to finalize and resubmit the existing records from Summary. Faculty grading pages and My Classes also perform this check just-in-time, so a past deadline changed by Admin is enforced on the next faculty page load even before the scheduled command runs.
+- Faculty periodic grade visibility is configurable: by default faculty may review computed PG, MG, PFG, and FX values before submission, while official printing still requires submission. Configuration Management can restrict those periodic grades until the period gradebook is submitted. Faculty may self-reopen a submitted gradebook before the configured deadline, but the official printout is hidden again until resubmission; if a reopened gradebook reaches the deadline without resubmission, EduGradesPro auto-locks score/activity/attendance editing while still allowing faculty to finalize and resubmit the existing records from Summary. Faculty grading pages and My Classes also perform this check just-in-time, so a past deadline changed by Admin is enforced on the next faculty page load even before the scheduled command runs.
   - template governance Phase 2 workflow engine:
     - approval workflows now store real step timelines
     - hotfix workflows now store review/apply steps
     - sequential review chains can be enabled per tenant
+    - the Admin Portal Template Governance settings page is organized into Template Flow, Hotfix Flow, Safeguards, and Current Setup sections, with role assignment handled by searchable checkbox lists instead of listboxes to reduce accidental deselection.
   - periods/components/subcomponents/details
     - major components now use an explicit `is_exam_component` flag to identify exam buckets for class-standing/exam separation instead of relying on component code text
-  - grading-template testing calculator (read-only validation using sample raw score + total score)
+  - grading-template testing calculator (read-only validation using sample raw score + total score, with final-grade preview from the matched active Tenant Grading Profile formula or the active-period average fallback when no profile matches)
   - template assignment
   - template hotfix creation now uses a dedicated admin workflow page where `Selected Offerings` are sorted by course title and rendered as searchable offering cards for cleaner live-scope selection
+  - template hotfix apply modes now include `Requesting Faculty's Accepted Offerings`, which limits target offerings to active/open classes where the hotfix requester has an accepted faculty assignment.
+  - Template hotfix review now shows a compact impact preview before decision. The final apply step requires a decision reason plus the typed phrase `APPLY HOTFIX`; sequential review steps still remain single-user accountable and do not require dual approval.
+  - Faculty Portal can show a governed `Report Template Issue` action on the read-only class grading-template page when the faculty user has `template_hotfixes.create`, belongs to the configured Hotfix Request role, and the class is active/open, accepted, and unsubmitted. Submitted or reopened gradebooks are protected from this path. The faculty-facing report creates a pending template hotfix request with the faculty-limited scope and shows workflow status/stages back on the template page.
   - active grading period governance now drives faculty period openness:
     - only the configured active campus-term period stays open for normal faculty work
     - non-active periods are closed by policy unless the period has been formally reopened or is inside an approved correction window
     - correction filing pages for already submitted periods remain reachable so governance closure does not strand legitimate correction requests
   - period locks and deadlines
+    - broad campus-wide period reopen now requires a mandatory reason plus the typed phrase `REOPEN`, and records a compact impact summary in the audit trail.
     - for NCBA's simplified submission policy, the deadline now marks when a class becomes overdue/non-compliant but does not automatically close an unsubmitted grade book
     - unsubmitted grade books remain open until faculty finally submit them
     - `is_locked` disables faculty score, activity, and attendance editing for the selected period rule scope
     - `scope_type` controls coverage: `CAMPUS` applies one rule to all matching offerings in the selected campus/term/period, while `COURSE` targets one specific offering and takes priority over the campus rule
-    - inactive period-lock rows are ignored by faculty pages, deadline checks, and auto-lock processing; the Admin Period Locks list defaults to active rows and exposes a rule-state filter for inactive/audit review
+    - inactive period-lock rows are ignored by faculty pages, deadline checks, and auto-lock processing; the Admin Period Locks maintenance page separates active and inactive rules into distinct cards for audit/review
     - optional `Submission Non-Compliance Notices` can now be enabled per tenant so EduGradesPro issues staged overdue communications every configured interval until submission
     - the workflow supports `Notice`, `Warning`, and repeated `Escalation` stages, with HR escalation recipients configurable from `Tools -> Configuration Management`
     - faculty can review these communications from the `Faculty Reminder Center`, while admin/governance users can see the latest stage in the overdue non-compliance monitor
@@ -86,6 +135,10 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - configurable features/settings page for optional workflow toggles
   - template governance settings page for template lifecycle stage-role control
 - Audit views
+- Admin Portal Audit now includes `Recent Critical Actions`, a safe governance report for CAO/Dean/admin review of reset, hotfix apply, period reopen, correction/reopen decisions, and critical role-permission changes. It shows actor, scope, reason, confirmation status, and compact impact summaries without exposing sensitive student-grade details.
+- Governance anomaly detection is non-blocking and audit-based. Relevant audit events can carry `anomaly_flags_json` for unusual period reopen, template hotfix, correction, role/permission, and Actual Data Reset activity. The Admin Dashboard surfaces recent scoped `Governance Alerts`, and `Recent Critical Actions` includes a Flags column so CAO/Dean/admin users can review patterns without slowing normal operations.
+- SaaS/production hardening now includes tenant-bound SIS API keys stored as hashes in `tenant_api_keys`, with key prefixes for identification, revocation/rotation support, optional expiration, last-used tracking, per-key/IP rate limiting, tenant-bound access enforcement, campus validation, and audited API read/deny/rate-limit events. The legacy `SIS_API_TOKEN` path remains available only when `SIS_API_LEGACY_TOKEN_ENABLED=True`.
+- Production safeguards require `DEBUG=False`, explicit `DJANGO_ALLOWED_HOSTS`, separated system/error/security log files, and Actual Data Reset protection: production reset is disabled by default and requires explicit enablement, superadmin execution, maintenance mode, audit export validation, and database backup validation/confirmation.
 - Admin analytics now include:
   - failure breakdowns by period/component/detail
   - faculty class fail-rate ranking (top 10)
@@ -151,6 +204,9 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - The monitor aggregates stored period grades or stored activity computed scores by scoped faculty/class/period/activity context.
   - It uses neutral indicators only: `High Grade Concentration`, `High Perfect Score Rate`, `Low Grade Variation`, `Small Sample`, and `Incomplete Data`.
   - Its thresholds are tenant-level settings exposed in `Configuration Management -> Faculty Grade Distribution Monitor`.
+  - Its visible filters are limited to data source, campus, department, academic year, term, faculty, and grading period to keep the monitor broad enough for governance review.
+  - It shows a progress/loading overlay while report filters or result pages are loading.
+  - Clicking a row's Period / Level opens a modal with the underlying grade values for that exact distribution row; student numbers and names are masked before rendering for privacy.
   - It does not recalculate grades, change templates, expose student-level drilldown, or modify submissions/enrollments/assignments.
   - All rows are limited through the existing Admin scope service for tenant, campus, department, academic year, term, course, offering, and faculty access.
 - Faculty period Summary pages now present submission readiness through colored metric cards instead of a single inline text line, including counts for `ACTIVE`, complete records, missing records, coverage, `DRP`, `W`, and `INC`.
@@ -170,7 +226,7 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - Detailed operational setup is documented in `docs/TENANT_GRADING_PROFILE_SETUP_GUIDE.md`, including NCBA regular templates, Summer profile formula setup, and Taytay-only template scoping
   - example weighted profile payload:
     - `{"period_weights": [{"period_code": "PRELIM", "weight": "20.00"}, {"period_code": "MIDTERM", "weight": "20.00"}, {"period_code": "PREFINAL", "weight": "20.00"}, {"period_code": "FINAL", "weight": "40.00"}]}`
-  - the Admin form for Tenant Grading Profiles now includes field-by-field help text so tenant, campus, department, program, course, base value, passing threshold, formula mode, weights, priority, and effective term are easier to understand during setup
+  - the Admin form for Tenant Grading Profiles now includes field-by-field help text so tenant, campus, department, program, course, base value, passing threshold, formula mode, weights, priority, and effective term are easier to understand during setup. Its Department selector is campus-dependent with campus-aware labels to avoid duplicate-looking department choices, and its Course selector is sorted by course title then code. Tenant grading profiles can also be duplicated from the Admin list; duplicated profiles copy the scope/formula fields but start inactive and non-default so they do not affect live computation until reviewed. The Tenant Grading Profiles list uses compact icon-based row actions with tooltips for edit and duplicate actions, and renders Term Type as badges for quicker scanning.
 - Official period grades are now visible to faculty by default.
 - When Admin explicitly enables the post-deadline official-grade release restriction, the Summary `Passed` / `Failed` cards follow that same visibility rule so the readiness UI does not bypass the configured governance policy.
 - The Summary snapshot cards remain visible before submission, but the official gradebook table and print sheet are hidden until submission so unsubmitted EGP records cannot be used as the official AIMS source.
@@ -182,6 +238,7 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - The Final-period Summary page now also includes prior official period-grade columns (`PRELIM GRADE`, `MIDTERM GRADE`, `PRE-FINAL GRADE`) before the final-period grade column such as `FX Grade`.
 - Final-grade computation now uses the full configured active-period count as the divisor; missing later period grades do not reduce the denominator just because only earlier period grades already exist.
 - The Final-period Summary page now also refreshes stored `StudentFinalGrade` rows from existing official period grades before rendering, so governance-closed/read-only Final review pages do not keep showing stale final averages from older computation rules.
+- Faculty Period Summary now provides an audited `Explain` action beside visible official period grades, and the Final-period Summary provides the same action beside visible final grades. The modal uses the existing official grading service path and respects the same faculty official-grade visibility policy, showing template/profile/threshold/base-value/formula sources, component or period breakdown, raw diagnostic values before `ROUND_HALF_UP`, warnings, and authorized correction history.
 - Normal score and attendance writes now immediately recompute stored period and final grades for only the affected student(s), while Summary/Submit still provide full-offering refresh points.
 - Approved score-only correction petitions post the approved raw score values, recompute only the affected student(s), update their final grade from stored period grades, and log before/after score, period-grade, and final-grade audit entries.
 - Faculty Portal sidebar now organizes the main operational links as:
@@ -228,6 +285,8 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - When active grading period governance is configured, the faculty at-risk monitor focuses on that active period and keeps final-grade projection on the detailed prediction page to reduce confusion.
 - Prediction at-risk status now considers both the selected period estimate and the possible final grade; a student can be flagged at risk when the current period is passing but the possible final grade is still below the configured passing threshold.
 - Faculty Portal now also includes a class-period `Who Viewed` history page that lets faculty review admin-side read-only grade book monitor openings already recorded in the audit trail.
+- Faculty Grade Book Monitor student identity visibility is permission-controlled. Users with scoped access plus `gradebook.view_student_identity` may see unmasked student numbers and names for authorized gradebook or correction review; AC/Dean/CAO-style reviewers without that permission continue to see masked identity. The audit log records whether the view was masked or identity-visible.
+- Admin Faculty Grade Book Monitor now also exposes an audited `Explain` action for student period grades, plus final grades on final-period monitor rows when a stored final grade exists. The explanation follows the same student-identity masking rule as the monitor itself, so reviewers without `gradebook.view_student_identity` see masked identity inside the diagnostic modal.
 - Faculty Portal class-list handling now distinguishes:
   - `Remove from Class` for student schedule movement to another class
   - `DRP` for true drop from the class
@@ -316,7 +375,7 @@ All business operations should respect these dimensions and permissions.
   - prediction services now follow the same resolved tenant final-grade strategy for:
     - projected final grade
     - average still needed across remaining periods to finish with a passing final grade
-  - the admin template-testing calculator remains a template-only preview and does not fully simulate offering-specific tenant grading profile scope
+  - the admin template-testing calculator previews the selected template and applies an active Tenant Grading Profile assigned to that template when one exists; it still does not simulate full offering-specific scope such as campus, department, program, course, or term-type matching
 
 ## 5. Governance Rules in Focus
 - Faculty period submission now requires complete visible records for `ACTIVE` students:
@@ -385,6 +444,7 @@ All business operations should respect these dimensions and permissions.
 - Privacy consent is part of first-login governance.
 - Email-based flows require SMTP configuration via environment variables.
 - The Admin dashboard `Currently Logged-in Users` widget now uses an effective session-expiry calculation based on both the stored Django session expiry and the current configured timeout window from the user's latest auditable activity/login, so stale sessions created before a timeout-policy change do not continue appearing as active indefinitely.
+- `Tools -> Configuration Management -> Login Security` includes a tenant-level session timeout in minutes. Authenticated Admin Portal and Faculty Portal requests apply that configured timeout with active-use refresh behavior; `DJANGO_SESSION_TIMEOUT_SECONDS` remains the deployment fallback when no tenant setting is saved.
 - Optional feature flows are being designed to use dedicated configurable feature settings with global toggles, role-aware control where appropriate, and tenant/campus-aware recipient configuration rather than hard-enabled behavior.
 - Faculty assignment reminder and expiry behavior is now also configurable from the dedicated Configuration Management screen instead of being fixed in code.
 - Faculty reminder center visibility and reminder-email queueing are also configurable from the same dedicated features screen so operations can turn them on/off without code changes.
@@ -435,6 +495,8 @@ All business operations should respect these dimensions and permissions.
 - Persistent filters where practical.
 - Reduced clicks for repetitive tasks (auto-filter, bulk assign, guided forms).
 - Course maintenance now applies campus-first department filtering in the form UI so campus-specific department mapping is less error-prone.
+- Admin Portal department filters include campus context when multiple campuses are visible, so repeated department codes such as `COLLEGE`, `BSA`, `INFOSYS`, `ELEM`, `JHS`, or `SHS` remain distinguishable across campuses.
+- Course-offering CSV import follows the same safe inference direction as the Admin Portal form: when `department_code` is blank, a unique selected section can supply the offering department before EduGradesPro falls back to the selected course's campus-matching department.
 - Admin monitoring/review screens now favor human-readable staff naming:
   - faculty selectors use `Full Name (username)` when name data exists
   - review-heavy screens keep the username visible only as supporting context.
@@ -442,7 +504,9 @@ All business operations should respect these dimensions and permissions.
   - course choices prefer `Course Title (code)`
   - section choices prefer section name
   - offering labels combine readable course/section/term names with codes only as secondary reference.
-- Admin Portal now includes a grading-template testing calculator so operations can validate how a selected template will compute raw score conversion, Prelim, Midterm, Pre-Final, Final Exam, and Final Grade before live use.
+- Admin Portal now includes a grading-template testing calculator so operations can validate how a selected template will compute raw score conversion, Prelim, Midterm, Pre-Final, Final Exam, and Final Grade before live use. The final-grade preview uses the active Tenant Grading Profile assigned to the selected template when available, including weighted selected-period formulas, and otherwise shows the active-period average fallback. The calculator also repeats the final-grade computation after the final period walkthrough so the computation reads in grading sequence.
+- Admin Portal grading-template Builder now presents the hierarchy with clearer spacing and visual separation: major components use stronger container panels, subcomponents sit in a distinct breakdown area, and detail items render as responsive cards so admins can distinguish the three levels more quickly.
+- Admin Portal `Template Subcomponents` and `Template Details` now have Back buttons that return admins to the parent setup list while preserving the selected template/period/component context.
 - The grading-template testing calculator now presents each period as its own guided walkthrough with clearer step sequencing and distinct period colors, helping admins explain the computation flow with less confusion.
 - The calculator presentation is now intentionally simpler and closer to the grading-template builder:
   - period formulas are shown in plain builder-style form such as `PRELIM GRADE = Prelim Exam (40%) + Class Standing (60%)`
@@ -467,6 +531,7 @@ All business operations should respect these dimensions and permissions.
 - The faculty prediction explainer now also includes a transparent methodology section that shows the actual computation flow, the major factors used by the engine, and the factor set behind each visible prediction column.
 - The same prediction explainer now also documents Base 50 transmutation, period-grade computation, and final-grade averaging so faculty can compare unofficial prediction with the official grading path more confidently.
 - Official computed grade release is now a separate faculty-governance control in Configuration Management:
+  - periodic grade visibility before submission can be allowed or restricted; the restriction is off by default
   - period grades can be released to faculty only after the selected period deadline
   - final grade can be released to faculty only after the final-period deadline
   - Faculty Portal summary/print views now honor those settings so official computed values are not exposed early.
@@ -483,10 +548,13 @@ All business operations should respect these dimensions and permissions.
 - Faculty Portal now also exposes the effective grading template per assigned class:
   - class cards show the current grading template name
   - faculty can open a read-only grading-template page for the class
-  - the page presents period formulas and class-standing breakdown using the template actually resolved for that offering.
+  - the page presents period formulas and class-standing breakdown using the template actually resolved for that offering
+  - the page links to a read-only Grade Calculator that lets faculty simulate raw-score conversion, period grades, and the offering-specific Tenant Grading Profile final-grade formula without saving grades, creating activities, or changing student records.
 - The faculty prediction guide now includes the dedicated `grades_prediction.png` screenshot and a shorter “quick reading order” explanation to support non-technical faculty users.
 - Admin Portal course-template assignment now supports bulk multi-course assignment with prior-assignment checking in the same term scope, making template rollout faster while avoiding conflicting assignment rows.
-- Admin Portal course-template assignment list now also acts as a coverage monitor by surfacing metric cards and a direct filter for courses that still have no active grading template assignment.
+- Admin Portal course-template assignment list now also acts as a coverage monitor by surfacing metric cards and direct filters for missing grading-template coverage:
+  - `Courses with no grading template` identifies course masters with no active template assignment.
+  - `Offerings with no grading template` identifies current course offerings whose course has no active published template assignment for that offering term, so admins can see the exact campus, AY/term, section, and faculty load affected before faculty grading starts.
 - Admin guide section `7. Submission and Reopen Control` now mirrors the improved guide presentation style and explicitly maps locks, submission monitoring, reopen governance, and faculty re-submission follow-through to the correct Admin Portal pages.
 - Admin guide section `7. Submission and Reopen Control` now also uses a dedicated visible-border table style so policy tables are easier to scan and read during operations briefings.
 - Admin guide section `8. Grade Correction Process (System vs Manual)` now uses the same table-first presentation style and makes the system request path, official PDF artifact, approval notifications, and manual-only handling easier to distinguish.
@@ -500,6 +568,7 @@ All business operations should respect these dimensions and permissions.
 - Faculty Portal base layout now displays an active-session notice when a superuser or account without an active FACULTY role opens faculty pages, explaining shared browser sessions and recommending incognito, another browser, or a separate browser profile for faculty-account testing.
 - Faculty Dashboard now uses a clearer "today first" layout with a stronger hero, shortcut cards for common tasks, a priority-action panel, a privacy-safe at-risk preview, and supporting KPI sections below.
 - Admin Portal guide has been redesigned as a polished workstream hub with a stronger hero, an operating-path card, grouped navigation for start/scope, grading setup, faculty operations, and security/monitoring, target highlighting, and a fixed Back to top link.
+- Admin Portal guide now explicitly documents that Admin/CAO users initiate official `Template Hotfix Request` records from `Grading -> Grading Templates -> Hotfix`, while Faculty Portal uses the faculty-facing `Report Template Issue` wording. CAO initiation requires both `template_hotfixes.create` and inclusion in the Template Governance `Hotfix Request` role set.
 - Admin Portal Security now includes a Faculty Deactivation page for scheduling or cancelling future faculty account deactivations. Due schedules are applied by running `python manage.py apply_scheduled_user_deactivations` from cron or a task scheduler, which deactivates the account, clears active sessions, and writes audit logs.
 - Faculty deadline reminder banners now distinguish between `no deadline configured` and `deadline configured for a different campus/term scope`, so faculty users get a clearer explanation when admin settings do not apply to their accepted classes.
 - The `Period Lock` admin form now uses actual grading-template period choices and validation, reducing deadline mismatches caused by manually typed term codes instead of real period codes.

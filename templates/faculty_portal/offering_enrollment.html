@@ -84,6 +84,11 @@
     - Use <strong>Remove from Class</strong> for schedule movement. Use <strong>DRP</strong> only when the student dropped this class, <strong>WITHDRAWN</strong> only when the student withdrew from the term, and <strong>INC</strong> when the class record should be marked incomplete.
   {% endif %}
 </div>
+{% if is_read_only_class %}
+<div class="alert alert-warning">
+  {{ read_only_reason }}
+</div>
+{% endif %}
 
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body py-3">

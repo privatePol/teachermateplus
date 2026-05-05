@@ -1,0 +1,28 @@
+<div class="table-responsive">
+  <table class="table table-hover mb-0">
+    <thead><tr><th>Student</th><th>Offering</th><th>Status</th><th>Source</th><th>Active</th>{% if show_inactive_tools %}<th>Used In</th>{% endif %}<th></th></tr></thead>
+    <tbody>
+    {% for row in page_obj %}
+      <tr>
+        <td>{{ row.student.student_no }} - {{ row.student.last_name }}, {{ row.student.first_name }}</td>
+        <td>
+          {{ row.course_offering.course.title }} <span class="text-muted">({{ row.course_offering.course.code }})</span>
+          | {{ row.course_offering.section.name|default:row.course_offering.section.code }}
+        </td>
+        <td><span class="badge text-bg-info">{{ row.enrollment_status }}</span></td>
+        <td>{{ row.encoded_via_portal }}</td>
+        <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+        {% if show_inactive_tools %}<td>{% include "admin_portal/shared/inactive_usage_cell.html" %}</td>{% endif %}
+        <td class="text-end">
+          {% if "enrollment.update" in effective_permissions %}
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:enrollment_update' row.id %}">Edit</a>
+          {% endif %}
+          {% if show_inactive_tools %}{% include "admin_portal/shared/inactive_delete_action.html" %}{% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="{% if show_inactive_tools %}7{% else %}6{% endif %}" class="text-center text-muted py-4">{{ empty_message|default:"No enrollment records found." }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

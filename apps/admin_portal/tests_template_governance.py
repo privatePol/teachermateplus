@@ -7,17 +7,19 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
+from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.auditlog.models import AuditLog
 from apps.core.services.scope import ScopeService
 from apps.core.services.settings import SystemSettingService
 from apps.grading.models import (
     GradingTemplate,
     GradingTemplateComponent,
+    GradingTemplateDetail,
     GradingTemplatePeriod,
+    GradingTemplateSubcomponent,
     TemplateHotfixRequest,
 )
-from apps.grading.services import TemplateGovernanceWorkflowService
+from apps.grading.services import TemplateGovernanceWorkflowService, TemplateHotfixService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.tenants.models import Campus, Department, Program, Tenant
 
@@ -116,6 +118,26 @@ class TemplateGovernanceWorkflowTests(TestCase):
             module="grading_templates",
             action="publish",
         )
+        self.permission_template_period_update = Permission.objects.create(
+            code="template_periods.update",
+            module="template_periods",
+            action="update",
+        )
+        self.permission_template_component_read = Permission.objects.create(
+            code="template_components.read",
+            module="template_components",
+            action="read",
+        )
+        self.permission_template_subcomponent_read = Permission.objects.create(
+            code="template_subcomponents.read",
+            module="template_subcomponents",
+            action="read",
+        )
+        self.permission_template_detail_read = Permission.objects.create(
+            code="template_details.read",
+            module="template_details",
+            action="read",
+        )
         self.permission_hotfix_read = Permission.objects.create(
             code="template_hotfixes.read",
             module="template_hotfixes",
@@ -139,6 +161,10 @@ class TemplateGovernanceWorkflowTests(TestCase):
             self.permission_template_submit,
             self.permission_template_approve,
             self.permission_template_publish,
+            self.permission_template_period_update,
+            self.permission_template_component_read,
+            self.permission_template_subcomponent_read,
+            self.permission_template_detail_read,
             self.permission_hotfix_read,
             self.permission_hotfix_create,
             self.permission_hotfix_review,
@@ -229,6 +255,150 @@ class TemplateGovernanceWorkflowTests(TestCase):
             is_active=True,
         )
         return template
+
+    def test_template_builder_shows_inactive_period_for_reactivation(self):
+        template = self._make_template(code="TMP-INACTIVE-PERIOD")
+        period = template.periods.get(code="PRELIM")
+        period.is_active = False
+        period.save(update_fields=["is_active", "updated_at"])
+
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+        response = self.client.get(reverse("admin_portal:grading_template_builder", kwargs={"template_id": template.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Prelim")
+        self.assertContains(response, "INACTIVE")
+        self.assertContains(response, "Edit Period")
+        self.assertContains(response, "Raw Score (Base-50)")
+
+    def test_template_list_period_count_excludes_inactive_periods(self):
+        template = self._make_template(code="TMP-ACTIVE-PERIOD-COUNT")
+        inactive_period = GradingTemplatePeriod.objects.create(
+            template=template,
+            code="OLD",
+            name="Old Period",
+            sequence_no=2,
+            is_active=False,
+        )
+        GradingTemplateComponent.objects.create(
+            template_period=inactive_period,
+            code="OLD_COMPONENT",
+            name="Old Component",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+        response = self.client.get(reverse("admin_portal:grading_template_list"))
+
+        self.assertEqual(response.status_code, 200)
+        row = next(row for row in response.context["active_page_obj"] if row.id == template.id)
+        self.assertEqual(row.period_count, 1)
+        self.assertEqual(row.active_period_codes, ["PRELIM"])
+
+    def test_template_structure_lists_link_back_to_builder(self):
+        template = self._make_template(code="TMP-BUILDER-LINKS")
+        period = template.periods.get(code="PRELIM")
+        component = period.components.get(code="PRELIM_EXAM")
+        subcomponent = GradingTemplateSubcomponent.objects.create(
+            template_component=component,
+            code="QUIZZES",
+            name="Quizzes",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="QUIZ_1",
+            name="Quiz 1",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        builder_url = reverse("admin_portal:grading_template_builder", kwargs={"template_id": template.id})
+
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+
+        component_response = self.client.get(
+            f"{reverse('admin_portal:template_component_list')}?period_id={period.id}"
+        )
+        self.assertEqual(component_response.status_code, 200)
+        self.assertContains(component_response, f'href="{builder_url}"')
+        self.assertContains(component_response, "Builder")
+
+        subcomponent_response = self.client.get(
+            f"{reverse('admin_portal:template_subcomponent_list')}?component_id={component.id}"
+        )
+        self.assertEqual(subcomponent_response.status_code, 200)
+        self.assertContains(subcomponent_response, f'href="{builder_url}"')
+        self.assertContains(subcomponent_response, "Builder")
+
+        detail_response = self.client.get(
+            f"{reverse('admin_portal:template_detail_list')}?subcomponent_id={subcomponent.id}"
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertContains(detail_response, f'href="{builder_url}"')
+        self.assertContains(detail_response, "Builder")
+
+    def test_requesting_faculty_offerings_scope_targets_only_requester_accepted_classes(self):
+        template = self._make_template(
+            code="TMP-FACULTY-SCOPE",
+            published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        faculty = self._make_user("faculty_hotfix", "Faculty Hotfix")
+        other_faculty = self._make_user("other_faculty", "Other Faculty")
+        other_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIT-1B",
+            name="BSIT 1B",
+        )
+        other_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=other_section,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=faculty,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=other_offering,
+            faculty_user=other_faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=other_faculty,
+        )
+
+        hotfix = TemplateHotfixService.create_request(
+            template=template,
+            requested_by=faculty,
+            apply_mode=TemplateHotfixRequest.ApplyMode.REQUESTING_FACULTY_OFFERINGS,
+            justification="Only my handled class should be in scope.",
+        )
+
+        target_offerings = TemplateHotfixService._resolve_target_offerings(hotfix)
+        self.assertEqual([offering.id for offering in target_offerings], [self.offering.id])
 
     def test_settings_page_saves_role_matrix_and_safeguards(self):
         self.client.force_login(self.workflow_admin)
@@ -430,7 +600,11 @@ class TemplateGovernanceWorkflowTests(TestCase):
 
         review_response = self.client.post(
             reverse("admin_portal:template_hotfix_review", kwargs={"hotfix_id": hotfix.id}),
-            {"decision": "APPROVE", "review_remarks": "Applying my own hotfix."},
+            {
+                "decision": "APPROVE",
+                "review_remarks": "Applying my own hotfix.",
+                "confirmation_phrase": "APPLY HOTFIX",
+            },
             follow=True,
         )
 
@@ -648,6 +822,22 @@ class TemplateGovernanceWorkflowTests(TestCase):
         final_review_response = self.client.post(
             reverse("admin_portal:template_hotfix_review", kwargs={"hotfix_id": hotfix.id}),
             {"decision": "APPROVE", "review_remarks": "CAO applied."},
+            follow=True,
+        )
+        self.assertEqual(final_review_response.status_code, 200)
+        self.assertContains(final_review_response, "Type APPLY HOTFIX to apply this hotfix.")
+        hotfix.refresh_from_db()
+        second_step.refresh_from_db()
+        self.assertEqual(hotfix.status, TemplateHotfixRequest.Status.PENDING)
+        self.assertEqual(second_step.status, "PENDING")
+
+        final_review_response = self.client.post(
+            reverse("admin_portal:template_hotfix_review", kwargs={"hotfix_id": hotfix.id}),
+            {
+                "decision": "APPROVE",
+                "review_remarks": "CAO applied.",
+                "confirmation_phrase": "APPLY HOTFIX",
+            },
             follow=True,
         )
         self.assertEqual(final_review_response.status_code, 200)

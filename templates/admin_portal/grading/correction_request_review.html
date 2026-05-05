@@ -34,6 +34,26 @@
             <span class="text-muted">({{ correction_request.requested_by_user.username }})</span>
           {% endif %}
         </div>
+        <div class="mb-2">
+          <strong>Source:</strong>
+          {% if correction_request.request_source == "ADMIN_ON_BEHALF" %}
+            Admin on behalf
+          {% else %}
+            Faculty self-petition
+          {% endif %}
+        </div>
+        {% if correction_request.initiated_by_user %}
+        <div class="mb-2">
+          <strong>Initiated By:</strong>
+          {{ correction_request.initiated_by_user.full_name|default:correction_request.initiated_by_user.username }}
+          {% if correction_request.initiated_by_user.full_name != correction_request.initiated_by_user.username %}
+            <span class="text-muted">({{ correction_request.initiated_by_user.username }})</span>
+          {% endif %}
+        </div>
+        {% endif %}
+        {% if correction_request.on_behalf_reason %}
+        <div class="mb-2"><strong>On-Behalf Reason:</strong><br>{{ correction_request.on_behalf_reason }}</div>
+        {% endif %}
         <div class="mb-2"><strong>Faculty Department:</strong> {{ correction_request.faculty_department.name|default:"-" }}</div>
         <div class="mb-2"><strong>Status:</strong> {{ correction_request.status }}</div>
         <div class="mb-2">

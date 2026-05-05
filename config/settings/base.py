@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+DJANGO_ENV = os.getenv("DJANGO_ENV", "local").lower()
 
 
 def env_bool(name, default=False):
@@ -60,6 +61,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.core.middleware.ScopeResolutionMiddleware",
+    "apps.core.middleware.SessionTimeoutMiddleware",
     "apps.core.middleware.PortalAccessMiddleware",
     "apps.core.middleware.PostLoginSecurityMiddleware",
 ]
@@ -152,9 +154,18 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", False)
 EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "10"))
+EMAIL_LOGO_URL = os.getenv("EMAIL_LOGO_URL", "")
+EMAIL_LOGO_PATH = os.getenv("EMAIL_LOGO_PATH", "")
+EMAIL_SCHOOL_LOGO_URL = os.getenv("EMAIL_SCHOOL_LOGO_URL", "")
+EMAIL_SCHOOL_LOGO_PATH = os.getenv("EMAIL_SCHOOL_LOGO_PATH", "")
 SIS_API_TOKEN = os.getenv("SIS_API_TOKEN", "")
+SIS_API_LEGACY_TOKEN_ENABLED = env_bool("SIS_API_LEGACY_TOKEN_ENABLED", True)
+SIS_API_RATE_LIMIT_PER_MINUTE = int(os.getenv("SIS_API_RATE_LIMIT_PER_MINUTE", "60"))
 PRIVACY_CONSENT_VERSION = os.getenv("PRIVACY_CONSENT_VERSION", "2026-03")
 ENFORCE_SINGLE_DEVICE_SESSION = env_bool("ENFORCE_SINGLE_DEVICE_SESSION", True)
+MAINTENANCE_MODE = env_bool("MAINTENANCE_MODE", False)
+ACTUAL_DATA_RESET_ALLOW_PRODUCTION = env_bool("ACTUAL_DATA_RESET_ALLOW_PRODUCTION", False)
+ACTUAL_DATA_RESET_EXTERNAL_BACKUP_CONFIRMED = env_bool("ACTUAL_DATA_RESET_EXTERNAL_BACKUP_CONFIRMED", False)
 
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
@@ -166,3 +177,50 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = env_bool("DJANGO_SESSION_EXPIRE_AT_BROWSER_CLO
 X_FRAME_OPTIONS = "DENY"
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
+
+LOG_DIR = Path(os.getenv("DJANGO_LOG_DIR", str(BASE_DIR / "logs")))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+        "system_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(LOG_DIR / "system.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 5,
+            "formatter": "standard",
+        },
+        "error_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(LOG_DIR / "errors.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 10,
+            "formatter": "standard",
+            "level": "ERROR",
+        },
+        "security_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(LOG_DIR / "security.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 10,
+            "formatter": "standard",
+        },
+    },
+    "loggers": {
+        "django": {"handlers": ["console", "system_file"], "level": "INFO", "propagate": True},
+        "django.request": {"handlers": ["console", "error_file"], "level": "ERROR", "propagate": False},
+        "django.security": {"handlers": ["console", "security_file"], "level": "WARNING", "propagate": False},
+        "edugradespro.api": {"handlers": ["console", "security_file"], "level": "INFO", "propagate": False},
+        "edugradespro.system": {"handlers": ["console", "system_file"], "level": "INFO", "propagate": False},
+    },
+}

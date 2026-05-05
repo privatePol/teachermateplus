@@ -1,6 +1,78 @@
 {% extends "admin_portal/base.html" %}
 
 {% block admin_content %}
+<style>
+  .template-action-group {
+    display: inline-grid;
+    gap: 0.35rem;
+    grid-template-columns: repeat(3, 2rem);
+    justify-content: end;
+    justify-items: center;
+    min-width: 6.7rem;
+  }
+  .template-action-btn {
+    align-items: center;
+    display: inline-flex;
+    height: 2rem;
+    justify-content: center;
+    padding: 0;
+    width: 2rem;
+  }
+  .template-action-btn svg {
+    height: 1rem;
+    width: 1rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+  }
+  .template-action-group form {
+    margin: 0;
+  }
+  .template-action-group-inactive {
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: auto;
+  }
+  .template-action-cell {
+    min-width: 7.35rem;
+    width: 7.35rem;
+  }
+  .template-action-cell-inactive {
+    min-width: 12rem;
+    width: auto;
+  }
+  .grading-template-sections > .card {
+    border: 1px solid #d9e0e5 !important;
+    overflow: hidden;
+  }
+  .grading-template-sections > .card:first-child > .card-header {
+    background: #008000 !important;
+    color: #ffffff;
+  }
+  .grading-template-sections > .card:first-child > .card-header .badge {
+    background: #ffffff !important;
+    color: #008000 !important;
+  }
+  .grading-template-sections > .card:nth-child(2) > .card-header {
+    background: #ffc107 !important;
+    color: #2b2200;
+  }
+  .grading-template-sections > .card:nth-child(2) > .card-header .badge {
+    background: #2b2200 !important;
+    color: #ffc107 !important;
+  }
+  .grading-template-sections .card-header h3 {
+    font-weight: 700;
+  }
+  .grading-template-sections > .card > .card-header {
+    min-height: 3.65rem;
+    padding-bottom: 0.9rem;
+    padding-top: 0.9rem;
+  }
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Grading Templates</h2>
   <div class="d-flex flex-wrap gap-2 justify-content-end">
@@ -52,100 +124,26 @@
     {% endfor %}
   </div>
 </div>
-<div class="card border-0 shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover mb-0">
-      <thead>
-        <tr>
-          <th>Tenant</th>
-          <th>Code</th>
-          <th>Name</th>
-          <th>Base Value</th>
-          <th>Passing Threshold</th>
-          <th>Periods</th>
-          <th>Publish</th>
-          <th>Approval</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for row in page_obj %}
-        <tr>
-          <td>{{ row.tenant.code }}</td>
-          <td>{{ row.code }}</td>
-          <td>{{ row.name }}</td>
-          <td>{{ row.default_base_value }}</td>
-          <td>{{ row.passing_grade_threshold|default:"Tenant/Profile Default" }}</td>
-          <td>
-            <div>{{ row.period_count }}</div>
-            {% if row.active_period_codes %}
-              <div class="small text-muted">
-                {% for code in row.active_period_codes %}
-                  <code>{{ code }}</code>{% if not forloop.last %}, {% endif %}
-                {% endfor %}
-              </div>
-            {% endif %}
-          </td>
-          <td>
-            {% if row.is_published %}
-              <span class="badge text-bg-success">Published</span>
-            {% else %}
-              <span class="badge text-bg-secondary">Draft</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if row.approval_status == "APPROVED" %}
-              <span class="badge text-bg-success">Approved</span>
-            {% elif row.approval_status == "FOR_APPROVAL" %}
-              <span class="badge text-bg-warning">For Approval</span>
-            {% elif row.approval_status == "REJECTED" %}
-              <span class="badge text-bg-danger">Rejected</span>
-            {% else %}
-              <span class="badge text-bg-secondary">Draft</span>
-            {% endif %}
-            {% if row.current_approval_step_label %}
-            <div class="small text-muted mt-1">Current Step: {{ row.current_approval_step_label }}</div>
-            {% endif %}
-          </td>
-          <td class="text-end">
-            {% if "grading_templates.read" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:grading_template_builder' row.id %}">Builder</a>
-            {% endif %}
-            <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:grading_template_structure' row.id %}">Structure</a>
-            {% if "grading_templates.read" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:grading_template_calculator' %}?grading_template={{ row.id }}&sample_value=85.00">Test Calculator</a>
-            {% endif %}
-            {% if "grading_templates.update" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grading_template_update' row.id %}">Edit</a>
-            {% endif %}
-            {% if row.can_submit %}
-            <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grading_template_submit_for_approval' row.id %}">Submit</a>
-            {% endif %}
-            {% if row.can_review_approval %}
-            <a class="btn btn-sm btn-outline-warning" href="{% url 'admin_portal:grading_template_review_approval' row.id %}">Review</a>
-            {% endif %}
-            {% if row.can_publish_workflow %}
-            <form method="post" action="{% url 'admin_portal:grading_template_publish' row.id %}" class="d-inline">
-              {% csrf_token %}
-              <button type="submit" class="btn btn-sm btn-success">Publish</button>
-            </form>
-            {% endif %}
-            {% if row.can_hotfix_request %}
-            <a class="btn btn-sm btn-outline-danger" href="{% url 'admin_portal:template_hotfix_create' row.id %}">Hotfix</a>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="9" class="text-center text-muted py-4">No grading templates found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+<div class="grading-template-sections">
+{% include "admin_portal/shared/active_inactive_sections.html" with section_label="Grading Templates" table_template="admin_portal/grading/template_table.html" active_empty_message="No active grading templates found." inactive_empty_message="No inactive grading templates found." %}
 </div>
 {% if "template_hotfixes.read" in effective_permissions %}
 <div class="mt-3">
   <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:template_hotfix_list' %}">View Hotfix Requests</a>
 </div>
 {% endif %}
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    if (typeof bootstrap === "undefined" || !bootstrap.Tooltip) {
+      return;
+    }
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (element) {
+      bootstrap.Tooltip.getOrCreateInstance(element, {
+        trigger: "hover focus",
+        boundary: "window"
+      });
+    });
+  });
+</script>
 {% endblock %}

@@ -285,6 +285,52 @@
     border-color: #9ac6a5;
     box-shadow: 0 0 0 0.2rem rgba(55, 138, 87, 0.12);
   }
+  .admin-scope-stack {
+    min-width: 0;
+  }
+  .admin-scope-form {
+    margin-left: 1rem;
+  }
+  .admin-academic-scope {
+    margin-left: 1rem;
+    margin-top: 0.25rem;
+    color: #496554;
+    font-size: 0.78rem;
+    line-height: 1.2;
+  }
+  .admin-academic-scope strong {
+    color: #1d5635;
+  }
+  .admin-user-actions {
+    align-items: flex-end;
+  }
+  .admin-user-identity {
+    color: var(--admin-nav-text);
+    font-size: 0.82rem;
+    line-height: 1.25;
+    text-align: right;
+  }
+  .admin-user-identity strong {
+    color: #143d27;
+    font-weight: 700;
+  }
+  .admin-user-role {
+    color: #5a715f;
+  }
+  @media (max-width: 767.98px) {
+    .admin-scope-form,
+    .admin-academic-scope {
+      margin-left: 0;
+    }
+    .admin-user-actions {
+      align-items: flex-start;
+      margin-top: 0.75rem;
+      width: 100%;
+    }
+    .admin-user-identity {
+      text-align: left;
+    }
+  }
   .admin-help-fab {
     position: fixed;
     right: 18px;
@@ -361,32 +407,52 @@
     <main class="col-12 col-md-9 col-lg-10 p-0">
       <nav class="navbar navbar-expand-lg navbar-light admin-topbar px-3">
         <span class="navbar-brand mb-0 h1 admin-brand">Admin Portal</span>
-        {% if scope_tenants %}
-        <form method="get" class="d-flex gap-2 ms-3">
-          {% for key, value in request.GET.items %}
-            {% if key != "scope_tenant_id" and key != "scope_campus_id" %}
-              <input type="hidden" name="{{ key }}" value="{{ value }}">
+        <div class="admin-scope-stack">
+          {% if scope_tenants %}
+          <form method="get" class="d-flex flex-wrap gap-2 admin-scope-form">
+            {% for key, value in request.GET.items %}
+              {% if key != "scope_tenant_id" and key != "scope_campus_id" %}
+                <input type="hidden" name="{{ key }}" value="{{ value }}">
+              {% endif %}
+            {% endfor %}
+            <select class="form-select form-select-sm" name="scope_tenant_id" onchange="this.form.submit()">
+              <option value="">Tenant</option>
+              {% for tenant in scope_tenants %}
+                <option value="{{ tenant.id }}" {% if tenant.id == current_tenant_id %}selected{% endif %}>{{ tenant.code }}</option>
+              {% endfor %}
+            </select>
+            <select class="form-select form-select-sm" name="scope_campus_id" onchange="this.form.submit()">
+              <option value="">Campus</option>
+              {% for campus in scope_campuses %}
+                <option value="{{ campus.id }}" {% if campus.id == current_campus_id %}selected{% endif %}>{{ campus.code }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          <div class="admin-academic-scope">
+            Academic Scope:
+            {% if admin_active_academic_year and admin_active_term %}
+              <strong>{{ admin_active_academic_year.code }} / {{ admin_active_term.code }}</strong>
+              <span class="text-muted">{{ admin_active_academic_year.name }} | {{ admin_active_term.name }}</span>
+            {% elif current_tenant_id %}
+              <span class="text-muted">Not configured</span>
+            {% else %}
+              <span class="text-muted">Select tenant</span>
             {% endif %}
-          {% endfor %}
-          <select class="form-select form-select-sm" name="scope_tenant_id" onchange="this.form.submit()">
-            <option value="">Tenant</option>
-            {% for tenant in scope_tenants %}
-              <option value="{{ tenant.id }}" {% if tenant.id == current_tenant_id %}selected{% endif %}>{{ tenant.code }}</option>
-            {% endfor %}
-          </select>
-          <select class="form-select form-select-sm" name="scope_campus_id" onchange="this.form.submit()">
-            <option value="">Campus</option>
-            {% for campus in scope_campuses %}
-              <option value="{{ campus.id }}" {% if campus.id == current_campus_id %}selected{% endif %}>{{ campus.code }}</option>
-            {% endfor %}
-          </select>
-        </form>
-        {% endif %}
-        <div class="ms-auto d-flex gap-2 align-items-center">
-          <span class="small" style="color:var(--admin-nav-text);">{{ request.user.full_name|default:request.user.username }}</span>
-          <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_signature' %}">My Signature</a>
-          <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_change_password' %}">Change Password</a>
-          <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_logout' %}">Logout</a>
+          </div>
+          {% endif %}
+        </div>
+        <div class="ms-auto d-flex flex-column gap-1 admin-user-actions">
+          <div class="admin-user-identity">
+            <strong>{{ request.user.full_name|default:request.user.username }}</strong>
+            {% if admin_user_role_label %}
+              <span class="admin-user-role">| {{ admin_user_role_label }}</span>
+            {% endif %}
+          </div>
+          <div class="d-flex flex-wrap justify-content-end gap-2">
+            <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_signature' %}">My Signature</a>
+            <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_change_password' %}">Change Password</a>
+            <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_logout' %}">Logout</a>
+          </div>
         </div>
       </nav>
       <section class="p-4">

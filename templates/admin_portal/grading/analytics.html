@@ -44,6 +44,15 @@
   </div>
 </div>
 
+{% if summary.missing_template_offerings %}
+<div class="alert alert-warning border mb-3">
+  {{ summary.missing_template_offerings }} offering{% if summary.missing_template_offerings != 1 %}s{% endif %}
+  in this analytics scope currently {% if summary.missing_template_offerings == 1 %}has{% else %}have{% endif %}
+  no published grading template assigned. Analytics will still load using the tenant passing threshold fallback where needed,
+  but template-based breakdowns may be incomplete until the grading template assignment is fixed.
+</div>
+{% endif %}
+
 <div class="row g-3 mb-3">
   <div class="col-md-2 col-6">
     <div class="card border-0 shadow-sm h-100">
@@ -103,6 +112,9 @@
       <span class="badge text-bg-success">Profile Threshold Offerings: {{ summary.profile_threshold_offerings }}</span>
       <span class="badge text-bg-info">Template Threshold Offerings: {{ summary.template_threshold_offerings }}</span>
       <span class="badge text-bg-secondary">Tenant Default Threshold Offerings: {{ summary.tenant_threshold_offerings }}</span>
+      {% if summary.missing_template_offerings %}
+      <span class="badge text-bg-warning">No Published Template: {{ summary.missing_template_offerings }}</span>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -209,7 +221,12 @@
         <td>{{ row.offering__academic_year__code }} / {{ row.offering__term__code }}</td>
         <td>{{ row.failed_students }}</td>
         <td>{% if row.avg_grade is not None %}{{ row.avg_grade|floatformat:2 }}{% else %}-{% endif %}</td>
-        <td>{{ row.threshold|floatformat:2 }} <span class="text-muted small">({{ row.threshold_source }})</span></td>
+        <td>
+          {{ row.threshold|floatformat:2 }} <span class="text-muted small">({{ row.threshold_source }})</span>
+          {% if row.missing_template %}
+          <div><span class="badge text-bg-warning">No template</span></div>
+          {% endif %}
+        </td>
       </tr>
       {% empty %}
       <tr><td colspan="6" class="text-center text-muted py-3">No failing offerings detected in this scope.</td></tr>
@@ -356,7 +373,12 @@
         <td>{{ row.failed }}</td>
         <td>{{ row.pass_fail_ratio }}</td>
         <td>{{ row.fail_rate }}%</td>
-        <td>{{ row.threshold_display }}</td>
+        <td>
+          {{ row.threshold_display }}
+          {% if row.missing_template %}
+          <div><span class="badge text-bg-warning">No template</span></div>
+          {% endif %}
+        </td>
       </tr>
       {% empty %}
       <tr><td colspan="10" class="text-center text-muted py-3">No faculty class fail-rate analytics available.</td></tr>

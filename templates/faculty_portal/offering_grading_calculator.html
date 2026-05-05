@@ -1,0 +1,336 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .calc-page-title {
+    font-weight: 800;
+    color: #143b25;
+  }
+  .calc-card {
+    border: 1px solid #d9e5d8;
+    border-radius: 1rem;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(22, 58, 36, 0.07);
+  }
+  .calc-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 0.85rem;
+  }
+  .calc-metric {
+    border: 0;
+    border-radius: 1rem;
+    padding: 1rem;
+    background: linear-gradient(145deg, #17633b 0%, #2f8e51 62%, #7faf46 100%);
+    color: #fff;
+    box-shadow: 0 0.75rem 1.25rem rgba(18, 72, 42, 0.12);
+  }
+  .calc-metric-label {
+    font-size: 0.76rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.9;
+  }
+  .calc-metric-value {
+    margin-top: 0.35rem;
+    font-size: 1.45rem;
+    font-weight: 800;
+  }
+  .calc-metric-meta {
+    margin-top: 0.35rem;
+    font-size: 0.83rem;
+    opacity: 0.9;
+  }
+  .period-header {
+    color: #fff;
+    border-radius: 1rem 1rem 0 0;
+  }
+  .period-header.prelim {
+    background: linear-gradient(125deg, #1f6a40 0%, #2f8a53 58%, #91b842 100%);
+  }
+  .period-header.midterm {
+    background: linear-gradient(125deg, #1c5a3d 0%, #2c744b 54%, #84aa3f 100%);
+  }
+  .period-header.prefinal {
+    background: linear-gradient(125deg, #2b553d 0%, #4a7a49 54%, #c2aa4b 100%);
+  }
+  .period-header.final {
+    background: linear-gradient(125deg, #234c38 0%, #3c6e42 54%, #d4b95d 100%);
+  }
+  .period-header.default {
+    background: linear-gradient(125deg, #27563d 0%, #417950 54%, #9eb056 100%);
+  }
+  .period-header .text-muted {
+    color: rgba(255, 255, 255, 0.8) !important;
+  }
+  .calc-step-list {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .calc-step {
+    border: 1px solid #d8e7da;
+    border-radius: 0.95rem;
+    background: #fff;
+    padding: 0.9rem 1rem;
+  }
+  .calc-step-title {
+    font-size: 0.83rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #315f46;
+    margin-bottom: 0.55rem;
+  }
+  .calc-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px dashed rgba(58, 99, 76, 0.14);
+  }
+  .calc-line:last-child {
+    border-bottom: 0;
+  }
+  .calc-eq {
+    font-family: Consolas, "Courier New", monospace;
+    color: #8f1f58;
+    line-height: 1.65;
+  }
+  .calc-result {
+    border-radius: 0.95rem;
+    padding: 0.9rem 1rem;
+    background: linear-gradient(135deg, #f6fbf5 0%, #edf7ee 55%, #f8f1d3 100%);
+    border: 1px solid #d8e7da;
+  }
+  .calc-result-label {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #54725e;
+  }
+  .calc-result-value {
+    margin-top: 0.25rem;
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #173c28;
+  }
+  .input-table td,
+  .input-table th {
+    vertical-align: middle;
+  }
+  .text-muted-small {
+    font-size: 0.82rem;
+    color: #6b7280;
+  }
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h2 class="h4 mb-1 calc-page-title">Grade Calculator</h2>
+    <div class="text-muted small">Read-only simulation for {{ offering.course.title }} / {{ offering.section.code }}.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-success" href="{% url 'faculty_portal:offering_grading_template' offering.id %}">Back to Template</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+  </div>
+</div>
+
+<div class="alert alert-info">
+  <strong>Simulation only.</strong> This calculator does not save grades, create activities, update students, or submit records.
+</div>
+
+<form method="post" class="card calc-card mb-3">
+  {% csrf_token %}
+  <div class="card-body">
+    <div class="row g-3 align-items-end">
+      <div class="col-lg-7">
+        <div class="small text-muted">Assigned Template</div>
+        <div class="fw-semibold">{{ template.name }}</div>
+        <div class="text-muted small">{{ template.code }} | {{ offering.term.code }} | {{ offering.campus.code }}</div>
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="sample_value">Default sample raw score</label>
+        <input id="sample_value" name="sample_value" type="number" min="0" max="100" step="0.01" class="form-control" value="{{ sample_value }}">
+      </div>
+      <div class="col-lg-2 d-grid">
+        <button class="btn btn-primary" type="submit">Recompute</button>
+      </div>
+    </div>
+  </div>
+</form>
+
+<div class="calc-metrics mb-3">
+  {% for card in calculation.metric_cards %}
+  <div class="calc-metric">
+    <div class="calc-metric-label">{{ card.label }}</div>
+    <div class="calc-metric-value">{{ card.value }}</div>
+    <div class="calc-metric-meta">{{ card.meta }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<form method="post" class="d-grid gap-3">
+  {% csrf_token %}
+  <input type="hidden" name="sample_value" value="{{ sample_value }}">
+
+  {% for period in calculation.period_rows %}
+  {% with code=period.row.code|upper name=period.row.name|upper %}
+  <div class="card calc-card">
+    <div class="card-header period-header {% if 'PREFINAL' in code or 'PRE-FINAL' in name or 'PRE FINAL' in name %}prefinal{% elif 'MIDTERM' in code or 'MIDTERM' in name %}midterm{% elif 'FINAL' in code or 'FINAL' in name or 'EXAM' in code %}final{% elif 'PRELIM' in code or 'PRELIM' in name %}prelim{% else %}default{% endif %} d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <div class="fw-semibold">{{ period.row.name }}</div>
+        <div class="small text-muted">{{ period.row.code }}</div>
+      </div>
+      <div class="text-end small">
+        <div>Class Standing: <strong>{{ period.class_standing|default:"-" }}</strong></div>
+        <div>Exam Grade: <strong>{{ period.exam_grade|default:"-" }}</strong></div>
+        <div>Period Grade: <strong>{{ period.period_grade|default:"-" }}</strong></div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="fw-semibold mb-2">{{ period.row.name|upper }} GRADE</div>
+      <div class="calc-eq mb-3">{{ period.period_formula|default:"No active components configured." }}</div>
+
+      <div class="table-responsive mb-3">
+        <table class="table table-sm align-middle input-table mb-0">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Lowest Active Level</th>
+              <th>Entry Method</th>
+              <th>Weight</th>
+              <th style="min-width: 140px;">Raw Score</th>
+              <th style="min-width: 140px;">Total Score</th>
+              <th>Computed %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in period.input_rows %}
+            <tr>
+              <td>
+                <div>{{ row.component_name }}</div>
+                <div class="text-muted-small">{{ row.component_code }}</div>
+              </td>
+              <td>
+                <div>{{ row.label }}</div>
+                <div class="text-muted-small">{{ row.level }}</div>
+              </td>
+              <td>{{ row.entry_method }}</td>
+              <td>{{ row.weight_percentage }}%</td>
+              <td>
+                <input type="number" step="0.01" min="0" name="{{ row.raw_name }}" value="{{ row.display_raw_value }}" class="form-control {% if row.error %}is-invalid{% endif %}">
+              </td>
+              <td>
+                {% if row.uses_total_score %}
+                <input type="number" step="0.01" min="0.01" name="{{ row.total_name }}" value="{{ row.display_total_value }}" class="form-control {% if row.error %}is-invalid{% endif %}">
+                {% else %}
+                <input type="text" value="Not needed" class="form-control" disabled>
+                {% endif %}
+              </td>
+              <td>
+                <strong>{{ row.computed_score }}</strong>
+                {% if row.error %}<div class="invalid-feedback d-block">{{ row.error }}</div>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="calc-step-list">
+        <div class="calc-step">
+          <div class="calc-step-title">Component Results</div>
+          {% for component in period.components %}
+          <div class="calc-line">
+            <div>
+              <strong>{{ component.row.name }}</strong>
+              <div class="text-muted-small">{{ component.weight }}% of {{ period.row.name }}</div>
+            </div>
+            <div class="text-end">
+              <strong>{{ component.component_score }}</strong>
+              <div class="text-muted-small">Contribution: {{ component.weighted_contribution }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="calc-result">
+          <div class="calc-result-label">{{ period.row.name }} Grade</div>
+          <div class="calc-result-value">{{ period.period_grade|default:"-" }}</div>
+          <div class="calc-eq mt-2">{{ period.period_formula }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endwith %}
+  {% endfor %}
+
+  <div class="card calc-card">
+    <div class="card-header period-header default d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <div class="fw-semibold">Final Grade Computation</div>
+        <div class="small text-muted">
+          {% if calculation.final_grade_detail.profile %}
+            {{ calculation.final_grade_detail.profile.profile_code }} - {{ calculation.final_grade_detail.profile.profile_name }}
+          {% else %}
+            Active-period average fallback
+          {% endif %}
+        </div>
+      </div>
+      <div class="text-end small">
+        <div>Formula Mode: <strong>{{ calculation.final_grade_detail.strategy.mode_label }}</strong></div>
+        <div>Final Grade: <strong>{{ calculation.final_grade|default:"-" }}</strong></div>
+        {% if calculation.final_grade_detail.official_value %}
+        <div>Official Rounded: <strong>{{ calculation.final_grade_detail.official_value }}</strong></div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="calc-step-list">
+        <div class="calc-step">
+          <div class="calc-step-title">Final Grade From Period Grades</div>
+          <div class="text-muted small mb-2">{{ calculation.final_grade_detail.strategy.source_label }}</div>
+          {% for entry in calculation.final_grade_detail.entries %}
+          <div class="calc-line">
+            <div>
+              <strong>{{ entry.period_name }}</strong>
+              <div class="text-muted-small">
+                {{ entry.period_code }}
+                {% if entry.weight %}| Weight: {{ entry.weight }}%{% endif %}
+              </div>
+            </div>
+            <div class="text-end">
+              <strong>{{ entry.value_used|default:"0.00" }}</strong>
+              {% if entry.contribution is not None %}
+              <div class="text-muted-small">Contribution: {{ entry.contribution }}</div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+          <div class="calc-eq mt-3">{{ calculation.final_formula }}</div>
+        </div>
+        <div class="calc-result">
+          <div class="calc-result-label">Computed Final Grade</div>
+          <div class="calc-result-value">{{ calculation.final_grade|default:"-" }}</div>
+          {% if calculation.final_grade_detail.official_value %}
+          <div class="small text-muted mt-2">Official rounded final grade: <strong>{{ calculation.final_grade_detail.official_value }}</strong></div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if calculation.final_grade_detail.warnings %}
+      <div class="alert alert-warning small mb-0 mt-3">
+        <ul class="mb-0 ps-3">
+          {% for warning in calculation.final_grade_detail.warnings %}
+          <li>{{ warning }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="d-flex justify-content-end">
+    <button class="btn btn-primary" type="submit">Recompute With These Scores</button>
+  </div>
+</form>
+{% endblock %}

@@ -1,41 +1,60 @@
 {% extends "admin_portal/base.html" %}
 
 {% block admin_content %}
+<style>
+  .role-action-group {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+  }
+  .role-action-btn {
+    align-items: center;
+    display: inline-flex;
+    height: 2rem;
+    justify-content: center;
+    padding: 0;
+    width: 2rem;
+  }
+  .role-action-btn svg {
+    height: 1rem;
+    width: 1rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+  }
+  .role-delete-form {
+    align-items: center;
+    display: flex;
+    gap: 0.35rem;
+    justify-content: flex-end;
+  }
+  .role-delete-input {
+    max-width: 10rem;
+  }
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Roles</h2>
   {% if "roles.create" in effective_permissions %}
   <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:role_create' %}">Add Role</a>
   {% endif %}
 </div>
-<div class="card border-0 shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover mb-0">
-      <thead><tr><th>Code</th><th>Name</th><th>Status</th><th>Permissions</th><th></th></tr></thead>
-      <tbody>
-      {% for role in roles %}
-        <tr>
-          <td>{{ role.code }}</td>
-          <td>{{ role.name }}</td>
-          <td>
-            {% if role.is_active %}
-              <span class="badge text-bg-success">Active</span>
-            {% else %}
-              <span class="badge text-bg-secondary">Inactive</span>
-            {% endif %}
-          </td>
-          <td>{{ role.permission_count }}</td>
-          <td class="text-end">
-            {% if "roles.update" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:role_update' role.id %}">Edit</a>
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:role_permissions' role.id %}">Manage Permissions</a>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="5" class="text-center text-muted py-4">No roles found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
+
+{% include "admin_portal/security/role_table.html" with title="Active Records" roles=active_roles empty_text="No active roles found." show_delete=False %}
+
+{% include "admin_portal/security/role_table.html" with title="Inactive Records" roles=inactive_roles empty_text="No inactive roles found." show_delete=True %}
+
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    if (typeof bootstrap === "undefined" || !bootstrap.Tooltip) return;
+    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (element) {
+      new bootstrap.Tooltip(element);
+    });
+  });
+</script>
 {% endblock %}

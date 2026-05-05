@@ -34,26 +34,20 @@ class ImportTemplateService:
                 "campus_code",
                 "department_code",
                 "program_code",
-                "academic_year_code",
-                "term_code",
-                "course_code",
                 "section_code",
-                "room",
-                "schedule_text",
-                "status",
+                "section_name",
+                "year_level",
+                "is_active",
             ],
             "sample_row": [
                 "DEMO",
                 "MAIN",
                 "COLLEGE",
                 "BSIT",
-                "AY2526",
-                "1ST",
-                "IT101",
                 "BSIT-1A",
-                "R101",
-                "MWF 8:00-9:00",
-                "OPEN",
+                "BSIT 1A",
+                "1",
+                "TRUE",
             ],
         },
         ImportBatch.ImportType.COURSES: {
@@ -166,7 +160,7 @@ class ImportTemplateService:
 
     REFERENCE_GUIDES = {
         ImportBatch.ImportType.SECTIONS: {
-            "summary": "Use this when your sections are derived from course offerings. Duplicate rows are auto-deduplicated.",
+            "summary": "Creates section master records. Use Course Offerings import separately to assign courses, terms, rooms, schedules, and offering status.",
             "relationships": [
                 "tenant_code -> campuses -> departments -> programs -> sections",
                 "If program_code is blank, the system attempts inference from section_code prefix.",
@@ -176,13 +170,16 @@ class ImportTemplateService:
                 "campus_code: must exist under the tenant",
                 "department_code: must exist under the tenant+campus",
                 "program_code: recommended; if blank, system will infer where possible",
-                "section_code: exact section code/name used by offerings (e.g. AB ENG-LANG 1-AB1_ENGLANG)",
+                "section_code: exact section code used by offerings",
+                "section_name: optional display name; defaults to section_code when blank",
+                "year_level: optional; inferred from section_code when blank and possible",
+                "is_active: TRUE/FALSE",
             ],
         },
         ImportBatch.ImportType.COURSE_OFFERINGS: {
             "summary": "Course offerings require all master references to exist first.",
             "relationships": [
-                "tenant_code + campus_code + department_code define organizational scope",
+                "tenant_code + campus_code define campus scope; department_code may be blank when course_code has a campus-matching department",
                 "academic_year_code + term_code define term scope",
                 "course_code and section_code must already exist in master tables",
             ],
@@ -191,6 +188,7 @@ class ImportTemplateService:
                 "term_code: use Term Code from Terms (e.g. 1ST, 2ND)",
                 "course_code: must match Courses.code",
                 "section_code: must match Sections.code",
+                "department_code: recommended; optional only when course_code has a campus-matching department",
                 "program_code: optional unless section_code is ambiguous across programs",
             ],
         },
@@ -592,7 +590,7 @@ class BulkImportService:
             return available_programs.first(), None
 
         errors.append(
-            "program_code is required for sections import when it cannot be inferred from section_code."
+            "program_code is required when it cannot be inferred from section_code."
         )
         return None, None
 
@@ -659,7 +657,7 @@ class BulkImportService:
             return None
         key = (tenant.id, course_code.upper())
         if key not in runtime["course_cache"]:
-            runtime["course_cache"][key] = Course.objects.filter(
+            runtime["course_cache"][key] = Course.objects.select_related("campus", "department").filter(
                 tenant=tenant, code__iexact=course_code, is_active=True
             ).first()
         course = runtime["course_cache"][key]
@@ -696,6 +694,31 @@ class BulkImportService:
             errors.append("section_code not found for selected tenant/campus/department/program.")
             return None
         return section
+
+    @staticmethod
+    def _resolve_unique_section_for_offering_inference(
+        section_code: str,
+        tenant,
+        campus,
+        program_code: str,
+    ):
+        section_code = section_code.strip()
+        if not section_code:
+            return None
+        query = Section.objects.select_related("department", "program").filter(
+            tenant=tenant,
+            campus=campus,
+            code__iexact=section_code,
+            is_active=True,
+            department__is_active=True,
+        )
+        normalized_program_code = program_code.strip()
+        if normalized_program_code:
+            query = query.filter(program__code__iexact=normalized_program_code)
+        matches = list(query.order_by("id"))
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     @staticmethod
     def _resolve_student(
@@ -855,9 +878,11 @@ class BulkImportService:
             )
 
         is_active = cls._parse_bool(cls._normalize_value(row.get("is_active", "")), "is_active", errors, default=True)
-        section_name = section_code
-        year_match = re.search(r"\b([1-6])(?:st|nd|rd|th)?\b", section_code, flags=re.IGNORECASE)
-        year_level = year_match.group(1) if year_match else None
+        section_name = cls._normalize_value(row.get("section_name")) or section_code
+        year_level = cls._normalize_value(row.get("year_level")) or None
+        if not year_level:
+            year_match = re.search(r"\b([1-6])(?:st|nd|rd|th)?\b", section_code, flags=re.IGNORECASE)
+            year_level = year_match.group(1) if year_match else None
 
         if tenant and campus and department and program and section_code:
             duplicate_exists = Section.objects.filter(
@@ -944,46 +969,105 @@ class BulkImportService:
         errors = []
         tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
         campus = department = program = academic_year = term = course = section = None
+        auto_section_payload = None
+        auto_program_code = None
+        section_code = cls._normalize_value(row["section_code"])
+        if not section_code:
+            errors.append("section_code is required.")
         if tenant:
             campus = cls._resolve_campus(row["campus_code"], tenant, runtime, errors, required=True)
+            course = cls._resolve_course(row["course_code"], tenant, runtime, errors)
+            if course and course.campus_id and campus and course.campus_id != campus.id:
+                errors.append("course_code belongs to a different campus than campus_code.")
         if tenant and campus:
-            department = cls._resolve_department(row["department_code"], tenant, campus, runtime, errors, required=True)
+            department_code = cls._normalize_value(row["department_code"])
+            if department_code:
+                department = cls._resolve_department(department_code, tenant, campus, runtime, errors, required=False)
+            else:
+                inferred_section = cls._resolve_unique_section_for_offering_inference(
+                    cls._normalize_value(row["section_code"]),
+                    tenant,
+                    campus,
+                    cls._normalize_value(row["program_code"]),
+                )
+                if inferred_section:
+                    section = inferred_section
+                    department = inferred_section.department
+                    program = inferred_section.program
+                    if department.tenant_id != tenant.id:
+                        errors.append("Section department does not belong to selected tenant.")
+                        department = None
+                    elif department.campus_id != campus.id:
+                        errors.append("Section department does not belong to selected campus.")
+                        department = None
+                if not department and course and course.department_id and course.department.is_active:
+                    department = course.department
+                    if department.tenant_id != tenant.id:
+                        errors.append("Course department does not belong to selected tenant.")
+                        department = None
+                    elif department.campus_id != campus.id:
+                        errors.append("Course department does not belong to selected campus.")
+                        department = None
+                elif not department:
+                    errors.append("department_code is required unless section_code or course_code has a campus-matching department.")
             # program_code is optional for open/shared offerings; section resolution will guard ambiguity.
-            program = cls._resolve_program(row["program_code"], tenant, campus, department, runtime, errors, required=False)
-            section = cls._resolve_section(
-                row["section_code"],
-                tenant,
-                campus,
-                department,
-                program,
-                runtime,
-                errors,
-                required=True,
-            )
-            if section and not program:
-                section_matches = Section.objects.filter(
+            if department and not section:
+                program, auto_program_code = cls._resolve_program_for_section_row(
+                    program_code=row["program_code"],
+                    section_code=section_code,
                     tenant=tenant,
                     campus=campus,
                     department=department,
-                    code__iexact=cls._normalize_value(row["section_code"]),
-                    is_active=True,
+                    runtime=runtime,
+                    errors=errors,
                 )
-                if section_matches.count() > 1:
-                    errors.append(
-                        "program_code is required because section_code is ambiguous across multiple programs."
+                if section_code and (program or auto_program_code):
+                    section_matches = Section.objects.filter(
+                        tenant=tenant,
+                        campus=campus,
+                        department=department,
+                        code__iexact=section_code,
+                        is_active=True,
                     )
-                else:
-                    # Derive program when a unique section row exists.
-                    program = section.program
+                    if program:
+                        section_matches = section_matches.filter(program=program)
+                    matches = list(section_matches.order_by("id"))
+                    if len(matches) == 1:
+                        section = matches[0]
+                        program = section.program
+                    elif len(matches) > 1:
+                        errors.append("program_code is required because section_code is ambiguous across multiple programs.")
+                    else:
+                        inactive_exists = Section.objects.filter(
+                            tenant=tenant,
+                            campus=campus,
+                            department=department,
+                            code__iexact=section_code,
+                            is_active=False,
+                        )
+                        if program:
+                            inactive_exists = inactive_exists.filter(program=program)
+                        if inactive_exists.exists():
+                            errors.append("section_code exists but is inactive. Reactivate the section first.")
+                        else:
+                            year_match = re.search(r"\b([1-6])(?:st|nd|rd|th)?\b", section_code, flags=re.IGNORECASE)
+                            auto_section_payload = {
+                                "tenant_id": tenant.id,
+                                "campus_id": campus.id,
+                                "department_id": department.id,
+                                "program_id": program.id if program else None,
+                                "program_code_auto": auto_program_code,
+                                "code": section_code,
+                                "name": section_code,
+                                "year_level": year_match.group(1) if year_match else None,
+                                "is_active": True,
+                            }
         if tenant:
             academic_year = cls._resolve_academic_year(row["academic_year_code"], tenant, runtime, errors)
         if tenant and academic_year:
             term = cls._resolve_term(row["term_code"], tenant, academic_year, runtime, errors)
             if term and term.academic_year_id != academic_year.id:
                 errors.append("term_code does not belong to selected academic_year_code.")
-        if tenant:
-            course = cls._resolve_course(row["course_code"], tenant, runtime, errors)
-
         status = cls._normalize_value(row["status"]).upper() or CourseOffering.Status.OPEN
         if status not in {choice for choice, _ in CourseOffering.Status.choices}:
             errors.append(f"status must be one of {[choice for choice, _ in CourseOffering.Status.choices]}.")
@@ -1011,14 +1095,24 @@ class BulkImportService:
             "term_id": term.id if term else None,
             "course_id": course.id if course else None,
             "section_id": section.id if section else None,
+            "section_payload": auto_section_payload,
             "room": cls._normalize_value(row["room"]) or None,
             "schedule_text": cls._normalize_value(row["schedule_text"]) or None,
             "status": status,
             "is_active": True,
         }
+        section_unique_key = None
+        if section:
+            section_unique_key = str(section.id)
+        elif auto_section_payload:
+            section_unique_key = (
+                "NEW:"
+                f"{auto_section_payload.get('program_id') or auto_section_payload.get('program_code_auto')}:"
+                f"{section_code.upper()}"
+            )
         unique_key = (
-            f"{tenant.id}:{campus.id}:{department.id}:{term.id}:{course.id}:{section.id}"
-            if tenant and campus and department and term and course and section
+            f"{tenant.id}:{campus.id}:{department.id}:{term.id}:{course.id}:{section_unique_key}"
+            if tenant and campus and department and term and course and section_unique_key
             else None
         )
         return normalized, errors, unique_key
@@ -1450,16 +1544,78 @@ class BulkImportService:
         return "Section", row
 
     @classmethod
+    def _resolve_or_create_section_for_offering(cls, normalized: dict) -> Section:
+        section_id = normalized.get("section_id")
+        if section_id:
+            section = Section.objects.filter(id=section_id, is_active=True).first()
+            if not section:
+                raise ValidationError("Section reference is invalid or inactive.")
+            return section
+
+        section_payload = normalized.get("section_payload") or {}
+        if not section_payload:
+            raise ValidationError("Section reference is required.")
+
+        program_id = section_payload.get("program_id")
+        if not program_id:
+            auto_code = cls._normalize_value(section_payload.get("program_code_auto"))
+            if not auto_code:
+                raise ValidationError("Unable to resolve program for auto-created section.")
+            program, _created = Program.objects.get_or_create(
+                tenant_id=section_payload["tenant_id"],
+                campus_id=section_payload["campus_id"],
+                department_id=section_payload["department_id"],
+                code=auto_code,
+                defaults={
+                    "name": auto_code,
+                    "level": None,
+                    "is_active": True,
+                },
+            )
+            if not program.is_active:
+                raise ValidationError("Resolved program is inactive. Reactivate the program first.")
+            program_id = program.id
+
+        section, created = Section.objects.get_or_create(
+            tenant_id=section_payload["tenant_id"],
+            campus_id=section_payload["campus_id"],
+            department_id=section_payload["department_id"],
+            program_id=program_id,
+            code=section_payload["code"],
+            defaults={
+                "name": section_payload.get("name") or section_payload["code"],
+                "year_level": section_payload.get("year_level"),
+                "is_active": bool(section_payload.get("is_active", True)),
+            },
+        )
+        if not section.is_active:
+            raise ValidationError("Section exists but is inactive. Reactivate the section first.")
+        if created:
+            normalized["section_auto_created"] = True
+        return section
+
+    @classmethod
     def _create_course_offering(cls, normalized: dict):
+        section = cls._resolve_or_create_section_for_offering(normalized)
+        if CourseOffering.objects.filter(
+            tenant_id=normalized["tenant_id"],
+            campus_id=normalized["campus_id"],
+            department_id=normalized["department_id"],
+            term_id=normalized["term_id"],
+            course_id=normalized["course_id"],
+            section_id=section.id,
+        ).exists():
+            raise ValidationError("Course offering already exists for tenant/campus/department/term/course/section.")
+
         row = CourseOffering.objects.create(
             tenant_id=normalized["tenant_id"],
             campus_id=normalized["campus_id"],
             department_id=normalized["department_id"],
-            program_id=normalized.get("program_id"),
+            program_id=normalized.get("program_id") or section.program_id,
             academic_year_id=normalized["academic_year_id"],
             term_id=normalized["term_id"],
             course_id=normalized["course_id"],
-            section_id=normalized["section_id"],
+            section_id=section.id,
             room=normalized.get("room"),
             schedule_text=normalized.get("schedule_text"),
             status=normalized["status"],

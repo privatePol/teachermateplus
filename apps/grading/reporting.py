@@ -488,6 +488,9 @@ class CorrectionOfficialReportService:
             ["Section", request_obj.offering.section.name or request_obj.offering.section.code, "Faculty", request_obj.requested_by_user.full_name],
             ["Period", request_obj.template_period.name or request_obj.template_period.code, "Status", request_obj.status],
         ]
+        if request_obj.request_source == request_obj.RequestSource.ADMIN_ON_BEHALF:
+            initiated_by = request_obj.initiated_by_user.full_name if request_obj.initiated_by_user_id else "-"
+            metadata_rows.append(["Petition Source", "Admin on behalf", "Initiated By", initiated_by])
         story.append(cls._table([["Field", "Value", "Field", "Value"]] + metadata_rows, col_widths=[45*mm, 55*mm, 45*mm, 40*mm]))
         story.extend(
             [
@@ -667,7 +670,20 @@ class FacultyFinalClearanceReportService:
                 offering__term_id=term.id,
                 offering__tenant_id=term.tenant_id,
                 offering__is_active=True,
+                offering__tenant__is_active=True,
+                offering__campus__is_active=True,
+                offering__academic_year__is_active=True,
+                offering__term__is_active=True,
+                offering__department__is_active=True,
+                offering__program__is_active=True,
+                offering__program__department__is_active=True,
+                offering__course__is_active=True,
+                offering__section__is_active=True,
+                offering__section__department__is_active=True,
+                offering__section__program__is_active=True,
+                offering__section__program__department__is_active=True,
             )
+            .filter(models.Q(offering__course__department__isnull=True) | models.Q(offering__course__department__is_active=True))
             .select_related(
                 "offering",
                 "offering__tenant",
@@ -701,6 +717,8 @@ class FacultyFinalClearanceReportService:
                     course_offering_id=offering.id,
                     is_active=True,
                     enrollment_status=Enrollment.Status.ACTIVE,
+                    student__is_active=True,
+                    student__department__is_active=True,
                 ).values_list("student_id", flat=True)
             )
 

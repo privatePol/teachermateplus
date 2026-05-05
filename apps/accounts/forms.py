@@ -96,7 +96,7 @@ class LoginOtpVerificationForm(forms.Form):
         return value
 
 
-class FacultyForgotPasswordForm(forms.Form):
+class PortalForgotPasswordForm(forms.Form):
     identifier = forms.CharField(
         label="Username or Email",
         max_length=254,
@@ -113,11 +113,27 @@ class FacultyForgotPasswordForm(forms.Form):
         self.fields["identifier"].widget.attrs.update({"class": "form-control"})
 
 
-class FacultyPasswordResetSetForm(SetPasswordForm):
+class AdminForgotPasswordForm(PortalForgotPasswordForm):
+    pass
+
+
+class FacultyForgotPasswordForm(PortalForgotPasswordForm):
+    pass
+
+
+class PortalPasswordResetSetForm(SetPasswordForm):
     def __init__(self, user, *args, **kwargs):
         super().__init__(user, *args, **kwargs)
         for field in self.fields.values():
             field.widget.attrs.update({"class": "form-control"})
+
+
+class AdminPasswordResetSetForm(PortalPasswordResetSetForm):
+    pass
+
+
+class FacultyPasswordResetSetForm(PortalPasswordResetSetForm):
+    pass
 
 
 class FacultySelfChangePasswordForm(PasswordChangeForm):

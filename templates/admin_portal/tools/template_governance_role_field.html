@@ -1,0 +1,20 @@
+<div class="role-field" data-role-field data-role-field-label="{{ field.label }}">
+  <div class="role-field-header">
+    <div class="role-field-title">{{ field.label }}</div>
+    {% if field.help_text %}<div class="role-field-help">{{ field.help_text }}</div>{% endif %}
+    <div class="selected-roles" data-role-summary aria-live="polite"></div>
+    {% for error in field.errors %}<div class="text-danger small mt-2">{{ error }}</div>{% endfor %}
+  </div>
+  <div class="role-picker-tools">
+    <input type="search" class="form-control role-search" data-role-search placeholder="Filter roles in this setting">
+  </div>
+  <div class="role-options">
+    {% for choice in field %}
+    <div class="role-option" data-role-option data-role-text="{{ choice.choice_label|lower }}">
+      {{ choice.tag }}
+      <label for="{{ choice.id_for_label }}">{{ choice.choice_label }}</label>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="role-empty" data-role-empty>No roles match this filter.</div>
+</div>

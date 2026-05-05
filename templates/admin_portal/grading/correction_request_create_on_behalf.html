@@ -1,0 +1,308 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <a href="{% url 'admin_portal:grade_correction_request_list' %}" class="btn btn-sm btn-outline-secondary">Back</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><strong>Petition Setup</strong></div>
+  <div class="card-body">
+    {% if not selected_campus or not selected_academic_year or not selected_term %}
+    <div class="alert alert-info">
+      Select the correction campus, academic year, and term first, then load the available classes for that scope.
+    </div>
+    {% elif offering_count == 0 %}
+    <div class="alert alert-warning">
+      No active course offerings are available for {{ selected_campus.code }} / {{ selected_academic_year.code }} / {{ selected_term.code }} within your department scope. Import or create course offerings first, then assign the original faculty member to the class before creating an on-behalf correction petition.
+    </div>
+    {% elif selected_offering and faculty_count == 0 %}
+    <div class="alert alert-warning">
+      The selected class has no faculty assignment. Assign the original faculty member to this course offering first, even if the faculty account is currently inactive.
+    </div>
+    {% endif %}
+    <form method="get" class="row g-3">
+      <div class="col-lg-3">
+        <label class="form-label" for="{{ setup_form.campus.id_for_label }}">{{ setup_form.campus.label }}</label>
+        {{ setup_form.campus }}
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="{{ setup_form.academic_year.id_for_label }}">{{ setup_form.academic_year.label }}</label>
+        {{ setup_form.academic_year }}
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="{{ setup_form.term.id_for_label }}">{{ setup_form.term.label }}</label>
+        {{ setup_form.term }}
+      </div>
+      <div class="col-lg-3 d-flex align-items-end">
+        <button class="btn btn-outline-secondary w-100" type="submit">Load Scope</button>
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="{{ setup_form.faculty_user.id_for_label }}">{{ setup_form.faculty_user.label }}</label>
+        {{ setup_form.faculty_user }}
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="{{ setup_form.section.id_for_label }}">{{ setup_form.section.label }}</label>
+        {{ setup_form.section }}
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="{{ setup_form.course.id_for_label }}">{{ setup_form.course.label }}</label>
+        {{ setup_form.course }}
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label" for="{{ setup_form.template_period.id_for_label }}">{{ setup_form.template_period.label }}</label>
+        {{ setup_form.template_period }}
+        <div class="form-text">Load after selecting faculty, section, and course.</div>
+      </div>
+      <div class="col-lg-1 d-flex align-items-end">
+        <button class="btn btn-outline-secondary w-100" type="submit">Load</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if selected_offering and selected_period and not is_submitted %}
+<div class="alert alert-warning">This grading period has not been submitted yet. On-behalf correction petitions are allowed only after submission.</div>
+{% endif %}
+
+{% if can_file and form %}
+<div class="alert alert-info">
+  This creates a petition for <strong>{{ selected_faculty.full_name|default:selected_faculty.username }}</strong>
+  and records <strong>{{ request.user.full_name|default:request.user.username }}</strong> as the initiating admin user.
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white"><strong>Correction Items</strong></div>
+  <div class="card-body">
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      <input type="hidden" name="campus" value="{{ selected_campus.id }}">
+      <input type="hidden" name="academic_year" value="{{ selected_academic_year.id }}">
+      <input type="hidden" name="term" value="{{ selected_term.id }}">
+      <input type="hidden" name="section" value="{{ selected_section.id }}">
+      <input type="hidden" name="course" value="{{ selected_course.id }}">
+      <input type="hidden" name="template_period" value="{{ selected_period.id }}">
+      <input type="hidden" name="faculty_user" value="{{ selected_faculty.id }}">
+      {{ form.correction_payload }}
+
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="mb-3">
+        <label class="form-label" for="{{ setup_form.on_behalf_reason.id_for_label }}">{{ setup_form.on_behalf_reason.label }}</label>
+        {{ setup_form.on_behalf_reason }}
+        {% if setup_form.on_behalf_reason.help_text %}<div class="form-text">{{ setup_form.on_behalf_reason.help_text }}</div>{% endif %}
+        {% for error in setup_form.on_behalf_reason.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-4">
+          <div class="border rounded p-3 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="form-label mb-0">Students</label>
+              <div class="form-check mb-0">
+                {{ form.apply_to_all_students }}
+                <label class="form-check-label" for="{{ form.apply_to_all_students.id_for_label }}">Entire Class</label>
+              </div>
+            </div>
+            {{ form.students }}
+            {% for error in form.students.errors %}<div class="small text-danger mt-2">{{ error }}</div>{% endfor %}
+          </div>
+        </div>
+        <div class="col-lg-8">
+          <div class="border rounded p-3 h-100">
+            <label class="form-label">Grading Items</label>
+            <div class="table-responsive correction-activity-table">
+              <table class="table table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th style="width: 72px;">Select</th>
+                    <th>Title</th>
+                    <th>Component</th>
+                    <th>Subcomponent</th>
+                    <th>Detail</th>
+                    <th>Entry Method</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in correction_activities %}
+                  <tr>
+                    <td>
+                      <input class="form-check-input" type="checkbox" name="{{ form.grade_activities.html_name }}" value="{{ row.id }}" id="correction-activity-{{ row.id }}" {% if row.id|stringformat:"s" in selected_grade_activity_ids %}checked{% endif %}>
+                    </td>
+                    <td>{{ row.title }}</td>
+                    <td>{{ row.component_name }}</td>
+                    <td>{{ row.subcomponent_name }}</td>
+                    <td>{{ row.detail_name }}</td>
+                    <td><span class="badge text-bg-light border">{{ row.entry_method_label }}</span></td>
+                    <td>{{ row.total_score }}</td>
+                  </tr>
+                  {% empty %}
+                  <tr><td colspan="7" class="text-muted">No grading items are available for this period.</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% for error in form.grade_activities.errors %}<div class="small text-danger mt-2">{{ error }}</div>{% endfor %}
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="border rounded p-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="form-label mb-0">Correction Encoding</label>
+              <span class="small text-muted">Original values are loaded from the submitted gradebook.</span>
+            </div>
+            <div id="correction-grid-sections">
+              <div class="text-muted py-3">Select students and grading items to build the correction encoding sections.</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12">
+          <label class="form-label">Justification</label>
+          {{ form.justification }}
+          {% for error in form.justification.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-8">
+          <label class="form-label">Attachment (optional)</label>
+          {{ form.attachment }}
+          {% for error in form.attachment.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <button class="btn btn-primary w-100" type="submit" {% if not is_submitted %}disabled{% endif %}>Submit Petition</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{{ correction_students|json_script:"correction-students-data" }}
+{{ correction_activities|json_script:"correction-activities-data" }}
+{{ correction_score_map|json_script:"correction-score-map" }}
+
+<style>
+  .correction-activity-table {
+    max-height: 21rem;
+    overflow-y: auto;
+  }
+  .correction-encode-section + .correction-encode-section {
+    margin-top: 1rem;
+  }
+</style>
+
+<script>
+  (() => {
+    const payloadField = document.getElementById("{{ form.correction_payload.id_for_label }}");
+    const studentSelect = document.getElementById("{{ form.students.id_for_label }}");
+    const applyAllCheckbox = document.getElementById("{{ form.apply_to_all_students.id_for_label }}");
+    const activityInputs = Array.from(document.querySelectorAll('input[name="{{ form.grade_activities.html_name }}"]'));
+    const gridSections = document.getElementById("correction-grid-sections");
+    const correctionForm = payloadField ? payloadField.closest("form") : null;
+    if (!payloadField || !studentSelect || !applyAllCheckbox || !gridSections || !correctionForm) {
+      return;
+    }
+    const students = JSON.parse(document.getElementById("correction-students-data").textContent);
+    const activities = JSON.parse(document.getElementById("correction-activities-data").textContent);
+    const scoreMap = JSON.parse(document.getElementById("correction-score-map").textContent);
+    const studentMap = new Map(students.map((row) => [String(row.id), row]));
+    const activityMap = new Map(activities.map((row) => [String(row.id), row]));
+
+    function parsePayload() {
+      if (!payloadField.value) return [];
+      try {
+        const parsed = JSON.parse(payloadField.value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        return [];
+      }
+    }
+    function selectedStudentIds() {
+      if (applyAllCheckbox.checked) return students.map((row) => String(row.id));
+      return Array.from(studentSelect.selectedOptions).map((option) => option.value);
+    }
+    function selectedActivityIds() {
+      return activityInputs.filter((input) => input.checked).map((input) => input.value);
+    }
+    function syncPayloadFromGrid() {
+      const preservedRows = new Map(parsePayload().map((row) => [`${row.student_id}:${row.grade_activity_id}`, row]));
+      Array.from(gridSections.querySelectorAll("[data-correction-row]")).forEach((row) => {
+        const input = row.querySelector("input");
+        const item = {
+          student_id: row.dataset.studentId,
+          grade_activity_id: row.dataset.activityId,
+          new_value: input ? input.value.trim() : "",
+        };
+        const key = `${item.student_id}:${item.grade_activity_id}`;
+        if (item.new_value) preservedRows.set(key, item);
+        else preservedRows.delete(key);
+      });
+      payloadField.value = JSON.stringify(Array.from(preservedRows.values()));
+    }
+    function buildStatusBadge(status) {
+      const badgeClass = status === "ACTIVE" ? "text-bg-success" : "text-bg-warning";
+      return `<span class="badge ${badgeClass}">${status}</span>`;
+    }
+    function renderGrid() {
+      const rememberedValues = new Map(parsePayload().map((row) => [`${row.student_id}:${row.grade_activity_id}`, row.new_value || ""]));
+      const studentIds = selectedStudentIds();
+      const activityIds = selectedActivityIds();
+      gridSections.innerHTML = "";
+      if (!studentIds.length || !activityIds.length) {
+        gridSections.innerHTML = '<div class="text-muted py-3">Select students and grading items to build the correction encoding sections.</div>';
+        return;
+      }
+      activityIds.forEach((activityId) => {
+        const activity = activityMap.get(String(activityId));
+        if (!activity) return;
+        const section = document.createElement("div");
+        section.className = "card border-0 shadow-sm correction-encode-section";
+        section.innerHTML = `<div class="card-body pb-0"><div class="alert alert-light border">Entry Method: <strong>${activity.entry_method_label}</strong> | ${activity.component_name} / ${activity.subcomponent_name}${activity.detail_name !== "-" ? ` / ${activity.detail_name}` : ""} | <strong>${activity.title}</strong></div></div>`;
+        const wrapper = document.createElement("div");
+        wrapper.className = "table-responsive";
+        const table = document.createElement("table");
+        table.className = "table table-hover mb-0 align-middle";
+        table.innerHTML = '<thead><tr><th style="width:72px;">No.</th><th>Name</th><th>Status</th><th style="width:160px;">Original Value</th><th style="width:200px;">Corrected Value</th></tr></thead>';
+        const tbody = document.createElement("tbody");
+        studentIds.forEach((studentId, index) => {
+          const student = studentMap.get(String(studentId));
+          if (!student) return;
+          const pairKey = `${studentId}:${activityId}`;
+          const row = document.createElement("tr");
+          row.dataset.correctionRow = "1";
+          row.dataset.studentId = String(studentId);
+          row.dataset.activityId = String(activityId);
+          row.innerHTML = `<td>${index + 1}</td><td>${student.name}</td><td>${buildStatusBadge(student.status)}</td><td>${scoreMap[pairKey] || "-"}</td><td></td>`;
+          const input = document.createElement("input");
+          input.className = "form-control form-control-sm";
+          input.type = "number";
+          input.step = "0.01";
+          input.min = "0";
+          input.max = activity.score_input_max;
+          input.placeholder = `0 to ${activity.score_input_max}`;
+          input.value = rememberedValues.get(pairKey) || "";
+          input.addEventListener("input", syncPayloadFromGrid);
+          row.lastElementChild.appendChild(input);
+          tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        wrapper.appendChild(table);
+        section.appendChild(wrapper);
+        gridSections.appendChild(section);
+      });
+      syncPayloadFromGrid();
+    }
+    applyAllCheckbox.addEventListener("change", () => {
+      studentSelect.disabled = applyAllCheckbox.checked;
+      renderGrid();
+    });
+    studentSelect.addEventListener("change", renderGrid);
+    activityInputs.forEach((input) => input.addEventListener("change", renderGrid));
+    correctionForm.addEventListener("submit", syncPayloadFromGrid);
+    studentSelect.disabled = applyAllCheckbox.checked;
+    renderGrid();
+  })();
+</script>
+{% endblock %}

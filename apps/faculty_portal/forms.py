@@ -2,6 +2,7 @@ import json
 from decimal import Decimal, InvalidOperation
 
 from django import forms
+from django.db import models
 
 from apps.academics.models import CourseOffering
 from apps.core.services.uploads import UploadValidationService
@@ -72,6 +73,25 @@ class FacultyEnrollmentForm(forms.Form):
         )
         self.fields["student"].widget.attrs["class"] = "form-select"
         self.fields["enrollment_status"].widget.attrs["class"] = "form-select"
+
+
+class FacultyTemplateIssueReportForm(forms.Form):
+    class IssueType(models.TextChoices):
+        WRONG_WEIGHT = "WRONG_WEIGHT", "Wrong component or period weight"
+        MISSING_BUCKET = "MISSING_BUCKET", "Missing component or activity category"
+        WRONG_STRUCTURE = "WRONG_STRUCTURE", "Wrong period or exam/class-standing structure"
+        TEMPLATE_MISMATCH = "TEMPLATE_MISMATCH", "Template does not match approved policy"
+        OTHER = "OTHER", "Other template issue"
+
+    issue_type = forms.ChoiceField(
+        choices=IssueType.choices,
+        label="Issue Type",
+    )
+    details = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 5}),
+        label="What is wrong with the template?",
+        help_text="Describe the template problem. Include the period, component, expected weight, or policy reference when available.",
+    )
 
 
 class GradeActivityForm(forms.ModelForm):

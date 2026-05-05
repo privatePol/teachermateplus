@@ -39,26 +39,46 @@
         <table class="table table-sm mb-0">
           <thead><tr><th>Role</th><th>Tenant</th><th>Campus</th><th>Department</th><th>Status</th><th></th></tr></thead>
           <tbody>
-          {% for a in assignments %}
+          {% for a in active_assignments %}
             <tr>
               <td>{{ a.role.code }}</td>
               <td>{{ a.tenant.code|default:"GLOBAL" }}</td>
               <td>{{ a.campus.code|default:"ALL" }}</td>
               <td>{{ a.department.name|default:"ALL" }}</td>
-              <td>{% if a.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+              <td><span class="badge text-bg-success">Active</span></td>
               <td class="text-end">
-                {% if a.is_active %}
                 <form method="post" class="d-inline">
                   {% csrf_token %}
                   <input type="hidden" name="action" value="deactivate">
                   <input type="hidden" name="assignment_id" value="{{ a.id }}">
                   <button class="btn btn-sm btn-outline-danger">Deactivate</button>
                 </form>
-                {% endif %}
               </td>
             </tr>
           {% empty %}
-            <tr><td colspan="6" class="text-center text-muted py-3">No role assignments yet.</td></tr>
+            <tr><td colspan="6" class="text-center text-muted py-3">No active role assignments.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mt-3">
+      <div class="card-header bg-white"><strong>Inactive Assignments</strong></div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Role</th><th>Tenant</th><th>Campus</th><th>Department</th><th>Status</th></tr></thead>
+          <tbody>
+          {% for a in inactive_assignments %}
+            <tr class="table-light">
+              <td>{{ a.role.code }}</td>
+              <td>{{ a.tenant.code|default:"GLOBAL" }}</td>
+              <td>{{ a.campus.code|default:"ALL" }}</td>
+              <td>{{ a.department.name|default:"ALL" }}</td>
+              <td><span class="badge text-bg-warning text-dark">Inactive</span></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="text-center text-muted py-3">No inactive role assignments.</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -66,5 +86,71 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll('select[data-campus-dependent="true"]').forEach(function (departmentField) {
+      const campusFieldId = departmentField.dataset.campusFieldId || "id_campus";
+      const campusField = document.getElementById(campusFieldId);
+
+      if (!campusField) {
+        return;
+      }
+
+      let departmentOptions = [];
+      try {
+        departmentOptions = JSON.parse(departmentField.dataset.departmentOptions || "[]");
+      } catch (error) {
+        departmentOptions = [];
+      }
+
+      const initialDepartmentValue = departmentField.value;
+      const placeholderLabel = departmentField.dataset.placeholder || "---------";
+
+      function rebuildDepartmentOptions() {
+        const selectedCampusId = campusField.value;
+        const previousValue = departmentField.value || initialDepartmentValue;
+
+        departmentField.innerHTML = "";
+
+        const placeholderOption = document.createElement("option");
+        placeholderOption.value = "";
+        placeholderOption.textContent = placeholderLabel;
+        departmentField.appendChild(placeholderOption);
+
+        if (!selectedCampusId) {
+          departmentField.disabled = true;
+          departmentField.value = "";
+          return;
+        }
+
+        const filteredOptions = departmentOptions.filter(function (option) {
+          return String(option.campus_id) === String(selectedCampusId);
+        });
+
+        filteredOptions.forEach(function (option) {
+          const optionElement = document.createElement("option");
+          optionElement.value = option.id;
+          optionElement.textContent = option.label;
+          if (String(option.id) === String(previousValue)) {
+            optionElement.selected = true;
+          }
+          departmentField.appendChild(optionElement);
+        });
+
+        departmentField.disabled = false;
+        if (!filteredOptions.some(function (option) { return String(option.id) === String(previousValue); })) {
+          departmentField.value = "";
+        }
+      }
+
+      rebuildDepartmentOptions();
+      campusField.addEventListener("change", rebuildDepartmentOptions);
+    });
+  });
+</script>
 {% endblock %}
 

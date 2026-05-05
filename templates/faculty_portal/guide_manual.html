@@ -420,6 +420,11 @@
               <td>This prevents work in the wrong period while still allowing approved exceptions.</td>
             </tr>
           <tr>
+            <td>Active Academic Scope</td>
+            <td>Classes outside the active Academic Year and Term set by admin are shown as archived/history. They are read-only for normal encoding, attendance updates, submission, self-reopen, and class-list changes.</td>
+            <td>Old-term grade changes should use the governed correction workflow instead of direct editing.</td>
+          </tr>
+          <tr>
             <td>Grade Book View History</td>
             <td>Use <strong>Who Viewed</strong> to see authorized admin-side openings of the gradebook monitor. Use the Quick Jump links to move between Activities, Attendance, Summary, and Who Viewed.</td>
             <td>This makes monitoring more transparent and easier to check.</td>
@@ -458,6 +463,9 @@
           <li>Expired assignments must be renewed or reissued by admin before the faculty member can respond again.</li>
           <li>Admin users can monitor pending, due soon, accepted, and expired loads.</li>
           <li>The Faculty Portal class card shows the assigned grading template. Faculty can open it in read-only mode to review formulas before grading.</li>
+          <li>The class grading-template page includes a read-only <strong>Grade Calculator</strong> for sample raw-score conversion, period-grade computation, and final-grade formula preview. It does not save grades, activities, or student records.</li>
+          <li>If governance allows template issue reporting, the class grading-template page shows <strong>Report Template Issue</strong>. The report is reviewed through template hotfix governance and does not immediately change grades.</li>
+          <li>If a class has no active published course-template assignment, My Classes warns the faculty member that the grading template is not assigned yet and directs them to coordinate with the MIS Department.</li>
           <li>Scheduled operations should run <code>manage.py process_faculty_assignment_reminders</code> so reminders and expirations are processed regularly.</li>
         </ul>
       </div>
@@ -475,7 +483,7 @@
           </div>
           <div class="manual-rule">
             <strong>Readiness Cards</strong>
-            <p>The Summary page shows cards for ACTIVE, complete records, missing records, coverage, DRP, WITHDRAWN, and INC. The official Summary of Grades table and printout appear only after submission, so unsubmitted records are not treated as the official AIMS source. Pass/Fail counts use the configured passing grade, usually 75 unless another rule is set.</p>
+            <p>The Summary page shows cards for ACTIVE, complete records, missing records, coverage, DRP, WITHDRAWN, and INC. Depending on Configuration Management, computed periodic grades may be visible before submission for review. The official Summary of Grades printout appears only after submission, so unsubmitted records are not treated as the official AIMS source. Pass/Fail counts use the configured passing grade, usually 75 unless another rule is set.</p>
           </div>
           <div class="manual-rule">
             <strong>Reopen Before the Deadline</strong>
@@ -751,7 +759,7 @@
         </div>
         <div class="manual-rule">
           <strong>Official Grade Release Control</strong>
-          <p>Official grades may be hidden until the configured release point. This is separate from prediction, which is always unofficial.</p>
+          <p>Official grades may be hidden until the configured release point. Periodic grades may also be hidden until submission if admin enables that setting. This is separate from prediction, which is always unofficial.</p>
         </div>
       </div>
     </div>

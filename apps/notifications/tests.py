@@ -429,3 +429,37 @@ class FacultyReminderServiceTests(TestCase):
             SubmissionNonComplianceNotice.objects.filter(submission=submission).count(),
             3,
         )
+
+    def test_submission_non_compliance_heads_include_parent_department_roles(self):
+        parent_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="COLLEGE",
+            name="College",
+            unit_type=Department.UnitType.DIVISION,
+            is_active=True,
+        )
+        self.department.parent = parent_department
+        self.department.save(update_fields=["parent", "updated_at"])
+        dean_user = User.objects.create_user(
+            username="parent_dean",
+            email="parent_dean@ncba.edu.ph",
+            password="testpassword123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=parent_department,
+            is_active=True,
+        )
+        dean_role = Role.objects.create(code="DEAN", name="Dean", is_active=True)
+        UserRole.objects.create(
+            user=dean_user,
+            role=dean_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=parent_department,
+            is_active=True,
+        )
+
+        head_users = SubmissionNonComplianceNoticeService._resolve_head_users(offering=self.offering)
+
+        self.assertIn(dean_user, head_users)

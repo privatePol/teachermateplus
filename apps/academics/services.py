@@ -121,6 +121,13 @@ class AcademicGovernanceService:
             value_type="STRING",
             is_active=True,
         )
+        SystemSettingService.set(
+            cls.ACTIVE_TERM_KEY,
+            term.code,
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
 
     @staticmethod
     def normalize_period_key(value: str | None) -> str:
@@ -404,13 +411,6 @@ class AcademicGovernanceService:
             )
         state["is_closed_by_active_period"] = True
         return state
-        SystemSettingService.set(
-            cls.ACTIVE_TERM_KEY,
-            term.code,
-            tenant_id=tenant_id,
-            value_type="STRING",
-            is_active=True,
-        )
 
 
 class FacultyAssignmentWorkflowService:

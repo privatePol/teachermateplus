@@ -28,6 +28,18 @@
   .summary-toolbar .summary-search-form .form-control {
     min-width: 220px;
   }
+  .grade-explain-btn {
+    --bs-btn-padding-y: 0.12rem;
+    --bs-btn-padding-x: 0.45rem;
+    --bs-btn-font-size: 0.72rem;
+    border-color: #0f7a4a;
+    color: #0f7a4a;
+    background: #f7fff9;
+  }
+  .grade-explain-btn:hover {
+    background: #0f7a4a;
+    color: #fff;
+  }
   .readiness-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -437,7 +449,7 @@
       Reopen Before Deadline
     </button>
     {% endif %}
-    {% if can_view_gradebook_summary %}
+    {% if can_print_gradebook_summary %}
     <button class="btn btn-sm btn-outline-primary print-trigger-btn" type="button" onclick="window.print();">Print Periodic Grades</button>
     {% endif %}
     {% if "corrections.create" in effective_permissions and system_correction_enabled %}
@@ -656,9 +668,14 @@
   Until submission, use the readiness cards above to complete missing records and template requirements.
 </div>
 {% endif %}
+{% elif not can_print_gradebook_summary %}
+<div class="alert alert-info border no-print">
+  Periodic grades are visible for review, but the official Summary of Grades printout becomes available only after submission.
+</div>
 {% endif %}
 
 {% if can_view_gradebook_summary %}
+{% if can_print_gradebook_summary %}
 <div class="gradebook-print-header">
   <div class="print-brand-row">
     <img class="print-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA">
@@ -711,6 +728,7 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 
 <div class="card border-0 shadow-sm class-record-card">
   <div class="class-record-caption">
@@ -872,10 +890,20 @@
             <td class="metric-col metric-final">{{ value|default:"" }}</td>
           {% endfor %}
           {% if show_official_period_grade %}
-          <td class="metric-col metric-final"><strong>{{ row.period_grade|default:"" }}</strong></td>
+          <td class="metric-col metric-final">
+            <strong>{{ row.period_grade|default:"" }}</strong>
+            {% if row.period_explain_url %}
+            <button type="button" class="btn btn-sm grade-explain-btn ms-1" data-grade-explain-url="{{ row.period_explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
+            {% endif %}
+          </td>
           {% endif %}
           {% if show_official_final_grade %}
-          <td class="metric-col metric-final"><strong>{{ row.final_grade|default:"" }}</strong></td>
+          <td class="metric-col metric-final">
+            <strong>{{ row.final_grade|default:"" }}</strong>
+            {% if row.final_explain_url %}
+            <button type="button" class="btn btn-sm grade-explain-btn ms-1" data-grade-explain-url="{{ row.final_explain_url }}" aria-label="Explain final grade">&#128269; Explain</button>
+            {% endif %}
+          </td>
           {% endif %}
         </tr>
       {% empty %}
@@ -886,6 +914,7 @@
   </div>
 </div>
 
+{% if can_print_gradebook_summary %}
 <div class="gradebook-print-footer">
   <div class="none-follows">**** NONE FOLLOWS *****</div>
   <div class="submitted-by">
@@ -894,4 +923,40 @@
   </div>
 </div>
 {% endif %}
+{% endif %}
+
+<div class="modal fade" id="gradeExplanationModal" tabindex="-1" aria-labelledby="gradeExplanationTitle" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="gradeExplanationTitle">Explain This Grade</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" data-grade-explain-body>
+        <div class="text-muted">Loading explanation...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const modalEl = document.getElementById("gradeExplanationModal");
+    if (!modalEl || !window.bootstrap) return;
+    const modal = new bootstrap.Modal(modalEl);
+    const body = modalEl.querySelector("[data-grade-explain-body]");
+    document.querySelectorAll("[data-grade-explain-url]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        body.innerHTML = '<div class="text-muted">Loading explanation...</div>';
+        modal.show();
+        fetch(button.dataset.gradeExplainUrl, {headers: {"X-Requested-With": "XMLHttpRequest"}})
+          .then(function (response) { return response.text(); })
+          .then(function (html) { body.innerHTML = html; })
+          .catch(function () {
+            body.innerHTML = '<div class="alert alert-danger mb-0">Unable to load the grade explanation.</div>';
+          });
+      });
+    });
+  });
+</script>
 {% endblock %}

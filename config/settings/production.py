@@ -6,7 +6,12 @@ if not os.getenv("DJANGO_SECRET_KEY") or SECRET_KEY == "change-this-in-productio
     raise RuntimeError("DJANGO_SECRET_KEY must be set to a non-default value in production.")
 
 DEBUG = env_bool("DJANGO_DEBUG", False)
+if DEBUG:
+    raise RuntimeError("DJANGO_DEBUG must be False in production.")
+
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if h.strip()]
+if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
+    raise RuntimeError("DJANGO_ALLOWED_HOSTS must list explicit hosts in production.")
 
 SESSION_COOKIE_SECURE = env_bool("DJANGO_SESSION_COOKIE_SECURE", True)
 CSRF_COOKIE_SECURE = env_bool("DJANGO_CSRF_COOKIE_SECURE", True)

@@ -31,32 +31,5 @@
     <button class="btn btn-outline-secondary w-100">Filter</button>
   </div>
 </form>
-<div class="card border-0 shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover mb-0">
-      <thead><tr><th>Tenant</th><th>Campus</th><th>Department</th><th>Code</th><th>Name</th><th>Level</th><th>Record State</th><th></th></tr></thead>
-      <tbody>
-      {% for row in page_obj %}
-        <tr>
-          <td>{{ row.tenant.code }}</td>
-          <td>{{ row.campus.code }}</td>
-          <td>{{ row.department.code }}</td>
-          <td>{{ row.code }}</td>
-          <td>{{ row.name }}</td>
-          <td>{{ row.level|default:"-" }}</td>
-          <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
-          <td class="text-end">
-            {% if "programs.update" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:program_update' row.id %}">Edit</a>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="8" class="text-center text-muted py-4">No programs found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
-</div>
+{% include "admin_portal/shared/active_inactive_sections.html" with section_label="Programs" table_template="admin_portal/organization/program_table.html" active_empty_message="No active programs found." inactive_empty_message="No inactive programs found." %}
 {% endblock %}

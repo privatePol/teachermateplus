@@ -139,62 +139,64 @@
       });
     });
 
-    const campusField = document.getElementById("id_campus");
-    const departmentField = document.getElementById("id_department");
+    document.querySelectorAll('select[data-campus-dependent="true"]').forEach(function (departmentField) {
+      const campusFieldId = departmentField.dataset.campusFieldId || "id_campus";
+      const campusField = document.getElementById(campusFieldId);
 
-    if (!campusField || !departmentField || departmentField.dataset.campusDependent !== "true") {
-      return;
-    }
-
-    let departmentOptions = [];
-    try {
-      departmentOptions = JSON.parse(departmentField.dataset.departmentOptions || "[]");
-    } catch (error) {
-      departmentOptions = [];
-    }
-
-    const initialDepartmentValue = departmentField.value;
-    const placeholderLabel = departmentField.dataset.placeholder || "---------";
-
-    function rebuildDepartmentOptions() {
-      const selectedCampusId = campusField.value;
-      const previousValue = departmentField.value || initialDepartmentValue;
-
-      departmentField.innerHTML = "";
-
-      const placeholderOption = document.createElement("option");
-      placeholderOption.value = "";
-      placeholderOption.textContent = placeholderLabel;
-      departmentField.appendChild(placeholderOption);
-
-      if (!selectedCampusId) {
-        departmentField.disabled = true;
-        departmentField.value = "";
+      if (!campusField) {
         return;
       }
 
-      const filteredOptions = departmentOptions.filter(function (option) {
-        return String(option.campus_id) === String(selectedCampusId);
-      });
-
-      filteredOptions.forEach(function (option) {
-        const optionElement = document.createElement("option");
-        optionElement.value = option.id;
-        optionElement.textContent = option.label;
-        if (String(option.id) === String(previousValue)) {
-          optionElement.selected = true;
-        }
-        departmentField.appendChild(optionElement);
-      });
-
-      departmentField.disabled = false;
-      if (!filteredOptions.some(function (option) { return String(option.id) === String(previousValue); })) {
-        departmentField.value = "";
+      let departmentOptions = [];
+      try {
+        departmentOptions = JSON.parse(departmentField.dataset.departmentOptions || "[]");
+      } catch (error) {
+        departmentOptions = [];
       }
-    }
 
-    rebuildDepartmentOptions();
-    campusField.addEventListener("change", rebuildDepartmentOptions);
+      const initialDepartmentValue = departmentField.value;
+      const placeholderLabel = departmentField.dataset.placeholder || "---------";
+
+      function rebuildDepartmentOptions() {
+        const selectedCampusId = campusField.value;
+        const previousValue = departmentField.value || initialDepartmentValue;
+
+        departmentField.innerHTML = "";
+
+        const placeholderOption = document.createElement("option");
+        placeholderOption.value = "";
+        placeholderOption.textContent = placeholderLabel;
+        departmentField.appendChild(placeholderOption);
+
+        if (!selectedCampusId) {
+          departmentField.disabled = true;
+          departmentField.value = "";
+          return;
+        }
+
+        const filteredOptions = departmentOptions.filter(function (option) {
+          return String(option.campus_id) === String(selectedCampusId);
+        });
+
+        filteredOptions.forEach(function (option) {
+          const optionElement = document.createElement("option");
+          optionElement.value = option.id;
+          optionElement.textContent = option.label;
+          if (String(option.id) === String(previousValue)) {
+            optionElement.selected = true;
+          }
+          departmentField.appendChild(optionElement);
+        });
+
+        departmentField.disabled = false;
+        if (!filteredOptions.some(function (option) { return String(option.id) === String(previousValue); })) {
+          departmentField.value = "";
+        }
+      }
+
+      rebuildDepartmentOptions();
+      campusField.addEventListener("change", rebuildDepartmentOptions);
+    });
   });
 </script>
 {% endblock %}

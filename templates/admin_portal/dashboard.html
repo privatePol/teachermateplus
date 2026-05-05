@@ -271,6 +271,61 @@
     </div>
   </div>
 
+  {% if has_governance_alerts and governance_alerts %}
+  <div class="dashboard-section">
+    <div class="section-card">
+      <div class="section-header d-flex justify-content-between align-items-center gap-2 flex-wrap">
+        <div>
+          <h3 class="section-title">&#9888; Governance Alerts</h3>
+          <p class="section-subtitle">Non-blocking audit flags for unusual governance activity in your current scope.</p>
+        </div>
+        <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:recent_critical_actions' %}">Open Critical Actions</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+          <tr>
+            <th>Alert</th>
+            <th>Action</th>
+            <th>Actor</th>
+            <th>Scope</th>
+            <th>When</th>
+            <th></th>
+          </tr>
+          </thead>
+          <tbody>
+          {% for alert in governance_alerts %}
+          <tr>
+            <td>
+              <span class="badge text-bg-warning me-1">{{ alert.primary_anomaly.severity|title }}</span>
+              {{ alert.primary_anomaly.message }}
+              {% if alert.anomaly_flags|length > 1 %}
+              <div class="small text-muted">+{{ alert.anomaly_flags|length|add:"-1" }} more flag(s)</div>
+              {% endif %}
+            </td>
+            <td>{{ alert.action }} {{ alert.entity_type }}{% if alert.entity_id %} #{{ alert.entity_id }}{% endif %}</td>
+            <td>
+              {% if alert.actor_user %}
+                {{ alert.actor_user.full_name|default:alert.actor_user.username }}
+                {% if alert.actor_user.full_name != alert.actor_user.username %}
+                <div class="small text-muted">{{ alert.actor_user.username }}</div>
+                {% endif %}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>{{ alert.scope_summary }}</td>
+            <td>{{ alert.created_at|date:"Y-m-d H:i" }}</td>
+            <td><a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:recent_critical_actions' %}?q={{ alert.entity_id }}">View</a></td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="dashboard-section">
     <div class="section-card">
       <div class="section-header d-flex justify-content-between align-items-center gap-2 flex-wrap">

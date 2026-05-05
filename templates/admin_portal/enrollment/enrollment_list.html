@@ -116,33 +116,5 @@
   <div class="col-md-1"><button class="btn btn-outline-secondary w-100">Filter</button></div>
   <div class="col-md-1"><a class="btn btn-outline-dark w-100" href="{% url 'admin_portal:enrollment_list' %}">Reset</a></div>
 </form>
-<div class="card border-0 shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover mb-0">
-      <thead><tr><th>Student</th><th>Offering</th><th>Status</th><th>Source</th><th>Active</th><th></th></tr></thead>
-      <tbody>
-      {% for row in page_obj %}
-        <tr>
-          <td>{{ row.student.student_no }} - {{ row.student.last_name }}, {{ row.student.first_name }}</td>
-          <td>
-            {{ row.course_offering.course.title }} <span class="text-muted">({{ row.course_offering.course.code }})</span>
-            | {{ row.course_offering.section.name|default:row.course_offering.section.code }}
-          </td>
-          <td><span class="badge text-bg-info">{{ row.enrollment_status }}</span></td>
-          <td>{{ row.encoded_via_portal }}</td>
-          <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
-          <td class="text-end">
-            {% if "enrollment.update" in effective_permissions %}
-            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:enrollment_update' row.id %}">Edit</a>
-            {% endif %}
-          </td>
-        </tr>
-      {% empty %}
-        <tr><td colspan="6" class="text-center text-muted py-4">No enrollment records found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
-</div>
+{% include "admin_portal/shared/active_inactive_sections.html" with section_label="Enrollment Records" table_template="admin_portal/enrollment/enrollment_table.html" active_empty_message="No active enrollment records found." inactive_empty_message="No inactive enrollment records found." %}
 {% endblock %}

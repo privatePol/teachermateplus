@@ -1,0 +1,55 @@
+<div class="table-responsive">
+  <table class="table table-hover mb-0">
+    <thead>
+      <tr>
+        <th>Course</th>
+        <th>Template</th>
+        <th>Effective Term</th>
+        <th>Record State</th>
+        {% if show_inactive_tools %}<th>Used In</th>{% endif %}
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in page_obj %}
+      <tr>
+        <td>{{ row.course.title }} <span class="text-muted">({{ row.course.code }})</span></td>
+        <td>
+          {% if row.grading_template %}
+            {{ row.grading_template.name }} <span class="text-muted">({{ row.grading_template.code }})</span>
+          {% else %}
+            <span class="badge text-bg-warning text-dark">No grading template assigned</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.effective_from_term %}
+            {{ row.effective_from_term.name|default:row.effective_from_term.code }}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>
+          {% if row.grading_template and row.is_active %}
+            <span class="badge text-bg-success">Active</span>
+          {% elif row.grading_template %}
+            <span class="badge text-bg-warning text-dark">Inactive</span>
+          {% else %}
+            <span class="badge text-bg-secondary">Missing</span>
+          {% endif %}
+        </td>
+        {% if show_inactive_tools %}<td>{% include "admin_portal/shared/inactive_usage_cell.html" %}</td>{% endif %}
+        <td class="text-end">
+          {% if row.grading_template and "course_template_assignments.update" in effective_permissions %}
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:course_template_assignment_update' row.id %}">Edit</a>
+          {% elif "course_template_assignments.create" in effective_permissions %}
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:course_template_assignment_create' %}">Assign Now</a>
+          {% endif %}
+          {% if show_inactive_tools and row.grading_template %}{% include "admin_portal/shared/inactive_delete_action.html" %}{% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="{% if show_inactive_tools %}6{% else %}5{% endif %}" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

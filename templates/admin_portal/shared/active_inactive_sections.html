@@ -1,0 +1,21 @@
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <h3 class="h6 mb-0">Active {{ section_label }}</h3>
+    <span class="badge text-bg-success">{{ active_page_obj.paginator.count }}</span>
+  </div>
+  {% include table_template with page_obj=active_page_obj empty_message=active_empty_message show_inactive_tools=False %}
+  <div class="card-footer">
+    {% include "admin_portal/shared/pagination.html" with page_obj=active_page_obj %}
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <h3 class="h6 mb-0">Inactive {{ section_label }}</h3>
+    <span class="badge text-bg-warning text-dark">{{ inactive_page_obj.paginator.count }}</span>
+  </div>
+  {% include table_template with page_obj=inactive_page_obj empty_message=inactive_empty_message show_inactive_tools=True %}
+  <div class="card-footer">
+    {% include "admin_portal/shared/pagination.html" with page_obj=inactive_page_obj %}
+  </div>
+</div>

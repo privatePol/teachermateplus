@@ -5,6 +5,8 @@ from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.db import models
 from django.db.models import Count
 
 from apps.academics.models import CourseOffering, FacultyAssignment
@@ -22,6 +24,7 @@ class GradeDistributionMonitorService:
 
     SOURCE_PERIOD = "period"
     SOURCE_ACTIVITY = "activity"
+    REMOVED_FILTER_KEYS = ("course_id", "offering_id", "component_id", "subcomponent_id")
 
     DEFAULTS = {
         "high_grade_band_min": Decimal("90"),
@@ -53,7 +56,9 @@ class GradeDistributionMonitorService:
 
         faculty_by_offering = cls._faculty_by_offering(offering_ids)
         active_counts = cls._active_enrollment_counts(offering_ids)
-        thresholds = cls._passing_thresholds(offerings)
+        threshold_info = cls._passing_thresholds(offerings)
+        thresholds = threshold_info["thresholds"]
+        missing_template_offering_ids = threshold_info["missing_template_offering_ids"]
         settings = cls._threshold_settings(request)
 
         if selected["source"] == cls.SOURCE_ACTIVITY:
@@ -63,6 +68,7 @@ class GradeDistributionMonitorService:
                 faculty_by_offering=faculty_by_offering,
                 active_counts=active_counts,
                 thresholds=thresholds,
+                missing_template_offering_ids=missing_template_offering_ids,
                 settings=settings,
                 selected=selected,
             )
@@ -73,15 +79,16 @@ class GradeDistributionMonitorService:
                 faculty_by_offering=faculty_by_offering,
                 active_counts=active_counts,
                 thresholds=thresholds,
+                missing_template_offering_ids=missing_template_offering_ids,
                 settings=settings,
                 selected=selected,
             )
 
         rows = cls._attach_comparison_averages(rows)
-        summary = cls._summary(rows, len(offering_ids))
+        summary = cls._summary(rows, len(offering_ids), len(missing_template_offering_ids))
         filter_options = cls._filter_options(request, offerings_qs)
 
-        query_params = request.GET.copy()
+        query_params = cls.sanitized_query(request)
         query_params["export"] = "csv"
 
         return {
@@ -105,37 +112,41 @@ class GradeDistributionMonitorService:
             "academic_year_id": cls._safe_int(request.GET.get("academic_year_id")),
             "term_id": cls._safe_int(request.GET.get("term_id")),
             "faculty_id": cls._safe_int(request.GET.get("faculty_id")),
-            "course_id": cls._safe_int(request.GET.get("course_id")),
-            "offering_id": cls._safe_int(request.GET.get("offering_id")),
             "period_id": cls._safe_int(request.GET.get("period_id")),
-            "component_id": cls._safe_int(request.GET.get("component_id")),
-            "subcomponent_id": cls._safe_int(request.GET.get("subcomponent_id")),
         }
 
     @classmethod
     def _filtered_offerings(cls, request, selected):
-        offerings = AdminScopeService.scoped_course_offerings(request).filter(status=CourseOffering.Status.OPEN)
+        assignment_qs = AdminScopeService.scoped_faculty_assignments(request).filter(
+            is_active=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            offering__status=CourseOffering.Status.OPEN,
+        )
         if selected["campus_id"]:
-            offerings = offerings.filter(campus_id=selected["campus_id"])
+            assignment_qs = assignment_qs.filter(offering__campus_id=selected["campus_id"])
         if selected["department_id"]:
-            offerings = offerings.filter(department_id=selected["department_id"])
+            department_ids = AdminScopeService.expand_department_filter_ids(
+                selected["department_id"],
+                campus_id=selected["campus_id"],
+            )
+            department_faculty_ids = User.objects.filter(
+                models.Q(default_department_id__in=department_ids)
+                | models.Q(
+                    user_roles__role__code="FACULTY",
+                    user_roles__is_active=True,
+                    user_roles__role__is_active=True,
+                    user_roles__department_id__in=department_ids,
+                )
+            ).values("id")
+            assignment_qs = assignment_qs.filter(faculty_user_id__in=department_faculty_ids)
         if selected["academic_year_id"]:
-            offerings = offerings.filter(academic_year_id=selected["academic_year_id"])
+            assignment_qs = assignment_qs.filter(offering__academic_year_id=selected["academic_year_id"])
         if selected["term_id"]:
-            offerings = offerings.filter(term_id=selected["term_id"])
-        if selected["course_id"]:
-            offerings = offerings.filter(course_id=selected["course_id"])
-        if selected["offering_id"]:
-            offerings = offerings.filter(id=selected["offering_id"])
+            assignment_qs = assignment_qs.filter(offering__term_id=selected["term_id"])
         if selected["faculty_id"]:
-            faculty_offering_ids = FacultyAssignment.objects.filter(
-                offering_id__in=offerings.values("id"),
-                faculty_user_id=selected["faculty_id"],
-                is_active=True,
-                response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
-            ).values("offering_id")
-            offerings = offerings.filter(id__in=faculty_offering_ids)
-        return offerings.select_related(
+            assignment_qs = assignment_qs.filter(faculty_user_id=selected["faculty_id"])
+        offering_ids = assignment_qs.values("offering_id")
+        return CourseOffering.objects.filter(id__in=offering_ids).select_related(
             "tenant",
             "campus",
             "department",
@@ -178,12 +189,40 @@ class GradeDistributionMonitorService:
     @classmethod
     def _passing_thresholds(cls, offerings):
         thresholds = {}
+        missing_template_offering_ids = set()
+        tenant_threshold_cache = {}
         for offering in offerings:
-            thresholds[offering.id] = FacultyGradingService.resolve_passing_threshold(offering)
-        return thresholds
+            try:
+                thresholds[offering.id] = FacultyGradingService.resolve_passing_threshold(offering)
+            except ValidationError:
+                missing_template_offering_ids.add(offering.id)
+                if offering.tenant_id not in tenant_threshold_cache:
+                    tenant_raw = SystemSettingService.get(
+                        "PASSING_GRADE_THRESHOLD",
+                        tenant_id=offering.tenant_id,
+                        default="75",
+                    )
+                    tenant_threshold_cache[offering.tenant_id] = GradingGovernanceService._round(
+                        cls._decimal(tenant_raw, Decimal("75.00"))
+                    )
+                thresholds[offering.id] = tenant_threshold_cache[offering.tenant_id]
+        return {
+            "thresholds": thresholds,
+            "missing_template_offering_ids": missing_template_offering_ids,
+        }
 
     @classmethod
-    def _period_rows(cls, offering_ids, offering_map, faculty_by_offering, active_counts, thresholds, settings, selected):
+    def _period_rows(
+        cls,
+        offering_ids,
+        offering_map,
+        faculty_by_offering,
+        active_counts,
+        thresholds,
+        missing_template_offering_ids,
+        settings,
+        selected,
+    ):
         grades = StudentPeriodGrade.objects.filter(
             offering_id__in=offering_ids,
             period_grade__isnull=False,
@@ -193,9 +232,24 @@ class GradeDistributionMonitorService:
 
         grouped = defaultdict(list)
         period_names = {}
-        for row in grades.values("offering_id", "template_period_id", "template_period__name", "period_grade"):
+        for row in grades.values(
+            "offering_id",
+            "template_period_id",
+            "template_period__name",
+            "student__student_no",
+            "student__first_name",
+            "student__last_name",
+            "period_grade",
+        ):
             group_key = (row["offering_id"], row["template_period_id"])
-            grouped[group_key].append(cls._decimal(row["period_grade"], Decimal("0")))
+            grouped[group_key].append(
+                cls._grade_detail(
+                    student_no=row["student__student_no"],
+                    first_name=row["student__first_name"],
+                    last_name=row["student__last_name"],
+                    value=row["period_grade"],
+                )
+            )
             period_names[group_key] = row["template_period__name"]
 
         rows = []
@@ -214,16 +268,27 @@ class GradeDistributionMonitorService:
                     period_name=period_name or "-",
                     component_name="",
                     subcomponent_name="",
-                    values=values,
+                    grade_details=values,
                     active_count=active_counts.get(offering_id, 0),
                     passing_threshold=thresholds.get(offering_id, Decimal("75.00")),
+                    missing_template=offering_id in missing_template_offering_ids,
                     settings=settings,
                 )
             )
         return rows
 
     @classmethod
-    def _activity_rows(cls, offering_ids, offering_map, faculty_by_offering, active_counts, thresholds, settings, selected):
+    def _activity_rows(
+        cls,
+        offering_ids,
+        offering_map,
+        faculty_by_offering,
+        active_counts,
+        thresholds,
+        missing_template_offering_ids,
+        settings,
+        selected,
+    ):
         scores = StudentActivityScore.objects.filter(
             activity__offering_id__in=offering_ids,
             activity__is_active=True,
@@ -232,10 +297,6 @@ class GradeDistributionMonitorService:
         )
         if selected["period_id"]:
             scores = scores.filter(activity__template_period_id=selected["period_id"])
-        if selected["component_id"]:
-            scores = scores.filter(activity__template_component_id=selected["component_id"])
-        if selected["subcomponent_id"]:
-            scores = scores.filter(activity__template_subcomponent_id=selected["subcomponent_id"])
 
         activity_ids = list(scores.values_list("activity_id", flat=True).distinct())
         activity_map = {
@@ -249,8 +310,21 @@ class GradeDistributionMonitorService:
             )
         }
         grouped = defaultdict(list)
-        for row in scores.values("activity_id", "computed_score"):
-            grouped[row["activity_id"]].append(cls._decimal(row["computed_score"], Decimal("0")))
+        for row in scores.values(
+            "activity_id",
+            "student__student_no",
+            "student__first_name",
+            "student__last_name",
+            "computed_score",
+        ):
+            grouped[row["activity_id"]].append(
+                cls._grade_detail(
+                    student_no=row["student__student_no"],
+                    first_name=row["student__first_name"],
+                    last_name=row["student__last_name"],
+                    value=row["computed_score"],
+                )
+            )
 
         rows = []
         for activity_id, values in grouped.items():
@@ -270,9 +344,10 @@ class GradeDistributionMonitorService:
                     period_name=activity.template_period.name,
                     component_name=activity.template_component.name,
                     subcomponent_name=activity.template_subcomponent.name if activity.template_subcomponent else "",
-                    values=values,
+                    grade_details=values,
                     active_count=active_counts.get(activity.offering_id, 0),
                     passing_threshold=thresholds.get(activity.offering_id, Decimal("75.00")),
+                    missing_template=activity.offering_id in missing_template_offering_ids,
                     settings=settings,
                 )
             )
@@ -290,11 +365,17 @@ class GradeDistributionMonitorService:
         period_name,
         component_name,
         subcomponent_name,
-        values,
+        grade_details,
         active_count,
         passing_threshold,
+        missing_template,
         settings,
     ):
+        grade_details = sorted(
+            grade_details,
+            key=lambda item: (item["masked_name"], item["masked_student_no"], item["grade"]),
+        )
+        values = [detail["grade"] for detail in grade_details]
         graded_count = len(values)
         average = cls._round(sum(values) / Decimal(graded_count)) if graded_count else None
         highest = max(values) if values else None
@@ -314,6 +395,7 @@ class GradeDistributionMonitorService:
             exact_100_pct=cls._pct(exact_100, graded_count),
             spread=spread,
             incomplete=incomplete,
+            missing_template=missing_template,
             settings=settings,
         )
         return {
@@ -343,14 +425,25 @@ class GradeDistributionMonitorService:
             "below_passing_pct": cls._pct(below_passing, graded_count),
             "exact_100_pct": cls._pct(exact_100, graded_count),
             "flags": flags,
+            "missing_template": missing_template,
+            "grade_details": [
+                {
+                    "masked_student_no": detail["masked_student_no"],
+                    "masked_name": detail["masked_name"],
+                    "grade": cls._round(detail["grade"]),
+                }
+                for detail in grade_details
+            ],
             "has_review_flag": any(flag["kind"] == "review" for flag in flags),
             "department_key": (offering.campus_id, offering.department_id, period_name),
             "course_key": (offering.course_id, period_name),
         }
 
     @classmethod
-    def _flags(cls, *, graded_count, high_pct, exact_100_pct, spread, incomplete, settings):
+    def _flags(cls, *, graded_count, high_pct, exact_100_pct, spread, incomplete, missing_template, settings):
         flags = []
+        if missing_template:
+            flags.append({"label": "No template", "class": "text-bg-warning", "kind": "status"})
         min_count = settings["minimum_student_count_for_flag"]
         if graded_count == 0 or incomplete:
             flags.append({"label": "Incomplete Data", "class": "text-bg-secondary", "kind": "status"})
@@ -397,7 +490,7 @@ class GradeDistributionMonitorService:
         )
 
     @classmethod
-    def _summary(cls, rows, offering_count):
+    def _summary(cls, rows, offering_count, missing_template_offering_count=0):
         review_rows = sum(1 for row in rows if row["has_review_flag"])
         incomplete_rows = sum(1 for row in rows if any(flag["label"] == "Incomplete Data" for flag in row["flags"]))
         high_concentration_rows = sum(
@@ -413,6 +506,7 @@ class GradeDistributionMonitorService:
             "incomplete_rows": incomplete_rows,
             "high_concentration_rows": high_concentration_rows,
             "high_perfect_rows": high_perfect_rows,
+            "missing_template_offerings": missing_template_offering_count,
         }
 
     @classmethod
@@ -421,35 +515,32 @@ class GradeDistributionMonitorService:
         offering_ids = [offering.id for offering in scoped_offerings]
         template_ids = set()
         for offering in scoped_offerings[:200]:
-            template = FacultyGradingService.resolve_template_for_offering(offering)
+            try:
+                template = FacultyGradingService.resolve_template_for_offering(offering)
+            except ValidationError:
+                template = None
             if template:
                 template_ids.add(template.id)
         periods = AdminScopeService.scoped_template_periods(request)
-        components = AdminScopeService.scoped_template_components(request)
-        subcomponents = AdminScopeService.scoped_template_subcomponents(request)
         if template_ids:
             periods = periods.filter(template_id__in=template_ids)
-            components = components.filter(template_period__template_id__in=template_ids)
-            subcomponents = subcomponents.filter(template_component__template_period__template_id__in=template_ids)
         return {
-            "campuses": AdminScopeService.scoped_campuses(request).order_by("code"),
-            "departments": AdminScopeService.scoped_departments(request).order_by("code"),
-            "academic_years": AdminScopeService.scoped_academic_years(request).order_by("-start_date"),
-            "terms": AdminScopeService.scoped_terms(request).order_by("-academic_year__start_date", "sequence_no"),
+            "campuses": AdminScopeService.active_scoped_campuses(request).order_by("code"),
+            "departments": AdminScopeService.active_scoped_departments(request).order_by("code"),
+            "academic_years": AdminScopeService.active_scoped_academic_years(request).order_by("-start_date"),
+            "terms": AdminScopeService.active_scoped_terms(request).order_by("-academic_year__start_date", "sequence_no"),
             "faculty": User.objects.filter(id__in=AdminScopeService.scoped_faculty_users(request))
             .filter(id__in=FacultyAssignment.objects.filter(offering_id__in=offering_ids).values("faculty_user_id"))
             .order_by("last_name", "first_name", "username"),
-            "courses": AdminScopeService.scoped_courses(request).order_by("code"),
-            "offerings": scoped_offerings,
             "periods": periods.order_by("template__name", "sequence_no"),
-            "components": components.order_by("template_period__template__name", "template_period__sequence_no", "sort_order"),
-            "subcomponents": subcomponents.order_by(
-                "template_component__template_period__template__name",
-                "template_component__template_period__sequence_no",
-                "template_component__sort_order",
-                "sort_order",
-            ),
         }
+
+    @classmethod
+    def sanitized_query(cls, request):
+        query = request.GET.copy()
+        for key in cls.REMOVED_FILTER_KEYS:
+            query.pop(key, None)
+        return query
 
     @classmethod
     def _threshold_settings(cls, request):
@@ -481,6 +572,34 @@ class GradeDistributionMonitorService:
     @staticmethod
     def _round(value):
         return GradingGovernanceService._round(Decimal(value))
+
+    @classmethod
+    def _grade_detail(cls, *, student_no, first_name, last_name, value):
+        return {
+            "masked_student_no": cls._mask_student_no(student_no),
+            "masked_name": cls._mask_student_name(first_name=first_name, last_name=last_name),
+            "grade": cls._decimal(value, Decimal("0")),
+        }
+
+    @staticmethod
+    def _mask_student_no(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return "Masked"
+        visible = raw[-3:] if len(raw) > 3 else ""
+        masked_length = max(len(raw) - len(visible), 3)
+        return f"{'*' * masked_length}{visible}"
+
+    @staticmethod
+    def _mask_name_part(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return "***"
+        return f"{raw[:1].upper()}***"
+
+    @classmethod
+    def _mask_student_name(cls, *, first_name, last_name):
+        return f"{cls._mask_name_part(first_name)} {cls._mask_name_part(last_name)}"
 
     @staticmethod
     def _pct(value, total):

@@ -16,6 +16,7 @@ from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
+from django.urls import reverse
 from django.utils import timezone
 from PIL import Image
 
@@ -27,6 +28,7 @@ from apps.accounts.models import (
     UserSignatureUsageLog,
 )
 from apps.core.services.audit import AuditService
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
 from apps.core.services.features import FeatureSettingsService
 
 User = get_user_model()
@@ -504,18 +506,30 @@ class LoginOtpService:
     def _send_email(cls, *, request, user, challenge: LoginOtpChallenge, code: str) -> int:
         subject = "NCBA EduGradesPro Login Verification"
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
-        logo_url = request.build_absolute_uri(f"{settings.MEDIA_URL}logos/egp_logo_official.png") if request else ""
+        logo_context = build_email_logo_context(
+            filename="egp_logo_official.png",
+            cid="edugradespro-logo",
+            external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
+            configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+        )
         context = {
             "user": user,
             "portal_name": "Admin Portal" if challenge.portal_code == "ADMIN" else "Faculty Portal",
             "otp_code": code,
             "expires_at": challenge.expires_at,
             "expires_in_minutes": max(1, int(((challenge.expires_at - timezone.now()).total_seconds() + 59) // 60)),
-            "logo_url": logo_url,
+            **logo_context,
         }
         text_body = render_to_string("accounts/emails/login_otp.txt", context)
         html_body = render_to_string("accounts/emails/login_otp.html", context)
         message = EmailMultiAlternatives(subject=subject, body=text_body, from_email=from_email, to=[challenge.sent_to_email])
+        attach_logo_for_src(
+            message,
+            src=logo_context["email_logo_src"],
+            filename="egp_logo_official.png",
+            cid="edugradespro-logo",
+            configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+        )
         message.attach_alternative(html_body, "text/html")
         return message.send(fail_silently=True)
 
@@ -567,6 +581,135 @@ class LoginOtpService:
             entity_type="LoginOtpChallenge",
             entity_id=challenge.id,
             actor=user,
+            tenant=getattr(user, "default_tenant_id", None),
+            campus=getattr(user, "default_campus_id", None),
+            metadata={"username": user.username},
+            request=request,
+        )
+        return LoginOtpResult(success=True, challenge=challenge)
+
+
+class AdminPasswordResetOtpService:
+    PORTAL_CODE = LoginOtpChallenge.PortalCode.ADMIN
+    MAX_ATTEMPTS = LoginOtpService.MAX_ATTEMPTS
+
+    @classmethod
+    def create_and_send(cls, *, request, user) -> LoginOtpResult:
+        email = (getattr(user, "email", "") or "").strip()
+        if not email:
+            return LoginOtpResult(success=False, message="This admin account has no registered email address.")
+
+        code = LoginOtpService._generate_code()
+        challenge = LoginOtpChallenge.objects.create(
+            user=user,
+            portal_code=cls.PORTAL_CODE,
+            code_hash=make_password(code),
+            sent_to_email=email,
+            expires_at=timezone.now() + timedelta(minutes=LoginOtpService._expiry_minutes_for_user(user)),
+        )
+        sent_count = cls._send_email(request=request, user=user, challenge=challenge, code=code)
+        AuditService.log_event(
+            action="PASSWORD_RESET_OTP_SENT",
+            portal="ADMIN",
+            entity_type="LoginOtpChallenge",
+            entity_id=challenge.id,
+            actor=None,
+            tenant=getattr(user, "default_tenant_id", None),
+            campus=getattr(user, "default_campus_id", None),
+            metadata={
+                "username": user.username,
+                "email": LoginOtpService._masked_email(email),
+                "sent": sent_count > 0,
+                "expires_at": challenge.expires_at,
+            },
+            request=request,
+        )
+        if sent_count <= 0:
+            return LoginOtpResult(
+                success=False,
+                message="EduGradesPro could not send the reset verification code. Please try again or contact your administrator.",
+                challenge=challenge,
+            )
+        return LoginOtpResult(success=True, challenge=challenge)
+
+    @classmethod
+    def _send_email(cls, *, request, user, challenge: LoginOtpChallenge, code: str) -> int:
+        subject = "EduGradesPro Admin Password Reset Code"
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
+        logo_context = build_email_logo_context(
+            filename="egp_logo_official.png",
+            cid="edugradespro-logo",
+            external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
+            configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+        )
+        context = {
+            "user": user,
+            "otp_code": code,
+            "expires_at": challenge.expires_at,
+            "expires_in_minutes": max(1, int(((challenge.expires_at - timezone.now()).total_seconds() + 59) // 60)),
+            "admin_reset_url": request.build_absolute_uri(reverse("accounts:admin_password_reset_otp")) if request else "",
+            **logo_context,
+        }
+        text_body = render_to_string("accounts/emails/admin_password_reset_otp.txt", context)
+        html_body = render_to_string("accounts/emails/admin_password_reset_otp.html", context)
+        message = EmailMultiAlternatives(subject=subject, body=text_body, from_email=from_email, to=[challenge.sent_to_email])
+        attach_logo_for_src(
+            message,
+            src=logo_context["email_logo_src"],
+            filename="egp_logo_official.png",
+            cid="edugradespro-logo",
+            configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+        )
+        message.attach_alternative(html_body, "text/html")
+        return message.send(fail_silently=True)
+
+    @classmethod
+    def verify(cls, *, user, code: str, challenge_id: int | None = None, request=None) -> LoginOtpResult:
+        normalized_code = str(code or "").strip().replace(" ", "")
+        challenges = LoginOtpChallenge.objects.filter(
+            user=user,
+            portal_code=cls.PORTAL_CODE,
+            consumed_at__isnull=True,
+        )
+        if challenge_id is not None:
+            challenges = challenges.filter(id=challenge_id)
+        challenge = challenges.order_by("-created_at").first()
+        if not challenge:
+            return LoginOtpResult(success=False, message="No active reset code was found. Please request a new one.")
+        if challenge.expires_at <= timezone.now():
+            return LoginOtpResult(success=False, message="This reset code has expired. Please request a new one.", challenge=challenge)
+        if challenge.attempt_count >= cls.MAX_ATTEMPTS:
+            return LoginOtpResult(
+                success=False,
+                message="Too many incorrect verification attempts. Please request a new reset code.",
+                challenge=challenge,
+            )
+        if not normalized_code or not check_password(normalized_code, challenge.code_hash):
+            challenge.attempt_count += 1
+            challenge.last_attempt_at = timezone.now()
+            challenge.save(update_fields=["attempt_count", "last_attempt_at"])
+            AuditService.log_event(
+                action="PASSWORD_RESET_OTP_FAILURE",
+                portal="ADMIN",
+                entity_type="LoginOtpChallenge",
+                entity_id=challenge.id,
+                actor=None,
+                tenant=getattr(user, "default_tenant_id", None),
+                campus=getattr(user, "default_campus_id", None),
+                metadata={"username": user.username, "attempt_count": challenge.attempt_count},
+                request=request,
+            )
+            return LoginOtpResult(success=False, message="The reset verification code is incorrect.", challenge=challenge)
+
+        challenge.consumed_at = timezone.now()
+        challenge.last_attempt_at = challenge.consumed_at
+        challenge.save(update_fields=["consumed_at", "last_attempt_at"])
+        AuditService.log_event(
+            action="PASSWORD_RESET_OTP_SUCCESS",
+            portal="ADMIN",
+            entity_type="LoginOtpChallenge",
+            entity_id=challenge.id,
+            actor=None,
             tenant=getattr(user, "default_tenant_id", None),
             campus=getattr(user, "default_campus_id", None),
             metadata={"username": user.username},

@@ -2,7 +2,10 @@ from datetime import date
 from decimal import Decimal
 
 from django.test import TestCase, override_settings
+from django.core.cache import cache
 
+from apps.auditlog.models import AuditLog
+from apps.core.services.api_keys import TenantApiKeyService
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
 from apps.enrollment.models import Enrollment
@@ -221,6 +224,13 @@ class SISPeriodicGradesApiTests(TestCase):
             HTTP_X_API_TOKEN="test-sis-token",
         )
 
+    def _api_key_get(self, params: dict, token: str):
+        return self.client.get(
+            "/api/v1/sis/periodic-grades/",
+            data=params,
+            HTTP_X_API_TOKEN=token,
+        )
+
     def test_requires_campus_when_section_is_provided(self):
         response = self._api_get({"tenant_code": self.tenant.code, "section_code": self.section_code})
         self.assertEqual(response.status_code, 400)
@@ -264,3 +274,102 @@ class SISPeriodicGradesApiTests(TestCase):
         self.assertEqual(row["class_standing_grade"], "93")
         self.assertEqual(row["exam_grade"], "100")
         self.assertEqual(row["period_grade"], "96")
+
+    def test_inactive_department_chain_is_excluded_from_sis_export(self):
+        self.department_fairv.is_active = False
+        self.department_fairv.save(update_fields=["is_active"])
+
+        response = self._api_get(
+            {
+                "tenant_code": self.tenant.code,
+                "campus_code": self.campus_fairv.code,
+                "section_code": self.section_code,
+                "student_no": self.student_no,
+                "academic_year_code": self.academic_year.code,
+                "term_code": self.term.code,
+                "period_code": self.period.code,
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["total_count"], 0)
+
+    def test_tenant_api_key_authenticates_and_audits_access(self):
+        key, raw_token = TenantApiKeyService.create_key(tenant=self.tenant, name="SIS Fairview")
+
+        response = self._api_key_get(
+            {
+                "tenant_code": self.tenant.code,
+                "campus_code": self.campus_fairv.code,
+                "section_code": self.section_code,
+                "student_no": self.student_no,
+                "academic_year_code": self.academic_year.code,
+                "term_code": self.term.code,
+                "period_code": self.period.code,
+            },
+            raw_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        key.refresh_from_db()
+        self.assertIsNotNone(key.last_used_at)
+        log = AuditLog.objects.filter(entity_type="SISPeriodicGradesAPI", action="READ").latest("created_at")
+        self.assertEqual(log.tenant_id, self.tenant.id)
+        self.assertEqual(log.metadata_json["auth_mode"], "TENANT_API_KEY")
+        self.assertEqual(log.metadata_json["key_prefix"], key.key_prefix)
+        self.assertEqual(log.metadata_json["returned_count"], 1)
+
+    def test_invalid_tenant_api_key_is_rejected_and_audited(self):
+        response = self._api_key_get({"tenant_code": self.tenant.code}, "egp_sis_badprefix_badsecret")
+
+        self.assertEqual(response.status_code, 401)
+        log = AuditLog.objects.filter(entity_type="SISPeriodicGradesAPI", action="DENY").latest("created_at")
+        self.assertEqual(log.metadata_json["auth_mode"], "INVALID")
+
+    def test_tenant_api_key_cannot_access_another_tenant(self):
+        other_tenant = Tenant.objects.create(code="OTHER", name="Other Tenant")
+        _other_campus = Campus.objects.create(tenant=other_tenant, code="OTHER-MAIN", name="Other Main")
+        _key, raw_token = TenantApiKeyService.create_key(tenant=self.tenant, name="SIS NCBA")
+
+        response = self._api_key_get({"tenant_code": other_tenant.code}, raw_token)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("not authorized", response.json()["error"])
+
+    def test_campus_code_must_belong_to_requested_tenant(self):
+        other_tenant = Tenant.objects.create(code="OTHER", name="Other Tenant")
+        Campus.objects.create(tenant=other_tenant, code="OTHER-MAIN", name="Other Main")
+        _key, raw_token = TenantApiKeyService.create_key(tenant=self.tenant, name="SIS NCBA")
+
+        response = self._api_key_get(
+            {
+                "tenant_code": self.tenant.code,
+                "campus_code": "OTHER-MAIN",
+                "section_code": self.section_code,
+            },
+            raw_token,
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Campus is not available", response.json()["error"])
+
+    @override_settings(SIS_API_RATE_LIMIT_PER_MINUTE=1)
+    def test_tenant_api_key_rate_limit(self):
+        cache.clear()
+        _key, raw_token = TenantApiKeyService.create_key(tenant=self.tenant, name="SIS Limited")
+        params = {
+            "tenant_code": self.tenant.code,
+            "campus_code": self.campus_fairv.code,
+            "section_code": self.section_code,
+            "student_no": self.student_no,
+            "academic_year_code": self.academic_year.code,
+            "term_code": self.term.code,
+            "period_code": self.period.code,
+        }
+
+        first = self._api_key_get(params, raw_token)
+        second = self._api_key_get(params, raw_token)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second["Retry-After"], "60")

@@ -146,6 +146,13 @@
     color: #f6fff8;
     font-weight: 600;
   }
+  .faculty-academic-scope {
+    color: rgba(243, 255, 248, 0.9);
+    font-weight: 700;
+  }
+  .faculty-academic-scope strong {
+    color: #fff5c8;
+  }
   .faculty-logout {
     background: transparent;
     color: #f6fff8;
@@ -343,14 +350,26 @@
         </span>
         <div class="d-none d-sm-block">
           <div class="faculty-brand-title">NCBA | EduGradesPro</div>
-          <div class="faculty-brand-subtitle">Faculty Portal</div>
+          <div class="faculty-brand-subtitle">
+            Faculty Portal
+            <span class="faculty-academic-scope">
+              | Academic Scope:
+              {% if faculty_active_academic_year and faculty_active_term %}
+                <strong>{{ faculty_active_academic_year.code }} / {{ faculty_active_term.code }}</strong>
+              {% else %}
+                <span>Not configured</span>
+              {% endif %}
+            </span>
+          </div>
         </div>
       </div>
-      <div class="d-flex align-items-center gap-2">
-        <span class="small faculty-user">{{ request.user.full_name|default:request.user.username }}</span>
-        <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_signature' %}">My Signature</a>
-        <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_change_password' %}">Change Password</a>
-        <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_logout' %}">Logout</a>
+      <div class="d-flex flex-column gap-1 align-items-end">
+        <div class="small faculty-user">{{ request.user.full_name|default:request.user.username }}</div>
+        <div class="d-flex flex-wrap justify-content-end gap-2">
+          <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_signature' %}">My Signature</a>
+          <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_change_password' %}">Change Password</a>
+          <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_logout' %}">Logout</a>
+        </div>
       </div>
     </div>
   </nav>

@@ -1,6 +1,64 @@
 {% extends "admin_portal/base.html" %}
 
 {% block admin_content %}
+<style>
+  .grade-distribution-loading-overlay {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.78);
+    bottom: 0;
+    display: none;
+    justify-content: center;
+    left: 0;
+    position: fixed;
+    right: 0;
+    top: 0;
+    z-index: 1080;
+  }
+  .grade-distribution-loading-overlay.is-visible {
+    display: flex;
+  }
+  .grade-distribution-loading-panel {
+    background: #fff;
+    border: 1px solid rgba(25, 70, 42, 0.14);
+    border-radius: 8px;
+    box-shadow: 0 18px 40px rgba(21, 48, 31, 0.18);
+    max-width: 380px;
+    padding: 1.1rem;
+    width: calc(100% - 2rem);
+  }
+  .grade-distribution-loading-bar {
+    height: 4px;
+    overflow: hidden;
+  }
+  .distribution-detail-trigger {
+    color: #0f5132;
+    font-weight: 700;
+    line-height: 1.2;
+    text-decoration: none;
+  }
+  .distribution-detail-trigger:hover,
+  .distribution-detail-trigger:focus {
+    color: #0a3622;
+    text-decoration: underline;
+  }
+  .distribution-detail-table th,
+  .distribution-detail-table td {
+    white-space: nowrap;
+  }
+</style>
+
+<div class="grade-distribution-loading-overlay" id="gradeDistributionLoadingOverlay" aria-live="polite" aria-hidden="true">
+  <div class="grade-distribution-loading-panel">
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <div class="spinner-border spinner-border-sm text-success" role="status" aria-hidden="true"></div>
+      <strong>Loading grade distribution</strong>
+    </div>
+    <div class="progress grade-distribution-loading-bar" role="progressbar" aria-label="Loading grade distribution">
+      <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="width: 100%"></div>
+    </div>
+  </div>
+</div>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h2 class="h4 mb-1">Faculty Grade Distribution Monitor</h2>
@@ -14,7 +72,7 @@
 
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body">
-    <form method="get" class="row g-2 align-items-end">
+    <form method="get" class="row g-2 align-items-end" id="gradeDistributionFilterForm">
       <div class="col-md-2">
         <label class="form-label mb-1">Data Level</label>
         <select class="form-select" name="source">
@@ -36,7 +94,7 @@
         <select class="form-select" name="department_id">
           <option value="">All Departments</option>
           {% for department in filter_options.departments %}
-          <option value="{{ department.id }}" {% if selected.department_id == department.id %}selected{% endif %}>{{ department.code }}</option>
+          <option value="{{ department.id }}" {% if selected.department_id == department.id %}selected{% endif %}>{% if not selected.campus_id %}{{ department.campus.code }} / {% endif %}{{ department.code }}</option>
           {% endfor %}
         </select>
       </div>
@@ -70,26 +128,6 @@
         </select>
       </div>
 
-      <div class="col-md-3">
-        <label class="form-label mb-1">Course / Subject</label>
-        <select class="form-select" name="course_id">
-          <option value="">All Courses</option>
-          {% for course in filter_options.courses %}
-          <option value="{{ course.id }}" {% if selected.course_id == course.id %}selected{% endif %}>{{ course.code }} - {{ course.title }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label mb-1">Class / Offering</label>
-        <select class="form-select" name="offering_id">
-          <option value="">All Classes</option>
-          {% for offering in filter_options.offerings %}
-          <option value="{{ offering.id }}" {% if selected.offering_id == offering.id %}selected{% endif %}>
-            {{ offering.course.code }} / {{ offering.section.code }} / {{ offering.term.code }}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
       <div class="col-md-2">
         <label class="form-label mb-1">Grading Period</label>
         <select class="form-select" name="period_id">
@@ -99,32 +137,23 @@
           {% endfor %}
         </select>
       </div>
-      <div class="col-md-2">
-        <label class="form-label mb-1">Component</label>
-        <select class="form-select" name="component_id">
-          <option value="">All Components</option>
-          {% for component in filter_options.components %}
-          <option value="{{ component.id }}" {% if selected.component_id == component.id %}selected{% endif %}>{{ component.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label mb-1">Sub-component</label>
-        <select class="form-select" name="subcomponent_id">
-          <option value="">All Sub-components</option>
-          {% for subcomponent in filter_options.subcomponents %}
-          <option value="{{ subcomponent.id }}" {% if selected.subcomponent_id == subcomponent.id %}selected{% endif %}>{{ subcomponent.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
 
       <div class="col-md-3 d-flex gap-2">
         <button class="btn btn-outline-success w-100" type="submit">Apply Filters</button>
-        <a class="btn btn-outline-secondary" href="{% url 'admin_portal:grade_distribution_monitor' %}">Clear</a>
+        <a class="btn btn-outline-secondary" data-grade-distribution-loading href="{% url 'admin_portal:grade_distribution_monitor' %}">Clear</a>
       </div>
     </form>
   </div>
 </div>
+
+{% if summary.missing_template_offerings %}
+<div class="alert alert-warning border mb-3">
+  {{ summary.missing_template_offerings }} class{% if summary.missing_template_offerings != 1 %}es{% endif %}
+  in this monitor scope currently {% if summary.missing_template_offerings == 1 %}has{% else %}have{% endif %}
+  no published grading template assigned. The monitor will still load using the tenant passing threshold fallback,
+  but period filters and template-based interpretation may be incomplete until template coverage is fixed.
+</div>
+{% endif %}
 
 <div class="row g-3 mb-3">
   <div class="col-md-2 col-6">
@@ -177,6 +206,14 @@
   </div>
 </div>
 
+{% if summary.missing_template_offerings %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body py-2">
+    <span class="badge text-bg-warning">No template: {{ summary.missing_template_offerings }}</span>
+  </div>
+</div>
+{% endif %}
+
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body small text-muted">
     Review flags are indicators for academic review, not findings of misconduct. Current thresholds:
@@ -219,7 +256,14 @@
           <div class="small text-muted">{{ row.campus }} / {{ row.department }} / {{ row.school_year }} {{ row.term }}</div>
         </td>
         <td>
-          <div class="fw-semibold">{{ row.period }}</div>
+          <button
+            class="btn btn-link distribution-detail-trigger p-0 text-start"
+            type="button"
+            data-bs-toggle="modal"
+            data-bs-target="#gradeDistributionDetailModal{{ forloop.counter }}"
+          >
+            {{ row.period }}
+          </button>
           <div class="small text-muted">{{ row.level_label }}{% if row.component %} / {{ row.component }}{% endif %}{% if row.subcomponent %} / {{ row.subcomponent }}{% endif %}</div>
           {% if row.activity_title %}<div class="small text-muted">{{ row.activity_title }}</div>{% endif %}
         </td>
@@ -264,12 +308,12 @@
     <div class="small text-muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
     <div class="btn-group btn-group-sm">
       {% if page_obj.has_previous %}
-      <a class="btn btn-outline-secondary" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+      <a class="btn btn-outline-secondary" data-grade-distribution-loading href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
       {% else %}
       <span class="btn btn-outline-secondary disabled">Previous</span>
       {% endif %}
       {% if page_obj.has_next %}
-      <a class="btn btn-outline-secondary" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+      <a class="btn btn-outline-secondary" data-grade-distribution-loading href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
       {% else %}
       <span class="btn btn-outline-secondary disabled">Next</span>
       {% endif %}
@@ -277,4 +321,111 @@
   </div>
   {% endif %}
 </div>
+
+{% for row in rows %}
+<div class="modal fade" id="gradeDistributionDetailModal{{ forloop.counter }}" tabindex="-1" aria-labelledby="gradeDistributionDetailModalLabel{{ forloop.counter }}" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title" id="gradeDistributionDetailModalLabel{{ forloop.counter }}">
+            {{ row.period }} Grade Details
+          </h5>
+          <div class="small text-muted">
+            {{ row.course_code }} / {{ row.section }} |
+            {{ row.level_label }}{% if row.component %} / {{ row.component }}{% endif %}{% if row.subcomponent %} / {{ row.subcomponent }}{% endif %}
+            {% if row.activity_title %} / {{ row.activity_title }}{% endif %}
+          </div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-light border small mb-3">
+          Student identifiers are masked for privacy. Use this detail view for distribution review only.
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-sm-3">
+            <div class="border rounded p-2 h-100">
+              <div class="small text-muted">Graded</div>
+              <div class="fw-semibold">{{ row.graded_count }}{% if row.active_count %} / {{ row.active_count }}{% endif %}</div>
+            </div>
+          </div>
+          <div class="col-sm-3">
+            <div class="border rounded p-2 h-100">
+              <div class="small text-muted">Average</div>
+              <div class="fw-semibold">{% if row.average is not None %}{{ row.average|floatformat:2 }}{% else %}-{% endif %}</div>
+            </div>
+          </div>
+          <div class="col-sm-3">
+            <div class="border rounded p-2 h-100">
+              <div class="small text-muted">Highest</div>
+              <div class="fw-semibold">{% if row.highest is not None %}{{ row.highest|floatformat:2 }}{% else %}-{% endif %}</div>
+            </div>
+          </div>
+          <div class="col-sm-3">
+            <div class="border rounded p-2 h-100">
+              <div class="small text-muted">Lowest</div>
+              <div class="fw-semibold">{% if row.lowest is not None %}{{ row.lowest|floatformat:2 }}{% else %}-{% endif %}</div>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle mb-0 distribution-detail-table">
+            <thead>
+              <tr>
+                <th>No.</th>
+                <th>Masked Student No.</th>
+                <th>Masked Name</th>
+                <th class="text-end">Grade</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for detail in row.grade_details %}
+              <tr>
+                <td>{{ forloop.counter }}</td>
+                <td>{{ detail.masked_student_no }}</td>
+                <td>{{ detail.masked_name }}</td>
+                <td class="text-end fw-semibold">{{ detail.grade|floatformat:2 }}</td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="4" class="text-center text-muted py-3">No grade details are available for this row.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<script>
+  (function () {
+    const overlay = document.getElementById("gradeDistributionLoadingOverlay");
+    const form = document.getElementById("gradeDistributionFilterForm");
+    const showLoading = function () {
+      if (!overlay) return;
+      overlay.classList.add("is-visible");
+      overlay.setAttribute("aria-hidden", "false");
+    };
+    const hideLoading = function () {
+      if (!overlay) return;
+      overlay.classList.remove("is-visible");
+      overlay.setAttribute("aria-hidden", "true");
+    };
+
+    if (form) {
+      form.addEventListener("submit", showLoading);
+    }
+    document.querySelectorAll("[data-grade-distribution-loading]").forEach(function (link) {
+      link.addEventListener("click", showLoading);
+    });
+    window.addEventListener("pageshow", hideLoading);
+  })();
+</script>
 {% endblock %}

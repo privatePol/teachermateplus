@@ -67,6 +67,29 @@ class AuditService:
             tenant_obj = request.scope.get("tenant_id")
         if campus_obj is None and request and hasattr(request, "scope"):
             campus_obj = request.scope.get("campus_id")
+        metadata_payload = dict(metadata or {})
+        try:
+            from apps.core.services.governance_anomalies import GovernanceAnomalyService
+
+            anomaly_flags = GovernanceAnomalyService.evaluate_event(
+                action=action,
+                portal=portal,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                actor=actor_user,
+                tenant=tenant_obj,
+                campus=campus_obj,
+                before_data=before_data,
+                after_data=after_data,
+                metadata=metadata_payload,
+            )
+            if anomaly_flags:
+                metadata_payload["anomaly_flags_json"] = anomaly_flags
+                metadata_payload["has_anomaly_flags"] = True
+                metadata_payload["max_anomaly_severity"] = GovernanceAnomalyService.max_severity(anomaly_flags)
+        except Exception:
+            # Audit logging must never block the operational action being audited.
+            pass
 
         return AuditLog.objects.create(
             actor_user=actor_user,
@@ -82,7 +105,7 @@ class AuditService:
             user_agent=req_meta["user_agent"],
             before_json=cls._json_safe(before_data),
             after_json=cls._json_safe(after_data),
-            metadata_json=cls._json_safe(metadata or {}),
+            metadata_json=cls._json_safe(metadata_payload),
         )
 
     @classmethod

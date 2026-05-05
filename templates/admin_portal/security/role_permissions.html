@@ -74,7 +74,30 @@
         </div>
       </div>
       <div class="alert alert-light border small mb-0 mt-3">
-        Tip: use module buttons to select or clear a whole area, then fine-tune individual permissions. Changes are saved only when you click <strong>Save Permissions</strong>.
+        Tip: use module buttons to select or clear a whole area, then fine-tune individual permissions. Use <strong>Save Section</strong> to save only one section, or <strong>Save Permissions</strong> to save the whole page.
+      </div>
+      <div class="alert alert-warning border small mb-0 mt-3">
+        <div class="fw-semibold mb-1">Critical Access Safeguard</div>
+        <div class="mb-2">Required only when adding or removing high-impact permissions. Type <code>{{ critical_role_confirmation }}</code> and record a reason when critical access changes.</div>
+        {% if critical_permission_impact and critical_permission_impact.has_critical_change %}
+          <div class="mb-2">
+            Impact preview:
+            <strong>{{ critical_permission_impact.critical_permission_count }}</strong> critical permission change(s),
+            <strong>{{ critical_permission_impact.affected_active_user_count }}</strong> active user(s) currently assigned to this role.
+          </div>
+        {% endif %}
+        <div class="row g-2">
+          <div class="col-lg-8">
+            <label class="form-label mb-1" for="{{ form.change_reason.id_for_label }}">{{ form.change_reason.label }}</label>
+            {{ form.change_reason }}
+            {% for err in form.change_reason.errors %}<div class="text-danger small">{{ err }}</div>{% endfor %}
+          </div>
+          <div class="col-lg-4">
+            <label class="form-label mb-1" for="{{ form.confirmation_phrase.id_for_label }}">{{ form.confirmation_phrase.label }}</label>
+            {{ form.confirmation_phrase }}
+            {% for err in form.confirmation_phrase.errors %}<div class="text-danger small">{{ err }}</div>{% endfor %}
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -90,6 +113,7 @@
         <div class="d-flex flex-wrap gap-2">
           <button class="btn btn-sm btn-outline-success" type="button" data-module-select="{{ module.dom_id }}">Select Module</button>
           <button class="btn btn-sm btn-outline-secondary" type="button" data-module-clear="{{ module.dom_id }}">Clear Module</button>
+          <button class="btn btn-sm btn-primary" type="submit" name="save_module" value="{{ module.key }}">Save Section</button>
         </div>
       </div>
     </div>
@@ -104,6 +128,7 @@
             <span class="flex-grow-1">
               <span class="d-flex flex-wrap align-items-center gap-2 mb-1">
                 <span class="badge {{ perm.badge_class }}">{{ perm.action_label }}</span>
+                {% if perm.is_critical %}<span class="badge text-bg-warning">Critical</span>{% endif %}
                 <span class="permission-code">{{ perm.code }}</span>
               </span>
               <span class="d-block small text-muted">{{ perm.description }}</span>

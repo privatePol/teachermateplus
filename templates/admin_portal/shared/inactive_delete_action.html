@@ -1,0 +1,18 @@
+{% if row.can_show_hard_delete %}
+{% if row.can_hard_delete %}
+<form method="post" action="{% url 'admin_portal:inactive_record_delete' row.hard_delete_model_key row.id %}" class="d-inline-flex gap-1 align-items-center">
+  {% csrf_token %}
+  <input
+    class="form-control form-control-sm"
+    style="max-width: 9rem;"
+    name="confirmation_code"
+    autocomplete="off"
+    placeholder="Type {{ row.hard_delete_confirmation_code }}"
+    aria-label="Type {{ row.hard_delete_confirmation_code }} to confirm permanent deletion"
+  >
+  <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+</form>
+{% else %}
+<button class="btn btn-sm btn-outline-secondary" type="button" disabled title="{{ row.inactive_usage_label }}">In use</button>
+{% endif %}
+{% endif %}

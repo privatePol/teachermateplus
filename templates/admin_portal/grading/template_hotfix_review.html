@@ -42,6 +42,43 @@
   </ul>
 </div>
 
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white"><strong>Impact Preview</strong></div>
+  <div class="card-body">
+    <div class="row g-2 mb-2">
+      <div class="col-md-3">
+        <div class="border rounded p-2 h-100">
+          <div class="small text-muted">Target Offerings</div>
+          <div class="fw-semibold">{{ impact_preview.target_offering_count }}</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="border rounded p-2 h-100">
+          <div class="small text-muted">Submitted/Reopened</div>
+          <div class="fw-semibold">{{ impact_preview.submitted_or_reopened_offering_count }}</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="border rounded p-2 h-100">
+          <div class="small text-muted">Campuses</div>
+          <div class="fw-semibold">{{ impact_preview.campus_count }}</div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="border rounded p-2 h-100">
+          <div class="small text-muted">Terms</div>
+          <div class="fw-semibold">{{ impact_preview.term_count }}</div>
+        </div>
+      </div>
+    </div>
+    {% if impact_preview.sample_offerings %}
+      <div class="small text-muted">
+        Sample: {% for offering in impact_preview.sample_offerings %}<span class="badge text-bg-light border me-1 mb-1">#{{ offering.id }} {{ offering.label }}</span>{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
 {% if workflow_steps %}
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-header bg-white"><strong>Workflow Timeline</strong></div>
@@ -85,6 +122,9 @@
     <div class="alert alert-warning border mb-3">
       <strong>Current Step:</strong> {{ current_step.step_label }}.
       Allowed roles: {{ current_step.role_codes_json|join:", " }}.
+      {% if is_apply_step %}
+        <div class="mt-2">Approving this step applies the hotfix. Type <code>{{ hotfix_apply_confirmation }}</code> in the confirmation field.</div>
+      {% endif %}
     </div>
     {% endif %}
     <form method="post" novalidate>

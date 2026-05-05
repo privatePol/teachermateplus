@@ -55,6 +55,14 @@
   </div>
 </div>
 
+{% if summary.missing_template_classes %}
+<div class="alert alert-warning border mb-3">
+  {{ summary.missing_template_classes }} included class{% if summary.missing_template_classes != 1 %}es{% endif %}
+  currently {% if summary.missing_template_classes == 1 %}has{% else %}have{% endif %} no published grading template assigned.
+  Analytics will still load, but pending-period and template-based values may be incomplete for those classes.
+</div>
+{% endif %}
+
 <div class="row g-3 mb-3">
   <div class="col-md-2 col-6">
     <div class="card analytics-kpi kpi-green">
@@ -153,7 +161,12 @@
         <td>{{ row.offering.academic_year.code }} / {{ row.offering.term.code }}</td>
         <td>{{ row.active_students }}</td>
         <td>{{ row.submitted_periods }}</td>
-        <td>{{ row.pending_periods }}</td>
+        <td>
+          {{ row.pending_periods }}
+          {% if row.missing_template %}
+          <div><span class="badge text-bg-warning">No template</span></div>
+          {% endif %}
+        </td>
         <td>{% if row.avg_grade is not None %}{{ row.avg_grade|floatformat:2 }}{% else %}-{% endif %}</td>
         <td>{{ row.failed_rows }}</td>
         <td>{{ row.pass_rate }}%</td>
@@ -166,4 +179,3 @@
   </div>
 </div>
 {% endblock %}
-

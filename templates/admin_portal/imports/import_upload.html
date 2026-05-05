@@ -19,12 +19,24 @@
     background: #fff;
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-    padding: 1rem 1.25rem;
+    padding: 1.15rem 1.25rem;
+    width: min(420px, calc(100vw - 2rem));
+    color: #1f3f2d;
+  }
+  .csv-upload-overlay-title {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    color: #1f3f2d;
-    font-weight: 600;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+  }
+  .csv-upload-overlay-note {
+    color: #607267;
+    font-size: 0.88rem;
+    margin-bottom: 0.75rem;
+  }
+  .csv-upload-progress {
+    height: 0.55rem;
   }
 </style>
 
@@ -112,8 +124,16 @@
 
 <div class="csv-upload-overlay" id="csv-upload-overlay" aria-hidden="true">
   <div class="csv-upload-overlay-card">
-    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-    <span>Uploading and validating CSV...</span>
+    <div class="csv-upload-overlay-title">
+      <span class="spinner-border spinner-border-sm text-success" role="status" aria-hidden="true"></span>
+      <span>Validating CSV records</span>
+    </div>
+    <div class="csv-upload-overlay-note">
+      Please keep this tab open while EduGradesPro reads the file, checks the template headers, and stages valid rows.
+    </div>
+    <div class="progress csv-upload-progress" role="progressbar" aria-label="Validating CSV">
+      <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" style="width: 100%"></div>
+    </div>
   </div>
 </div>
 
