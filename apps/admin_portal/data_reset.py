@@ -84,6 +84,7 @@ from apps.tenants.models import Campus, Department, Program, SystemSetting, Tena
 
 class ActualDataResetService:
     CONFIRMATION_PHRASE = "RESET ACTUAL DATA"
+    TRANSACTIONAL_CONFIRMATION_PHRASE = "RESET FACULTY GRADES"
 
     @staticmethod
     def is_production_environment() -> bool:
@@ -244,6 +245,87 @@ class ActualDataResetService:
         Tenant,
     )
 
+    TRANSACTIONAL_RESET_PREVIEW = (
+        ("faculty_loading", "Faculty Assignments / Load Responses", (FacultyAssignment,)),
+        ("grading_transactions", "Activities / Scores / Period and Final Grades", (
+            GradeActivity,
+            StudentActivityScore,
+            StudentPeriodGrade,
+            StudentFinalGrade,
+        )),
+        ("submission_correction_attendance", "Submissions / Corrections / Attendance / Period Locks", (
+            GradeSubmission,
+            GradeSubmissionReopenRequest,
+            GradeCorrectionRequest,
+            GradeCorrectionApprovalStep,
+            GradeCorrectionRequestItem,
+            GradeCorrectionAttachment,
+            GradeCorrectionUnlockWindow,
+            GradingPeriodLock,
+            AttendanceSession,
+            AttendanceRecord,
+        )),
+        ("prediction_notification", "Predictions / Faculty Reminders / Notifications", (
+            PredictionSettingSnapshot,
+            PredictionSnapshot,
+            PredictionSummarySnapshot,
+            PredictionDirtyQueue,
+            PredictionWhatIfDraft,
+            PredictionViewLog,
+            FacultyReminder,
+            FacultyReminderEmailQueue,
+            FacultyMemo,
+            NotificationQueue,
+            SubmissionNonComplianceNotice,
+        )),
+        ("faculty_clearance_hotfix", "Final Clearance / Template Issue Reports", (
+            FacultyFinalClearanceReport,
+            TemplateHotfixRequest,
+            TemplateHotfixWorkflowStep,
+        )),
+    )
+
+    TRANSACTIONAL_RESET_ORDER = (
+        PredictionViewLog,
+        PredictionWhatIfDraft,
+        PredictionDirtyQueue,
+        PredictionSummarySnapshot,
+        PredictionSnapshot,
+        PredictionSettingSnapshot,
+        NotificationQueue,
+        FacultyReminderEmailQueue,
+        FacultyReminder,
+        FacultyMemo,
+        SubmissionNonComplianceNotice,
+        AttendanceRecord,
+        AttendanceSession,
+        GradeCorrectionApprovalStep,
+        GradeCorrectionRequestItem,
+        GradeCorrectionAttachment,
+        GradeCorrectionUnlockWindow,
+        GradeCorrectionRequest,
+        GradeSubmissionReopenRequest,
+        GradingPeriodLock,
+        StudentActivityScore,
+        GradeActivity,
+        StudentPeriodGrade,
+        StudentFinalGrade,
+        GradeSubmission,
+        FacultyFinalClearanceReport,
+        TemplateHotfixWorkflowStep,
+        TemplateHotfixRequest,
+        FacultyAssignment,
+    )
+
+    TRANSACTIONAL_KEPT_TABLES = (
+        ("tenant/campus/department/program", "Organization setup is kept."),
+        ("academic years/terms/courses/sections/offerings", "Academic setup and class offerings are kept."),
+        ("grading templates/profiles/assignments", "Template setup, tenant grading profiles, and course-template assignments are kept."),
+        ("students", "Student master records are kept."),
+        ("enrollments", "Class lists are kept unless the optional enrollment checkbox is selected."),
+        ("users/roles/permissions/menus", "Security shell and menu configuration are kept."),
+    )
+
     @classmethod
     def preview(cls):
         groups = []
@@ -272,6 +354,48 @@ class ActualDataResetService:
             "users_count": users_count,
             "kept_tables": cls.KEPT_TABLES,
             "confirmation_phrase": cls.CONFIRMATION_PHRASE,
+        }
+
+    @classmethod
+    def transactional_preview(cls, *, include_enrollments: bool = False):
+        groups = []
+        for key, label, models in cls.TRANSACTIONAL_RESET_PREVIEW:
+            tables = []
+            total = 0
+            for model in models:
+                count = model.objects.count()
+                total += count
+                tables.append(
+                    {
+                        "label": model._meta.verbose_name_plural.title(),
+                        "table": model._meta.db_table,
+                        "count": count,
+                    }
+                )
+            groups.append({"key": key, "label": label, "total": total, "tables": tables})
+        enrollment_count = Enrollment.objects.count() if include_enrollments else 0
+        if include_enrollments:
+            groups.append(
+                {
+                    "key": "optional_enrollments",
+                    "label": "Optional Class Lists / Enrollments",
+                    "total": enrollment_count,
+                    "tables": [
+                        {
+                            "label": Enrollment._meta.verbose_name_plural.title(),
+                            "table": Enrollment._meta.db_table,
+                            "count": enrollment_count,
+                        }
+                    ],
+                }
+            )
+        return {
+            "groups": groups,
+            "delete_total": sum(group["total"] for group in groups),
+            "enrollment_count": Enrollment.objects.count(),
+            "include_enrollments": include_enrollments,
+            "kept_tables": cls.TRANSACTIONAL_KEPT_TABLES,
+            "confirmation_phrase": cls.TRANSACTIONAL_CONFIRMATION_PHRASE,
         }
 
     @classmethod
@@ -314,6 +438,45 @@ class ActualDataResetService:
             "audit_export_validation": export_validation,
             "deleted": deleted,
             "removed_files": removed_files,
+        }
+
+    @classmethod
+    def reset_faculty_grade_transactions(cls, *, include_enrollments: bool = False):
+        safety_error = cls.production_safety_error()
+        if safety_error:
+            raise ValidationError(safety_error)
+        backup_path = cls._backup_database()
+        audit_export = cls.export_audit_logs()
+        backup_validation = cls.validate_backup_artifact(backup_path)
+        export_validation = cls.validate_audit_export(audit_export)
+        if cls.is_production_environment() and not backup_validation["ok"]:
+            raise ValidationError(backup_validation["message"])
+        if not export_validation["ok"]:
+            raise ValidationError(export_validation["message"])
+        file_paths = cls._collect_transactional_upload_paths()
+        deleted = []
+
+        with transaction.atomic():
+            for model in cls.TRANSACTIONAL_RESET_ORDER:
+                total = cls._delete_queryset(model.objects.all())
+                if total:
+                    deleted.append({"table": model._meta.db_table, "count": total})
+            if include_enrollments:
+                total = cls._delete_queryset(Enrollment.objects.all())
+                if total:
+                    deleted.append({"table": Enrollment._meta.db_table, "count": total})
+
+        removed_files = cls._remove_files(file_paths)
+        return {
+            "backup_path": str(backup_path) if backup_path else "",
+            "audit_export_path": str(audit_export["path"]) if audit_export.get("path") else "",
+            "audit_export_count": audit_export.get("count", 0),
+            "backup_validation": backup_validation,
+            "audit_export_validation": export_validation,
+            "deleted": deleted,
+            "removed_files": removed_files,
+            "reset_scope": "faculty_grade_transactions",
+            "include_enrollments": include_enrollments,
         }
 
     @staticmethod
@@ -387,6 +550,14 @@ class ActualDataResetService:
         for batch in ImportBatch.objects.exclude(source_file="").only("source_file"):
             if batch.source_file and batch.source_file.name:
                 paths.append(Path(settings.MEDIA_ROOT) / batch.source_file.name)
+        for attachment in GradeCorrectionAttachment.objects.exclude(file="").only("file"):
+            if attachment.file and attachment.file.name:
+                paths.append(Path(settings.MEDIA_ROOT) / attachment.file.name)
+        return paths
+
+    @staticmethod
+    def _collect_transactional_upload_paths():
+        paths = []
         for attachment in GradeCorrectionAttachment.objects.exclude(file="").only("file"):
             if attachment.file and attachment.file.name:
                 paths.append(Path(settings.MEDIA_ROOT) / attachment.file.name)

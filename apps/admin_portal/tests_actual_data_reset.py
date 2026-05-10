@@ -6,10 +6,26 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.academics.models import AcademicYear, Course, Section, Term
+from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.auditlog.models import AuditLog
+from apps.enrollment.models import Enrollment
+from apps.grading.models import (
+    CourseTemplateAssignment,
+    GradeActivity,
+    GradeSubmission,
+    GradingPeriodLock,
+    GradingTemplate,
+    GradingTemplateComponent,
+    GradingTemplatePeriod,
+    StudentActivityScore,
+    StudentFinalGrade,
+    StudentPeriodGrade,
+    TenantGradingProfile,
+)
 from apps.navigation.models import MenuGroup, MenuItem, MenuItemPermission
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
+from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, SystemSetting, Tenant
 
 
@@ -82,8 +98,8 @@ class ActualDataResetTests(TestCase):
             start_date=date(2026, 6, 1),
             end_date=date(2026, 10, 31),
         )
-        Course.objects.create(tenant=self.tenant, code="IT101", title="IT 101")
-        Section.objects.create(
+        self.course = Course.objects.create(tenant=self.tenant, code="IT101", title="IT 101")
+        self.section = Section.objects.create(
             tenant=self.tenant,
             campus=self.campus,
             department=self.department,
@@ -116,6 +132,7 @@ class ActualDataResetTests(TestCase):
         response = self.client.post(
             reverse("admin_portal:actual_data_reset"),
             {
+                "reset_scope": "full",
                 "confirmation_phrase": "RESET ACTUAL DATA",
                 "reset_reason": "Approved training-data rebuild.",
                 "understood": "on",
@@ -151,11 +168,248 @@ class ActualDataResetTests(TestCase):
         self.assertIn("audit_export_path", reset_log.metadata_json)
         self.assertTrue(reset_log.metadata_json["audit_export_validation"]["ok"])
 
+    def test_faculty_grade_transaction_reset_keeps_setup_and_enrollments_by_default(self):
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=self.section,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=offering,
+            faculty_user=self.admin,
+            accepted_by=self.admin,
+            accepted_at=timezone.now(),
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+        )
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="S-001",
+            last_name="Demo",
+            first_name="Student",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=offering,
+        )
+        template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TMP",
+            name="Template",
+            is_published=True,
+            is_active=True,
+        )
+        period = GradingTemplatePeriod.objects.create(
+            template=template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+        )
+        component = GradingTemplateComponent.objects.create(
+            template_period=period,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=100,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=template,
+            effective_from_term=self.term,
+        )
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            profile_code="DEFAULT",
+            profile_name="Default",
+            grading_template=template,
+            is_active=True,
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=offering,
+            template_period=period,
+            template_component=component,
+            title="Quiz",
+            total_score=100,
+            created_by_user=self.admin,
+        )
+        StudentActivityScore.objects.create(
+            activity=activity,
+            student=student,
+            raw_score=90,
+            computed_score=95,
+            encoded_by_user=self.admin,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=offering,
+            template_period=period,
+            student=student,
+            period_grade=95,
+            computed_by_user=self.admin,
+        )
+        StudentFinalGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=offering,
+            student=student,
+            final_grade=95,
+            computed_by_user=self.admin,
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=offering,
+            template_period=period,
+            status=GradeSubmission.Status.SUBMITTED,
+        )
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=period.code,
+            scope_type=GradingPeriodLock.ScopeType.COURSE,
+            course_offering=offering,
+            is_locked=True,
+        )
+        session = AttendanceSession.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=offering,
+            template_period=period,
+            session_date=date(2026, 6, 15),
+            title="Meeting",
+        )
+        AttendanceRecord.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            session=session,
+            student=student,
+            status_code=AttendanceRecord.Status.PRESENT,
+            recorded_by_user=self.admin,
+        )
+
+        response = self.client.post(
+            reverse("admin_portal:actual_data_reset"),
+            {
+                "reset_scope": "faculty_grade_transactions",
+                "confirmation_phrase": "RESET FACULTY GRADES",
+                "reset_reason": "Reset demo grading transactions only.",
+                "understood": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Tenant.objects.count(), 1)
+        self.assertEqual(Campus.objects.count(), 1)
+        self.assertEqual(Department.objects.count(), 1)
+        self.assertEqual(Program.objects.count(), 1)
+        self.assertEqual(AcademicYear.objects.count(), 1)
+        self.assertEqual(Term.objects.count(), 1)
+        self.assertEqual(Course.objects.count(), 1)
+        self.assertEqual(Section.objects.count(), 1)
+        self.assertEqual(CourseOffering.objects.count(), 1)
+        self.assertEqual(Student.objects.count(), 1)
+        self.assertEqual(Enrollment.objects.count(), 1)
+        self.assertEqual(GradingTemplate.objects.count(), 1)
+        self.assertEqual(TenantGradingProfile.objects.count(), 1)
+        self.assertEqual(CourseTemplateAssignment.objects.count(), 1)
+        self.assertEqual(FacultyAssignment.objects.count(), 0)
+        self.assertEqual(GradeActivity.objects.count(), 0)
+        self.assertEqual(StudentActivityScore.objects.count(), 0)
+        self.assertEqual(StudentPeriodGrade.objects.count(), 0)
+        self.assertEqual(StudentFinalGrade.objects.count(), 0)
+        self.assertEqual(GradeSubmission.objects.count(), 0)
+        self.assertEqual(GradingPeriodLock.objects.count(), 0)
+        self.assertEqual(AttendanceSession.objects.count(), 0)
+        self.assertEqual(AttendanceRecord.objects.count(), 0)
+        reset_log = AuditLog.objects.get(entity_type="ActualDataReset", action="RESET")
+        self.assertEqual(reset_log.metadata_json["reset_scope"], "faculty_grade_transactions")
+        self.assertEqual(reset_log.metadata_json["confirmation_phrase"], "RESET FACULTY GRADES")
+
+    def test_reset_with_invalid_scope_is_rejected_without_deleting_data(self):
+        response = self.client.post(
+            reverse("admin_portal:actual_data_reset"),
+            {
+                "reset_scope": "unexpected_scope",
+                "confirmation_phrase": "RESET ACTUAL DATA",
+                "reset_reason": "Attempt invalid reset scope.",
+                "understood": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Choose a valid reset scope")
+        self.assertEqual(Tenant.objects.count(), 1)
+        self.assertEqual(SystemSetting.objects.filter(tenant__isnull=False).count(), 1)
+        self.assertFalse(AuditLog.objects.filter(entity_type="ActualDataReset", action="RESET").exists())
+
+    def test_faculty_grade_transaction_reset_can_optionally_clear_enrollments(self):
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=self.section,
+        )
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="S-002",
+            last_name="Demo",
+            first_name="Two",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=offering,
+        )
+
+        response = self.client.post(
+            reverse("admin_portal:actual_data_reset"),
+            {
+                "reset_scope": "faculty_grade_transactions",
+                "include_enrollments": "on",
+                "confirmation_phrase": "RESET FACULTY GRADES",
+                "reset_reason": "Reset demo grading and class list transactions.",
+                "understood": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Student.objects.count(), 1)
+        self.assertEqual(Enrollment.objects.count(), 0)
+        self.assertEqual(CourseOffering.objects.count(), 1)
+
     @override_settings(DJANGO_ENV="production", ACTUAL_DATA_RESET_ALLOW_PRODUCTION=False)
     def test_reset_is_blocked_by_default_in_production(self):
         response = self.client.post(
             reverse("admin_portal:actual_data_reset"),
             {
+                "reset_scope": "full",
                 "confirmation_phrase": "RESET ACTUAL DATA",
                 "reset_reason": "Production reset attempt.",
                 "understood": "on",

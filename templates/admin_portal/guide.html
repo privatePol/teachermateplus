@@ -800,7 +800,7 @@
             and only after those are ready should enrollment imports be processed.
           </div>
           <div class="guide-note">
-            For training or setup rehearsal, <strong>Admin Portal -> Tools -> Actual Data Reset</strong> can clear actual tenant, academic, grading-template, import, enrollment, faculty-loading, and grade data while keeping the security/menu shell. Access is controlled by <code>actual_data_reset.run</code>. It requires a reason, acknowledgement, exact confirmation phrase, and exports audit logs before deletion. Use it only before rebuilding data from source files.
+            For training or setup rehearsal, <strong>Admin Portal -> Tools -> Actual Data Reset</strong> can run a full actual-data reset or a narrower <strong>Faculty assignments and grading transactions only</strong> reset. The narrower mode keeps setup data such as tenants, departments, programs, courses, course offerings, grading templates, tenant grading profiles, students, and enrollments by default, while clearing faculty loads, activities, scores, submissions, corrections, attendance, period locks, prediction snapshots, reminders, and notifications. Use the optional enrollment checkbox only when the class lists should also be cleared. Access is controlled by <code>actual_data_reset.run</code>. It requires a reason, acknowledgement, exact confirmation phrase, and exports audit logs before deletion.
           </div>
         </div>
         <div class="guide-image">

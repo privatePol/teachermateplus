@@ -20,6 +20,22 @@
     columns: 1;
   }
 
+  .reset-scope-option {
+    border: 1px solid #d7e3d7;
+    border-radius: 0.85rem;
+    padding: 0.85rem;
+    background: #fbfdfb;
+  }
+
+  .transaction-reset-panel {
+    border: 1px solid rgba(20, 83, 45, 0.18);
+  }
+
+  .transaction-reset-panel .card-header {
+    background: #f0fdf4;
+    color: #14532d;
+  }
+
   @media (min-width: 992px) {
     .kept-list {
       columns: 2;
@@ -55,6 +71,9 @@
       <div class="card-body">
         <div class="alert alert-warning mb-3">
           This reset is intended for rebuilding actual production data from scratch. It deletes tenants, campuses, departments, programs, grading templates, grading profiles, academic data, imports, grades, submissions, predictions, sessions, and audit logs.
+        </div>
+        <div class="alert alert-success mb-3">
+          For demonstrations where setup data should stay intact, use <strong>Faculty assignments and grading transactions only</strong> in the Run Reset panel. That mode keeps tenants, departments, programs, courses, course offerings, grading templates, tenant grading profiles, course-template assignments, students, and enrollments by default.
         </div>
         <div class="row g-2 mb-3">
           <div class="col-md-4">
@@ -132,13 +151,75 @@
         </div>
       </div>
     {% endif %}
+
+    <div class="card shadow-sm transaction-reset-panel mt-3">
+      <div class="card-header">
+        <strong>Faculty Assignments and Grading Transactions Only</strong>
+      </div>
+      <div class="card-body">
+        <div class="alert alert-success mb-3">
+          This scoped reset is intended for demos and training cycles. It clears faculty load responses, activities, scores, attendance, submissions, corrections, prediction snapshots, faculty reminders, notifications, final-clearance reports, and faculty template issue reports while keeping setup data ready for reuse.
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-4">
+            <div class="border rounded p-2 h-100">
+              <div class="text-muted small">Default Impact</div>
+              <div class="fw-semibold reset-count">{{ transactional_preview.delete_total }} row(s)</div>
+              <div class="small text-muted">Enrollments kept</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="border rounded p-2 h-100">
+              <div class="text-muted small">With Enrollments</div>
+              <div class="fw-semibold reset-count">{{ transactional_preview_with_enrollments.delete_total }} row(s)</div>
+              <div class="small text-muted">Optional class-list clear</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="border rounded p-2 h-100">
+              <div class="text-muted small">Confirmation Phrase</div>
+              <div class="fw-semibold"><code>{{ transactional_preview.confirmation_phrase }}</code></div>
+            </div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Area</th>
+                <th class="text-end">Rows</th>
+                <th>Tables</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for group in transactional_preview.groups %}
+                <tr>
+                  <td><strong>{{ group.label }}</strong></td>
+                  <td class="text-end reset-count">{{ group.total }}</td>
+                  <td>
+                    {% for table in group.tables %}
+                      <span class="badge text-bg-light border me-1 mb-1">{{ table.table }}: {{ table.count }}</span>
+                    {% endfor %}
+                  </td>
+                </tr>
+              {% endfor %}
+              <tr>
+                <td><strong>Optional enrollments/class lists</strong></td>
+                <td class="text-end reset-count">{{ transactional_preview.enrollment_count }}</td>
+                <td><span class="badge text-bg-light border">enrollments, only if selected in Run Reset</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="col-lg-4">
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-header bg-white"><strong>Records Kept</strong></div>
       <div class="card-body">
-        <p class="text-muted small">Users are kept so a superuser can rebuild setup data. User role assignments and default tenant/campus/department values are cleared because their scope records are deleted.</p>
+        <p class="text-muted small">Users are kept so a superuser can rebuild setup data. User role assignments and default tenant/campus/department values are cleared only by the full actual data reset because their scope records are deleted.</p>
         <ul class="kept-list small mb-0">
           {% for table, note in preview.kept_tables %}
             <li><code>{{ table }}</code> - {{ note }}</li>
@@ -150,6 +231,13 @@
           Users kept: <strong>{{ preview.users_count }}</strong><br>
           Global settings kept: <strong>{{ preview.global_settings_count }}</strong>
         </div>
+        <hr>
+        <p class="text-muted small mb-2">The faculty/grading transaction reset also keeps:</p>
+        <ul class="small mb-0">
+          {% for table, note in transactional_preview.kept_tables %}
+            <li><code>{{ table }}</code> - {{ note }}</li>
+          {% endfor %}
+        </ul>
       </div>
     </div>
 
@@ -164,22 +252,51 @@
             </div>
           {% endif %}
           <div class="mb-3">
+            <label class="form-label">Reset Scope</label>
+            <div class="d-grid gap-2">
+              <label class="reset-scope-option">
+                <input class="form-check-input me-2 reset-scope-radio" type="radio" name="reset_scope" value="faculty_grade_transactions" {% if request.POST.reset_scope != 'full' %}checked{% endif %}>
+                <strong>Faculty assignments and grading transactions only</strong>
+                <div class="small text-muted mt-1">
+                  Keeps setup data intact. Default impact: {{ transactional_preview.delete_total }} row(s). Confirmation phrase: <code>{{ transactional_preview.confirmation_phrase }}</code>
+                </div>
+              </label>
+              <label class="reset-scope-option">
+                <input class="form-check-input me-2 reset-scope-radio" type="radio" name="reset_scope" value="full" {% if request.POST.reset_scope == 'full' %}checked{% endif %}>
+                <strong>Full actual data reset</strong>
+                <div class="small text-muted mt-1">
+                  Clears setup and transaction data. Impact: {{ preview.delete_total }} row(s). Confirmation phrase: <code>{{ preview.confirmation_phrase }}</code>
+                </div>
+              </label>
+            </div>
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="includeEnrollments" name="include_enrollments" {% if request.POST.include_enrollments %}checked{% endif %}>
+            <label class="form-check-label" for="includeEnrollments">
+              Also clear enrollments/class lists in faculty transaction reset
+            </label>
+            <div class="form-text">Leave unchecked for normal demos where class lists should remain ready.</div>
+          </div>
+          <div class="mb-3">
             <label class="form-label" for="resetReason">Reason</label>
             <textarea id="resetReason" class="form-control" name="reset_reason" rows="3" required placeholder="Example: rebuild training data after approved setup rehearsal">{{ request.POST.reset_reason }}</textarea>
             <div class="form-text">Required. This is saved in the critical-action audit trail.</div>
           </div>
           <div class="mb-3">
             <label class="form-label" for="confirmationPhrase">Confirmation Phrase</label>
-            <input id="confirmationPhrase" class="form-control" name="confirmation_phrase" autocomplete="off" placeholder="{{ preview.confirmation_phrase }}">
-            <div class="form-text">Type <code>{{ preview.confirmation_phrase }}</code> exactly.</div>
+            <input id="confirmationPhrase" class="form-control" name="confirmation_phrase" autocomplete="off" placeholder="{{ transactional_preview.confirmation_phrase }}">
+            <div class="form-text">
+              Type the exact phrase for the selected reset scope:
+              <code>{{ transactional_preview.confirmation_phrase }}</code> or <code>{{ preview.confirmation_phrase }}</code>.
+            </div>
           </div>
           <div class="form-check mb-3">
             <input class="form-check-input" type="checkbox" id="understood" name="understood">
             <label class="form-check-label" for="understood">
-              I understand this hard-deletes actual data and clears scoped user roles.
+              I understand this hard-deletes the selected actual data scope.
             </label>
           </div>
-          <button class="btn btn-danger w-100" type="submit" {% if production_safety_error %}disabled{% endif %}>Reset Actual Data</button>
+          <button class="btn btn-danger w-100" type="submit" {% if production_safety_error %}disabled{% endif %}>Run Selected Reset</button>
         </form>
       </div>
     </div>

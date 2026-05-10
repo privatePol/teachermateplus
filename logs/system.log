@@ -733,3 +733,26 @@
 2026-05-06 07:09:26,728 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-06 07:09:31,308 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\urls.py changed, reloading.
 2026-05-06 07:09:32,592 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-06 07:15:35,404 INFO [django.server] "GET /faculty/my-courses/428/grading-template/ HTTP/1.1" 200 33078
+2026-05-06 07:15:39,958 INFO [django.server] "GET /faculty/my-courses/428/grading-template/calculator/?sample_value=85.00 HTTP/1.1" 200 52760
+2026-05-06 07:16:33,534 INFO [django.server] "POST /faculty/my-courses/428/grading-template/calculator/?sample_value=85.00 HTTP/1.1" 200 52756
+2026-05-06 07:17:22,612 INFO [django.server] "GET /faculty/my-courses/428/grading-template/ HTTP/1.1" 200 33078
+2026-05-06 07:17:37,960 INFO [django.server] "GET /faculty/my-courses/428/grading-template/calculator/?sample_value=85.00 HTTP/1.1" 200 52760
+2026-05-06 07:18:58,544 INFO [django.server] "POST /faculty/my-courses/428/grading-template/calculator/?sample_value=85.00 HTTP/1.1" 200 52745
+2026-05-06 07:21:53,163 INFO [django.server] "GET /faculty/my-courses/428/grading-template/ HTTP/1.1" 200 33078
+2026-05-06 07:21:59,316 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 45738
+2026-05-06 07:22:02,701 INFO [django.server] "GET /faculty/my-courses/428/grading-template/ HTTP/1.1" 200 33078
+2026-05-06 07:22:10,498 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 45738
+2026-05-06 07:22:13,677 INFO [django.server] "GET /faculty/my-courses/428/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 38170
+2026-05-06 07:22:22,479 INFO [django.server] "GET /faculty/my-courses/428/periods/8/activities/?next=%2Ffaculty%2Fmy-courses%2F428%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 32522
+2026-05-06 07:22:27,699 INFO [django.server] "GET /faculty/my-courses/428/periods/9/activities/?next=%2Ffaculty%2Fmy-courses%2F428%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 32536
+2026-05-06 07:30:03,167 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\data_reset.py changed, reloading.
+2026-05-06 07:30:04,615 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-06 07:30:32,265 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-06 07:30:34,123 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-06 07:40:27,212 INFO [django.server] "POST /admin-portal/grading/templates/calculator/?grading_template=6&sample_value=85.00 HTTP/1.1" 200 101450
+2026-05-06 07:40:57,871 INFO [django.server] "GET /admin-portal/tools/actual-data-reset/ HTTP/1.1" 200 71846
+2026-05-06 07:44:50,287 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\data_reset.py changed, reloading.
+2026-05-06 07:44:52,363 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-06 07:45:16,536 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-06 07:45:18,641 INFO [django.utils.autoreload] Watching for file changes with StatReloader

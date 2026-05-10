@@ -4248,54 +4248,77 @@ def actual_data_reset_view(request):
     result = None
     production_safety_error = ActualDataResetService.production_safety_error(request.user)
     if request.method == "POST":
+        reset_scope = request.POST.get("reset_scope") or ""
+        include_enrollments = request.POST.get("include_enrollments") == "on"
+        valid_reset_scopes = {"full", "faculty_grade_transactions"}
         confirmation = (request.POST.get("confirmation_phrase") or "").strip()
         reset_reason = (request.POST.get("reset_reason") or "").strip()
         understood = request.POST.get("understood") == "on"
         if production_safety_error:
             messages.error(request, production_safety_error)
+        elif reset_scope not in valid_reset_scopes:
+            messages.error(request, "Data reset was not run. Choose a valid reset scope.")
         elif not reset_reason:
             messages.error(request, "Data reset was not run. Enter the operational reason for audit accountability.")
-        elif confirmation != ActualDataResetService.CONFIRMATION_PHRASE or not understood:
-            messages.error(
-                request,
-                "Data reset was not run. Tick the acknowledgement and type the exact confirmation phrase.",
-            )
         else:
-            preview = ActualDataResetService.preview()
-            result = ActualDataResetService.reset(
-                preserve_session_key=getattr(request.session, "session_key", None)
+            expected_phrase = (
+                ActualDataResetService.TRANSACTIONAL_CONFIRMATION_PHRASE
+                if reset_scope == "faculty_grade_transactions"
+                else ActualDataResetService.CONFIRMATION_PHRASE
             )
-            AuditService.log_event(
-                action="RESET",
-                portal="ADMIN",
-                entity_type="ActualDataReset",
-                actor=request.user,
-                after_data={
-                    "deleted_table_count": len(result.get("deleted") or []),
-                    "removed_files": result.get("removed_files", 0),
-                },
-                metadata={
-                    "critical_action": True,
-                    "reason": reset_reason,
-                    "confirmation_required": True,
-                    "confirmation_phrase": ActualDataResetService.CONFIRMATION_PHRASE,
-                    "impact_summary": {
-                        "delete_total": preview.get("delete_total", 0),
-                        "tenant_settings_count": preview.get("tenant_settings_count", 0),
-                        "users_kept": preview.get("users_count", 0),
+            if confirmation != expected_phrase or not understood:
+                messages.error(
+                    request,
+                    "Data reset was not run. Tick the acknowledgement and type the exact confirmation phrase.",
+                )
+            else:
+                if reset_scope == "faculty_grade_transactions":
+                    preview = ActualDataResetService.transactional_preview(include_enrollments=include_enrollments)
+                    result = ActualDataResetService.reset_faculty_grade_transactions(
+                        include_enrollments=include_enrollments
+                    )
+                    success_message = "Faculty assignments and grading transaction reset completed."
+                else:
+                    preview = ActualDataResetService.preview()
+                    result = ActualDataResetService.reset(
+                        preserve_session_key=getattr(request.session, "session_key", None)
+                    )
+                    success_message = "Actual data reset completed."
+                AuditService.log_event(
+                    action="RESET",
+                    portal="ADMIN",
+                    entity_type="ActualDataReset",
+                    actor=request.user,
+                    after_data={
+                        "deleted_table_count": len(result.get("deleted") or []),
+                        "removed_files": result.get("removed_files", 0),
                     },
-                    "audit_export_path": result.get("audit_export_path"),
-                    "audit_export_count": result.get("audit_export_count", 0),
-                    "backup_path": result.get("backup_path"),
-                    "backup_validation": result.get("backup_validation"),
-                    "audit_export_validation": result.get("audit_export_validation"),
-                },
-                request=None,
-            )
-            messages.success(request, "Actual data reset completed.")
+                    metadata={
+                        "critical_action": True,
+                        "reason": reset_reason,
+                        "reset_scope": reset_scope,
+                        "include_enrollments": include_enrollments if reset_scope == "faculty_grade_transactions" else None,
+                        "confirmation_required": True,
+                        "confirmation_phrase": expected_phrase,
+                        "impact_summary": {
+                            "delete_total": preview.get("delete_total", 0),
+                            "tenant_settings_count": preview.get("tenant_settings_count", 0),
+                            "users_kept": preview.get("users_count", 0),
+                        },
+                        "audit_export_path": result.get("audit_export_path"),
+                        "audit_export_count": result.get("audit_export_count", 0),
+                        "backup_path": result.get("backup_path"),
+                        "backup_validation": result.get("backup_validation"),
+                        "audit_export_validation": result.get("audit_export_validation"),
+                    },
+                    request=None,
+                )
+                messages.success(request, success_message)
 
     context = {
         "preview": ActualDataResetService.preview(),
+        "transactional_preview": ActualDataResetService.transactional_preview(),
+        "transactional_preview_with_enrollments": ActualDataResetService.transactional_preview(include_enrollments=True),
         "result": result,
         "production_safety_error": production_safety_error,
     }
