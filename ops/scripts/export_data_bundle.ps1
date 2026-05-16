@@ -16,6 +16,15 @@ if (-not $OutputPath) {
     }
 }
 
+$resolvedOutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
+$outputDirectory = Split-Path -Parent $resolvedOutputPath
+if ($outputDirectory -and -not (Test-Path -LiteralPath $outputDirectory)) {
+    New-Item -ItemType Directory -Path $outputDirectory | Out-Null
+}
+$temporaryOutputPath = "$resolvedOutputPath.tmp"
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$strictUtf8NoBom = [System.Text.UTF8Encoding]::new($false, $true)
+
 $setupModels = @(
     "tenants.Tenant",
     "tenants.Campus",
@@ -82,7 +91,7 @@ if ($Mode -eq "operational") {
 
 $args = @("manage.py", "dumpdata")
 $args += $modelList
-$args += @("--indent", "2", "--output", $OutputPath)
+$args += @("--indent", "2", "--output", $temporaryOutputPath)
 if ($IncludeNaturalKeys) {
     $args += @("--natural-foreign", "--natural-primary")
 }
@@ -90,12 +99,46 @@ if ($IncludeNaturalKeys) {
 Write-Host ""
 Write-Host "EduGradesPro data export"
 Write-Host "Mode      : $Mode"
-Write-Host "Output    : $OutputPath"
+Write-Host "Output    : $resolvedOutputPath"
 Write-Host "Model count: $($modelList.Count)"
 Write-Host ""
 
-& python @args
+$previousPythonUtf8 = $env:PYTHONUTF8
+$previousPythonIoEncoding = $env:PYTHONIOENCODING
+try {
+    $env:PYTHONUTF8 = "1"
+    $env:PYTHONIOENCODING = "utf-8"
+
+    if (Test-Path -LiteralPath $temporaryOutputPath) {
+        Remove-Item -LiteralPath $temporaryOutputPath -Force
+    }
+
+    & python @args
+    if ($LASTEXITCODE -ne 0) {
+        throw "Django dumpdata failed with exit code $LASTEXITCODE."
+    }
+
+    $json = [System.IO.File]::ReadAllText($temporaryOutputPath, $strictUtf8NoBom)
+    [System.IO.File]::WriteAllText($resolvedOutputPath, $json, $utf8NoBom)
+}
+finally {
+    if ($null -eq $previousPythonUtf8) {
+        Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONUTF8 = $previousPythonUtf8
+    }
+
+    if ($null -eq $previousPythonIoEncoding) {
+        Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
+    } else {
+        $env:PYTHONIOENCODING = $previousPythonIoEncoding
+    }
+
+    if (Test-Path -LiteralPath $temporaryOutputPath) {
+        Remove-Item -LiteralPath $temporaryOutputPath -Force
+    }
+}
 
 Write-Host ""
-Write-Host "Export complete: $OutputPath"
+Write-Host "Export complete: $resolvedOutputPath"
 Write-Host "Review the bundle before loading it into staging or production."
