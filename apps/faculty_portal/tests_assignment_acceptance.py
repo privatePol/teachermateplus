@@ -2381,6 +2381,25 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Current Active Grading Period")
         self.assertContains(response, "Active Period")
 
+    def test_offering_periods_uses_configured_period_name_for_fx_card(self):
+        self.final.code = "FX"
+        self.final.name = "Final Exam"
+        self.final.save(update_fields=["code", "name", "updated_at"])
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.accepted_by = self.faculty_user
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:offering_periods", kwargs={"offering_id": self.offering.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "FINAL EXAM")
+        self.assertContains(response, "Code: FX")
+        self.assertContains(response, "Finalize all records")
+
     def test_my_courses_shows_final_clearance_action(self):
         self.assignment.accepted_at = timezone.now()
         self.assignment.accepted_by = self.faculty_user

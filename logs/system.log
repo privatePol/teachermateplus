@@ -756,3 +756,23 @@
 2026-05-06 07:44:52,363 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-06 07:45:16,536 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
 2026-05-06 07:45:18,641 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-16 22:12:22,568 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-16 22:12:40,186 INFO [django.server] "GET / HTTP/1.1" 200 5987
+2026-05-16 22:12:40,268 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 70994
+2026-05-16 22:12:45,877 INFO [django.server] "GET /admin-portal/ HTTP/1.1" 302 0
+2026-05-16 22:12:45,893 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 3801
+2026-05-16 22:12:46,009 INFO [django.server] "GET /media/logos/edugradepro_logo.png HTTP/1.1" 200 2211507
+2026-05-16 22:12:58,990 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
+2026-05-16 22:12:59,271 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 61662
+2026-05-16 22:12:59,345 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 70994
+2026-05-16 22:13:08,977 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/ HTTP/1.1" 200 88315
+2026-05-16 22:13:16,098 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/?scope_tenant_id=8&scope_campus_id=14 HTTP/1.1" 200 88576
+2026-05-16 22:13:19,707 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/?scope_tenant_id=8&scope_campus_id= HTTP/1.1" 200 88576
+2026-05-16 22:13:38,096 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/create/?next=%2Fadmin-portal%2Fgrading%2Fcourse-template-assignments%2F%3Fscope_tenant_id%3D8%26scope_campus_id%3D HTTP/1.1" 200 84274
+2026-05-16 22:13:50,039 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/?tenant_id=8&course_id=652&term_id=7&q= HTTP/1.1" 200 88966
+2026-05-16 22:13:51,245 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/?tenant_id=8&course_id=652&term_id=7&q= HTTP/1.1" 200 88966
+2026-05-16 22:15:21,394 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/create/?next=%2Fadmin-portal%2Fgrading%2Fcourse-template-assignments%2F%3Ftenant_id%3D8%26course_id%3D652%26term_id%3D7%26q%3D HTTP/1.1" 200 84298
+2026-05-16 22:38:41,682 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-16 22:38:42,591 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-16 22:38:43,489 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 74040
+2026-05-16 22:38:51,191 INFO [django.server] "GET /admin-portal/grading/templates/9/structure/ HTTP/1.1" 200 65679

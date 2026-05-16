@@ -2810,6 +2810,16 @@ def offering_periods_view(request, offering_id: int):
     )
     period_cards = []
     for p in periods:
+        period_display_name = (p.name or p.code or "Period").strip()
+        period_key = f"{p.code or ''} {p.name or ''}".upper()
+        if "PREFINAL" in period_key or "PRE-FINAL" in period_key:
+            period_kind = "prefinal"
+        elif "MIDTERM" in period_key:
+            period_kind = "midterm"
+        elif "FINAL" in period_key or (p.code or "").upper() == "FX":
+            period_kind = "final"
+        else:
+            period_kind = "prelim"
         GradingGovernanceService.auto_lock_expired_reopened_gradebook(offering=offering, template_period=p)
         lock = GradingGovernanceService.resolve_lock(offering=offering, template_period=p)
         submission = GradingGovernanceService.get_submission(offering=offering, template_period=p)
@@ -2831,6 +2841,8 @@ def offering_periods_view(request, offering_id: int):
         period_cards.append(
             {
                 "period": p,
+                "display_name": period_display_name,
+                "kind": period_kind,
                 "is_read_only_class": offering.faculty_is_read_only,
                 "is_locked": bool(lock and lock.is_locked),
                 "is_submitted": GradingGovernanceService.is_submitted(offering=offering, template_period=p),

@@ -25,6 +25,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin Portal grading-template Builder now keeps the softer rotating period color scheme and makes the small weight, metadata, and detail cards more prominent with accent borders, shadows, and subtle gradients.
 
 ### Fixed
+- Faculty Portal course period cards now display the configured grading-template period name, so `FX` periods named `Final Exam` no longer fall back to a `PRELIM` heading or prelim guidance.
 - Admin Portal grading-template Builder now displays the major component `Score Entry Method` value correctly.
 - Admin Portal Tenant Grading Profiles list now renders Term Type as compact badges for Regular, Summer, Special, or All Terms.
 - Admin Portal Tenant Grading Profiles list now uses compact icon-based row actions with tooltips for edit and duplicate actions.

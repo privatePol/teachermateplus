@@ -285,24 +285,16 @@
 
 <div class="row g-3">
   {% for item in period_cards %}
-    {% with code=item.period.code|upper %}
+    {% with kind=item.kind %}
     <div class="col-md-6 col-xl-4">
       <article class="period-card {% if item.is_closed_by_active_period or item.is_read_only_class %}period-card-closed{% endif %}">
         <header class="period-card-header
-          {% if 'PREFINAL' in code %}period-head-prefinal
-          {% elif 'MIDTERM' in code %}period-head-midterm
-          {% elif 'FINAL' in code %}period-head-final
+          {% if kind == 'prefinal' %}period-head-prefinal
+          {% elif kind == 'midterm' %}period-head-midterm
+          {% elif kind == 'final' %}period-head-final
           {% else %}period-head-prelim{% endif %}">
           <div class="period-head-title">
-            {% if 'PREFINAL' in code %}
-              PRE-FINAL
-            {% elif 'MIDTERM' in code %}
-              MIDTERM
-            {% elif 'FINAL' in code %}
-              FINAL
-            {% else %}
-              PRELIM
-            {% endif %}
+            {{ item.display_name|upper }}
           </div>
           <div class="period-head-code">Code: {{ item.period.code }}</div>
           {% if item.is_active_period %}
@@ -355,13 +347,13 @@
           {% endif %}
 
           <div class="period-guidance">
-            {% if 'PREFINAL' in code %}
+            {% if kind == 'prefinal' %}
               <div><span class="label">What to do:</span> <span class="text">Complete remaining activities, encode attendance, and verify grade summary before final grading.</span></div>
               <div><span class="label">Why set this:</span> <span class="text">Pre-final quality checks prevent last-minute errors before final submission.</span></div>
-            {% elif 'MIDTERM' in code %}
+            {% elif kind == 'midterm' %}
               <div><span class="label">What to do:</span> <span class="text">Set midterm activities, encode scores promptly, and keep attendance updated.</span></div>
               <div><span class="label">Why set this:</span> <span class="text">Midterm grading tracks student progress and triggers early academic interventions.</span></div>
-            {% elif 'FINAL' in code %}
+            {% elif kind == 'final' %}
               <div><span class="label">What to do:</span> <span class="text">Finalize all records, review summary values, and submit the official period result.</span></div>
               <div><span class="label">Why set this:</span> <span class="text">Final period output is part of the official grade trail and audit record.</span></div>
             {% else %}
