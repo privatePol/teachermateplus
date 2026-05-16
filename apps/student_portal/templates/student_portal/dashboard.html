@@ -1,0 +1,57 @@
+{% extends "student_portal/base.html" %}
+
+{% block student_content %}
+<div class="row g-3 mb-3">
+  <div class="col-md-8">
+    <div class="student-panel h-100">
+      <div class="student-panel-header">
+        <h1 class="h4 mb-1">Student Dashboard</h1>
+        <div class="student-muted">Signed in as {{ student.first_name }} {{ student.last_name }}.</div>
+      </div>
+      <div class="student-panel-body">
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <div class="student-kpi">
+              <div class="student-muted small">Active Academic Scope</div>
+              <div class="fs-5 fw-bold">
+                {% if active_academic_year and active_term %}
+                  {{ active_academic_year.code }} / {{ active_term.code }}
+                {% else %}
+                  Not configured
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="student-kpi">
+              <div class="student-muted small">Active Enrollments</div>
+              <div class="fs-5 fw-bold">{{ total_active_enrollment_count }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="student-panel h-100">
+      <div class="student-panel-header"><h2 class="h6 mb-0">Linked Record</h2></div>
+      <div class="student-panel-body small">
+        <div><strong>Student No:</strong> {{ student.student_no }}</div>
+        <div><strong>Tenant:</strong> {{ link.tenant.name }}</div>
+        <div><strong>Campus:</strong> {{ link.campus.name }}</div>
+        <div><strong>Program:</strong> {{ student.program.name|default:"Not set" }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="student-panel">
+  <div class="student-panel-header d-flex justify-content-between align-items-center">
+    <h2 class="h5 mb-0">Current Courses</h2>
+    <a class="btn btn-sm btn-outline-success" href="{% url 'student_portal:courses' %}">View All</a>
+  </div>
+  <div class="student-panel-body p-0">
+    {% include "student_portal/_course_table.html" %}
+  </div>
+</div>
+{% endblock %}
+

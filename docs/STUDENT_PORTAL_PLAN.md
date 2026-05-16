@@ -70,6 +70,66 @@ one active student link per user
 
 This separate link model is preferred over adding `user` directly to `Student` because it is easier to audit, deactivate, relink, and extend later for account recovery or external identity providers.
 
+## Student Registration And Account Provisioning
+
+Students should not freely self-register by typing a student number and any email address. Student Portal accounts expose sensitive grades and attendance, so account creation must start from an existing tenant-owned `Student` record.
+
+Recommended V1 flow:
+
+1. Admin creates or imports the `Student` record.
+2. Admin verifies that the student record has the correct registered email address.
+3. Admin opens Student Account Links or Student Portal Account Provisioning.
+4. Admin selects the student record.
+5. EduGradesPro shows the email destination that will receive the activation/invitation.
+6. Admin confirms account provisioning.
+7. EduGradesPro creates or links the `User` account and creates an active `StudentAccountLink`.
+8. EduGradesPro sends an activation link or temporary credential to the registered student email.
+9. Student logs in, sets a password, and accepts privacy consent.
+10. Student Portal access starts only after the active `StudentAccountLink` is in place.
+
+### Email Destination Policy
+
+For V1, invitations should be sent only to the email address registered in the student data.
+
+Recommended rule:
+
+```text
+Send Student Portal activation/invitation only to the official registered email stored on the Student record.
+```
+
+If the `Student` model supports multiple emails, use this priority:
+
+1. `official_email`
+2. verified school email
+3. validated imported student contact email
+
+If no trusted student email exists, EduGradesPro should not send a portal invitation automatically. Admin must correct the student record first or issue credentials through an approved manual process.
+
+Students should not be allowed to enter an arbitrary email address during registration and immediately receive access.
+
+Recommended future fields if the current student record does not distinguish emails:
+
+```text
+official_email
+personal_email
+email_verified_at
+```
+
+### Optional Future Claim Flow
+
+A self-service claim flow may be added later, behind a feature setting, but it should still verify against existing student data.
+
+Possible claim requirements:
+
+- Tenant/school
+- Campus
+- Student number
+- Date of birth or another private identifier
+- Official registered email or mobile number
+- One-time code sent only to the official registered contact
+
+Even in the claim flow, the student should not be able to change the destination email before identity is verified.
+
 ## Tenant Boundary Rule
 
 Every Student Portal read must start from the authenticated user and resolve the active student link.
@@ -268,6 +328,7 @@ Recommended settings:
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | Enable Student Portal | Off | Global rollout control |
+| Enable student self-claim | Off | Allows a future verified claim flow |
 | Show period grades after submission | On | Controls period grade visibility |
 | Show final grade after submission | On | Controls final grade visibility |
 | Show activity scores | Off | Controls detailed score visibility |
@@ -301,6 +362,101 @@ Every detail URL must validate that the offering belongs to an enrollment for th
 
 ## Suggested Implementation Phases
 
+## Current Stop Point And Release Decision
+
+Student Portal work is paused here for now, but the chosen release approach is to promote it as a dark-launched app instead of keeping it local-only.
+
+Decision:
+
+```text
+Promote apps/student_portal/ into repository tracking as a dark-launched app.
+```
+
+The `apps/student_portal/` ignore rule has been removed from `.gitignore` so the app can be tracked with the rest of the codebase. This avoids broken imports or missing-app deployments caused by tracked support files referencing an ignored local app.
+
+Dark-launch guardrails:
+
+- `FEATURE_STUDENT_PORTAL_ENABLED` remains Off by default.
+- Student Portal routes may exist, but access must be denied unless the tenant explicitly enables the feature.
+- Access still requires authentication.
+- Access still requires `student_portal.access`.
+- Access still requires an active `StudentAccountLink`.
+- Student self-registration/self-claim remains unavailable.
+- Invitation email sending remains unavailable.
+- No student should receive access unless an admin intentionally provisions or links the account.
+- Grades and attendance remain read-only.
+- Draft grades, reopened/unsubmitted gradebooks, activity scores, classmates, rankings, distributions, and analytics remain hidden.
+
+The dark-launched app currently includes the conservative read-only foundation:
+
+- Student Portal app shell under `apps/student_portal/`
+- `StudentAccountLink`
+- tenant/campus/student-scoped access resolution
+- Admin-driven account-link/provisioning support
+- global Student Portal enable/disable setting
+- dashboard
+- My Courses
+- Profile
+- Account
+- My Grades, submitted/released summary only
+- My Attendance, read-only summary with optional session details
+- focused tenant/campus/student isolation tests
+
+The remaining items below are deferred and should not be completed in the current release cycle unless explicitly reactivated.
+
+## Deferred Items For Later Release
+
+### Release Hardening
+
+- Keep Student Portal dark-launched with `FEATURE_STUDENT_PORTAL_ENABLED` default Off.
+- Re-run full migrations and tests after tracking the app.
+- Add any missing production deployment settings, routing checks, and monitoring hooks.
+- Confirm production/staging deployments deny `/student/` access when the feature is Off.
+- Confirm no public navigation or homepage entry point advertises Student Portal until pilot approval.
+
+### Account Activation And Email
+
+- Add invitation/activation email sending behind an explicit feature setting.
+- Send invitations only to trusted student email destinations.
+- Add activation-token expiry, resend, and audit handling.
+- Add a safe manual credential handoff policy if email is disabled.
+- Refine first-login password-change and privacy-consent flow for student users.
+
+### Student Self-Claim
+
+- Keep self-claim disabled by default.
+- If added later, require existing student record verification and one-time code delivery only to trusted registered contact data.
+- Do not allow a student to type any arbitrary email and immediately receive access.
+
+### Grades Enhancements
+
+- Decide whether students should ever see activity-level scores.
+- Add a separate feature setting before exposing activity-level scores.
+- Add optional grade computation explanations only after privacy/audit requirements are settled.
+- Decide whether final grades need a separate admin release flag beyond `is_submitted`.
+- Add audit events for sensitive grade-detail reads if required by school policy.
+
+### Attendance Enhancements
+
+- Decide whether session-level attendance details should remain default On or become default Off for pilot.
+- Add optional attendance correction/request workflow only after approval rules are designed.
+- Add audit events for attendance-detail reads if required.
+
+### Student-Facing Workflows
+
+- Profile correction requests.
+- Student notifications/messages.
+- Student help/guide page.
+- Student-facing privacy/security copy.
+- Parent/guardian access planning, if ever needed, as a separate access model.
+
+### UAT And Documentation
+
+- Add Student Portal UAT scenarios to `docs/ROLE_BASED_UAT_TEST_SCENARIOS.md`.
+- Create an Admin guide section for provisioning Student Portal accounts.
+- Create a Student guide page for login, grades, attendance, profile, and account security.
+- Run pilot smoke tests with sample student users across multiple tenants/campuses.
+
 ### Phase 1: Foundation
 
 - Create `apps/student_portal`.
@@ -315,6 +471,18 @@ Deliverable:
 ```text
 Student can log in and see a basic dashboard with their own identity.
 ```
+
+Implementation note for the local prototype:
+
+- The initial foundation has been added in the intentionally ignored `apps/student_portal/` app.
+- Access is controlled by authenticated user, active `StudentAccountLink`, `student_portal.access`, and `FEATURE_STUDENT_PORTAL_ENABLED` with default Off behavior.
+- The first read-only screens are `/student/`, `/student/courses/`, `/student/courses/<offering_id>/`, `/student/grades/`, `/student/grades/<offering_id>/`, `/student/attendance/`, `/student/profile/`, and `/student/account/`.
+- Admin provisioning is currently represented by the `StudentAccountLink` model/service, Django admin registration, and Admin Portal Student Account Links list/create/deactivate pages governed by `student_account_links.manage`.
+- `FEATURE_STUDENT_PORTAL_ENABLED`, `FEATURE_STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION`, `FEATURE_STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION`, and `FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED` are exposed in Configurable Features under a Student Portal card.
+- The Student model now has `official_email` and `official_email_verified_at` for trusted account provisioning. Admin Portal provisioning can create or link a user, grant scoped `student_portal.access`, and create the active `StudentAccountLink` only after the official email is present and verified.
+- The grades stage now shows summary-only submitted period grades and submitted final grades for the linked student's owned enrollments. Draft/reopened gradebooks, activity scores, classmates, rankings, distributions, and analytics are not exposed.
+- Attendance now shows tenant/campus/student-scoped read-only summary counts by enrolled course, with optional session-level details when enabled.
+- Invitation email workflow, student self-claim, grade computation explanations, activity-score details, profile correction requests, and attendance edit/request workflows remain deferred.
 
 ### Phase 2: Courses And Profile
 
@@ -342,6 +510,13 @@ Deliverable:
 Student can see official released grades only.
 ```
 
+Implementation note for the local prototype:
+
+- `/student/grades/` lists the linked student's enrolled courses with submitted period grades and submitted final grade when release settings allow them.
+- `/student/grades/<offering_id>/` verifies enrollment ownership before rendering grade details.
+- Period grades require a matching `GradeSubmission` in `SUBMITTED` status. Final grades require `StudentFinalGrade.is_submitted=True`.
+- The initial grade view is summary-only and intentionally excludes activity-level score details and computation breakdowns.
+
 ### Phase 4: Attendance
 
 - Add Attendance summary page.
@@ -353,6 +528,12 @@ Deliverable:
 ```text
 Student can review their own attendance records.
 ```
+
+Implementation note for the local prototype:
+
+- `/student/attendance/` summarizes Present, Late, Absent, and Excused counts for each active owned enrollment.
+- Attendance records are filtered through the active `StudentAccountLink`, tenant, campus, student, and owned course offering.
+- Session-level rows are shown only when `FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED` allows them; otherwise summary counts remain visible.
 
 ### Phase 5: Release Controls And Hardening
 

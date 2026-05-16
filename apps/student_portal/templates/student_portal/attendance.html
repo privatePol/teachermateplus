@@ -1,0 +1,88 @@
+{% extends "student_portal/base.html" %}
+
+{% block student_content %}
+<div class="student-panel">
+  <div class="student-panel-header">
+    <h1 class="h4 mb-1">My Attendance</h1>
+    <div class="student-muted">Read-only attendance records for your enrolled courses.</div>
+  </div>
+  <div class="student-panel-body">
+    {% if attendance_rows %}
+    <div class="d-grid gap-3">
+      {% for row in attendance_rows %}
+      <section class="border rounded-3 p-3 bg-white">
+        <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+          <div>
+            <h2 class="h6 mb-1">{{ row.offering.course.code }} - {{ row.offering.course.title }}</h2>
+            <div class="small text-muted">
+              {{ row.offering.section.code }} | {{ row.enrollment.academic_year.code }} / {{ row.enrollment.term.code }}
+              {% if row.faculty %} | {{ row.faculty.full_name }}{% endif %}
+            </div>
+          </div>
+          <div class="text-end small text-muted">Total sessions recorded: <strong>{{ row.total_count }}</strong></div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-6 col-lg-3">
+            <div class="student-kpi">
+              <div class="student-muted small">Present</div>
+              <div class="fs-5 fw-bold">{{ row.present_count }}</div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="student-kpi">
+              <div class="student-muted small">Late</div>
+              <div class="fs-5 fw-bold">{{ row.late_count }}</div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="student-kpi">
+              <div class="student-muted small">Absent</div>
+              <div class="fs-5 fw-bold">{{ row.absent_count }}</div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="student-kpi">
+              <div class="student-muted small">Excused</div>
+              <div class="fs-5 fw-bold">{{ row.excused_count }}</div>
+            </div>
+          </div>
+        </div>
+        {% if row.records %}
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Date</th>
+                <th>Period</th>
+                <th>Session</th>
+                <th>Status</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for record in row.records %}
+              <tr>
+                <td>{{ record.session.session_date }}</td>
+                <td>{{ record.session.template_period.code }}</td>
+                <td>{{ record.session.title|default:"Class session" }}</td>
+                <td>{{ record.get_status_code_display }}</td>
+                <td>{{ record.remarks|default:"-" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% elif row.total_count %}
+        <div class="small text-muted">Session-level attendance details are hidden by configuration.</div>
+        {% else %}
+        <div class="small text-muted">No attendance has been recorded for this course.</div>
+        {% endif %}
+      </section>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-muted">No enrolled courses are available for attendance review.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

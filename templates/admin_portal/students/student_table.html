@@ -1,11 +1,23 @@
 <div class="table-responsive">
   <table class="table table-hover mb-0">
-    <thead><tr><th>Student No</th><th>Name</th><th>Campus</th><th>Program</th><th>Status</th><th>Record State</th>{% if show_inactive_tools %}<th>Used In</th>{% endif %}<th></th></tr></thead>
+    <thead><tr><th>Student No</th><th>Name</th><th>Official Email</th><th>Campus</th><th>Program</th><th>Status</th><th>Record State</th>{% if show_inactive_tools %}<th>Used In</th>{% endif %}<th></th></tr></thead>
     <tbody>
     {% for row in page_obj %}
       <tr>
         <td>{{ row.student_no }}</td>
         <td>{{ row.last_name }}, {{ row.first_name }}</td>
+        <td>
+          {% if row.official_email %}
+            <div>{{ row.official_email }}</div>
+            {% if row.official_email_verified_at %}
+              <span class="badge text-bg-success">Verified</span>
+            {% else %}
+              <span class="badge text-bg-warning text-dark">Unverified</span>
+            {% endif %}
+          {% else %}
+            <span class="text-muted">Not set</span>
+          {% endif %}
+        </td>
         <td>{{ row.campus.code }}</td>
         <td>{% if row.program %}{{ row.program.code }}{% else %}<span class="text-muted">Unspecified</span>{% endif %}</td>
         <td><span class="badge text-bg-info">{{ row.status }}</span></td>
@@ -19,7 +31,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="{% if show_inactive_tools %}8{% else %}7{% endif %}" class="text-center text-muted py-4">{{ empty_message|default:"No students found." }}</td></tr>
+      <tr><td colspan="{% if show_inactive_tools %}9{% else %}8{% endif %}" class="text-center text-muted py-4">{{ empty_message|default:"No students found." }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

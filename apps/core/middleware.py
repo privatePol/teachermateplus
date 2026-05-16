@@ -47,6 +47,7 @@ class SessionTimeoutMiddleware:
 class PortalAccessMiddleware:
     ADMIN_PREFIX = "/admin-portal/"
     FACULTY_PREFIX = "/faculty/"
+    STUDENT_PREFIX = "/student/"
     ADMIN_LOGIN_PATH = "/admin-portal/login/"
     ADMIN_LOGIN_OTP_PATH = "/admin-portal/login/otp/"
     ADMIN_PUBLIC_PATHS = {
@@ -102,12 +103,17 @@ class PortalAccessMiddleware:
             ):
                 return HttpResponseForbidden("Faculty portal access denied.")
 
+        if path.startswith(self.STUDENT_PREFIX):
+            if not request.user.is_authenticated:
+                return redirect(reverse("accounts:admin_login"))
+
         return self.get_response(request)
 
 
 class PostLoginSecurityMiddleware:
     ADMIN_PREFIX = "/admin-portal/"
     FACULTY_PREFIX = "/faculty/"
+    STUDENT_PREFIX = "/student/"
     ADMIN_ALLOWED_PATHS = {
         "/admin-portal/login/",
         "/admin-portal/login/otp/",

@@ -1,0 +1,54 @@
+{% if grade_rows %}
+<div class="table-responsive">
+  <table class="table table-sm align-middle mb-0">
+    <thead class="table-light">
+      <tr>
+        <th>Course</th>
+        <th>Section</th>
+        <th>Faculty</th>
+        <th>Submitted Period Grades</th>
+        <th>Submitted Final Grade</th>
+        <th class="text-end">Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in grade_rows %}
+      <tr>
+        <td>
+          <div class="fw-semibold">{{ row.offering.course.code }}</div>
+          <div class="small text-muted">{{ row.offering.course.title }}</div>
+        </td>
+        <td>{{ row.offering.section.code }}</td>
+        <td>{{ row.faculty.full_name|default:"Not assigned" }}</td>
+        <td>
+          {% if row.period_grades %}
+            <div class="d-flex flex-wrap gap-2">
+              {% for grade in row.period_grades %}
+              <span class="badge text-bg-light border">
+                {{ grade.template_period.code }}: {{ grade.period_grade|default:"-" }}
+              </span>
+              {% endfor %}
+            </div>
+          {% else %}
+            <span class="text-muted small">No submitted period grades released.</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.final_grade %}
+            <span class="fw-semibold">{{ row.final_grade.final_grade|default:"-" }}</span>
+            {% if row.final_grade.remarks %}<span class="small text-muted">({{ row.final_grade.remarks }})</span>{% endif %}
+          {% else %}
+            <span class="text-muted small">Not released.</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          <a class="btn btn-sm btn-outline-success" href="{% url 'student_portal:grade_detail' row.offering.id %}">View</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="p-4 text-muted">No enrolled courses are available for grade review.</div>
+{% endif %}

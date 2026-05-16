@@ -39,6 +39,7 @@ from apps.grading.models import (
 from apps.navigation.models import MenuGroup, MenuItem
 from apps.rbac.models import Permission, Role, UserRole
 from apps.students.models import Student
+from apps.student_portal.models import StudentAccountLink
 from apps.tenants.models import Campus, Department, Program, Tenant
 
 
@@ -140,6 +141,14 @@ def _faculty_label(obj):
     if full_name and username and full_name != username:
         return f"{full_name} ({username})"
     return full_name or username or str(obj)
+
+
+def _student_label(obj):
+    student_no = (getattr(obj, "student_no", "") or "").strip()
+    last_name = (getattr(obj, "last_name", "") or "").strip()
+    first_name = (getattr(obj, "first_name", "") or "").strip()
+    name = ", ".join(part for part in [last_name, first_name] if part)
+    return f"{student_no} - {name}" if student_no and name else student_no or name or str(obj)
 
 
 def _resolve_user_default_scope_ids(user):
@@ -1112,6 +1121,8 @@ class StudentForm(forms.ModelForm):
             "last_name",
             "first_name",
             "middle_name",
+            "official_email",
+            "official_email_verified_at",
             "sex",
             "year_level",
             "status",
@@ -2289,6 +2300,26 @@ class DocumentPrintSettingForm(forms.Form):
 
 
 class ConfigurableFeatureSettingForm(forms.Form):
+    student_portal_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Student Portal",
+        help_text="Allows linked and permitted student users to open the read-only Student Portal for this tenant.",
+    )
+    student_portal_period_grades_after_submission = forms.BooleanField(
+        required=False,
+        label="Show period grades after submission",
+        help_text="Shows only submitted official period grades in the Student Portal. Draft and reopened gradebooks stay hidden.",
+    )
+    student_portal_final_grades_after_submission = forms.BooleanField(
+        required=False,
+        label="Show final grade after submission",
+        help_text="Shows only submitted official final grades in the Student Portal.",
+    )
+    student_portal_attendance_details_enabled = forms.BooleanField(
+        required=False,
+        label="Show attendance details",
+        help_text="Shows session-level attendance records to linked student users. Summary counts remain read-only.",
+    )
     correction_official_report_enabled = forms.BooleanField(
         required=False,
         label="Enable official correction PDF/report generation",
@@ -2837,6 +2868,102 @@ class ConfigurableFeatureSettingForm(forms.Form):
             )
 
         cleaned["correction_registrar_campus_recipient_map"] = campus_recipient_map
+        return cleaned
+
+
+class StudentAccountLinkForm(forms.ModelForm):
+    class Meta:
+        model = StudentAccountLink
+        fields = ["tenant", "campus", "student", "user", "is_active", "notes"]
+
+    def __init__(
+        self,
+        *args,
+        tenant_queryset=None,
+        campus_queryset=None,
+        student_queryset=None,
+        user_queryset=None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if tenant_queryset is not None:
+            self.fields["tenant"].queryset = tenant_queryset
+        if campus_queryset is not None:
+            self.fields["campus"].queryset = campus_queryset
+        if student_queryset is not None:
+            self.fields["student"].queryset = student_queryset
+        if user_queryset is not None:
+            self.fields["user"].queryset = user_queryset
+        _enforce_active_reference_choices(self)
+        _set_choice_label(self.fields.get("student"), _student_label)
+        _set_choice_label(self.fields.get("user"), _faculty_label)
+        self.fields["notes"].required = False
+        self.fields["notes"].widget.attrs["rows"] = 3
+        self.fields["is_active"].help_text = "Deactivate links instead of deleting them so account-link history remains reviewable."
+
+    def clean(self):
+        cleaned = super().clean()
+        instance = self.instance
+        for field_name in ("tenant", "campus", "student", "user", "is_active", "notes"):
+            if field_name in cleaned:
+                setattr(instance, field_name, cleaned[field_name])
+        try:
+            instance.clean()
+        except DjangoValidationError as exc:
+            raise exc
+        return cleaned
+
+
+class StudentAccountProvisioningForm(forms.Form):
+    student = forms.ModelChoiceField(
+        queryset=Student.objects.none(),
+        label="Student",
+        help_text="Select the existing student record to provision for Student Portal access.",
+    )
+    existing_user = forms.ModelChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        label="Existing user account",
+        help_text="Optional. Leave blank to create or match a user from the student's official email.",
+    )
+    verify_official_email = forms.BooleanField(
+        required=False,
+        label="I confirm the official student email has been verified",
+        help_text="Required when the student record does not already have an email verification timestamp.",
+    )
+    notes = forms.CharField(
+        required=False,
+        label="Notes",
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+    def __init__(self, *args, student_queryset=None, user_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if student_queryset is not None:
+            self.fields["student"].queryset = student_queryset
+        if user_queryset is not None:
+            self.fields["existing_user"].queryset = user_queryset
+        _enforce_active_reference_choices(self)
+        _set_choice_label(self.fields.get("student"), _student_label)
+        _set_choice_label(self.fields.get("existing_user"), _faculty_label)
+
+    def clean_student(self):
+        student = self.cleaned_data["student"]
+        if not student.official_email:
+            raise forms.ValidationError("This student has no official email. Update the student record first.")
+        return student
+
+    def clean(self):
+        cleaned = super().clean()
+        student = cleaned.get("student")
+        existing_user = cleaned.get("existing_user")
+        if student and existing_user:
+            if existing_user.default_tenant_id and existing_user.default_tenant_id != student.tenant_id:
+                self.add_error("existing_user", "Existing user default tenant does not match the selected student.")
+            if existing_user.default_campus_id and existing_user.default_campus_id != student.campus_id:
+                self.add_error("existing_user", "Existing user default campus does not match the selected student.")
+        if student and not student.official_email_verified_at and not cleaned.get("verify_official_email"):
+            self.add_error("verify_official_email", "Confirm email verification before provisioning this student.")
         return cleaned
 
 

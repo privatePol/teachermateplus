@@ -823,6 +823,8 @@ This document is generated from the current Django model registry so it reflects
 | `last_name` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
 | `first_name` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
 | `middle_name` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
+| `official_email` | `EmailField` | `Yes` | `Yes` | `No` | - | Trusted official student email used for Student Portal account provisioning. |
+| `official_email_verified_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Timestamp confirming the official email was verified for provisioning use. |
 | `sex` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `year_level` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `status` | `CharField` | `No` | `No` | `No` | - | Workflow or operational status code. |

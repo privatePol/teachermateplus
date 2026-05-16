@@ -1,0 +1,14 @@
+{% extends "student_portal/base.html" %}
+
+{% block student_content %}
+<div class="student-panel">
+  <div class="student-panel-header">
+    <h1 class="h4 mb-1">My Courses</h1>
+    <div class="student-muted">Read-only enrollment list for the linked student record.</div>
+  </div>
+  <div class="student-panel-body p-0">
+    {% include "student_portal/_course_table.html" %}
+  </div>
+</div>
+{% endblock %}
+

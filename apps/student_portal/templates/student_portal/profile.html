@@ -1,0 +1,23 @@
+{% extends "student_portal/base.html" %}
+
+{% block student_content %}
+<div class="student-panel">
+  <div class="student-panel-header">
+    <h1 class="h4 mb-1">My Profile</h1>
+    <div class="student-muted">This profile is read-only in the first Student Portal foundation.</div>
+  </div>
+  <div class="student-panel-body">
+    <dl class="row mb-0">
+      <dt class="col-sm-3">Student No</dt><dd class="col-sm-9">{{ student.student_no }}</dd>
+      <dt class="col-sm-3">Name</dt><dd class="col-sm-9">{{ student.last_name }}, {{ student.first_name }} {{ student.middle_name|default:"" }}</dd>
+      <dt class="col-sm-3">Tenant</dt><dd class="col-sm-9">{{ link.tenant.name }}</dd>
+      <dt class="col-sm-3">Campus</dt><dd class="col-sm-9">{{ link.campus.name }}</dd>
+      <dt class="col-sm-3">Department</dt><dd class="col-sm-9">{{ student.department.name }}</dd>
+      <dt class="col-sm-3">Program</dt><dd class="col-sm-9">{{ student.program.name|default:"Not set" }}</dd>
+      <dt class="col-sm-3">Year Level</dt><dd class="col-sm-9">{{ student.year_level|default:"Not set" }}</dd>
+      <dt class="col-sm-3">Status</dt><dd class="col-sm-9">{{ student.get_status_display }}</dd>
+    </dl>
+  </div>
+</div>
+{% endblock %}
+

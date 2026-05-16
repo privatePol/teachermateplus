@@ -1,0 +1,26 @@
+{% extends "student_portal/base.html" %}
+
+{% block student_content %}
+<div class="student-panel">
+  <div class="student-panel-header">
+    <h1 class="h4 mb-1">My Account</h1>
+    <div class="student-muted">Account security uses the existing EduGradesPro user account.</div>
+  </div>
+  <div class="student-panel-body">
+    <dl class="row">
+      <dt class="col-sm-3">Username</dt><dd class="col-sm-9">{{ request.user.username }}</dd>
+      <dt class="col-sm-3">Email</dt><dd class="col-sm-9">{{ request.user.email }}</dd>
+      <dt class="col-sm-3">Privacy Consent</dt>
+      <dd class="col-sm-9">
+        {% if request.user.privacy_consent_at %}
+          Accepted {{ request.user.privacy_consent_version }} on {{ request.user.privacy_consent_at|date:"Y-m-d H:i" }}
+        {% else %}
+          Not yet recorded
+        {% endif %}
+      </dd>
+    </dl>
+    <p class="mb-0 text-muted">Password reset and privacy-consent workflows are reused from the existing account system during this local prototype stage.</p>
+  </div>
+</div>
+{% endblock %}
+

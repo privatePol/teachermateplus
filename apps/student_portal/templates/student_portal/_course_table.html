@@ -1,0 +1,38 @@
+<div class="table-responsive">
+  <table class="table table-sm align-middle mb-0">
+    <thead>
+      <tr>
+        <th>Course</th>
+        <th>Section</th>
+        <th>Term</th>
+        <th>Campus</th>
+        <th>Faculty</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in course_rows %}
+      <tr>
+        <td>
+          <div class="fw-semibold">{{ row.offering.course.code }}</div>
+          <div class="small student-muted">{{ row.offering.course.title }}</div>
+        </td>
+        <td>{{ row.offering.section.name|default:row.offering.section.code }}</td>
+        <td>{{ row.enrollment.academic_year.code }} / {{ row.enrollment.term.code }}</td>
+        <td>{{ row.enrollment.campus.name }}</td>
+        <td>{{ row.faculty.full_name|default:"Not assigned" }}</td>
+        <td><span class="badge text-bg-light border">{{ row.enrollment.get_enrollment_status_display }}</span></td>
+        <td class="text-end">
+          <a class="btn btn-sm btn-outline-success" href="{% url 'student_portal:course_detail' row.offering.id %}">Open</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="7" class="text-center text-muted py-4">No enrolled courses are available for this account.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+

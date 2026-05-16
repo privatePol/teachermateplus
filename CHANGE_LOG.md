@@ -6,6 +6,13 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+- Student Portal local foundation: added the ignored local `apps/student_portal` prototype app with `StudentAccountLink`, `student_portal.access`, a global `FEATURE_STUDENT_PORTAL_ENABLED` guard, read-only dashboard/courses/profile/account pages under `/student/`, and focused tenant/campus/student isolation tests.
+- Admin Portal Student Portal controls: added a Configurable Features toggle for `FEATURE_STUDENT_PORTAL_ENABLED`, plus scoped Student Account Links list/create/deactivate pages governed by `student_account_links.manage` with audit logging.
+- Student Portal provisioning: added trusted student `official_email` and `official_email_verified_at` fields, exposed official email status in student maintenance, and added an Admin Portal provisioning flow that creates or links a student user account, grants scoped `student_portal.access`, creates the active `StudentAccountLink`, and blocks provisioning when the official email is missing or unverified.
+- Student Portal grades stage: added read-only `/student/grades/` and `/student/grades/<offering_id>/` views that show only the linked student's own submitted period grades and submitted final grades, with Configurable Features controls for student period/final grade release after submission.
+- Student Portal attendance stage: added read-only `/student/attendance/` with tenant/campus/student-scoped attendance counts and optional session-level details controlled by `FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED`.
+
 ### Changed
 - Admin Portal grading-template Testing Calculator now applies the matched active Tenant Grading Profile final-grade formula for the selected template, including weighted selected periods and the official rounded final grade; if no active profile matches, it clearly shows the active-period average fallback.
 - Admin Portal grading-template Testing Calculator now also repeats the final-grade computation immediately after the final period walkthrough, so admins can follow period computation into final-grade computation in sequence.

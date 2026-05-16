@@ -5,6 +5,32 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 
 ## 2. Current Operating Modules
 
+### Student Portal
+- A local-only Student Portal foundation now exists under the intentionally ignored `apps/student_portal/` prototype app.
+- Initial routes use the `/student/` prefix:
+  - `/student/`
+  - `/student/courses/`
+  - `/student/courses/<offering_id>/`
+  - `/student/grades/`
+  - `/student/grades/<offering_id>/`
+  - `/student/attendance/`
+  - `/student/profile/`
+  - `/student/account/`
+- Student access is conservative and read-only. Every student-facing read starts from the authenticated user, resolves an active `StudentAccountLink`, then filters enrollments by the linked tenant, campus, and student.
+- `StudentAccountLink` links an existing `Student` record to an existing `User` account with tenant/campus validation, active-link uniqueness for both student and user, deactivation support, `linked_by_user`, `linked_at`, and notes.
+- Student Portal access requires all of:
+  - authenticated user
+  - active `StudentAccountLink`
+  - `student_portal.access`
+  - tenant feature setting `FEATURE_STUDENT_PORTAL_ENABLED`
+- Student Portal grades are read-only and summary-only. They show only the linked student's own submitted period grades and submitted final grades, never draft/reopened gradebooks, classmates, rankings, distributions, analytics, or activity-level scores.
+- Student Portal grade visibility is controlled from Configuration Management with `FEATURE_STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION` and `FEATURE_STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION`, both defaulting On once the Student Portal itself is enabled.
+- Student Portal attendance is read-only. It shows only the linked student's own tenant/campus/offering attendance records, summarized by course with optional session-level detail controlled by `FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED`.
+- Student records now include `official_email` and `official_email_verified_at` so Student Portal provisioning can use a trusted registered email instead of a student-entered address.
+- Account provisioning remains admin-driven by design. The Admin Portal now includes scoped Student Account Links list/create/deactivate pages for authorized users with `student_account_links.manage`; deactivation is preferred over deletion and create/deactivate actions are audited.
+- Admins can use `Provision Account` from Student Account Links to create or link a student user automatically. Provisioning requires an official student email, records/uses email verification, creates a non-staff user when needed, grants scoped `student_portal.access`, and creates the active `StudentAccountLink`. Temporary credentials are shown only for the approved manual credential process; invitation email sending and student self-claim remain future work.
+- `Tools -> Configuration Management -> Student Portal` exposes the tenant-level Student Portal enable/disable toggle, student grade release toggles, and the attendance-detail visibility toggle. The portal default remains Off.
+
 ### Admin Portal
 - Security: users, roles, scoped permissions
 - User account security now includes:

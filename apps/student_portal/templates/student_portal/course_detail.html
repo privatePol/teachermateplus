@@ -1,0 +1,25 @@
+{% extends "student_portal/base.html" %}
+
+{% block student_content %}
+<div class="student-panel">
+  <div class="student-panel-header d-flex justify-content-between align-items-center">
+    <div>
+      <h1 class="h4 mb-1">{{ course_row.offering.course.code }} - {{ course_row.offering.course.title }}</h1>
+      <div class="student-muted">{{ course_row.offering.section.name|default:course_row.offering.section.code }}</div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'student_portal:courses' %}">Back</a>
+  </div>
+  <div class="student-panel-body">
+    <dl class="row mb-0">
+      <dt class="col-sm-3">Academic Year</dt><dd class="col-sm-9">{{ enrollment.academic_year.name }}</dd>
+      <dt class="col-sm-3">Term</dt><dd class="col-sm-9">{{ enrollment.term.name }}</dd>
+      <dt class="col-sm-3">Campus</dt><dd class="col-sm-9">{{ enrollment.campus.name }}</dd>
+      <dt class="col-sm-3">Faculty</dt><dd class="col-sm-9">{{ course_row.faculty.full_name|default:"Not assigned" }}</dd>
+      <dt class="col-sm-3">Schedule</dt><dd class="col-sm-9">{{ course_row.offering.schedule_text|default:"Not set" }}</dd>
+      <dt class="col-sm-3">Room/Office/Lab</dt><dd class="col-sm-9">{{ course_row.offering.room|default:"Not set" }}</dd>
+      <dt class="col-sm-3">Enrollment Status</dt><dd class="col-sm-9">{{ enrollment.get_enrollment_status_display }}</dd>
+    </dl>
+  </div>
+</div>
+{% endblock %}
+

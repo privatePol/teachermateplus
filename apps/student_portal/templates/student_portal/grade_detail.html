@@ -1,0 +1,60 @@
+{% extends "student_portal/base.html" %}
+
+{% block student_content %}
+<div class="student-panel">
+  <div class="student-panel-header d-flex justify-content-between align-items-center">
+    <div>
+      <h1 class="h4 mb-1">{{ grade_row.offering.course.code }} - {{ grade_row.offering.course.title }}</h1>
+      <div class="student-muted">{{ grade_row.offering.section.name|default:grade_row.offering.section.code }}</div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'student_portal:grades' %}">Back</a>
+  </div>
+  <div class="student-panel-body">
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <h2 class="h6">Submitted Period Grades</h2>
+        {% if grade_row.period_grades %}
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Period</th>
+                <th>Class Standing</th>
+                <th>Exam</th>
+                <th>Period Grade</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for grade in grade_row.period_grades %}
+              <tr>
+                <td>{{ grade.template_period.name }}</td>
+                <td>{{ grade.class_standing_grade|default:"-" }}</td>
+                <td>{{ grade.exam_grade|default:"-" }}</td>
+                <td class="fw-semibold">{{ grade.period_grade|default:"-" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-muted small">No submitted period grades are released for this course.</div>
+        {% endif %}
+      </div>
+      <div class="col-lg-5">
+        <h2 class="h6">Submitted Final Grade</h2>
+        <div class="student-kpi">
+          {% if grade_row.final_grade %}
+          <div class="student-muted small">Final Grade</div>
+          <div class="fs-4 fw-bold">{{ grade_row.final_grade.final_grade|default:"-" }}</div>
+          {% if grade_row.final_grade.remarks %}
+          <div class="small text-muted">{{ grade_row.final_grade.remarks }}</div>
+          {% endif %}
+          {% else %}
+          <div class="text-muted small">Final grade is not released for this course.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

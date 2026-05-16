@@ -1,0 +1,73 @@
+{% extends "shared/base_public.html" %}
+{% load static %}
+
+{% block title %}{{ title|default:"Student Portal" }} | EduGradesPro{% endblock %}
+{% block extra_head %}
+<style>
+  body { background: #f5f8f4; }
+  .student-shell { min-height: 100vh; background: linear-gradient(135deg, #f5f8f4 0%, #f9fbf8 58%, #fbf6df 100%); }
+  .student-topbar {
+    background: linear-gradient(100deg, #0f472b 0%, #1a6a40 52%, #d5b84f 100%);
+    box-shadow: 0 6px 18px rgba(11, 51, 31, 0.18);
+  }
+  .student-logo { height: 58px; width: auto; object-fit: contain; }
+  .student-brand { color: #fff; font-weight: 800; font-size: 1.25rem; line-height: 1.1; }
+  .student-subtitle { color: rgba(245, 255, 248, 0.88); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .student-layout { display: flex; min-height: calc(100vh - 74px); }
+  .student-sidebar { width: 240px; background: #f8fbf7; border-right: 1px solid #d7e2d4; padding: 1rem; }
+  .student-link {
+    display: flex; align-items: center; gap: .6rem; padding: .65rem .75rem; border-radius: .5rem;
+    color: #2c4738; text-decoration: none; font-weight: 700; margin-bottom: .3rem;
+  }
+  .student-link:hover, .student-link.active { background: #e6f1e8; color: #143b25; }
+  .student-main { flex: 1; min-width: 0; padding: 1.35rem; }
+  .student-panel { border: 1px solid #dbe7d8; border-radius: .5rem; background: #fff; box-shadow: 0 8px 18px rgba(21, 62, 38, .07); }
+  .student-panel-header { border-bottom: 1px solid #e6eee4; padding: .9rem 1rem; }
+  .student-panel-body { padding: 1rem; }
+  .student-kpi { border-left: 4px solid #1a6a40; background: #fff; border-radius: .5rem; padding: 1rem; }
+  .student-muted { color: #5f7467; }
+  @media (max-width: 767.98px) {
+    .student-layout { display: block; }
+    .student-sidebar { width: 100%; border-right: 0; border-bottom: 1px solid #d7e2d4; }
+    .student-main { padding: 1rem; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="student-shell">
+  <nav class="navbar student-topbar px-3">
+    <div class="container-fluid">
+      <div class="d-flex align-items-center gap-2">
+        <img src="{% get_media_prefix %}logos/egp_logo_official.png" alt="EduGradesPro" class="student-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/edp_logo.png';">
+        <div>
+          <div class="student-brand">NCBA | EduGradesPro</div>
+          <div class="student-subtitle">
+            Student Portal
+            {% if active_academic_year and active_term %}
+              | {{ active_academic_year.code }} / {{ active_term.code }}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="text-end text-white">
+        <div class="fw-semibold">{{ student.first_name }} {{ student.last_name }}</div>
+        <div class="small">{{ student.student_no }}</div>
+      </div>
+    </div>
+  </nav>
+  <div class="student-layout">
+    <aside class="student-sidebar">
+      <a class="student-link {% if request.resolver_match.view_name == 'student_portal:dashboard' %}active{% endif %}" href="{% url 'student_portal:dashboard' %}">Dashboard</a>
+      <a class="student-link {% if request.resolver_match.view_name == 'student_portal:courses' or request.resolver_match.view_name == 'student_portal:course_detail' %}active{% endif %}" href="{% url 'student_portal:courses' %}">My Courses</a>
+      <a class="student-link {% if request.resolver_match.view_name == 'student_portal:grades' or request.resolver_match.view_name == 'student_portal:grade_detail' %}active{% endif %}" href="{% url 'student_portal:grades' %}">My Grades</a>
+      <a class="student-link {% if request.resolver_match.view_name == 'student_portal:attendance' %}active{% endif %}" href="{% url 'student_portal:attendance' %}">Attendance</a>
+      <a class="student-link {% if request.resolver_match.view_name == 'student_portal:profile' %}active{% endif %}" href="{% url 'student_portal:profile' %}">Profile</a>
+      <a class="student-link {% if request.resolver_match.view_name == 'student_portal:account' %}active{% endif %}" href="{% url 'student_portal:account' %}">Account</a>
+    </aside>
+    <main class="student-main">
+      {% block student_content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% endblock %}

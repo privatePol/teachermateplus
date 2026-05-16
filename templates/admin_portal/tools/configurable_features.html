@@ -291,6 +291,64 @@
 
   <div class="settings-card-grid">
   <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-student-portal" aria-expanded="false" aria-controls="feature-card-student-portal">
+      <strong>Student Portal</strong>
+      <span class="toggle-indicator" aria-hidden="true">+</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-student-portal" aria-expanded="false" aria-controls="feature-card-student-portal">
+      <span class="settings-card-summary-title">Student Portal</span>
+      <span class="settings-card-summary-text">Control whether linked student users may open the read-only Student Portal for this tenant.</span>
+    </button>
+    <div id="feature-card-student-portal" class="collapse">
+    <div class="card-body">
+      <div class="form-check form-switch mb-3">
+        {{ form.student_portal_enabled }}
+        <label class="form-check-label" for="{{ form.student_portal_enabled.id_for_label }}">
+          {{ form.student_portal_enabled.label }}
+        </label>
+        {% if form.student_portal_enabled.help_text %}
+        <div class="form-text">{{ form.student_portal_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.student_portal_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.student_portal_period_grades_after_submission }}
+        <label class="form-check-label" for="{{ form.student_portal_period_grades_after_submission.id_for_label }}">
+          {{ form.student_portal_period_grades_after_submission.label }}
+        </label>
+        {% if form.student_portal_period_grades_after_submission.help_text %}
+        <div class="form-text">{{ form.student_portal_period_grades_after_submission.help_text }}</div>
+        {% endif %}
+        {% for error in form.student_portal_period_grades_after_submission.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.student_portal_final_grades_after_submission }}
+        <label class="form-check-label" for="{{ form.student_portal_final_grades_after_submission.id_for_label }}">
+          {{ form.student_portal_final_grades_after_submission.label }}
+        </label>
+        {% if form.student_portal_final_grades_after_submission.help_text %}
+        <div class="form-text">{{ form.student_portal_final_grades_after_submission.help_text }}</div>
+        {% endif %}
+        {% for error in form.student_portal_final_grades_after_submission.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.student_portal_attendance_details_enabled }}
+        <label class="form-check-label" for="{{ form.student_portal_attendance_details_enabled.id_for_label }}">
+          {{ form.student_portal_attendance_details_enabled.label }}
+        </label>
+        {% if form.student_portal_attendance_details_enabled.help_text %}
+        <div class="form-text">{{ form.student_portal_attendance_details_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.student_portal_attendance_details_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="alert alert-light border small mb-0">
+        Student Portal remains read-only in this stage. Activity scores, class rankings, distributions, and draft grades remain hidden.
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
     <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-correction-official-report" aria-expanded="false" aria-controls="feature-card-correction-official-report">
       <strong>Correction Official Report</strong>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>

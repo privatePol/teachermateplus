@@ -47,6 +47,10 @@ class FeatureSettingsService:
     SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS"
     SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES"
     SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS"
+    STUDENT_PORTAL_ENABLED_KEY = "FEATURE_STUDENT_PORTAL_ENABLED"
+    STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY = "FEATURE_STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION"
+    STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION_KEY = "FEATURE_STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION"
+    STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY = "FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED"
 
     @staticmethod
     def _positive_int(value, *, default: int, minimum: int = 0) -> int:
@@ -321,6 +325,61 @@ class FeatureSettingsService:
             ),
             default=default,
             minimum=1,
+        )
+
+    @classmethod
+    def is_student_portal_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.STUDENT_PORTAL_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def show_student_portal_period_grades_after_submission(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: bool = True,
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def show_student_portal_final_grades_after_submission(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: bool = True,
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def show_student_portal_attendance_details(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: bool = True,
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
         )
 
     @classmethod

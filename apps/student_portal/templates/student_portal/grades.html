@@ -1,0 +1,13 @@
+{% extends "student_portal/base.html" %}
+
+{% block student_content %}
+<div class="student-panel">
+  <div class="student-panel-header">
+    <h1 class="h4 mb-1">My Grades</h1>
+    <div class="student-muted">Official submitted grades only. Draft and reopened gradebooks are not shown.</div>
+  </div>
+  <div class="student-panel-body p-0">
+    {% include "student_portal/_grade_summary_table.html" %}
+  </div>
+</div>
+{% endblock %}

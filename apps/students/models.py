@@ -25,6 +25,8 @@ class Student(TimeStampedModel, ActivatableModel):
     last_name = models.CharField(max_length=100)
     first_name = models.CharField(max_length=100)
     middle_name = models.CharField(max_length=100, blank=True, null=True)
+    official_email = models.EmailField(blank=True, null=True)
+    official_email_verified_at = models.DateTimeField(blank=True, null=True)
     sex = models.CharField(max_length=16, blank=True, null=True)
     year_level = models.CharField(max_length=50, blank=True, null=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)

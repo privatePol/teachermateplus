@@ -66,6 +66,8 @@ from apps.admin_portal.forms import (
     RoleForm,
     RolePermissionsForm,
     SectionForm,
+    StudentAccountLinkForm,
+    StudentAccountProvisioningForm,
     StudentForm,
     TenantForm,
     TenantTermGradingPeriodForm,
@@ -148,6 +150,8 @@ from apps.notifications.models import SubmissionNonComplianceNotice
 from apps.predictions.services import PredictionAuditService, PredictionSnapshotService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
+from apps.student_portal.models import StudentAccountLink
+from apps.student_portal.services import StudentAccountProvisioningService
 from apps.tenants.models import Campus, Department, Program, Tenant
 
 User = get_user_model()
@@ -3531,10 +3535,34 @@ def configurable_features_settings_view(request):
         "low_variation_threshold": str(current_grade_distribution_settings["low_variation_threshold"]),
         "minimum_student_count_for_flag": int(current_grade_distribution_settings["minimum_student_count_for_flag"]),
     }
+    current_student_portal_enabled = FeatureSettingsService.is_student_portal_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
+    current_student_portal_period_grades_after_submission = (
+        FeatureSettingsService.show_student_portal_period_grades_after_submission(
+            tenant_id=tenant_id,
+            default=True,
+        )
+    )
+    current_student_portal_final_grades_after_submission = (
+        FeatureSettingsService.show_student_portal_final_grades_after_submission(
+            tenant_id=tenant_id,
+            default=True,
+        )
+    )
+    current_student_portal_attendance_details_enabled = FeatureSettingsService.show_student_portal_attendance_details(
+        tenant_id=tenant_id,
+        default=True,
+    )
 
     form = ConfigurableFeatureSettingForm(
         request.POST or None,
         initial={
+            "student_portal_enabled": current_student_portal_enabled,
+            "student_portal_period_grades_after_submission": current_student_portal_period_grades_after_submission,
+            "student_portal_final_grades_after_submission": current_student_portal_final_grades_after_submission,
+            "student_portal_attendance_details_enabled": current_student_portal_attendance_details_enabled,
             "correction_official_report_enabled": current_report_enabled,
             "user_signatures_enabled": current_user_signatures_enabled,
             "user_signatures_final_clearance_enabled": current_user_signatures_final_clearance_enabled,
@@ -3641,6 +3669,34 @@ def configurable_features_settings_view(request):
             else:
                 updated_enrollment_override_map.pop(override_key, None)
 
+        SystemSettingService.set(
+            FeatureSettingsService.STUDENT_PORTAL_ENABLED_KEY,
+            bool(form.cleaned_data["student_portal_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
+            bool(form.cleaned_data["student_portal_period_grades_after_submission"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION_KEY,
+            bool(form.cleaned_data["student_portal_final_grades_after_submission"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY,
+            bool(form.cleaned_data["student_portal_attendance_details_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
         SystemSettingService.set(
             FeatureSettingsService.CORRECTION_OFFICIAL_REPORT_ENABLED_KEY,
             bool(form.cleaned_data["correction_official_report_enabled"]),
@@ -4062,8 +4118,22 @@ def configurable_features_settings_view(request):
                 "faculty_official_period_grades_after_deadline": current_faculty_official_period_grades_after_deadline,
                 "faculty_official_period_grades_after_submission": current_faculty_official_period_grades_after_submission,
                 "faculty_official_final_grades_after_deadline": current_faculty_official_final_grades_after_deadline,
+                "student_portal_enabled": current_student_portal_enabled,
+                "student_portal_period_grades_after_submission": current_student_portal_period_grades_after_submission,
+                "student_portal_final_grades_after_submission": current_student_portal_final_grades_after_submission,
+                "student_portal_attendance_details_enabled": current_student_portal_attendance_details_enabled,
             },
             after_data={
+                "student_portal_enabled": bool(form.cleaned_data["student_portal_enabled"]),
+                "student_portal_period_grades_after_submission": bool(
+                    form.cleaned_data["student_portal_period_grades_after_submission"]
+                ),
+                "student_portal_final_grades_after_submission": bool(
+                    form.cleaned_data["student_portal_final_grades_after_submission"]
+                ),
+                "student_portal_attendance_details_enabled": bool(
+                    form.cleaned_data["student_portal_attendance_details_enabled"]
+                ),
                 "correction_official_report_enabled": bool(form.cleaned_data["correction_official_report_enabled"]),
                 "user_signatures_enabled": bool(form.cleaned_data["user_signatures_enabled"]),
                 "user_signatures_final_clearance_enabled": bool(
@@ -4208,6 +4278,10 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_DEADLINE_KEY,
                     FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
                     FeatureSettingsService.FACULTY_OFFICIAL_FINAL_GRADES_AFTER_DEADLINE_KEY,
+                    FeatureSettingsService.STUDENT_PORTAL_ENABLED_KEY,
+                    FeatureSettingsService.STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
+                    FeatureSettingsService.STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION_KEY,
+                    FeatureSettingsService.STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY,
                 ],
             },
             request=request,
@@ -8093,6 +8167,187 @@ def student_update_view(request, student_id: int):
     context = {"form": form, "title": f"Edit Student: {row.student_no}"}
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
+
+
+def _scoped_student_account_links(request):
+    tenants = AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True)
+    campuses = AdminScopeService.active_scoped_campuses(request).values_list("id", flat=True)
+    students = AdminScopeService.scoped_students(request).values_list("id", flat=True)
+    return (
+        StudentAccountLink.objects.filter(tenant_id__in=tenants, campus_id__in=campuses, student_id__in=students)
+        .select_related("tenant", "campus", "student", "user", "linked_by_user")
+        .order_by("-is_active", "campus__name", "student__last_name", "student__first_name")
+    )
+
+
+def _student_account_link_user_queryset(request):
+    tenant_ids = list(AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True))
+    campus_ids = list(AdminScopeService.active_scoped_campuses(request).values_list("id", flat=True))
+    return (
+        User.objects.filter(is_active=True)
+        .filter(Q(default_tenant_id__in=tenant_ids) | Q(default_tenant__isnull=True))
+        .filter(Q(default_campus_id__in=campus_ids) | Q(default_campus__isnull=True))
+        .order_by("last_name", "first_name", "username")
+    )
+
+
+@portal_required("ADMIN")
+@permission_required("student_account_links.manage")
+def student_account_link_list_view(request):
+    queryset = _scoped_student_account_links(request)
+    campus_id = request.GET.get("campus_id", "").strip()
+    status = request.GET.get("status", "").strip().lower()
+    q = request.GET.get("q", "").strip()
+    if campus_id:
+        queryset = queryset.filter(campus_id=campus_id)
+    if status == "active":
+        queryset = queryset.filter(is_active=True)
+    elif status == "inactive":
+        queryset = queryset.filter(is_active=False)
+    if q:
+        queryset = queryset.filter(
+            Q(student__student_no__icontains=q)
+            | Q(student__last_name__icontains=q)
+            | Q(student__first_name__icontains=q)
+            | Q(user__username__icontains=q)
+            | Q(user__email__icontains=q)
+        )
+    paginator = Paginator(queryset, 25)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    context = {
+        "title": "Student Account Links",
+        "page_obj": page_obj,
+        "q": q,
+        "status": status,
+        "campus_id": campus_id,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/students/student_account_link_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("student_account_links.manage")
+def student_account_link_create_view(request):
+    form = StudentAccountLinkForm(
+        request.POST or None,
+        tenant_queryset=AdminScopeService.active_scoped_tenants(request),
+        campus_queryset=AdminScopeService.active_scoped_campuses(request),
+        student_queryset=AdminScopeService.scoped_students(request).filter(is_active=True),
+        user_queryset=_student_account_link_user_queryset(request),
+    )
+    _style_form(form)
+    if request.method == "POST" and form.is_valid():
+        row = form.save(commit=False)
+        row.linked_by_user = request.user
+        row.save()
+        AuditService.log_event(
+            action="CREATE",
+            portal="ADMIN",
+            entity_type="StudentAccountLink",
+            entity_id=row.id,
+            actor=request.user,
+            tenant=row.tenant_id,
+            campus=row.campus_id,
+            after_data=model_before_after(row),
+            request=request,
+        )
+        messages.success(request, "Student account link created.")
+        return _redirect_back_or_default(request, "admin_portal:student_account_link_list")
+    context = {"form": form, "title": "Create Student Account Link"}
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/shared/form_page.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("student_account_links.manage")
+def student_account_provision_view(request):
+    form = StudentAccountProvisioningForm(
+        request.POST or None,
+        student_queryset=AdminScopeService.scoped_students(request).filter(is_active=True),
+        user_queryset=_student_account_link_user_queryset(request),
+    )
+    _style_form(form)
+    if request.method == "POST" and form.is_valid():
+        student = form.cleaned_data["student"]
+        before_payload = model_before_after(student)
+        try:
+            result = StudentAccountProvisioningService.provision(
+                student=student,
+                actor=request.user,
+                existing_user=form.cleaned_data.get("existing_user"),
+                verify_official_email=form.cleaned_data.get("verify_official_email"),
+                notes=form.cleaned_data.get("notes", ""),
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            user = result["user"]
+            link = result["link"]
+            AuditService.log_event(
+                action="PROVISION_STUDENT_ACCOUNT",
+                portal="ADMIN",
+                entity_type="StudentAccountLink",
+                entity_id=link.id,
+                actor=request.user,
+                tenant=link.tenant_id,
+                campus=link.campus_id,
+                before_data={"student": before_payload},
+                after_data={
+                    "student_account_link": model_before_after(link),
+                    "user": model_before_after(user),
+                    "created_user": result["created_user"],
+                    "official_email": result["official_email"],
+                },
+                request=request,
+            )
+            if result["created_user"]:
+                messages.success(
+                    request,
+                    f"Student account created for {student.student_no}. Username: {user.username}. "
+                    f"Temporary password: {result['temporary_password']}",
+                )
+                messages.warning(
+                    request,
+                    "Give the temporary password only through the approved manual credential process. "
+                    "Invitation email sending is still deferred.",
+                )
+            else:
+                messages.success(
+                    request,
+                    f"Existing user {user.username} linked to student {student.student_no}.",
+                )
+            return _redirect_back_or_default(request, "admin_portal:student_account_link_list")
+    context = {"form": form, "title": "Provision Student Portal Account"}
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/shared/form_page.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("student_account_links.manage")
+def student_account_link_deactivate_view(request, link_id: int):
+    row = get_object_or_404(_scoped_student_account_links(request), id=link_id)
+    if request.method != "POST":
+        return redirect("admin_portal:student_account_link_list")
+    if not row.is_active:
+        messages.info(request, "Student account link is already inactive.")
+        return _redirect_back_or_default(request, "admin_portal:student_account_link_list")
+    before = model_before_after(row)
+    row.is_active = False
+    row.save(update_fields=["is_active", "updated_at"])
+    AuditService.log_event(
+        action="DEACTIVATE",
+        portal="ADMIN",
+        entity_type="StudentAccountLink",
+        entity_id=row.id,
+        actor=request.user,
+        tenant=row.tenant_id,
+        campus=row.campus_id,
+        before_data=before,
+        after_data=model_before_after(row),
+        request=request,
+    )
+    messages.success(request, "Student account link deactivated.")
+    return _redirect_back_or_default(request, "admin_portal:student_account_link_list")
 
 
 @portal_required("ADMIN")
