@@ -476,6 +476,19 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Pending Faculty Assignments")
         self.assertContains(response, "Accept Assignment")
         self.assertContains(response, "College Template")
+        self.assertContains(response, "Campus: Fairview (NCBA-FAIRVIEW)")
+
+    def test_my_courses_labels_accepted_assignments_with_campus_name(self):
+        self._accept_assignment()
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(reverse("faculty_portal:my_courses"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Accepted Course Assignments")
+        self.assertContains(response, "These are your official accepted classes")
+        self.assertContains(response, "NCBA / Fairview")
+        self.assertContains(response, "(NCBA-FAIRVIEW)")
 
     def test_my_courses_warns_faculty_when_course_has_no_template_assignment(self):
         missing_course = Course.objects.create(

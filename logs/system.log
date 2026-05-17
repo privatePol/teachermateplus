@@ -1087,3 +1087,26 @@
 2026-05-17 10:35:17,564 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-17 10:38:07,801 INFO [django.utils.autoreload] D:\edugradespro\apps\accounts\forms.py changed, reloading.
 2026-05-17 10:38:08,606 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-17 11:00:57,880 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27293
+2026-05-17 11:00:58,016 INFO [django.server] "GET /static/faculty_portal/css/public_index.css HTTP/1.1" 200 13128
+2026-05-17 11:00:58,024 INFO [django.server] "GET /media/logos/egp_logo_official.png HTTP/1.1" 200 1465036
+2026-05-17 11:00:58,055 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
+2026-05-17 11:00:58,069 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
+2026-05-17 11:00:58,076 INFO [django.server] "GET /static/faculty_portal/js/public_index.js HTTP/1.1" 200 476
+2026-05-17 11:00:58,086 INFO [django.server] "GET /media/imahe/techsupp.jpg HTTP/1.1" 200 1100794
+2026-05-17 11:01:06,058 INFO [django.server] "POST /faculty/login/ HTTP/1.1" 302 0
+2026-05-17 11:01:06,219 INFO [django.server] "GET /faculty/dashboard/ HTTP/1.1" 200 44883
+2026-05-17 11:01:12,151 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 46782
+2026-05-17 11:02:22,672 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 38541
+2026-05-17 11:02:53,034 INFO [django.server] "GET /faculty/reminders/ HTTP/1.1" 200 35907
+2026-05-17 11:02:57,163 INFO [django.server] "GET /faculty/notes/ HTTP/1.1" 200 34281
+2026-05-17 11:03:08,439 INFO [django.server] "GET /faculty/reminders/ HTTP/1.1" 200 35907
+2026-05-17 11:04:12,300 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 46782
+2026-05-17 11:05:20,255 INFO [django.server] "GET /faculty/my-courses/419/grading-template/ HTTP/1.1" 200 33036
+2026-05-17 11:05:27,065 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 38541
+2026-05-17 11:11:13,664 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 38541
+2026-05-17 11:11:16,234 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 46782
+2026-05-17 11:11:59,000 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 38541
+2026-05-17 11:15:09,824 INFO [django.server] "GET /faculty/my-courses/419/periods/20/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 86000
+2026-05-17 11:16:44,432 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 46782
+2026-05-17 11:16:50,146 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 39071

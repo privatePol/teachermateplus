@@ -18,6 +18,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Faculty Portal My Classes now groups accepted classes under an `Accepted Course Assignments` board, displays campus names in the accepted and pending assignment areas while retaining campus codes as supporting text, uses larger card/section header typography, and highlights missing grading-template warnings in a danger/red style.
+- Faculty Portal class period cards now render `What to do` and `Why set this` as compact badges without the previous light-green guidance container background, and place the yellow `Active Period` badge beside the period code.
 - Faculty/Admin grade explanation modals now show the period detailed computation as a responsive table with component, category, raw/status, total, computed score, and notes columns instead of nested text lines, using subtle row background colors for component/category/subcategory totals.
 - Enrollment import batch details now show the enrollment student-handling mode detected from each CSV tenant/campus pair, making tenant-scoped `STRICT_EXISTING` versus `AUTO_CREATE` mismatches visible beside row errors.
 - Admin Portal grading-template Testing Calculator now applies the matched active Tenant Grading Profile final-grade formula for the selected template, including weighted selected periods and the official rounded final grade; if no active profile matches, it clearly shows the active-period average fallback.
