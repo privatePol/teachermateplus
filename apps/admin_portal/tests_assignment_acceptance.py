@@ -347,6 +347,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             reverse("admin_portal:configurable_features_settings"),
             {
                 "enrollment_ownership_mode": "FACULTY_ALLOWED",
+                "enrollment_student_mode": "AUTO_CREATE",
                 "faculty_drp_allowed_through_period": "PREFINAL",
                 "login_lockout_max_attempts": 5,
                 "login_lockout_window_minutes": 15,
@@ -364,6 +365,10 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertEqual(
             SystemSettingService.get("ENROLLMENT_OWNERSHIP_MODE", tenant_id=self.tenant.id),
             "FACULTY_ALLOWED",
+        )
+        self.assertEqual(
+            SystemSettingService.get("ENROLLMENT_STUDENT_MODE", tenant_id=self.tenant.id),
+            "AUTO_CREATE",
         )
         self.assertEqual(
             SystemSettingService.get("FACULTY_DRP_ALLOWED_THROUGH_PERIOD", tenant_id=self.tenant.id),

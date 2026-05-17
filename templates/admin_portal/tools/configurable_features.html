@@ -138,6 +138,10 @@
   .feature-settings-form .settings-card:nth-of-type(9) .card-header { background: linear-gradient(135deg, #2c5e52, #6c9a8b) !important; }
   .feature-settings-form .settings-card:nth-of-type(10) .card-header { background: linear-gradient(135deg, #5d4e8c, #8e83c9) !important; }
   .feature-settings-form .settings-card:nth-of-type(11) .card-header { background: linear-gradient(135deg, #6a4b1f, #c78b42) !important; }
+  .feature-settings-form .settings-card:nth-of-type(12) .card-header { background: linear-gradient(135deg, #365f7c, #6aa5c8) !important; }
+  .feature-settings-form .settings-card:nth-of-type(13) .card-header { background: linear-gradient(135deg, #276a5b, #65b79f) !important; }
+  .feature-settings-form .settings-card:nth-of-type(14) .card-header { background: linear-gradient(135deg, #7a4e7d, #c083ba) !important; }
+  .feature-settings-form .settings-card:nth-of-type(15) .card-header { background: linear-gradient(135deg, #8a5a20, #d39a4a) !important; }
 
   .feature-settings-form .settings-card .card-header .text-muted,
   .feature-settings-form .settings-card .card-header .small {
@@ -795,6 +799,14 @@
         <div class="form-text">{{ form.enrollment_ownership_mode.help_text }}</div>
         {% endif %}
         {% for error in form.enrollment_ownership_mode.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.enrollment_student_mode.id_for_label }}">{{ form.enrollment_student_mode.label }}</label>
+        {{ form.enrollment_student_mode }}
+        {% if form.enrollment_student_mode.help_text %}
+        <div class="form-text">{{ form.enrollment_student_mode.help_text }}</div>
+        {% endif %}
+        {% for error in form.enrollment_student_mode.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
       <div class="mb-3">
         <label class="form-label" for="{{ form.faculty_drp_allowed_through_period.id_for_label }}">{{ form.faculty_drp_allowed_through_period.label }}</label>

@@ -697,7 +697,7 @@
               <tr>
                 <td>Optional Workflow Features</td>
                 <td><strong>Admin Portal -> Tools -> Configuration Management</strong></td>
-                <td>Turn optional features on/off such as official correction PDF, registrar auto-email, assignment-primary default behavior, class master list ownership mode and Faculty DRP cutoff for roster maintenance, grade prediction options, login security, periodic-grade visibility before submission, and the official-grade release restriction that can delay computed period grades and final grades until after deadline.</td>
+                <td>Turn optional features on/off such as official correction PDF, registrar auto-email, assignment-primary default behavior, class master list ownership mode, enrollment import student handling, Faculty DRP cutoff for roster maintenance, grade prediction options, login security, periodic-grade visibility before submission, and the official-grade release restriction that can delay computed period grades and final grades until after deadline.</td>
               </tr>
               <tr>
                 <td>Tenant Grading Formula</td>
@@ -758,6 +758,11 @@
                 <td>Load course masters in bulk using the required EduGradesPro template structure.</td>
               </tr>
               <tr>
+                <td>Students</td>
+                <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
+                <td>Create or update student master records before enrollment imports. Use row actions for create, update, or upsert, including yearly updates such as year level, program, status, and verified email.</td>
+              </tr>
+              <tr>
                 <td>Course Offerings</td>
                 <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
                 <td>Create the actual offered classes for a term by importing prepared offering rows.</td>
@@ -793,8 +798,14 @@
             Strict headers are required by design; custom formats are rejected.
           </div>
           <div class="guide-note">
+            Use the <strong>Students</strong> template before enrollment when student master data is missing or must be refreshed. Set <code>row_action</code> to <code>CREATE</code>, <code>UPDATE</code>, or <code>UPSERT</code>. UPDATE rows may leave stable identity fields blank when the student already exists, which is useful for yearly changes such as year level and program.
+          </div>
+          <div class="guide-note">
+            Enrollment imports use the tenant's <strong>Enrollment import student handling</strong> setting in <strong>Tools -> Configuration Management</strong>. Strict mode requires every <code>student_no</code> to already exist in the same tenant and campus. Auto-create mode may create missing students from the enrollment CSV student name columns after the class offering is resolved.
+          </div>
+          <div class="guide-note">
             Recommended import order:
-            sections and courses first,
+            sections, courses, and students first,
             then course offerings,
             then faculty assignments,
             and only after those are ready should enrollment imports be processed.

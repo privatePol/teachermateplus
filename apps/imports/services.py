@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
+from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.http import HttpResponse
@@ -100,6 +101,42 @@ class ImportTemplateService:
                 "R101",
                 "MWF 8:00-9:00",
                 "OPEN",
+            ],
+        },
+        ImportBatch.ImportType.STUDENTS: {
+            "headers": [
+                "row_action",
+                "tenant_code",
+                "campus_code",
+                "department_code",
+                "program_code",
+                "student_no",
+                "last_name",
+                "first_name",
+                "middle_name",
+                "official_email",
+                "official_email_verified",
+                "sex",
+                "year_level",
+                "status",
+                "is_active",
+            ],
+            "sample_row": [
+                "UPSERT",
+                "DEMO",
+                "MAIN",
+                "COLLEGE",
+                "BSIT",
+                "20250001",
+                "DELA CRUZ",
+                "JUAN",
+                "SANTOS",
+                "juan.delacruz@example.edu",
+                "FALSE",
+                "M",
+                "1",
+                "ACTIVE",
+                "TRUE",
             ],
         },
         ImportBatch.ImportType.FACULTY_ASSIGNMENTS: {
@@ -227,6 +264,22 @@ class ImportTemplateService:
                 "is_active: TRUE/FALSE",
             ],
         },
+        ImportBatch.ImportType.STUDENTS: {
+            "summary": "Creates or updates student master records before enrollment imports.",
+            "relationships": [
+                "tenant_code + campus_code + student_no identify the student record",
+                "department_code and program_code are used for student master scope; program_code is optional",
+                "Use row_action=UPDATE for yearly changes such as year_level, program_code, status, or verified email",
+            ],
+            "code_rules": [
+                "row_action: CREATE, UPDATE, or UPSERT",
+                "CREATE requires department_code, student_no, last_name, and first_name",
+                "UPDATE requires an existing student; blank optional fields keep their current values",
+                "UPSERT updates an existing student or creates a missing one when required identity fields are present",
+                "status: ACTIVE, INACTIVE, GRADUATED, DROPPED, or WITHDRAWN; blank keeps existing status on UPDATE and defaults to ACTIVE on CREATE",
+                "official_email_verified: TRUE/FALSE; blank keeps existing verification on UPDATE",
+            ],
+        },
     }
 
     @classmethod
@@ -266,6 +319,9 @@ class ImportTemplateService:
 
 class BulkImportService:
     AUTO_DEDUP_IMPORT_TYPES = {ImportBatch.ImportType.SECTIONS}
+    STUDENT_ROW_ACTION_CREATE = "CREATE"
+    STUDENT_ROW_ACTION_UPDATE = "UPDATE"
+    STUDENT_ROW_ACTION_UPSERT = "UPSERT"
     ENROLLMENT_STUDENT_MODE_KEY = "ENROLLMENT_STUDENT_MODE"
     ENROLLMENT_STUDENT_MODE_STRICT = "STRICT_EXISTING"
     ENROLLMENT_STUDENT_MODE_AUTO_CREATE = "AUTO_CREATE"
@@ -273,6 +329,7 @@ class BulkImportService:
     IMPORT_PERMISSION_MAP = {
         ImportBatch.ImportType.SECTIONS: "sections.import",
         ImportBatch.ImportType.COURSES: "courses.import",
+        ImportBatch.ImportType.STUDENTS: "students.import",
         ImportBatch.ImportType.COURSE_OFFERINGS: "course_offerings.import",
         ImportBatch.ImportType.FACULTY_ASSIGNMENTS: "faculty_assignments.import",
         ImportBatch.ImportType.ENROLLMENT: "enrollment.import",
@@ -289,6 +346,7 @@ class BulkImportService:
         return [
             ImportBatch.ImportType.SECTIONS,
             ImportBatch.ImportType.COURSES,
+            ImportBatch.ImportType.STUDENTS,
             ImportBatch.ImportType.COURSE_OFFERINGS,
             ImportBatch.ImportType.FACULTY_ASSIGNMENTS,
             ImportBatch.ImportType.ENROLLMENT,
@@ -324,6 +382,7 @@ class BulkImportService:
         mapping = {
             "sections": ImportBatch.ImportType.SECTIONS,
             "courses": ImportBatch.ImportType.COURSES,
+            "students": ImportBatch.ImportType.STUDENTS,
             "course-offerings": ImportBatch.ImportType.COURSE_OFFERINGS,
             "faculty-assignments": ImportBatch.ImportType.FACULTY_ASSIGNMENTS,
             "enrollment": ImportBatch.ImportType.ENROLLMENT,
@@ -335,6 +394,7 @@ class BulkImportService:
         mapping = {
             ImportBatch.ImportType.SECTIONS: "sections",
             ImportBatch.ImportType.COURSES: "courses",
+            ImportBatch.ImportType.STUDENTS: "students",
             ImportBatch.ImportType.COURSE_OFFERINGS: "course-offerings",
             ImportBatch.ImportType.FACULTY_ASSIGNMENTS: "faculty-assignments",
             ImportBatch.ImportType.ENROLLMENT: "enrollment",
@@ -965,6 +1025,146 @@ class BulkImportService:
         return normalized, errors, unique_key
 
     @classmethod
+    def _validate_student_row(cls, row: dict, runtime: dict):
+        errors = []
+        action = cls._normalize_value(row["row_action"]).upper().replace("-", "_").replace(" ", "_")
+        action_aliases = {
+            "ADD": cls.STUDENT_ROW_ACTION_CREATE,
+            "CREATE_ONLY": cls.STUDENT_ROW_ACTION_CREATE,
+            "EDIT": cls.STUDENT_ROW_ACTION_UPDATE,
+            "UPDATE_ONLY": cls.STUDENT_ROW_ACTION_UPDATE,
+            "UPDATE_OR_CREATE": cls.STUDENT_ROW_ACTION_UPSERT,
+            "CREATE_OR_UPDATE": cls.STUDENT_ROW_ACTION_UPSERT,
+        }
+        action = action_aliases.get(action, action)
+        allowed_actions = {
+            cls.STUDENT_ROW_ACTION_CREATE,
+            cls.STUDENT_ROW_ACTION_UPDATE,
+            cls.STUDENT_ROW_ACTION_UPSERT,
+        }
+        if action not in allowed_actions:
+            errors.append("row_action must be CREATE, UPDATE, or UPSERT.")
+
+        tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
+        campus = None
+        existing_student = None
+        student_no = cls._normalize_value(row["student_no"])
+        if tenant:
+            campus = cls._resolve_campus(row["campus_code"], tenant, runtime, errors, required=True)
+        if not student_no:
+            errors.append("student_no is required.")
+        if tenant and campus and student_no:
+            existing_student = (
+                Student.objects.select_related("department", "program")
+                .filter(
+                    tenant=tenant,
+                    campus=campus,
+                    student_no__iexact=student_no,
+                )
+                .first()
+            )
+            if action == cls.STUDENT_ROW_ACTION_CREATE and existing_student:
+                errors.append("student_no already exists for this tenant/campus. Use UPDATE or UPSERT.")
+            if action == cls.STUDENT_ROW_ACTION_UPDATE and not existing_student:
+                errors.append("student_no does not exist for this tenant/campus. Use CREATE or UPSERT.")
+
+        will_update = bool(existing_student and action in {cls.STUDENT_ROW_ACTION_UPDATE, cls.STUDENT_ROW_ACTION_UPSERT})
+        will_create = bool(not existing_student and action in {cls.STUDENT_ROW_ACTION_CREATE, cls.STUDENT_ROW_ACTION_UPSERT})
+
+        department = None
+        department_code = cls._normalize_value(row["department_code"])
+        if department_code:
+            if tenant and campus:
+                department = cls._resolve_department(department_code, tenant, campus, runtime, errors, required=False)
+        elif will_update and existing_student:
+            department = existing_student.department
+        elif will_create:
+            errors.append("department_code is required when creating a student.")
+
+        program = None
+        program_code = cls._normalize_value(row["program_code"])
+        if program_code:
+            if not department:
+                errors.append("program_code requires a resolved department_code or existing student department.")
+            elif tenant and campus:
+                program = cls._resolve_program(program_code, tenant, campus, department, runtime, errors, required=False)
+        elif will_update and existing_student:
+            if department and existing_student.department_id == department.id:
+                program = existing_student.program
+            else:
+                program = None
+
+        last_name_input = cls._normalize_value(row["last_name"])
+        first_name_input = cls._normalize_value(row["first_name"])
+        last_name = last_name_input or (existing_student.last_name if will_update and existing_student else "")
+        first_name = first_name_input or (existing_student.first_name if will_update and existing_student else "")
+        if will_create and not last_name:
+            errors.append("last_name is required when creating a student.")
+        if will_create and not first_name:
+            errors.append("first_name is required when creating a student.")
+
+        middle_name_input = cls._normalize_value(row["middle_name"])
+        official_email_input = cls._normalize_value(row["official_email"])
+        sex_input = cls._normalize_value(row["sex"])
+        year_level_input = cls._normalize_value(row["year_level"])
+
+        official_email = official_email_input
+        if not official_email and will_update and existing_student:
+            official_email = existing_student.official_email or ""
+        if official_email_input:
+            try:
+                validate_email(official_email_input)
+            except ValidationError:
+                errors.append("official_email is invalid.")
+
+        verified_input = cls._normalize_value(row["official_email_verified"])
+        official_email_verified = cls._parse_bool(
+            verified_input,
+            "official_email_verified",
+            errors,
+            default=None,
+        )
+        if official_email_verified is True and not official_email:
+            errors.append("official_email is required when official_email_verified is TRUE.")
+
+        raw_status = cls._normalize_value(row["status"]).upper()
+        status = raw_status or (existing_student.status if will_update and existing_student else Student.Status.ACTIVE)
+        allowed_statuses = {choice for choice, _ in Student.Status.choices}
+        if status not in allowed_statuses:
+            errors.append(f"status must be one of {sorted(allowed_statuses)}.")
+
+        is_active_input = cls._normalize_value(row["is_active"])
+        parsed_is_active = cls._parse_bool(is_active_input, "is_active", errors, default=None)
+        if parsed_is_active is None:
+            is_active = existing_student.is_active if will_update and existing_student else True
+        else:
+            is_active = parsed_is_active
+
+        normalized = {
+            "row_action": action,
+            "existing_student_id": existing_student.id if existing_student else None,
+            "tenant_id": tenant.id if tenant else None,
+            "campus_id": campus.id if campus else None,
+            "department_id": department.id if department else None,
+            "program_id": program.id if program else None,
+            "student_no": student_no,
+            "last_name": last_name,
+            "first_name": first_name,
+            "middle_name": middle_name_input or (
+                existing_student.middle_name if will_update and existing_student else None
+            ),
+            "official_email": official_email or None,
+            "official_email_input_provided": bool(official_email_input),
+            "official_email_verified": official_email_verified,
+            "sex": sex_input or (existing_student.sex if will_update and existing_student else None),
+            "year_level": year_level_input or (existing_student.year_level if will_update and existing_student else None),
+            "status": status,
+            "is_active": bool(is_active),
+        }
+        unique_key = f"{tenant.id}:{campus.id}:{student_no.upper()}" if tenant and campus and student_no else None
+        return normalized, errors, unique_key
+
+    @classmethod
     def _validate_course_offering_row(cls, row: dict, runtime: dict):
         errors = []
         tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
@@ -1271,6 +1471,8 @@ class BulkImportService:
             return cls._validate_section_row(row, runtime)
         if import_type == ImportBatch.ImportType.COURSES:
             return cls._validate_course_row(row, runtime)
+        if import_type == ImportBatch.ImportType.STUDENTS:
+            return cls._validate_student_row(row, runtime)
         if import_type == ImportBatch.ImportType.COURSE_OFFERINGS:
             return cls._validate_course_offering_row(row, runtime)
         if import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS:
@@ -1510,6 +1712,98 @@ class BulkImportService:
             is_active=bool(normalized.get("is_active", True)),
         )
         return "Course", row
+
+    @staticmethod
+    def _student_audit_snapshot(student: Student):
+        return {
+            "tenant_id": student.tenant_id,
+            "campus_id": student.campus_id,
+            "department_id": student.department_id,
+            "program_id": student.program_id,
+            "student_no": student.student_no,
+            "last_name": student.last_name,
+            "first_name": student.first_name,
+            "middle_name": student.middle_name,
+            "official_email": student.official_email,
+            "official_email_verified": bool(student.official_email_verified_at),
+            "sex": student.sex,
+            "year_level": student.year_level,
+            "status": student.status,
+            "is_active": student.is_active,
+        }
+
+    @classmethod
+    def _create_or_update_student(cls, normalized: dict):
+        existing_student_id = normalized.get("existing_student_id")
+        action = normalized.get("row_action") or cls.STUDENT_ROW_ACTION_CREATE
+        verified_value = normalized.get("official_email_verified")
+        now = timezone.now()
+
+        if existing_student_id:
+            student = Student.objects.get(id=existing_student_id)
+            before = cls._student_audit_snapshot(student)
+            old_email = student.official_email or ""
+            new_email = normalized.get("official_email")
+
+            student.department_id = normalized["department_id"]
+            student.program_id = normalized.get("program_id")
+            student.last_name = normalized["last_name"]
+            student.first_name = normalized["first_name"]
+            student.middle_name = normalized.get("middle_name")
+            student.official_email = new_email
+            if verified_value is True:
+                student.official_email_verified_at = student.official_email_verified_at or now
+            elif verified_value is False:
+                student.official_email_verified_at = None
+            elif normalized.get("official_email_input_provided") and old_email != (new_email or ""):
+                student.official_email_verified_at = None
+            student.sex = normalized.get("sex")
+            student.year_level = normalized.get("year_level")
+            student.status = normalized["status"]
+            student.is_active = bool(normalized.get("is_active", True))
+            student.save(
+                update_fields=[
+                    "department",
+                    "program",
+                    "last_name",
+                    "first_name",
+                    "middle_name",
+                    "official_email",
+                    "official_email_verified_at",
+                    "sex",
+                    "year_level",
+                    "status",
+                    "is_active",
+                    "updated_at",
+                ]
+            )
+            normalized["_audit_action"] = "UPDATE"
+            normalized["_audit_before"] = before
+            normalized["_audit_after"] = cls._student_audit_snapshot(student)
+            return "Student", student
+
+        if action == cls.STUDENT_ROW_ACTION_UPDATE:
+            raise ValidationError("student_no does not exist for this tenant/campus.")
+
+        row = Student.objects.create(
+            tenant_id=normalized["tenant_id"],
+            campus_id=normalized["campus_id"],
+            department_id=normalized["department_id"],
+            program_id=normalized.get("program_id"),
+            student_no=normalized["student_no"],
+            last_name=normalized["last_name"],
+            first_name=normalized["first_name"],
+            middle_name=normalized.get("middle_name"),
+            official_email=normalized.get("official_email"),
+            official_email_verified_at=now if verified_value is True else None,
+            sex=normalized.get("sex"),
+            year_level=normalized.get("year_level"),
+            status=normalized["status"],
+            is_active=bool(normalized.get("is_active", True)),
+        )
+        normalized["_audit_action"] = "CREATE"
+        normalized["_audit_after"] = cls._student_audit_snapshot(row)
+        return "Student", row
 
     @classmethod
     def _create_section(cls, normalized: dict):
@@ -1767,18 +2061,21 @@ class BulkImportService:
         tenant_id = getattr(entity_obj, "tenant_id", None) or normalized.get("tenant_id")
         campus_id = getattr(entity_obj, "campus_id", None) or normalized.get("campus_id")
         entity_id = getattr(entity_obj, "id", None)
+        normalized_for_audit = {key: value for key, value in normalized.items() if not str(key).startswith("_audit_")}
         AuditService.log_event(
-            action="CREATE",
+            action=normalized.get("_audit_action") or "CREATE",
             portal="ADMIN",
             entity_type=entity_type,
             entity_id=entity_id,
             actor=actor,
             tenant=tenant_id,
             campus=campus_id,
+            before_data=normalized.get("_audit_before"),
             after_data={
                 "import_type": batch.import_type,
                 "entity_id": entity_id,
-                "normalized": normalized,
+                "normalized": normalized_for_audit,
+                "result": normalized.get("_audit_after"),
             },
             metadata={
                 "source": "BULK_IMPORT_CONFIRM",
@@ -1795,6 +2092,8 @@ class BulkImportService:
             return cls._create_section(normalized)
         if import_type == ImportBatch.ImportType.COURSES:
             return cls._create_course(normalized)
+        if import_type == ImportBatch.ImportType.STUDENTS:
+            return cls._create_or_update_student(normalized)
         if import_type == ImportBatch.ImportType.COURSE_OFFERINGS:
             return cls._create_course_offering(normalized)
         if import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS:

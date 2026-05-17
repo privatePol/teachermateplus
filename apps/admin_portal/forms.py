@@ -22,6 +22,7 @@ from apps.academics.models import (
 )
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.services import EnrollmentService
+from apps.imports.services import BulkImportService
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
@@ -2480,6 +2481,15 @@ class ConfigurableFeatureSettingForm(forms.Form):
         ],
         help_text="Controls whether faculty may maintain the class master list for their own assigned classes or whether roster maintenance stays admin-only.",
     )
+    enrollment_student_mode = forms.ChoiceField(
+        required=False,
+        label="Enrollment import student handling",
+        choices=[
+            (BulkImportService.ENROLLMENT_STUDENT_MODE_STRICT, "Require existing students"),
+            (BulkImportService.ENROLLMENT_STUDENT_MODE_AUTO_CREATE, "Auto-create missing students"),
+        ],
+        help_text="Controls whether enrollment CSV uploads reject missing student_no values or create student records from the student name columns.",
+    )
     faculty_drp_allowed_through_period = forms.ChoiceField(
         required=False,
         label="Faculty DRP allowed through",
@@ -2803,6 +2813,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
             )
         if not cleaned.get("enrollment_ownership_mode"):
             cleaned["enrollment_ownership_mode"] = EnrollmentService.ADMIN_ONLY
+        if not cleaned.get("enrollment_student_mode"):
+            cleaned["enrollment_student_mode"] = BulkImportService.ENROLLMENT_STUDENT_MODE_STRICT
         if not cleaned.get("faculty_drp_allowed_through_period"):
             cleaned["faculty_drp_allowed_through_period"] = EnrollmentService.PERIOD_PREFINAL
         if not cleaned.get("class_master_list_override_mode"):

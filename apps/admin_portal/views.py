@@ -145,6 +145,7 @@ from apps.grading.services import (
     TemplateHotfixService,
 )
 from apps.imports.models import ImportBatch
+from apps.imports.services import BulkImportService
 from apps.navigation.models import MenuGroup, MenuItem, MenuItemPermission
 from apps.notifications.models import SubmissionNonComplianceNotice
 from apps.predictions.services import PredictionAuditService, PredictionSnapshotService
@@ -3425,6 +3426,7 @@ def configurable_features_settings_view(request):
         FeatureSettingsService.get_submission_non_compliance_hr_recipients(tenant_id=tenant_id)
     )
     current_enrollment_ownership_mode = EnrollmentService.get_enrollment_mode(tenant_id)
+    current_enrollment_student_mode = BulkImportService.get_enrollment_student_mode(tenant_id)
     current_faculty_drp_allowed_through_period = EnrollmentService.get_faculty_drp_allowed_through_period(tenant_id)
     current_enrollment_override_map = EnrollmentService.get_enrollment_mode_overrides(tenant_id)
     selected_override_modes = {
@@ -3598,6 +3600,7 @@ def configurable_features_settings_view(request):
                 "minimum_student_count_for_flag"
             ],
             "enrollment_ownership_mode": current_enrollment_ownership_mode,
+            "enrollment_student_mode": current_enrollment_student_mode,
             "faculty_drp_allowed_through_period": current_faculty_drp_allowed_through_period,
             "class_master_list_term": selected_term.id if selected_term else None,
             "class_master_list_faculty": selected_faculty.id if selected_faculty else None,
@@ -3894,6 +3897,13 @@ def configurable_features_settings_view(request):
             is_active=True,
         )
         SystemSettingService.set(
+            BulkImportService.ENROLLMENT_STUDENT_MODE_KEY,
+            str(form.cleaned_data["enrollment_student_mode"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
+        SystemSettingService.set(
             EnrollmentService.FACULTY_DRP_ALLOWED_THROUGH_PERIOD_KEY,
             str(form.cleaned_data["faculty_drp_allowed_through_period"]),
             tenant_id=tenant_id,
@@ -4094,6 +4104,7 @@ def configurable_features_settings_view(request):
                 "submission_non_compliance_hr_recipients": current_submission_non_compliance_hr_recipients,
                 "grade_distribution_settings": current_grade_distribution_audit_settings,
                 "enrollment_ownership_mode": current_enrollment_ownership_mode,
+                "enrollment_student_mode": current_enrollment_student_mode,
                 "faculty_drp_allowed_through_period": current_faculty_drp_allowed_through_period,
                 "enrollment_ownership_mode_by_offering": current_enrollment_override_map,
                 "login_lockout_enabled": current_login_lockout_enabled,
@@ -4182,6 +4193,7 @@ def configurable_features_settings_view(request):
                     ),
                 },
                 "enrollment_ownership_mode": str(form.cleaned_data["enrollment_ownership_mode"]),
+                "enrollment_student_mode": str(form.cleaned_data["enrollment_student_mode"]),
                 "faculty_drp_allowed_through_period": str(form.cleaned_data["faculty_drp_allowed_through_period"]),
                 "enrollment_ownership_mode_by_offering": updated_enrollment_override_map,
                 "selected_class_master_list_term": selected_class_override_term.code if selected_class_override_term else None,
@@ -4254,6 +4266,7 @@ def configurable_features_settings_view(request):
                     GradeDistributionMonitorService.SETTING_KEYS["low_variation_threshold"],
                     GradeDistributionMonitorService.SETTING_KEYS["minimum_student_count_for_flag"],
                     EnrollmentService.MODE_KEY,
+                    BulkImportService.ENROLLMENT_STUDENT_MODE_KEY,
                     EnrollmentService.FACULTY_DRP_ALLOWED_THROUGH_PERIOD_KEY,
                     EnrollmentService.MODE_OVERRIDE_MAP_KEY,
                     FeatureSettingsService.LOGIN_LOCKOUT_ENABLED_KEY,

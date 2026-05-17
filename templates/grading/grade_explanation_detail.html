@@ -103,36 +103,130 @@
   <details class="border rounded-3 p-3 mb-3">
     <summary class="fw-semibold">Show Detailed Computation</summary>
     <div class="mt-3">
-      {% for component in explanation.component_breakdown %}
-      <div class="mb-3">
-        <div class="fw-semibold">{{ component.name }} · {{ component.weight }}%</div>
-        {% if component.subcomponents %}
-          {% for sub in component.subcomponents %}
-          <div class="ms-3 mt-2">
-            <div class="small"><strong>{{ sub.name }}</strong> · {{ sub.weight }}% · score {{ sub.score|default:"-" }}{% if sub.is_attendance_component %} · attendance{% endif %}</div>
-            {% if sub.details %}
-              {% for detail in sub.details %}
-              <div class="ms-3 small text-muted">{{ detail.name }} · {{ detail.weight }}% · score {{ detail.score|default:"-" }}</div>
-              {% for activity in detail.activities %}
-              <div class="ms-4 small">{{ activity.title }}: {{ activity.raw_score|default:"-" }}/{{ activity.total_score }} = {{ activity.computed_score|default:"-" }}{% if activity.missing %} <span class="badge text-bg-light">missing</span>{% endif %}</div>
+      <div class="table-responsive">
+        <style>
+          .grade-explain .computation-table .component-total > * {
+            background-color: #eef0f2;
+          }
+
+          .grade-explain .computation-table .category-total.category-soft-yellow > * {
+            background-color: #fff7bf;
+          }
+
+          .grade-explain .computation-table .category-total.category-soft-green > * {
+            background-color: #dff6d6;
+          }
+
+          .grade-explain .computation-table .subcategory-total > * {
+            background-color: #d8f1fb;
+          }
+        </style>
+        <table class="table table-sm table-bordered align-middle mb-0 computation-table">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">Component</th>
+              <th scope="col">Category</th>
+              <th scope="col">Item</th>
+              <th scope="col" class="text-end">Weight</th>
+              <th scope="col" class="text-end">Raw / Status</th>
+              <th scope="col" class="text-end">Total</th>
+              <th scope="col" class="text-end">Computed</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for component in explanation.component_breakdown %}
+            <tr class="component-total">
+              <th scope="row">{{ component.name }}</th>
+              <td>Component</td>
+              <td>Overall {{ component.name }}</td>
+              <td class="text-end">{{ component.weight }}%</td>
+              <td class="text-end">-</td>
+              <td class="text-end">-</td>
+              <td class="text-end">{{ component.score|default:"-" }}</td>
+              <td>Weighted contribution: {{ component.weighted_contribution|floatformat:4 }}</td>
+            </tr>
+            {% if component.subcomponents %}
+              {% for sub in component.subcomponents %}
+              <tr class="category-total {% cycle 'category-soft-yellow' 'category-soft-green' %}">
+                <td>{{ component.name }}</td>
+                <td><strong>{{ sub.name }}</strong></td>
+                <td>Category average</td>
+                <td class="text-end">{{ sub.weight }}%</td>
+                <td class="text-end">-</td>
+                <td class="text-end">-</td>
+                <td class="text-end">{{ sub.score|default:"-" }}</td>
+                <td>{% if sub.is_attendance_component %}Attendance component{% else %}-{% endif %}</td>
+              </tr>
+              {% if sub.details %}
+                {% for detail in sub.details %}
+                <tr class="subcategory-total">
+                  <td>{{ component.name }}</td>
+                  <td>{{ sub.name }}</td>
+                  <td><strong>{{ detail.name }}</strong></td>
+                  <td class="text-end">{{ detail.weight }}%</td>
+                  <td class="text-end">-</td>
+                  <td class="text-end">-</td>
+                  <td class="text-end">{{ detail.score|default:"-" }}</td>
+                  <td>Subcategory average</td>
+                </tr>
+                {% for activity in detail.activities %}
+                <tr>
+                  <td>{{ component.name }}</td>
+                  <td>{{ detail.name }}</td>
+                  <td>{{ activity.title }}</td>
+                  <td class="text-end">-</td>
+                  <td class="text-end">{{ activity.raw_score|default:"-" }}</td>
+                  <td class="text-end">{{ activity.total_score }}</td>
+                  <td class="text-end">{{ activity.computed_score|default:"-" }}</td>
+                  <td>{% if activity.missing %}<span class="badge text-bg-light">missing</span>{% else %}-{% endif %}</td>
+                </tr>
+                {% endfor %}
+                {% endfor %}
+              {% endif %}
+              {% for activity in sub.activities %}
+              <tr>
+                <td>{{ component.name }}</td>
+                <td>{{ sub.name }}</td>
+                <td>{{ activity.title }}</td>
+                <td class="text-end">-</td>
+                <td class="text-end">{{ activity.raw_score|default:"-" }}</td>
+                <td class="text-end">{{ activity.total_score }}</td>
+                <td class="text-end">{{ activity.computed_score|default:"-" }}</td>
+                <td>{% if activity.missing %}<span class="badge text-bg-light">missing</span>{% else %}-{% endif %}</td>
+              </tr>
+              {% endfor %}
+              {% for attendance in sub.attendance_records %}
+              <tr>
+                <td>{{ component.name }}</td>
+                <td>{{ sub.name }}</td>
+                <td>{{ attendance.title }}</td>
+                <td class="text-end">-</td>
+                <td class="text-end">{{ attendance.status_label }}</td>
+                <td class="text-end">-</td>
+                <td class="text-end">{{ attendance.mapped_score|default:"-" }}</td>
+                <td>{% if attendance.missing %}<span class="badge text-bg-light">missing</span>{% else %}Attendance mapping{% endif %}</td>
+              </tr>
               {% endfor %}
               {% endfor %}
             {% endif %}
-            {% for activity in sub.activities %}
-            <div class="ms-3 small">{{ activity.title }}: {{ activity.raw_score|default:"-" }}/{{ activity.total_score }} = {{ activity.computed_score|default:"-" }}{% if activity.missing %} <span class="badge text-bg-light">missing</span>{% endif %}</div>
+            {% for activity in component.activities %}
+            <tr>
+              <td>{{ component.name }}</td>
+              <td>Direct activity</td>
+              <td>{{ activity.title }}</td>
+              <td class="text-end">-</td>
+              <td class="text-end">{{ activity.raw_score|default:"-" }}</td>
+              <td class="text-end">{{ activity.total_score }}</td>
+              <td class="text-end">{{ activity.computed_score|default:"-" }}</td>
+              <td>{% if activity.missing %}<span class="badge text-bg-light">missing</span>{% else %}-{% endif %}</td>
+            </tr>
             {% endfor %}
-            {% for attendance in sub.attendance_records %}
-            <div class="ms-3 small">{{ attendance.title }}: {{ attendance.status_label }} = {{ attendance.mapped_score|default:"-" }}{% if attendance.missing %} <span class="badge text-bg-light">missing</span>{% endif %}</div>
             {% endfor %}
-          </div>
-          {% endfor %}
-        {% endif %}
-        {% for activity in component.activities %}
-        <div class="ms-3 small">{{ activity.title }}: {{ activity.raw_score|default:"-" }}/{{ activity.total_score }} = {{ activity.computed_score|default:"-" }}{% if activity.missing %} <span class="badge text-bg-light">missing</span>{% endif %}</div>
-        {% endfor %}
+          </tbody>
+        </table>
       </div>
-      {% endfor %}
-      <div class="small text-muted">Attendance mapping: Present = 100, Excused = 100, Late = 90, Absent = 0.</div>
+      <div class="small text-muted mt-2">Attendance mapping: Present = 100, Excused = 100, Late = 90, Absent = 0.</div>
     </div>
   </details>
   {% endif %}

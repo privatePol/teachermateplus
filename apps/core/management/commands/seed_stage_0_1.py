@@ -73,6 +73,7 @@ class Command(BaseCommand):
         ("students.read", "students", "read"),
         ("students.create", "students", "create"),
         ("students.update", "students", "update"),
+        ("students.import", "students", "import"),
         ("enrollment.read", "enrollment", "read"),
         ("enrollment.create", "enrollment", "create"),
         ("enrollment.update", "enrollment", "update"),

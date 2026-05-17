@@ -8,6 +8,7 @@ class ImportBatch(TimeStampedModel):
     class ImportType(models.TextChoices):
         SECTIONS = "sections", "Sections"
         COURSES = "courses", "Courses"
+        STUDENTS = "students", "Students"
         COURSE_OFFERINGS = "course_offerings", "Course Offerings"
         FACULTY_ASSIGNMENTS = "faculty_assignments", "Faculty Assignments"
         ENROLLMENT = "enrollment", "Enrollment"
