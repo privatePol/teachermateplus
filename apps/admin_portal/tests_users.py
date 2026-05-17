@@ -4,6 +4,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.auditlog.models import AuditLog
 from apps.rbac.models import Permission, Role
 from apps.admin_portal.forms import UserCreateForm, UserRoleAssignmentForm, UserUpdateForm
 from apps.tenants.models import Campus, Department, Tenant
@@ -66,6 +67,47 @@ class UserListTests(TestCase):
         self.assertIn("active_nonstaff_user", content)
         self.assertNotIn("active_staff_user", content)
         self.assertNotIn("inactive_staff_user", content)
+
+    def test_user_list_shows_and_resets_privacy_consent(self):
+        user = User.objects.create_user(
+            username="privacy_user",
+            email="privacy_user@example.com",
+            password="testpass123",
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+            privacy_consent_ip="127.0.0.1",
+        )
+
+        response = self.client.get(reverse("admin_portal:user_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Privacy Consent")
+        self.assertContains(response, "Acknowledged")
+        self.assertContains(response, reverse("admin_portal:user_privacy_consent_reset", args=[user.id]))
+
+        response = self.client.get(reverse("admin_portal:user_privacy_consent_reset", args=[user.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "RESET PRIVACY CONSENT")
+
+        response = self.client.post(
+            reverse("admin_portal:user_privacy_consent_reset", args=[user.id]),
+            {"confirmation_phrase": "RESET PRIVACY CONSENT"},
+            HTTP_REFERER=reverse("admin_portal:user_list"),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        user.refresh_from_db()
+        self.assertIsNone(user.privacy_consent_at)
+        self.assertIsNone(user.privacy_consent_version)
+        self.assertIsNone(user.privacy_consent_ip)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="PRIVACY_CONSENT_RESET",
+                entity_type="User",
+                entity_id=str(user.id),
+            ).exists()
+        )
 
     def test_user_role_department_dropdown_filters_by_selected_campus(self):
         tenant = Tenant.objects.create(code="NCBA", name="NCBA")

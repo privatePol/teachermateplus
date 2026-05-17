@@ -578,6 +578,22 @@ class UserChangePasswordForm(forms.Form):
         return cleaned
 
 
+class UserPrivacyConsentResetForm(forms.Form):
+    confirmation_phrase = forms.CharField(
+        label="Typed confirmation",
+        help_text="Type RESET PRIVACY CONSENT exactly to show the consent page again for this user.",
+        widget=forms.TextInput(attrs={"autocomplete": "off"}),
+    )
+
+    CONFIRMATION_PHRASE = "RESET PRIVACY CONSENT"
+
+    def clean_confirmation_phrase(self):
+        value = (self.cleaned_data.get("confirmation_phrase") or "").strip()
+        if value != self.CONFIRMATION_PHRASE:
+            raise forms.ValidationError(f"Type {self.CONFIRMATION_PHRASE} exactly to confirm.")
+        return value
+
+
 class FacultyDeactivationScheduleForm(forms.Form):
     user = forms.ModelChoiceField(
         queryset=User.objects.none(),

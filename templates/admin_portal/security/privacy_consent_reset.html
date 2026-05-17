@@ -1,0 +1,44 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Show Privacy Consent Again</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:user_list' %}">Back to Users</a>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-4">
+    <p class="mb-2">
+      This action clears the recorded privacy-consent acknowledgment for the selected active user.
+      The user will be required to review and accept the consent page again at next portal access.
+    </p>
+    <div class="alert alert-warning small">
+      Use this only for onboarding demonstrations, consent version retesting, or authorized account support.
+      This does not use the user's name, username, email, or other personal information as the confirmation phrase.
+    </div>
+    <dl class="row small mb-4">
+      <dt class="col-sm-3">Current Version</dt>
+      <dd class="col-sm-9">{{ current_consent.privacy_consent_version|default:"-" }}</dd>
+      <dt class="col-sm-3">Accepted At</dt>
+      <dd class="col-sm-9">{{ current_consent.privacy_consent_at|date:"Y-m-d H:i"|default:"-" }}</dd>
+      <dt class="col-sm-3">Recorded IP</dt>
+      <dd class="col-sm-9">{{ current_consent.privacy_consent_ip|default:"-" }}</dd>
+    </dl>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.confirmation_phrase.id_for_label }}">{{ form.confirmation_phrase.label }}</label>
+        {{ form.confirmation_phrase }}
+        {% if form.confirmation_phrase.help_text %}
+        <div class="form-text">{{ form.confirmation_phrase.help_text }}</div>
+        {% endif %}
+        <div>{{ form.confirmation_phrase.errors }}</div>
+      </div>
+      <button class="btn btn-danger" type="submit">Reset Privacy Consent</button>
+      <a class="btn btn-outline-secondary" href="{% url 'admin_portal:user_list' %}">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

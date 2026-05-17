@@ -14,6 +14,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Student Portal attendance stage: added read-only `/student/attendance/` with tenant/campus/student-scoped attendance counts and optional session-level details controlled by `FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED`.
 - Configuration Management now exposes tenant-level enrollment import student handling, allowing admins to keep strict existing-student validation or enable auto-creation of missing students from enrollment CSV name columns.
 - Bulk Imports now includes a Student master import with `CREATE`, `UPDATE`, and `UPSERT` row actions, supporting yearly student maintenance such as year level, program, status, activation, and verified email changes before strict enrollment imports run.
+- Admin Portal Users active records now include a Privacy Consent status column and an audited action to reset one user's consent so the consent screen appears again at next portal access.
+- Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
 - Faculty/Admin grade explanation modals now show the period detailed computation as a responsive table with component, category, raw/status, total, computed score, and notes columns instead of nested text lines, using subtle row background colors for component/category/subcategory totals.

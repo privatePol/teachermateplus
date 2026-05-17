@@ -23,6 +23,10 @@
     stroke-linejoin: round;
     stroke-width: 2;
   }
+  .user-action-form {
+    display: inline-flex;
+    margin: 0;
+  }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -72,9 +76,9 @@
   </div>
 </form>
 
-{% include "admin_portal/security/user_table.html" with title="Active Records" users=active_users empty_text="No active users found." show_inactive_tools=False %}
+{% include "admin_portal/security/user_table.html" with title="Active Records" users=active_users empty_text="No active users found." show_inactive_tools=False show_privacy_tools=True %}
 
-{% include "admin_portal/security/user_table.html" with title="Inactive Records" users=inactive_users empty_text="No inactive users found." show_inactive_tools=True %}
+{% include "admin_portal/security/user_table.html" with title="Inactive Records" users=inactive_users empty_text="No inactive users found." show_inactive_tools=True show_privacy_tools=False %}
 
 {% endblock %}
 

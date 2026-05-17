@@ -13,6 +13,7 @@
           <th>Default Department</th>
           <th>Staff</th>
           <th>Status</th>
+          {% if show_privacy_tools %}<th>Privacy Consent</th>{% endif %}
           {% if show_inactive_tools %}<th>Used In</th>{% endif %}
           <th></th>
         </tr>
@@ -26,6 +27,20 @@
           <td>{{ row.default_department.code|default:"-" }}</td>
           <td>{% if row.is_staff %}<span class="badge text-bg-primary">Staff</span>{% else %}<span class="badge text-bg-light text-dark">Non-staff</span>{% endif %}</td>
           <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
+          {% if show_privacy_tools %}
+          <td>
+            {% if row.privacy_consent_at and row.privacy_consent_version == privacy_consent_version %}
+            <span class="badge text-bg-success">Acknowledged</span>
+            <div class="small text-muted">{{ row.privacy_consent_version }} · {{ row.privacy_consent_at|date:"Y-m-d H:i" }}</div>
+            {% elif row.privacy_consent_at %}
+            <span class="badge text-bg-warning text-dark">Old Version</span>
+            <div class="small text-muted">{{ row.privacy_consent_version|default:"-" }} · {{ row.privacy_consent_at|date:"Y-m-d H:i" }}</div>
+            {% else %}
+            <span class="badge text-bg-secondary">Pending</span>
+            <div class="small text-muted">Will display at next portal access</div>
+            {% endif %}
+          </td>
+          {% endif %}
           {% if show_inactive_tools %}<td>{% include "admin_portal/shared/inactive_usage_cell.html" %}</td>{% endif %}
           <td class="text-end">
             <div class="user-action-group" aria-label="User actions">
@@ -56,6 +71,21 @@
                 <path d="m19 4.5 2.5 2.5"></path>
               </svg>
             </a>
+            {% if show_privacy_tools %}
+            <a
+              class="btn btn-sm btn-outline-success user-action-btn"
+              href="{% url 'admin_portal:user_privacy_consent_reset' row.id %}"
+              aria-label="Show privacy consent again for {{ row.username }}"
+              data-bs-toggle="tooltip"
+              data-bs-title="Show privacy consent again"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path>
+                <path d="M14 2v6h6"></path>
+                <path d="m9 15 2 2 4-5"></path>
+              </svg>
+            </a>
+            {% endif %}
             {% endif %}
             {% if "roles.update" in effective_permissions %}
             <a
@@ -80,7 +110,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="{% if show_inactive_tools %}8{% else %}7{% endif %}" class="text-center text-muted py-4">{{ empty_text }}</td></tr>
+        <tr><td colspan="{% if show_inactive_tools %}8{% elif show_privacy_tools %}8{% else %}7{% endif %}" class="text-center text-muted py-4">{{ empty_text }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

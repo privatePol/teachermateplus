@@ -144,6 +144,7 @@ from .views import (
     user_create_view,
     user_change_password_view,
     user_list_view,
+    user_privacy_consent_reset_view,
     user_roles_view,
     user_update_view,
 )
@@ -211,6 +212,11 @@ urlpatterns = [
         "admin-portal/security/users/<int:user_id>/change-password/",
         user_change_password_view,
         name="user_change_password",
+    ),
+    path(
+        "admin-portal/security/users/<int:user_id>/privacy-consent/reset/",
+        user_privacy_consent_reset_view,
+        name="user_privacy_consent_reset",
     ),
     path("admin-portal/security/users/<int:user_id>/roles/", user_roles_view, name="user_roles"),
     path("admin-portal/security/roles/", role_list_view, name="role_list"),

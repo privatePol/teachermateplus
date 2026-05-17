@@ -45,6 +45,14 @@
         </label>
         <div>{{ form.consent.errors }}</div>
       </div>
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.confirmation_phrase.id_for_label }}">{{ form.confirmation_phrase.label }}</label>
+        {{ form.confirmation_phrase }}
+        {% if form.confirmation_phrase.help_text %}
+        <div class="form-text">{{ form.confirmation_phrase.help_text }}</div>
+        {% endif %}
+        <div>{{ form.confirmation_phrase.errors }}</div>
+      </div>
       <button class="btn btn-success" type="submit">Accept and Continue</button>
       <a class="btn btn-outline-secondary" href="{% url 'accounts:admin_logout' %}">Logout</a>
     </form>

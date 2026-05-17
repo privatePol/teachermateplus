@@ -53,7 +53,7 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - User role management separates active `Current Assignments` from `Inactive Assignments` so scoped roles that no longer grant access are easier to distinguish.
 - User role assignment uses a campus-dependent Department dropdown; select the campus first so only that campus's departments are assignable.
 - The Admin Roles list uses icon-based row actions with tooltips for editing roles and managing permissions.
-- The Admin Users list separates active and inactive accounts, keeps the table focused on username, email, default campus, default department, staff flag, status, and icon-based row actions with tooltips, and supports filtering by `is_staff`. User create/edit forms make Default Department campus-dependent through the selected Default Campus.
+- The Admin Users list separates active and inactive accounts, keeps the table focused on username, email, default campus, default department, staff flag, status, privacy consent status, and icon-based row actions with tooltips, and supports filtering by `is_staff`. Active user rows include an audited privacy-consent reset action that clears that user's consent acknowledgment so the consent page appears again at next portal access. User create/edit forms make Default Department campus-dependent through the selected Default Campus.
 - The Admin User create page uses a live Default Campus -> Default Department dependent dropdown, so duplicate-looking department codes from other campuses are not shown after a campus is selected.
 - Role assignment scope now supports department-level granularity (`tenant + campus + department`) for governance use cases such as AC/Dean monitoring boundaries.
 - Admin Portal campus scope is driven by active non-faculty admin roles when such roles exist; faculty-only role assignments do not grant Admin Portal governance visibility for another campus.
@@ -345,7 +345,7 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - correction request
 - Gradebook print view
 - Faculty guide/help center page
-- Faculty privacy-consent page now uses the revised shared `EduGradesPro Privacy Consent` statement for system data-processing acknowledgment.
+- Faculty privacy-consent page now uses the revised shared `EduGradesPro Privacy Consent` statement for system data-processing acknowledgment, and Admin/Faculty consent screens require the non-personal typed confirmation phrase `I CONSENT` in addition to the consent checkbox before acceptance is recorded.
 - Faculty guide/help center now uses section-specific `media/portal-img` visuals for workflow, activities/encoding, and submission guidance.
 - Workflow visual in faculty guide is embedded directly inside the "Recommended Daily Faculty Workflow" step container for clearer instructional flow.
 - Score correction request filing now supports:

@@ -78,6 +78,7 @@ from apps.admin_portal.forms import (
     TermForm,
     UserCreateForm,
     UserChangePasswordForm,
+    UserPrivacyConsentResetForm,
     UserRoleAssignmentForm,
     UserUpdateForm,
 )
@@ -5272,6 +5273,7 @@ def user_list_view(request):
         "tenant_filter": tenant_filter,
         "campus_filter": campus_filter,
         "staff_filter": staff_filter,
+        "privacy_consent_version": getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/security/user_list.html", context)
@@ -5568,6 +5570,65 @@ def user_update_view(request, user_id: int):
     context = {"form": form, "title": f"Edit User: {user.username}"}
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("users.update")
+def user_privacy_consent_reset_view(request, user_id: int):
+    user = get_object_or_404(_scoped_users_queryset(request), id=user_id, is_active=True)
+    form = UserPrivacyConsentResetForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        before = {
+            "privacy_consent_version": user.privacy_consent_version,
+            "privacy_consent_at": user.privacy_consent_at.isoformat() if user.privacy_consent_at else None,
+            "privacy_consent_ip": user.privacy_consent_ip,
+        }
+        if not user.privacy_consent_at and not user.privacy_consent_version and not user.privacy_consent_ip:
+            messages.info(request, f"{user.username} is already pending privacy consent.")
+            return _redirect_back_or_default(request, "admin_portal:user_list")
+        user.privacy_consent_at = None
+        user.privacy_consent_version = None
+        user.privacy_consent_ip = None
+        user.save(update_fields=["privacy_consent_at", "privacy_consent_version", "privacy_consent_ip", "updated_at"])
+        AuditService.log_event(
+            action="PRIVACY_CONSENT_RESET",
+            portal="ADMIN",
+            entity_type="User",
+            entity_id=user.id,
+            actor=request.user,
+            tenant=user.default_tenant_id,
+            campus=user.default_campus_id,
+            before_data=before,
+            after_data={
+                "privacy_consent_version": None,
+                "privacy_consent_at": None,
+                "privacy_consent_ip": None,
+            },
+            metadata={
+                "username": user.username,
+                "required_version": getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+                "confirmation_phrase": UserPrivacyConsentResetForm.CONFIRMATION_PHRASE,
+            },
+            request=request,
+        )
+        messages.success(request, f"Privacy consent reset for {user.username}. The user will see the consent page at next portal access.")
+        return _redirect_back_or_default(request, "admin_portal:user_list")
+
+    before = {
+        "privacy_consent_version": user.privacy_consent_version,
+        "privacy_consent_at": user.privacy_consent_at,
+        "privacy_consent_ip": user.privacy_consent_ip,
+    }
+    return render(
+        request,
+        "admin_portal/security/privacy_consent_reset.html",
+        {
+            "form": form,
+            "target_user": user,
+            "current_consent": before,
+            "confirmation_phrase": UserPrivacyConsentResetForm.CONFIRMATION_PHRASE,
+        },
+    )
 
 
 @portal_required("ADMIN")

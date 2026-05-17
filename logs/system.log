@@ -1067,3 +1067,23 @@
 2026-05-17 09:25:52,088 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-17 09:26:24,632 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\import_views.py changed, reloading.
 2026-05-17 09:26:25,355 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-17 10:31:11,124 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-17 10:31:11,872 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-17 10:31:20,969 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\urls.py changed, reloading.
+2026-05-17 10:31:21,682 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-17 10:31:28,449 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-17 10:31:29,133 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-17 10:34:50,083 INFO [django.server] "GET /admin-portal/security/users/ HTTP/1.1" 302 0
+2026-05-17 10:34:50,096 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 3801
+2026-05-17 10:34:50,212 INFO [django.server] "GET /media/logos/edugradepro_logo.png HTTP/1.1" 200 2211507
+2026-05-17 10:34:50,235 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 71332
+2026-05-17 10:34:52,600 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\forms.py changed, reloading.
+2026-05-17 10:34:53,342 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-17 10:34:57,800 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
+2026-05-17 10:34:58,032 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 61662
+2026-05-17 10:34:58,181 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 71332
+2026-05-17 10:35:02,651 INFO [django.server] "GET /admin-portal/security/users/ HTTP/1.1" 200 89671
+2026-05-17 10:35:16,834 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-17 10:35:17,564 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-17 10:38:07,801 INFO [django.utils.autoreload] D:\edugradespro\apps\accounts\forms.py changed, reloading.
+2026-05-17 10:38:08,606 INFO [django.utils.autoreload] Watching for file changes with StatReloader

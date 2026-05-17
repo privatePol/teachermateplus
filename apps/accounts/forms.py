@@ -200,14 +200,32 @@ class AdminSelfChangePasswordForm(PasswordChangeForm):
 
 
 class PrivacyConsentForm(forms.Form):
+    CONFIRMATION_PHRASE = "I CONSENT"
+
     consent = forms.BooleanField(
         required=True,
         label="I have read and agree to the EduGradesPro Privacy Consent.",
+    )
+    confirmation_phrase = forms.CharField(
+        required=True,
+        label='Type "I CONSENT" to confirm.',
+        help_text="Use the exact phrase shown. Do not type your name or other personal information.",
     )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["consent"].widget.attrs.update({"class": "form-check-input"})
+        self.fields["confirmation_phrase"].widget.attrs.update({
+            "class": "form-control",
+            "autocomplete": "off",
+            "placeholder": self.CONFIRMATION_PHRASE,
+        })
+
+    def clean_confirmation_phrase(self):
+        value = (self.cleaned_data.get("confirmation_phrase") or "").strip()
+        if value != self.CONFIRMATION_PHRASE:
+            raise forms.ValidationError(f'Type "{self.CONFIRMATION_PHRASE}" exactly to continue.')
+        return value
 
 
 class UserSignatureUploadForm(forms.Form):
