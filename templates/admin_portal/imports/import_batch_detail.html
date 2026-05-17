@@ -101,6 +101,57 @@
 </div>
 {% endif %}
 
+{% if enrollment_student_mode_references %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="small fw-semibold text-uppercase text-muted mb-2">Detected Enrollment Student Handling</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-2">
+        <thead>
+        <tr>
+          <th>CSV Tenant</th>
+          <th>CSV Campus</th>
+          <th>Mode Used for Validation</th>
+          <th>Note</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for item in enrollment_student_mode_references %}
+        <tr>
+          <td><code>{{ item.tenant_code }}</code></td>
+          <td>{% if item.campus_code %}<code>{{ item.campus_code }}</code>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+          <td>
+            {% if item.student_mode == "AUTO_CREATE" %}
+            <span class="badge text-bg-success">AUTO_CREATE</span>
+            {% elif item.student_mode %}
+            <span class="badge text-bg-warning">STRICT_EXISTING</span>
+            {% else %}
+            <span class="badge text-bg-secondary">Unknown</span>
+            {% endif %}
+          </td>
+          <td class="small text-muted">
+            {% if not item.tenant_found %}
+            Tenant code was not found, so this row cannot use tenant settings yet.
+            {% elif item.campus_code and not item.campus_found %}
+            Campus code was not found under this tenant.
+            {% elif item.student_mode == "AUTO_CREATE" %}
+            Missing students can be created from this enrollment CSV when required student name fields are present.
+            {% else %}
+            Missing students must exist first, or switch this CSV tenant to Auto-create missing students in Configuration Management.
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="small text-muted">
+      This setting is read from the tenant code inside the CSV row, which may differ from the active tenant selected in the Admin Portal topbar.
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% if import_guide %}
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body">

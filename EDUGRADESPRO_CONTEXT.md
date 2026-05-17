@@ -108,6 +108,7 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - Faculty reminder and memo class selectors default to accepted classes in the current active academic scope so old-term classes do not appear in day-to-day faculty planning dropdowns.
 - Enrollment management
 - Enrollment updates enforce the same tenant/campus match between student and offering as enrollment creation, preventing cross-campus or cross-tenant class-list rows.
+- Enrollment import batch details show the student-handling mode resolved from each CSV tenant/campus pair, so admins can see when the active Admin Portal topbar tenant differs from the tenant code inside the CSV rows.
 - `Tools -> Configuration Management` now includes a more guided `Class Master List Ownership` area:
   - enrollment CSV student handling is tenant-configurable; strict mode rejects missing students, while auto-create mode creates missing student records from `student_no`, name, sex, and year-level columns after the target offering resolves
   - class-level ownership overrides can be filtered by tenant, campus, term, and optional faculty

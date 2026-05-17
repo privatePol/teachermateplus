@@ -17,6 +17,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 
 ### Changed
 - Faculty/Admin grade explanation modals now show the period detailed computation as a responsive table with component, category, raw/status, total, computed score, and notes columns instead of nested text lines, using subtle row background colors for component/category/subcategory totals.
+- Enrollment import batch details now show the enrollment student-handling mode detected from each CSV tenant/campus pair, making tenant-scoped `STRICT_EXISTING` versus `AUTO_CREATE` mismatches visible beside row errors.
 - Admin Portal grading-template Testing Calculator now applies the matched active Tenant Grading Profile final-grade formula for the selected template, including weighted selected periods and the official rounded final grade; if no active profile matches, it clearly shows the active-period average fallback.
 - Admin Portal grading-template Testing Calculator now also repeats the final-grade computation immediately after the final period walkthrough, so admins can follow period computation into final-grade computation in sequence.
 - Faculty Portal class grading-template pages now link to a read-only Grade Calculator that simulates raw-score conversion, period grades, and the offering-specific Tenant Grading Profile final-grade formula without saving grades or student records.

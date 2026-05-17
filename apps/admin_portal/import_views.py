@@ -15,6 +15,7 @@ from apps.core.services.permissions import PermissionService
 from apps.imports.forms import ImportUploadForm
 from apps.imports.models import ImportBatch, ImportBatchRow
 from apps.imports.services import BulkImportService, ImportTemplateService
+from apps.tenants.models import Campus, Tenant
 
 from .services import AdminScopeService
 from .views import _get_page, _scope_context, _style_form
@@ -65,14 +66,50 @@ def _batch_error_tips(batch: ImportBatch):
     if "student_no" in all_text and "not found" in all_text:
         tips.append(
             "Missing students are rejected in STRICT_EXISTING mode. "
-            "Set ENROLLMENT_STUDENT_MODE to AUTO_CREATE for this tenant to auto-create missing students during import."
+            "Set ENROLLMENT_STUDENT_MODE to AUTO_CREATE for the CSV tenant to auto-create missing students during import."
         )
     if "enrollment_student_mode is strict_existing" in all_text:
         tips.append(
-            "Current tenant uses STRICT_EXISTING. Switch ENROLLMENT_STUDENT_MODE to AUTO_CREATE "
+            "The CSV tenant uses STRICT_EXISTING. Switch ENROLLMENT_STUDENT_MODE to AUTO_CREATE "
             "if you want enrollment import to create missing students."
         )
     return tips
+
+
+def _enrollment_student_mode_references(batch: ImportBatch):
+    if batch.import_type != ImportBatch.ImportType.ENROLLMENT:
+        return []
+
+    seen = set()
+    references = []
+    for raw_data in batch.rows.order_by("row_number").values_list("raw_data_json", flat=True):
+        if not isinstance(raw_data, dict):
+            continue
+        tenant_code = str(raw_data.get("tenant_code") or "").strip()
+        campus_code = str(raw_data.get("campus_code") or "").strip()
+        key = (tenant_code.upper(), campus_code.upper())
+        if not tenant_code or key in seen:
+            continue
+        seen.add(key)
+
+        tenant = Tenant.objects.filter(code__iexact=tenant_code).first()
+        campus = None
+        if tenant and campus_code:
+            campus = Campus.objects.filter(tenant=tenant, code__iexact=campus_code).first()
+        references.append(
+            {
+                "tenant_code": tenant_code,
+                "campus_code": campus_code,
+                "tenant_found": bool(tenant),
+                "campus_found": bool(campus) if campus_code else None,
+                "student_mode": (
+                    BulkImportService.get_enrollment_student_mode(tenant.id)
+                    if tenant
+                    else None
+                ),
+            }
+        )
+    return references
 
 
 def _scope_ids(request):
@@ -261,6 +298,7 @@ def import_batch_detail_view(request, batch_id: int):
         "import_slug": BulkImportService.import_type_to_slug(batch.import_type),
         "import_guide": ImportTemplateService.get_template_config(batch.import_type).get("guide", {}),
         "error_tips": _batch_error_tips(batch),
+        "enrollment_student_mode_references": _enrollment_student_mode_references(batch),
         "status_badge_class": {
             ImportBatch.Status.VALIDATED: "text-bg-primary",
             ImportBatch.Status.VALIDATION_FAILED: "text-bg-danger",

@@ -1041,3 +1041,29 @@
 2026-05-17 00:44:08,035 INFO [django.server] "GET /faculty/my-courses/419/periods/20/summary/explain/204/PERIOD/ HTTP/1.1" 200 9175
 2026-05-17 00:44:13,081 INFO [django.server] "GET /faculty/my-courses/419/periods/20/summary/explain/208/PERIOD/ HTTP/1.1" 200 9171
 2026-05-17 00:48:52,560 INFO [django.server] "GET /faculty/my-courses/419/periods/20/summary/explain/199/PERIOD/ HTTP/1.1" 200 9168
+2026-05-17 00:51:42,896 INFO [django.server] "GET /faculty/my-courses/419/periods/20/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 86000
+2026-05-17 00:51:45,459 INFO [django.server] "GET /faculty/my-courses/419/periods/20/summary/explain/202/PERIOD/ HTTP/1.1" 200 9906
+2026-05-17 00:52:18,137 INFO [django.server] "GET /faculty/at-risk-monitor/ HTTP/1.1" 302 0
+2026-05-17 00:52:18,799 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 49200
+2026-05-17 00:52:35,649 INFO [django.server] "GET /faculty/at-risk-monitor/ HTTP/1.1" 302 0
+2026-05-17 00:52:36,420 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 49200
+2026-05-17 00:52:41,144 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 45738
+2026-05-17 00:52:45,531 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 38541
+2026-05-17 08:58:27,889 INFO [django.server] "GET /admin-portal/enrollment/ HTTP/1.1" 302 0
+2026-05-17 08:58:27,900 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 3801
+2026-05-17 08:58:27,987 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 70994
+2026-05-17 08:58:36,204 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
+2026-05-17 08:58:36,522 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 61662
+2026-05-17 08:58:36,626 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 70994
+2026-05-17 08:59:06,802 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 61662
+2026-05-17 08:59:16,305 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 302 0
+2026-05-17 08:59:16,317 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27293
+2026-05-17 08:59:16,427 INFO [django.server] "GET /media/imahe/techsupp.jpg HTTP/1.1" 200 1100794
+2026-05-17 08:59:16,432 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
+2026-05-17 08:59:16,436 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
+2026-05-17 09:25:39,297 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\import_views.py changed, reloading.
+2026-05-17 09:25:40,419 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-17 09:25:51,390 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\import_views.py changed, reloading.
+2026-05-17 09:25:52,088 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-17 09:26:24,632 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\import_views.py changed, reloading.
+2026-05-17 09:26:25,355 INFO [django.utils.autoreload] Watching for file changes with StatReloader
