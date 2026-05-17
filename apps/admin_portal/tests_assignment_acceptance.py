@@ -272,6 +272,33 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertContains(response, "Pending Acceptance")
         self.assertContains(response, "Due Within 24 Hours")
 
+    def test_assignment_offering_filter_requires_explicit_submit(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            reverse("admin_portal:faculty_assignment_list"),
+            {"faculty_user_id": self.faculty_user.id, "assign": "1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="assignment-offering-panels"')
+        self.assertContains(response, 'id="offering-search-form" method="get"')
+        self.assertContains(response, '<h4 class="mb-0">Unassigned Course Offerings</h4>', html=True)
+        self.assertContains(response, '<h4 class="mb-0">Assigned Offerings</h4>', html=True)
+        self.assertContains(response, "assignment-card-header-unassigned")
+        self.assertContains(response, "assignment-card-header-assigned")
+        self.assertContains(response, "Primary and Secondary Load Tags")
+        self.assertContains(response, "marks the lead faculty assignment")
+        self.assertContains(response, "marks supporting or shared-load faculty")
+        self.assertContains(response, "Load Role")
+        self.assertContains(response, "fetch(targetUrl")
+        self.assertContains(response, "panels.innerHTML = nextPanels.innerHTML")
+        self.assertContains(response, 'name="offering_q"')
+        self.assertContains(response, ">Filter</button>")
+        self.assertContains(response, "Set the course or section filter, then click Filter or press Enter.")
+        self.assertNotContains(response, "Filtering runs automatically while typing.")
+        self.assertNotContains(response, 'searchInput.addEventListener("input"')
+
     def test_admin_assignment_view_reports_accepted_assignment_details(self):
         self.assignment.accepted_at = timezone.now()
         self.assignment.accepted_by = self.faculty_user

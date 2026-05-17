@@ -35,6 +35,40 @@
   .text-expired {
     color: #6a2ea0;
   }
+  .assignment-card-header {
+    border-bottom: 1px solid rgba(23, 59, 36, 0.12);
+    padding: 1rem 1.25rem;
+  }
+  .assignment-card-header h4 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .assignment-card-header-unassigned {
+    background: #fff4db;
+  }
+  .assignment-card-header-assigned {
+    background: #e7f3ff;
+  }
+  .assignment-role-note {
+    border: 1px solid #cfe2ff;
+    border-left: 4px solid #0d6efd;
+    background: #f4f9ff;
+    border-radius: 0.5rem;
+    padding: 0.85rem 1rem;
+  }
+  .assignment-role-note-title {
+    font-size: 0.86rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #164b8f;
+  }
+  .assignment-offering-panels {
+    transition: opacity 0.12s ease-in-out;
+  }
+  .assignment-offering-panels.is-refreshing {
+    opacity: 0.72;
+  }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -142,35 +176,39 @@
 </div>
 {% endif %}
 
-<div class="d-flex flex-column gap-3">
+<div class="d-flex flex-column gap-3 assignment-offering-panels" id="assignment-offering-panels">
   {% if show_assign_box %}
   <div class="card border-0 shadow-sm">
-    <div class="card-body">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h3 class="h6 mb-0">Unassigned Course Offerings</h3>
+    <div class="assignment-card-header assignment-card-header-unassigned">
+      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
+        <h4 class="mb-0">Unassigned Course Offerings</h4>
         <div class="d-flex gap-2 align-items-center">
           <span class="badge text-bg-info">{{ assignable_count }} available</span>
           <span class="badge text-bg-secondary" id="selected-assign-count">0 selected</span>
         </div>
       </div>
+    </div>
+    <div class="card-body">
 
-      <form class="mb-3" id="offering-search-form">
+      <form class="mb-3" id="offering-search-form" method="get">
         <input type="hidden" name="faculty_q" value="{{ faculty_q }}">
         <input type="hidden" name="faculty_user_id" value="{{ selected_faculty.id }}">
         <input type="hidden" name="assign" value="1">
-        <div class="row g-2">
-          <div class="col-md-8">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-6">
+            <label class="form-label" for="offering-search-input">Course</label>
             <input
               class="form-control"
               id="offering-search-input"
               type="text"
               name="offering_q"
               value="{{ offering_q }}"
-              placeholder="Type to filter by course code or course title"
+              placeholder="Filter by course code or course title"
               autocomplete="off"
             >
           </div>
           <div class="col-md-4">
+            <label class="form-label" for="offering-section-filter">Section</label>
             <select class="form-select" id="offering-section-filter" name="section_id">
               <option value="">All Sections</option>
               {% for s in sections %}
@@ -178,8 +216,11 @@
               {% endfor %}
             </select>
           </div>
+          <div class="col-md-2 d-grid">
+            <button class="btn btn-outline-secondary" type="submit">Filter</button>
+          </div>
         </div>
-        <div class="form-text">Filtering runs automatically while typing.</div>
+        <div class="form-text">Set the course or section filter, then click Filter or press Enter.</div>
       </form>
 
       <form method="post" action="{% url 'admin_portal:faculty_assignment_assign' %}">
@@ -245,12 +286,23 @@
   {% endif %}
 
   <div class="card border-0 shadow-sm">
-    <div class="card-body">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h3 class="h6 mb-0">Assigned Offerings</h3>
+    <div class="assignment-card-header assignment-card-header-assigned">
+      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
+        <h4 class="mb-0">Assigned Offerings</h4>
         <div class="d-flex gap-2 align-items-center">
           <span class="badge text-bg-primary">{{ assigned_count }} assigned</span>
           <span class="badge text-bg-secondary" id="selected-unassign-count">0 selected</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="assignment-role-note mb-3">
+        <div class="assignment-role-note-title mb-1">Primary and Secondary Load Tags</div>
+        <div class="small text-muted">
+          <span class="badge text-bg-success">Primary</span>
+          marks the lead faculty assignment for the offering. Use it for the teacher mainly accountable for the class, reports, reminders, and monitoring.
+          <span class="badge text-bg-secondary ms-2">Secondary</span>
+          marks supporting or shared-load faculty so the assignment remains visible without replacing the lead owner.
         </div>
       </div>
       <form method="post" action="{% url 'admin_portal:faculty_assignment_unassign' %}">
@@ -280,7 +332,7 @@
                 <th>Schedule / Time</th>
                 <th>Instructions</th>
                 <th>Acceptance</th>
-                <th>Primary</th>
+                <th>Load Role</th>
               </tr>
             </thead>
             <tbody>
@@ -404,103 +456,143 @@
       });
     }
 
-    const selectAll = document.getElementById("select-all-offerings");
-    const checkboxes = Array.from(document.querySelectorAll(".offering-checkbox"));
-    const selectedAssignCountEl = document.getElementById("selected-assign-count");
+    const initAssignmentPanels = function (root) {
+      const scope = root || document;
+      const panels = document.getElementById("assignment-offering-panels");
 
-    const refreshAssignSelectedCounter = function () {
-      if (!selectedAssignCountEl) {
-        return;
-      }
-      const selectedCount = checkboxes.filter((item) => item.checked).length;
-      selectedAssignCountEl.textContent = `${selectedCount} selected`;
-    };
+      const searchForm = scope.querySelector("#offering-search-form");
+      if (searchForm && panels) {
+        searchForm.addEventListener("submit", function (event) {
+          event.preventDefault();
 
-    if (selectAll && checkboxes.length > 0) {
-      selectAll.addEventListener("change", function () {
-        checkboxes.forEach((cb) => {
-          cb.checked = selectAll.checked;
+          const targetUrl = `${window.location.pathname}?${new URLSearchParams(new FormData(searchForm)).toString()}`;
+          const filterButton = searchForm.querySelector('button[type="submit"]');
+          if (filterButton) {
+            filterButton.disabled = true;
+          }
+          panels.classList.add("is-refreshing");
+
+          fetch(targetUrl, {
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+            },
+          })
+            .then((response) => {
+              if (!response.ok) {
+                throw new Error("Filter request failed.");
+              }
+              return response.text();
+            })
+            .then((html) => {
+              const parser = new DOMParser();
+              const nextDocument = parser.parseFromString(html, "text/html");
+              const nextPanels = nextDocument.getElementById("assignment-offering-panels");
+              if (!nextPanels) {
+                throw new Error("Updated panels were not found.");
+              }
+              panels.innerHTML = nextPanels.innerHTML;
+              const currentToggleForm = document.getElementById("toggle-primary-form");
+              const nextToggleForm = nextDocument.getElementById("toggle-primary-form");
+              if (currentToggleForm && nextToggleForm) {
+                currentToggleForm.innerHTML = nextToggleForm.innerHTML;
+              }
+              window.history.replaceState({}, "", targetUrl);
+              initAssignmentPanels(panels);
+            })
+            .catch(() => {
+              searchForm.submit();
+            })
+            .finally(() => {
+              panels.classList.remove("is-refreshing");
+              if (filterButton) {
+                filterButton.disabled = false;
+              }
+            });
         });
-        refreshAssignSelectedCounter();
-      });
+      }
 
-      checkboxes.forEach((cb) => {
-        cb.addEventListener("change", function () {
-          const allChecked = checkboxes.length > 0 && checkboxes.every((item) => item.checked);
-          selectAll.checked = allChecked;
+      const selectAll = scope.querySelector("#select-all-offerings");
+      const checkboxes = Array.from(scope.querySelectorAll(".offering-checkbox"));
+      const selectedAssignCountEl = scope.querySelector("#selected-assign-count");
+
+      const refreshAssignSelectedCounter = function () {
+        if (!selectedAssignCountEl) {
+          return;
+        }
+        const selectedCount = checkboxes.filter((item) => item.checked).length;
+        selectedAssignCountEl.textContent = `${selectedCount} selected`;
+      };
+
+      if (selectAll && checkboxes.length > 0) {
+        selectAll.addEventListener("change", function () {
+          checkboxes.forEach((cb) => {
+            cb.checked = selectAll.checked;
+          });
           refreshAssignSelectedCounter();
         });
-      });
 
-      refreshAssignSelectedCounter();
-    } else if (selectedAssignCountEl) {
-      selectedAssignCountEl.textContent = "0 selected";
-    }
-
-    const selectAllAssigned = document.getElementById("select-all-assigned");
-    const assignedCheckboxes = Array.from(document.querySelectorAll(".assigned-checkbox"));
-    const selectedUnassignCountEl = document.getElementById("selected-unassign-count");
-
-    const refreshUnassignSelectedCounter = function () {
-      if (!selectedUnassignCountEl) {
-        return;
-      }
-      const selectedCount = assignedCheckboxes.filter((item) => item.checked).length;
-      selectedUnassignCountEl.textContent = `${selectedCount} selected`;
-    };
-
-    if (selectAllAssigned && assignedCheckboxes.length > 0) {
-      selectAllAssigned.addEventListener("change", function () {
-        assignedCheckboxes.forEach((cb) => {
-          cb.checked = selectAllAssigned.checked;
+        checkboxes.forEach((cb) => {
+          cb.addEventListener("change", function () {
+            const allChecked = checkboxes.length > 0 && checkboxes.every((item) => item.checked);
+            selectAll.checked = allChecked;
+            refreshAssignSelectedCounter();
+          });
         });
-        refreshUnassignSelectedCounter();
-      });
 
-      assignedCheckboxes.forEach((cb) => {
-        cb.addEventListener("change", function () {
-          const allChecked = assignedCheckboxes.length > 0 && assignedCheckboxes.every((item) => item.checked);
-          selectAllAssigned.checked = allChecked;
+        refreshAssignSelectedCounter();
+      } else if (selectedAssignCountEl) {
+        selectedAssignCountEl.textContent = "0 selected";
+      }
+
+      const selectAllAssigned = scope.querySelector("#select-all-assigned");
+      const assignedCheckboxes = Array.from(scope.querySelectorAll(".assigned-checkbox"));
+      const selectedUnassignCountEl = scope.querySelector("#selected-unassign-count");
+
+      const refreshUnassignSelectedCounter = function () {
+        if (!selectedUnassignCountEl) {
+          return;
+        }
+        const selectedCount = assignedCheckboxes.filter((item) => item.checked).length;
+        selectedUnassignCountEl.textContent = `${selectedCount} selected`;
+      };
+
+      if (selectAllAssigned && assignedCheckboxes.length > 0) {
+        selectAllAssigned.addEventListener("change", function () {
+          assignedCheckboxes.forEach((cb) => {
+            cb.checked = selectAllAssigned.checked;
+          });
           refreshUnassignSelectedCounter();
         });
-      });
 
-      refreshUnassignSelectedCounter();
-    } else if (selectedUnassignCountEl) {
-      selectedUnassignCountEl.textContent = "0 selected";
-    }
-
-    const searchForm = document.getElementById("offering-search-form");
-    const searchInput = document.getElementById("offering-search-input");
-    const sectionFilter = document.getElementById("offering-section-filter");
-    if (searchForm && searchInput) {
-      let debounceTimer = null;
-      searchInput.addEventListener("input", function () {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(function () {
-          searchForm.submit();
-        }, 350);
-      });
-    }
-    if (searchForm && sectionFilter) {
-      sectionFilter.addEventListener("change", function () {
-        searchForm.submit();
-      });
-    }
-
-    const togglePrimaryButtons = document.querySelectorAll(".js-toggle-primary");
-    const togglePrimaryForm = document.getElementById("toggle-primary-form");
-    const togglePrimaryAssignmentIdInput = document.getElementById("toggle-primary-assignment-id");
-    if (togglePrimaryButtons.length > 0 && togglePrimaryForm && togglePrimaryAssignmentIdInput) {
-      togglePrimaryButtons.forEach((btn) => {
-        btn.addEventListener("click", function () {
-          togglePrimaryAssignmentIdInput.value = btn.dataset.assignmentId || "";
-          if (togglePrimaryAssignmentIdInput.value) {
-            togglePrimaryForm.submit();
-          }
+        assignedCheckboxes.forEach((cb) => {
+          cb.addEventListener("change", function () {
+            const allChecked = assignedCheckboxes.length > 0 && assignedCheckboxes.every((item) => item.checked);
+            selectAllAssigned.checked = allChecked;
+            refreshUnassignSelectedCounter();
+          });
         });
-      });
-    }
+
+        refreshUnassignSelectedCounter();
+      } else if (selectedUnassignCountEl) {
+        selectedUnassignCountEl.textContent = "0 selected";
+      }
+
+      const togglePrimaryButtons = scope.querySelectorAll(".js-toggle-primary");
+      const togglePrimaryForm = document.getElementById("toggle-primary-form");
+      const togglePrimaryAssignmentIdInput = document.getElementById("toggle-primary-assignment-id");
+      if (togglePrimaryButtons.length > 0 && togglePrimaryForm && togglePrimaryAssignmentIdInput) {
+        togglePrimaryButtons.forEach((btn) => {
+          btn.addEventListener("click", function () {
+            togglePrimaryAssignmentIdInput.value = btn.dataset.assignmentId || "";
+            if (togglePrimaryAssignmentIdInput.value) {
+              togglePrimaryForm.submit();
+            }
+          });
+        });
+      }
+    };
+
+    initAssignmentPanels(document);
   });
 </script>
 {% endblock %}

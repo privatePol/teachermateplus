@@ -171,6 +171,7 @@
         if (!selectedCampusId) {
           departmentField.disabled = true;
           departmentField.value = "";
+          departmentField.dispatchEvent(new Event("change", { bubbles: true }));
           return;
         }
 
@@ -192,10 +193,153 @@
         if (!filteredOptions.some(function (option) { return String(option.id) === String(previousValue); })) {
           departmentField.value = "";
         }
+        departmentField.dispatchEvent(new Event("change", { bubbles: true }));
       }
 
       rebuildDepartmentOptions();
       campusField.addEventListener("change", rebuildDepartmentOptions);
+    });
+
+    document.querySelectorAll('select[data-department-dependent="true"]').forEach(function (programField) {
+      const campusField = document.getElementById(programField.dataset.campusFieldId || "id_campus");
+      const departmentField = document.getElementById(programField.dataset.departmentFieldId || "id_department");
+
+      if (!campusField || !departmentField) {
+        return;
+      }
+
+      let programOptions = [];
+      try {
+        programOptions = JSON.parse(programField.dataset.programOptions || "[]");
+      } catch (error) {
+        programOptions = [];
+      }
+
+      const initialProgramValue = programField.value;
+      const placeholderLabel = programField.dataset.placeholder || "---------";
+
+      function rebuildProgramOptions() {
+        const selectedCampusId = campusField.value;
+        const selectedDepartmentId = departmentField.value;
+        const previousValue = programField.value || initialProgramValue;
+
+        programField.innerHTML = "";
+
+        const placeholderOption = document.createElement("option");
+        placeholderOption.value = "";
+        placeholderOption.textContent = placeholderLabel;
+        programField.appendChild(placeholderOption);
+
+        if (!selectedCampusId || !selectedDepartmentId) {
+          programField.disabled = true;
+          programField.value = "";
+          return;
+        }
+
+        const filteredOptions = programOptions.filter(function (option) {
+          return (
+            String(option.campus_id) === String(selectedCampusId) &&
+            String(option.department_id) === String(selectedDepartmentId)
+          );
+        });
+
+        filteredOptions.forEach(function (option) {
+          const optionElement = document.createElement("option");
+          optionElement.value = option.id;
+          optionElement.textContent = option.label;
+          if (String(option.id) === String(previousValue)) {
+            optionElement.selected = true;
+          }
+          programField.appendChild(optionElement);
+        });
+
+        programField.disabled = false;
+        if (!filteredOptions.some(function (option) { return String(option.id) === String(previousValue); })) {
+          programField.value = "";
+        }
+        programField.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      rebuildProgramOptions();
+      campusField.addEventListener("change", rebuildProgramOptions);
+      departmentField.addEventListener("change", rebuildProgramOptions);
+    });
+
+    document.querySelectorAll('select[data-section-dependent="true"]').forEach(function (sectionField) {
+      const campusField = document.getElementById(sectionField.dataset.campusFieldId || "id_campus");
+      const departmentField = document.getElementById(sectionField.dataset.departmentFieldId || "id_department");
+      const programField = document.getElementById(sectionField.dataset.programFieldId || "id_program");
+
+      if (!campusField) {
+        return;
+      }
+
+      let sectionOptions = [];
+      try {
+        sectionOptions = JSON.parse(sectionField.dataset.sectionOptions || "[]");
+      } catch (error) {
+        sectionOptions = [];
+      }
+
+      const initialSectionValue = sectionField.value;
+      const placeholderLabel = sectionField.dataset.placeholder || "---------";
+
+      function rebuildSectionOptions() {
+        const selectedCampusId = campusField.value;
+        const selectedDepartmentId = departmentField ? departmentField.value : "";
+        const selectedProgramId = programField ? programField.value : "";
+        const previousValue = sectionField.value || initialSectionValue;
+
+        sectionField.innerHTML = "";
+
+        const placeholderOption = document.createElement("option");
+        placeholderOption.value = "";
+        placeholderOption.textContent = placeholderLabel;
+        sectionField.appendChild(placeholderOption);
+
+        if (!selectedCampusId) {
+          sectionField.disabled = true;
+          sectionField.value = "";
+          return;
+        }
+
+        const filteredOptions = sectionOptions.filter(function (option) {
+          if (String(option.campus_id) !== String(selectedCampusId)) {
+            return false;
+          }
+          if (selectedDepartmentId && String(option.department_id) !== String(selectedDepartmentId)) {
+            return false;
+          }
+          if (selectedProgramId && String(option.program_id) !== String(selectedProgramId)) {
+            return false;
+          }
+          return true;
+        });
+
+        filteredOptions.forEach(function (option) {
+          const optionElement = document.createElement("option");
+          optionElement.value = option.id;
+          optionElement.textContent = option.label;
+          if (String(option.id) === String(previousValue)) {
+            optionElement.selected = true;
+          }
+          sectionField.appendChild(optionElement);
+        });
+
+        sectionField.disabled = false;
+        if (!filteredOptions.some(function (option) { return String(option.id) === String(previousValue); })) {
+          sectionField.value = "";
+        }
+      }
+
+      rebuildSectionOptions();
+      campusField.addEventListener("change", rebuildSectionOptions);
+      if (departmentField) {
+        departmentField.addEventListener("change", rebuildSectionOptions);
+      }
+      if (programField) {
+        programField.addEventListener("change", rebuildSectionOptions);
+      }
     });
   });
 </script>

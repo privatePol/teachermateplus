@@ -14,6 +14,7 @@ from django.views.decorators.http import require_GET
 
 from apps.core.services.api_keys import ApiRateLimitService, TenantApiKeyService
 from apps.core.services.audit import AuditService
+from apps.core.services.features import FeatureSettingsService
 from apps.enrollment.models import Enrollment
 from apps.grading.models import GradeSubmission, StudentPeriodGrade
 from apps.tenants.models import Campus, Tenant
@@ -192,6 +193,17 @@ def sis_periodic_grades_api_view(request):
             metadata={"reason": "API key tenant does not match requested tenant."},
         )
         return _json_error("API key is not authorized for the requested tenant.", status=403)
+    if not FeatureSettingsService.is_sis_periodic_grades_api_enabled(tenant_id=tenant.id, default=False):
+        _audit_sis_api_access(
+            action="DENY",
+            request=request,
+            tenant=tenant,
+            status_code=403,
+            auth_mode="TENANT_API_KEY" if auth and auth.tenant_api_key else "LEGACY_TOKEN",
+            api_key=auth.tenant_api_key if auth else None,
+            metadata={"reason": "SIS periodic grades API is disabled for this tenant."},
+        )
+        return _json_error("SIS periodic grades API is disabled for this tenant.", status=403)
 
     campus_code = (request.GET.get("campus_code") or "").strip()
     academic_year_code = (request.GET.get("academic_year_code") or "").strip()

@@ -6,6 +6,8 @@ from django.core.cache import cache
 
 from apps.auditlog.models import AuditLog
 from apps.core.services.api_keys import TenantApiKeyService
+from apps.core.services.features import FeatureSettingsService
+from apps.core.services.settings import SystemSettingService
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
 from apps.enrollment.models import Enrollment
@@ -18,6 +20,13 @@ from apps.tenants.models import Campus, Department, Program, Tenant
 class SISPeriodicGradesApiTests(TestCase):
     def setUp(self):
         self.tenant = Tenant.objects.create(code="NCBA", name="NCBA")
+        SystemSettingService.set(
+            FeatureSettingsService.SIS_PERIODIC_GRADES_API_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
         self.campus_fairv = Campus.objects.create(tenant=self.tenant, code="NCBA-FAIRV", name="Fairview")
         self.campus_cubao = Campus.objects.create(tenant=self.tenant, code="NCBA-CUBAO", name="Cubao")
 
@@ -274,6 +283,23 @@ class SISPeriodicGradesApiTests(TestCase):
         self.assertEqual(row["class_standing_grade"], "93")
         self.assertEqual(row["exam_grade"], "100")
         self.assertEqual(row["period_grade"], "96")
+
+    def test_tenant_feature_toggle_can_disable_sis_periodic_grades_api(self):
+        SystemSettingService.set(
+            FeatureSettingsService.SIS_PERIODIC_GRADES_API_ENABLED_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+
+        response = self._api_get({"tenant_code": self.tenant.code})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("disabled", response.json()["error"])
+        log = AuditLog.objects.filter(entity_type="SISPeriodicGradesAPI", action="DENY").latest("created_at")
+        self.assertEqual(log.tenant_id, self.tenant.id)
+        self.assertEqual(log.metadata_json["reason"], "SIS periodic grades API is disabled for this tenant.")
 
     def test_inactive_department_chain_is_excluded_from_sis_export(self):
         self.department_fairv.is_active = False

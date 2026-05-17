@@ -3558,6 +3558,10 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default=True,
     )
+    current_sis_periodic_grades_api_enabled = FeatureSettingsService.is_sis_periodic_grades_api_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    )
 
     form = ConfigurableFeatureSettingForm(
         request.POST or None,
@@ -3566,6 +3570,7 @@ def configurable_features_settings_view(request):
             "student_portal_period_grades_after_submission": current_student_portal_period_grades_after_submission,
             "student_portal_final_grades_after_submission": current_student_portal_final_grades_after_submission,
             "student_portal_attendance_details_enabled": current_student_portal_attendance_details_enabled,
+            "sis_periodic_grades_api_enabled": current_sis_periodic_grades_api_enabled,
             "correction_official_report_enabled": current_report_enabled,
             "user_signatures_enabled": current_user_signatures_enabled,
             "user_signatures_final_clearance_enabled": current_user_signatures_final_clearance_enabled,
@@ -3697,6 +3702,13 @@ def configurable_features_settings_view(request):
         SystemSettingService.set(
             FeatureSettingsService.STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY,
             bool(form.cleaned_data["student_portal_attendance_details_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SIS_PERIODIC_GRADES_API_ENABLED_KEY,
+            bool(form.cleaned_data["sis_periodic_grades_api_enabled"]),
             tenant_id=tenant_id,
             value_type="BOOL",
             is_active=True,
@@ -4134,6 +4146,7 @@ def configurable_features_settings_view(request):
                 "student_portal_period_grades_after_submission": current_student_portal_period_grades_after_submission,
                 "student_portal_final_grades_after_submission": current_student_portal_final_grades_after_submission,
                 "student_portal_attendance_details_enabled": current_student_portal_attendance_details_enabled,
+                "sis_periodic_grades_api_enabled": current_sis_periodic_grades_api_enabled,
             },
             after_data={
                 "student_portal_enabled": bool(form.cleaned_data["student_portal_enabled"]),
@@ -4146,6 +4159,7 @@ def configurable_features_settings_view(request):
                 "student_portal_attendance_details_enabled": bool(
                     form.cleaned_data["student_portal_attendance_details_enabled"]
                 ),
+                "sis_periodic_grades_api_enabled": bool(form.cleaned_data["sis_periodic_grades_api_enabled"]),
                 "correction_official_report_enabled": bool(form.cleaned_data["correction_official_report_enabled"]),
                 "user_signatures_enabled": bool(form.cleaned_data["user_signatures_enabled"]),
                 "user_signatures_final_clearance_enabled": bool(
@@ -4296,6 +4310,7 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
                     FeatureSettingsService.STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION_KEY,
                     FeatureSettingsService.STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY,
+                    FeatureSettingsService.SIS_PERIODIC_GRADES_API_ENABLED_KEY,
                 ],
             },
             request=request,
@@ -6675,8 +6690,17 @@ def offering_list_view(request):
 @portal_required("ADMIN")
 @permission_required("offerings.create")
 def offering_create_view(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    campus_id = getattr(request, "scope", {}).get("campus_id")
+    active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
     form = CourseOfferingForm(
         request.POST or None,
+        initial={
+            "tenant": tenant_id,
+            "campus": campus_id,
+            "academic_year": active_academic_year.id if active_academic_year else None,
+            "term": active_term.id if active_term else None,
+        },
         tenant_queryset=AdminScopeService.scoped_tenants(request),
         campus_queryset=AdminScopeService.scoped_campuses(request),
         department_queryset=AdminScopeService.active_scoped_departments(request),

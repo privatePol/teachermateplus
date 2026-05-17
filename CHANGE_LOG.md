@@ -7,7 +7,10 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added `docs/INSTITUTION_IMPLEMENTATION_REFERENCE.md`, a plain-English superadmin guide for production institution setup, required master data, tenant configuration, faculty grading readiness, bulk import order, and related governance.
 - Student Portal local foundation: added the ignored local `apps/student_portal` prototype app with `StudentAccountLink`, `student_portal.access`, a global `FEATURE_STUDENT_PORTAL_ENABLED` guard, read-only dashboard/courses/profile/account pages under `/student/`, and focused tenant/campus/student isolation tests.
+- SIS periodic grades API now has a tenant-level Configuration Management toggle (`FEATURE_SIS_PERIODIC_GRADES_API_ENABLED`) so colleges can disable third-party grade reads when integration is not required; existing tenants are enabled by migration, while new tenants default off until configured.
+- Course offering manual creation now filters department choices by selected campus, program choices by selected department, and section choices by selected campus/department/program; course choices are sorted by title and section choices by code for easier manual setup.
 - Admin Portal Student Portal controls: added a Configurable Features toggle for `FEATURE_STUDENT_PORTAL_ENABLED`, plus scoped Student Account Links list/create/deactivate pages governed by `student_account_links.manage` with audit logging.
 - Student Portal provisioning: added trusted student `official_email` and `official_email_verified_at` fields, exposed official email status in student maintenance, and added an Admin Portal provisioning flow that creates or links a student user account, grants scoped `student_portal.access`, creates the active `StudentAccountLink`, and blocks provisioning when the official email is missing or unverified.
 - Student Portal grades stage: added read-only `/student/grades/` and `/student/grades/<offering_id>/` views that show only the linked student's own submitted period grades and submitted final grades, with Configurable Features controls for student period/final grade release after submission.
@@ -18,6 +21,9 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Admin Portal Faculty Assignments now uses distinct colored `h4` card headers for `Unassigned Course Offerings` and `Assigned Offerings`, making the assign/unassign areas easier to distinguish.
+- Admin Portal Faculty Assignments now applies unassigned-offering filters with an in-page refresh so the assignment cards update without a noticeable full-page reload.
+- Admin Portal Faculty Assignments now explains Primary versus Secondary load tags in the Assigned Offerings card and labels the column as `Load Role`.
 - Faculty Portal My Classes now groups accepted classes under an `Accepted Course Assignments` board, displays campus names in the accepted and pending assignment areas while retaining campus codes as supporting text, uses larger card/section header typography, and highlights missing grading-template warnings in a danger/red style.
 - Faculty Portal class period cards now render `What to do` and `Why set this` as compact badges without the previous light-green guidance container background, and place the yellow `Active Period` badge beside the period code.
 - Faculty/Admin grade explanation modals now show the period detailed computation as a responsive table with component, category, raw/status, total, computed score, and notes columns instead of nested text lines, using subtle row background colors for component/category/subcategory totals.
@@ -33,6 +39,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin Portal grading-template Builder now keeps the softer rotating period color scheme and makes the small weight, metadata, and detail cards more prominent with accent borders, shadows, and subtle gradients.
 
 ### Fixed
+- Admin Portal Faculty Assignments now waits for the explicit `Filter` button before applying the unassigned course-offering course/section filters, preventing the page from refreshing on every typed character.
 - Faculty Portal course period cards now display the configured grading-template period name, so `FX` periods named `Final Exam` no longer fall back to a `PRELIM` heading or prelim guidance.
 - Admin Portal grading-template Builder now displays the major component `Score Entry Method` value correctly.
 - Admin Portal Tenant Grading Profiles list now renders Term Type as compact badges for Regular, Summer, Special, or All Terms.

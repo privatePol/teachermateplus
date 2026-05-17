@@ -51,6 +51,7 @@ class FeatureSettingsService:
     STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY = "FEATURE_STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION"
     STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION_KEY = "FEATURE_STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION"
     STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY = "FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED"
+    SIS_PERIODIC_GRADES_API_ENABLED_KEY = "FEATURE_SIS_PERIODIC_GRADES_API_ENABLED"
 
     @staticmethod
     def _positive_int(value, *, default: int, minimum: int = 0) -> int:
@@ -377,6 +378,16 @@ class FeatureSettingsService:
         return bool(
             SystemSettingService.get(
                 cls.STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_sis_periodic_grades_api_enabled(cls, *, tenant_id: int | None, default: bool = False) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.SIS_PERIODIC_GRADES_API_ENABLED_KEY,
                 tenant_id=tenant_id,
                 default=default,
             )

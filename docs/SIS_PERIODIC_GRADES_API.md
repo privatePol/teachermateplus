@@ -2,6 +2,15 @@
 
 EduGradesPro exposes a pull API so the School Information System (SIS) can fetch periodic grades directly.
 
+## Feature toggle
+
+This API is controlled per tenant from **Admin Portal -> Tools -> Configuration Management -> SIS / API Integration**.
+
+- Setting key: `FEATURE_SIS_PERIODIC_GRADES_API_ENABLED`
+- Existing tenants are enabled during the migration to preserve current integrations.
+- New tenants default to disabled until the college explicitly enables the feature.
+- When disabled, authenticated requests return `403` and are audit-logged as denied API access.
+
 ## Endpoint
 
 - Primary: `/api/v1/sis/periodic-grades/`

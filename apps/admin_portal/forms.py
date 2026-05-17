@@ -85,6 +85,14 @@ def _section_label(obj):
     return name or code or str(obj)
 
 
+def _program_label(obj):
+    name = (getattr(obj, "name", "") or "").strip()
+    code = (getattr(obj, "code", "") or "").strip()
+    if name and code and name != code:
+        return f"{code} - {name}"
+    return code or name or str(obj)
+
+
 def _term_label(obj):
     name = (getattr(obj, "name", "") or "").strip()
     code = (getattr(obj, "code", "") or "").strip()
@@ -1018,8 +1026,6 @@ class CourseOfferingForm(forms.ModelForm):
             self.fields["tenant"].queryset = tenant_queryset
         if campus_queryset is not None:
             self.fields["campus"].queryset = campus_queryset
-        if department_queryset is not None:
-            self.fields["department"].queryset = department_queryset
         if program_queryset is not None:
             self.fields["program"].queryset = program_queryset
         if academic_year_queryset is not None:
@@ -1031,19 +1037,69 @@ class CourseOfferingForm(forms.ModelForm):
         if section_queryset is not None:
             self.fields["section"].queryset = section_queryset
         self.fields["department"].required = False
-        self.fields["department"].help_text = (
-            "Optional when the department can be inferred from the selected section or course. "
-            "Keep it explicit when the offering owner differs from the course default owner."
+        _configure_campus_dependent_department_field(
+            self,
+            campus_field_name="campus",
+            department_field_name="department",
+            department_queryset=department_queryset,
         )
-        self.fields["program"].help_text = "Optional if section_code is globally unique. Required when section codes repeat per program."
+        selected_tenant_id = self._selected_model_id("tenant")
+        selected_campus_id = self._selected_model_id("campus")
+        selected_department_id = self._selected_model_id("department")
+        selected_program_id = self._selected_model_id("program")
+        selected_academic_year_id = self._selected_model_id("academic_year")
+
+        if selected_tenant_id:
+            self.fields["campus"].queryset = self.fields["campus"].queryset.filter(tenant_id=selected_tenant_id)
+            self.fields["academic_year"].queryset = self.fields["academic_year"].queryset.filter(tenant_id=selected_tenant_id)
+            self.fields["course"].queryset = self.fields["course"].queryset.filter(tenant_id=selected_tenant_id)
+            self.fields["section"].queryset = self.fields["section"].queryset.filter(tenant_id=selected_tenant_id)
+            self.fields["term"].queryset = self.fields["term"].queryset.filter(tenant_id=selected_tenant_id)
+            self.fields["program"].queryset = self.fields["program"].queryset.filter(tenant_id=selected_tenant_id)
+
+        if selected_campus_id:
+            self.fields["program"].queryset = self.fields["program"].queryset.filter(campus_id=selected_campus_id)
+            self.fields["course"].queryset = self.fields["course"].queryset.filter(
+                models.Q(campus_id=selected_campus_id) | models.Q(campus__isnull=True)
+            )
+            self.fields["section"].queryset = self.fields["section"].queryset.filter(campus_id=selected_campus_id)
+        else:
+            self.fields["program"].queryset = self.fields["program"].queryset.none()
+            self.fields["section"].queryset = self.fields["section"].queryset.none()
+
+        self._configure_department_dependent_program_field(program_queryset=program_queryset)
+
+        if selected_department_id:
+            self.fields["section"].queryset = self.fields["section"].queryset.filter(department_id=selected_department_id)
+        if selected_program_id:
+            self.fields["section"].queryset = self.fields["section"].queryset.filter(program_id=selected_program_id)
+        if selected_academic_year_id:
+            self.fields["term"].queryset = self.fields["term"].queryset.filter(academic_year_id=selected_academic_year_id)
+
+        self._configure_scope_dependent_section_field(section_queryset=section_queryset)
+
+        for field_name in ("tenant", "campus", "department", "program", "academic_year", "term"):
+            self.fields[field_name].queryset = self.fields[field_name].queryset.distinct()
+        self.fields["course"].queryset = self.fields["course"].queryset.distinct().order_by("title", "code", "id")
+        self.fields["section"].queryset = self.fields["section"].queryset.distinct().order_by("code", "name", "id")
+
+        self.fields["department"].help_text = (
+            "Choose the offering owner for the selected campus. Only departments from the selected campus are shown."
+        )
+        self.fields["program"].help_text = (
+            "Optional when section codes are unique. Select a department first to show only matching programs."
+        )
         self.fields["academic_year"].help_text = "Must match Academic Year used in CSV import (use AY code values from master)."
         self.fields["term"].help_text = "Must match Term code in CSV (example: 1ST, 2ND)."
-        self.fields["section"].help_text = "Use exact Section code from Sections master."
+        self.fields["section"].help_text = (
+            "Use the exact section from the selected campus. Department and program selections narrow this list."
+        )
         self.fields["room"].label = "Room/Office/Lab"
         _set_choice_label(self.fields.get("academic_year"), _academic_year_label)
         _set_choice_label(self.fields.get("term"), _term_label)
         _set_choice_label(self.fields.get("course"), _course_label)
         _set_choice_label(self.fields.get("section"), _section_label)
+        _set_choice_label(self.fields.get("program"), _program_label)
         self.fields["is_active"].label = "Record state"
         self.fields["is_active"].widget = forms.Select(
             choices=((True, "Active"), (False, "Inactive"))
@@ -1052,6 +1108,92 @@ class CourseOfferingForm(forms.ModelForm):
             "Inactive offerings are hidden from non-superadmin users and excluded from processing."
         )
         _enforce_active_reference_choices(self)
+
+    def _selected_model_id(self, field_name: str):
+        raw_value = None
+        if self.is_bound:
+            raw_value = self.data.get(self.add_prefix(field_name))
+        if raw_value in (None, ""):
+            raw_value = self.initial.get(field_name)
+        if hasattr(raw_value, "id"):
+            raw_value = raw_value.id
+        if raw_value in (None, ""):
+            raw_value = getattr(getattr(self, "instance", None), f"{field_name}_id", None)
+        try:
+            return int(raw_value) if raw_value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    def _configure_department_dependent_program_field(self, *, program_queryset):
+        program_field = self.fields["program"]
+        if program_queryset is not None:
+            base_queryset = _active_only_queryset(program_queryset)
+        else:
+            base_queryset = _active_only_queryset(program_field.queryset)
+        full_queryset = base_queryset.select_related("campus", "department").order_by(
+            "campus__code", "department__code", "code", "name"
+        )
+        program_options = [
+            {
+                "id": program.id,
+                "campus_id": program.campus_id,
+                "department_id": program.department_id,
+                "label": _program_label(program),
+            }
+            for program in full_queryset
+        ]
+        selected_campus_id = self._selected_model_id("campus")
+        selected_department_id = self._selected_model_id("department")
+        if selected_campus_id and selected_department_id:
+            program_field.queryset = full_queryset.filter(
+                campus_id=selected_campus_id,
+                department_id=selected_department_id,
+            )
+        else:
+            program_field.queryset = full_queryset.none()
+        program_field.widget.attrs["data-department-dependent"] = "true"
+        program_field.widget.attrs["data-campus-field-id"] = "id_campus"
+        program_field.widget.attrs["data-department-field-id"] = "id_department"
+        program_field.widget.attrs["data-program-options"] = json.dumps(program_options)
+        program_field.widget.attrs["data-placeholder"] = "---------"
+
+    def _configure_scope_dependent_section_field(self, *, section_queryset):
+        section_field = self.fields["section"]
+        if section_queryset is not None:
+            base_queryset = _active_only_queryset(section_queryset)
+        else:
+            base_queryset = _active_only_queryset(section_field.queryset)
+        full_queryset = base_queryset.select_related("campus", "department", "program").order_by(
+            "campus__code", "department__code", "program__code", "code", "name"
+        )
+        section_options = [
+            {
+                "id": section.id,
+                "campus_id": section.campus_id,
+                "department_id": section.department_id,
+                "program_id": section.program_id,
+                "label": _section_label(section),
+            }
+            for section in full_queryset
+        ]
+        selected_campus_id = self._selected_model_id("campus")
+        selected_department_id = self._selected_model_id("department")
+        selected_program_id = self._selected_model_id("program")
+        if selected_campus_id:
+            scoped_queryset = full_queryset.filter(campus_id=selected_campus_id)
+            if selected_department_id:
+                scoped_queryset = scoped_queryset.filter(department_id=selected_department_id)
+            if selected_program_id:
+                scoped_queryset = scoped_queryset.filter(program_id=selected_program_id)
+            section_field.queryset = scoped_queryset
+        else:
+            section_field.queryset = full_queryset.none()
+        section_field.widget.attrs["data-section-dependent"] = "true"
+        section_field.widget.attrs["data-campus-field-id"] = "id_campus"
+        section_field.widget.attrs["data-department-field-id"] = "id_department"
+        section_field.widget.attrs["data-program-field-id"] = "id_program"
+        section_field.widget.attrs["data-section-options"] = json.dumps(section_options)
+        section_field.widget.attrs["data-placeholder"] = "---------"
 
     def clean(self):
         cleaned = super().clean()
@@ -2336,6 +2478,11 @@ class ConfigurableFeatureSettingForm(forms.Form):
         required=False,
         label="Show attendance details",
         help_text="Shows session-level attendance records to linked student users. Summary counts remain read-only.",
+    )
+    sis_periodic_grades_api_enabled = forms.BooleanField(
+        required=False,
+        label="Enable SIS periodic grades API",
+        help_text="Allows authorized third-party SIS/AIMS clients to pull submitted periodic grades for this tenant.",
     )
     correction_official_report_enabled = forms.BooleanField(
         required=False,

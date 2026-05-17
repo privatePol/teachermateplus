@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
 from apps.accounts.models import User
+from apps.admin_portal.forms import CourseOfferingForm
 from apps.rbac.models import Permission
 from apps.tenants.models import Campus, Department, Program, Tenant
 
@@ -42,12 +43,26 @@ class DepartmentDropdownLabelTests(TestCase):
             name="College",
             unit_type=Department.UnitType.DIVISION,
         )
+        self.fairview_basic_ed = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.fairview,
+            code="BASIC_ED",
+            name="Basic Education",
+            unit_type=Department.UnitType.DIVISION,
+        )
         self.program = Program.objects.create(
             tenant=self.tenant,
             campus=self.fairview,
             department=self.fairview_college,
             code="BSIS",
             name="BSIS",
+        )
+        self.basic_ed_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.fairview,
+            department=self.fairview_basic_ed,
+            code="JHS",
+            name="Junior High School",
         )
         self.academic_year = AcademicYear.objects.create(
             tenant=self.tenant,
@@ -70,6 +85,13 @@ class DepartmentDropdownLabelTests(TestCase):
             code="IT101",
             title="Intro to IT",
         )
+        self.earlier_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.fairview,
+            department=self.fairview_college,
+            code="ACCT101",
+            title="Accounting Basics",
+        )
         self.section = Section.objects.create(
             tenant=self.tenant,
             campus=self.fairview,
@@ -77,6 +99,14 @@ class DepartmentDropdownLabelTests(TestCase):
             program=self.program,
             code="BSIS-1A",
             name="BSIS 1A",
+        )
+        self.later_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.fairview,
+            department=self.fairview_college,
+            program=self.program,
+            code="BSIS-1B",
+            name="BSIS 1B",
         )
         CourseOffering.objects.create(
             tenant=self.tenant,
@@ -96,6 +126,99 @@ class DepartmentDropdownLabelTests(TestCase):
         content = response.content.decode("utf-8")
         self.assertIn("NCBA-01 / COLLEGE", content)
         self.assertIn("NCBA-02 / COLLEGE", content)
+
+    def test_offering_form_department_choices_follow_selected_campus(self):
+        form = CourseOfferingForm(
+            initial={"tenant": self.tenant.id, "campus": self.fairview.id},
+            tenant_queryset=Tenant.objects.all(),
+            campus_queryset=Campus.objects.all(),
+            department_queryset=Department.objects.all(),
+            program_queryset=Program.objects.all(),
+            academic_year_queryset=AcademicYear.objects.all(),
+            term_queryset=Term.objects.all(),
+            course_queryset=Course.objects.all(),
+            section_queryset=Section.objects.all(),
+        )
+
+        department_ids = set(form.fields["department"].queryset.values_list("id", flat=True))
+
+        self.assertIn(self.fairview_college.id, department_ids)
+        self.assertIn(self.fairview_basic_ed.id, department_ids)
+        self.assertNotIn(self.cubao_college.id, department_ids)
+        self.assertEqual(
+            form.fields["department"].widget.attrs["data-campus-dependent"],
+            "true",
+        )
+
+    def test_offering_form_program_choices_follow_selected_department(self):
+        form = CourseOfferingForm(
+            initial={
+                "tenant": self.tenant.id,
+                "campus": self.fairview.id,
+                "department": self.fairview_college.id,
+            },
+            tenant_queryset=Tenant.objects.all(),
+            campus_queryset=Campus.objects.all(),
+            department_queryset=Department.objects.all(),
+            program_queryset=Program.objects.all(),
+            academic_year_queryset=AcademicYear.objects.all(),
+            term_queryset=Term.objects.all(),
+            course_queryset=Course.objects.all(),
+            section_queryset=Section.objects.all(),
+        )
+
+        program_ids = set(form.fields["program"].queryset.values_list("id", flat=True))
+
+        self.assertIn(self.program.id, program_ids)
+        self.assertNotIn(self.basic_ed_program.id, program_ids)
+        self.assertEqual(
+            form.fields["program"].widget.attrs["data-department-dependent"],
+            "true",
+        )
+
+    def test_offering_form_course_choices_are_sorted_by_title(self):
+        form = CourseOfferingForm(
+            initial={"tenant": self.tenant.id, "campus": self.fairview.id},
+            tenant_queryset=Tenant.objects.all(),
+            campus_queryset=Campus.objects.all(),
+            department_queryset=Department.objects.all(),
+            program_queryset=Program.objects.all(),
+            academic_year_queryset=AcademicYear.objects.all(),
+            term_queryset=Term.objects.all(),
+            course_queryset=Course.objects.all(),
+            section_queryset=Section.objects.all(),
+        )
+
+        course_titles = list(form.fields["course"].queryset.values_list("title", flat=True))
+
+        self.assertEqual(course_titles, sorted(course_titles))
+
+    def test_offering_form_section_choices_follow_scope_and_are_sorted(self):
+        form = CourseOfferingForm(
+            initial={
+                "tenant": self.tenant.id,
+                "campus": self.fairview.id,
+                "department": self.fairview_college.id,
+                "program": self.program.id,
+            },
+            tenant_queryset=Tenant.objects.all(),
+            campus_queryset=Campus.objects.all(),
+            department_queryset=Department.objects.all(),
+            program_queryset=Program.objects.all(),
+            academic_year_queryset=AcademicYear.objects.all(),
+            term_queryset=Term.objects.all(),
+            course_queryset=Course.objects.all(),
+            section_queryset=Section.objects.all(),
+        )
+
+        section_codes = list(form.fields["section"].queryset.values_list("code", flat=True))
+
+        self.assertEqual(section_codes, sorted(section_codes))
+        self.assertEqual(set(section_codes), {"BSIS-1A", "BSIS-1B"})
+        self.assertEqual(
+            form.fields["section"].widget.attrs["data-section-dependent"],
+            "true",
+        )
 
     def test_offering_list_department_filter_prefixes_campus_when_all_campuses_are_visible(self):
         response = self.client.get(reverse("admin_portal:offering_list"))
