@@ -14,7 +14,7 @@ from django.utils import timezone
 from reportlab.graphics.barcode.qr import QrCodeWidget
 from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape, legal
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
@@ -631,6 +631,231 @@ class CorrectionOfficialReportService:
         return buffer.getvalue()
 
 
+class ClassTabulationSheetPdfService:
+    LOGO_PATH = CorrectionOfficialReportService.LOGO_PATH
+
+    @staticmethod
+    def _safe_text(value):
+        return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    @classmethod
+    def _paragraph(cls, value, style):
+        return Paragraph(cls._safe_text(value), style)
+
+    @classmethod
+    def _draw_page_background(cls, canvas, doc):
+        canvas.saveState()
+        page_width, page_height = doc.pagesize
+        canvas.setFillColor(colors.HexColor("#eef4ee"))
+        canvas.setFont("Helvetica-Bold", 72)
+        canvas.translate(page_width / 2, page_height / 2)
+        canvas.rotate(32)
+        canvas.drawCentredString(0, 0, "NCBA")
+        canvas.restoreState()
+
+        canvas.saveState()
+        canvas.setStrokeColor(colors.HexColor("#94a38f"))
+        canvas.setLineWidth(0.3)
+        canvas.line(doc.leftMargin, 12 * mm, page_width - doc.rightMargin, 12 * mm)
+        canvas.setFillColor(colors.HexColor("#4b5563"))
+        canvas.setFont("Helvetica", 7)
+        canvas.drawRightString(page_width - doc.rightMargin, 7 * mm, f"Page {doc.page}")
+        canvas.restoreState()
+
+    @classmethod
+    def _column_widths(cls, dynamic_column_count):
+        usable_width = landscape(legal)[0] - (16 * mm)
+        fixed_widths = [8 * mm, 22 * mm, 45 * mm, 11 * mm]
+        final_width = 14 * mm
+        remaining = usable_width - sum(fixed_widths) - final_width
+        dynamic_width = max(6.5 * mm, min(12 * mm, remaining / max(dynamic_column_count, 1)))
+        return fixed_widths + ([dynamic_width] * dynamic_column_count) + [final_width]
+
+    @classmethod
+    def build_pdf_bytes(cls, *, report):
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=landscape(legal),
+            leftMargin=8 * mm,
+            rightMargin=8 * mm,
+            topMargin=8 * mm,
+            bottomMargin=14 * mm,
+            title="Class Tabulation Sheet",
+        )
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name="Tiny", fontSize=5.4, leading=6.2))
+        styles.add(ParagraphStyle(name="TinyBold", fontSize=5.4, leading=6.2, fontName="Helvetica-Bold"))
+        styles.add(ParagraphStyle(name="SmallCenter", fontSize=7, leading=8.5, alignment=1))
+        styles.add(ParagraphStyle(name="HeaderTitle", fontSize=12, leading=14, alignment=1, fontName="Helvetica-Bold"))
+        styles.add(ParagraphStyle(name="HeaderSmall", fontSize=7.5, leading=9, alignment=1))
+
+        story = []
+        header_rows = []
+        if cls.LOGO_PATH.exists():
+            logo = Image(str(cls.LOGO_PATH), width=18 * mm, height=18 * mm)
+            header_rows.append([logo])
+        header_rows.extend(
+            [
+                [Paragraph(cls._safe_text(report["print_header_name"]), styles["HeaderTitle"])],
+                [Paragraph(cls._safe_text(report.get("print_header_address") or ""), styles["HeaderSmall"])],
+                [Paragraph("CLASS TABULATION SHEET", styles["HeaderTitle"])],
+            ]
+        )
+        header = Table(header_rows, colWidths=[180 * mm])
+        header.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                ]
+            )
+        )
+        story.append(header)
+        story.append(Spacer(1, 4))
+
+        offering = report["offering"]
+        meta_rows = [
+            [
+                cls._paragraph("Tenant", styles["TinyBold"]),
+                cls._paragraph(offering.tenant.name, styles["Tiny"]),
+                cls._paragraph("Campus", styles["TinyBold"]),
+                cls._paragraph(offering.campus.name, styles["Tiny"]),
+                cls._paragraph("Academic Year / Term", styles["TinyBold"]),
+                cls._paragraph(f"{offering.academic_year.code} / {offering.term.name or offering.term.code}", styles["Tiny"]),
+            ],
+            [
+                cls._paragraph("Faculty", styles["TinyBold"]),
+                cls._paragraph(report["faculty_name"], styles["Tiny"]),
+                cls._paragraph("Section", styles["TinyBold"]),
+                cls._paragraph(offering.section.code, styles["Tiny"]),
+                cls._paragraph("Room", styles["TinyBold"]),
+                cls._paragraph(offering.room or "TBA", styles["Tiny"]),
+            ],
+            [
+                cls._paragraph("Course", styles["TinyBold"]),
+                cls._paragraph(f"{offering.course.code} - {offering.course.title}", styles["Tiny"]),
+                cls._paragraph("Generated", styles["TinyBold"]),
+                cls._paragraph(report["generated_at"].strftime("%Y-%m-%d %H:%M"), styles["Tiny"]),
+                "",
+                "",
+            ],
+        ]
+        meta_table = Table(meta_rows, colWidths=[18 * mm, 78 * mm, 18 * mm, 58 * mm, 25 * mm, 70 * mm])
+        meta_table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cfd8cf")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+        story.extend([meta_table, Spacer(1, 5)])
+
+        period_header = [
+            Paragraph("No.", styles["TinyBold"]),
+            Paragraph("Student No", styles["TinyBold"]),
+            Paragraph("Student Name", styles["TinyBold"]),
+            Paragraph("Status", styles["TinyBold"]),
+        ]
+        detail_header = ["", "", "", ""]
+        span_styles = []
+        cursor = 4
+        for period in report["period_column_groups"]:
+            period_header.append(Paragraph(cls._safe_text(period["label"]), styles["TinyBold"]))
+            period_header.extend([""] * max(len(period["columns"]) - 1, 0))
+            detail_header.extend([Paragraph(cls._safe_text(column["label"]), styles["TinyBold"]) for column in period["columns"]])
+            end_cursor = cursor + len(period["columns"]) - 1
+            if end_cursor > cursor:
+                span_styles.append(("SPAN", (cursor, 0), (end_cursor, 0)))
+            cursor = end_cursor + 1
+        period_header.append(Paragraph("Final Grade", styles["TinyBold"]))
+        detail_header.append("")
+
+        rows = [period_header, detail_header]
+        rows.append(
+            [
+                "",
+                "",
+                Paragraph("Highest Possible Score", styles["TinyBold"]),
+                "",
+                *[Paragraph(cls._safe_text(value), styles["Tiny"]) for value in report["highest_row"]],
+                "",
+            ]
+        )
+        for row in report["sheet_rows"]:
+            rows.append(
+                [
+                    str(row["number"]),
+                    Paragraph(cls._safe_text(row["student_no"]), styles["Tiny"]),
+                    Paragraph(cls._safe_text(row["student_name"]), styles["Tiny"]),
+                    Paragraph(cls._safe_text(row["status"]), styles["Tiny"]),
+                    *[Paragraph(cls._safe_text(value), styles["Tiny"]) for value in row["values"]],
+                    Paragraph(cls._safe_text(row["final_grade"]), styles["TinyBold"]),
+                ]
+            )
+        rows.append(
+            [
+                "",
+                "",
+                Paragraph("**** NOTHING FOLLOWS *****", styles["TinyBold"]),
+                "",
+                *([""] * len(report["highest_row"])),
+                "",
+            ]
+        )
+
+        table = Table(rows, colWidths=cls._column_widths(len(report["highest_row"])), repeatRows=2)
+        table_style = [
+            ("GRID", (0, 0), (-1, -1), 0.2, colors.HexColor("#cfd8cf")),
+            ("BACKGROUND", (0, 0), (-1, 1), colors.HexColor("#e8f2e8")),
+            ("BACKGROUND", (0, 2), (-1, 2), colors.HexColor("#f1f7f1")),
+            ("BACKGROUND", (-1, 0), (-1, -1), colors.HexColor("#fff7d6")),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("ALIGN", (2, 0), (2, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTNAME", (0, 0), (-1, 1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 5.4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 1.6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 1.6),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.4),
+        ]
+        table_style.extend(span_styles)
+        table.setStyle(TableStyle(table_style))
+        story.append(table)
+        story.append(Spacer(1, 12))
+
+        signature_table = Table(
+            [
+                ["", Paragraph("Prepared and Submitted By", styles["TinyBold"])],
+                ["", Paragraph(cls._safe_text(report["faculty_name"]).upper(), styles["SmallCenter"])],
+            ],
+            colWidths=[220 * mm, 70 * mm],
+        )
+        signature_table.setStyle(
+            TableStyle(
+                [
+                    ("LINEABOVE", (1, 1), (1, 1), 0.5, colors.black),
+                    ("ALIGN", (1, 0), (1, -1), "CENTER"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+        story.append(signature_table)
+
+        doc.build(story, onFirstPage=cls._draw_page_background, onLaterPages=cls._draw_page_background)
+        return buffer.getvalue()
+
+
 class FacultyFinalClearanceReportService:
     LOGO_PATH = CorrectionOfficialReportService.LOGO_PATH
 
@@ -667,6 +892,8 @@ class FacultyFinalClearanceReportService:
         assignments = (
             faculty_user.faculty_assignments.filter(
                 is_active=True,
+                response_status="ACCEPTED",
+                accepted_at__isnull=False,
                 offering__term_id=term.id,
                 offering__tenant_id=term.tenant_id,
                 offering__is_active=True,

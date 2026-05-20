@@ -8,7 +8,7 @@ from django.contrib import messages
 from django import forms as django_forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Avg, Count, Prefetch, Q
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -57,7 +57,11 @@ from apps.grading.models import (
 )
 from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService
-from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
+from apps.grading.reporting import (
+    ClassTabulationSheetPdfService,
+    CorrectionOfficialReportService,
+    FacultyFinalClearanceReportService,
+)
 from apps.grading.services import (
     FacultyGradingService,
     GradingGovernanceService,
@@ -1135,7 +1139,7 @@ def _build_class_tabulation_period_section(*, offering, period, enrollments, sto
         rows.append(
             {
                 "student": enrollment.student,
-                "enrollment_status": enrollment.enrollment_status,
+                "enrollment_status": _tabulation_status_display(enrollment.enrollment_status),
                 "class_standing_blocks": summary_values["class_standing_blocks"],
                 "exam_values": summary_values["exam_values"],
                 "period_grade": _format_official_grade_display(grade_row.period_grade if grade_row else None),
@@ -1158,6 +1162,116 @@ def _build_class_tabulation_period_section(*, offering, period, enrollments, sto
         "summary_layout": summary_layout,
         "rows": rows,
         "colspan": colspan,
+    }
+
+
+def _tabulation_display_value(value):
+    if value in (None, ""):
+        return ""
+    if isinstance(value, Decimal):
+        return format(value.quantize(Decimal("0.01")), "f")
+    try:
+        return format(Decimal(str(value)).quantize(Decimal("0.01")), "f")
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+
+
+def _tabulation_status_display(status):
+    return "" if status == Enrollment.Status.ACTIVE else str(status or "")
+
+
+def _tabulation_period_label(period):
+    name = (period.name or period.code or "").strip().upper()
+    code = (period.code or "").strip().upper()
+    if name in {"FINAL", "FINALS", "FX"} or code in {"FINAL", "FINALS", "FX"}:
+        return "FINAL EXAM"
+    return name
+
+
+def _period_sheet_columns_from_layout(section):
+    columns = []
+    highest_values = []
+    for block in section["summary_layout"]["class_standing_blocks"]:
+        for subsection in block["sections"]:
+            if subsection["uses_nested"]:
+                for group in subsection["groups"]:
+                    for column in group["activity_columns"]:
+                        columns.append({"label": column["label"]})
+                        highest_values.append(_tabulation_display_value(column["total_score"]))
+                    columns.append({"label": group["avg_label"]})
+                    highest_values.append("")
+            else:
+                for column in subsection["activity_columns"]:
+                    columns.append({"label": column["label"]})
+                    highest_values.append(_tabulation_display_value(column["total_score"]))
+                columns.append({"label": subsection["avg_label"]})
+                highest_values.append("")
+        columns.append({"label": block["total_label"]})
+        highest_values.append("")
+    for exam in section["summary_layout"]["exam_components"]:
+        columns.append({"label": exam["label"]})
+        total_score = ""
+        if exam["sections"] and exam["sections"][0]["activity_columns"]:
+            total_score = _tabulation_display_value(exam["sections"][0]["activity_columns"][0]["total_score"])
+        highest_values.append(total_score)
+    columns.append({"label": f"{_tabulation_period_label(section['period'])} Grade"})
+    highest_values.append("")
+    return columns, highest_values
+
+
+def _period_sheet_values_from_row(row):
+    values = []
+    for block in row["class_standing_blocks"]:
+        for subsection in block["sections"]:
+            if subsection["uses_nested"]:
+                for group in subsection["groups"]:
+                    values.extend(_tabulation_display_value(value) for value in group["activity_values"])
+                    values.append(_tabulation_display_value(group["average"]))
+            else:
+                values.extend(_tabulation_display_value(value) for value in subsection["activity_values"])
+                values.append(_tabulation_display_value(subsection["average"]))
+        values.append(_tabulation_display_value(block["total"]))
+    values.extend(_tabulation_display_value(value) for value in row["exam_values"])
+    values.append(row["period_grade"] or "")
+    return values
+
+
+def _build_class_tabulation_sheet_grid(*, period_sections, final_grade_map, enrollments):
+    period_column_groups = []
+    highest_row = []
+    for section in period_sections:
+        columns, section_highest = _period_sheet_columns_from_layout(section)
+        period_column_groups.append(
+            {
+                "period": section["period"],
+                "label": f"{_tabulation_period_label(section['period'])} ({section['period'].code})",
+                "columns": columns,
+            }
+        )
+        highest_row.extend(section_highest)
+
+    rows_by_student = defaultdict(list)
+    for section in period_sections:
+        for row in section["rows"]:
+            rows_by_student[row["student"].id].extend(_period_sheet_values_from_row(row))
+
+    sheet_rows = []
+    for number, enrollment in enumerate(enrollments, start=1):
+        sheet_rows.append(
+            {
+                "number": number,
+                "student_no": enrollment.student.student_no,
+                "student_name": f"{enrollment.student.last_name}, {enrollment.student.first_name}",
+                "status": _tabulation_status_display(enrollment.enrollment_status),
+                "values": rows_by_student.get(enrollment.student_id, []),
+                "final_grade": _format_official_grade_display(final_grade_map.get(enrollment.student_id)),
+            }
+        )
+
+    return {
+        "period_column_groups": period_column_groups,
+        "highest_row": highest_row,
+        "sheet_rows": sheet_rows,
     }
 
 
@@ -3020,12 +3134,17 @@ def offering_class_tabulation_sheet_view(request, offering_id: int):
         )
         for period in periods
     ]
+    sheet_grid = _build_class_tabulation_sheet_grid(
+        period_sections=period_sections,
+        final_grade_map=final_grade_map,
+        enrollments=enrollments,
+    )
     final_grade_rows = []
     for enrollment in enrollments:
         final_grade_rows.append(
             {
                 "student": enrollment.student,
-                "enrollment_status": enrollment.enrollment_status,
+                "enrollment_status": _tabulation_status_display(enrollment.enrollment_status),
                 "period_grades": [
                     _format_official_grade_display(
                         stored_grade_map.get(period.id, {}).get(enrollment.student_id).period_grade
@@ -3048,6 +3167,7 @@ def offering_class_tabulation_sheet_view(request, offering_id: int):
         tenant_id=offering.tenant_id,
         default=getattr(offering.campus, "address", "") or "",
     )
+    faculty_name = request.user.full_name or request.user.username
     context = {
         "offering": offering,
         "template": template,
@@ -3056,8 +3176,16 @@ def offering_class_tabulation_sheet_view(request, offering_id: int):
         "final_grade_rows": final_grade_rows,
         "print_header_name": print_header_name,
         "print_header_address": print_header_address,
+        "faculty_name": faculty_name,
+        **sheet_grid,
         "generated_at": timezone.localtime(),
     }
+    if request.GET.get("format") == "pdf":
+        pdf_bytes = ClassTabulationSheetPdfService.build_pdf_bytes(report=context)
+        filename = f"class-tabulation-{offering.course.code}-{offering.section.code}.pdf"
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{filename}"'
+        return response
     return render(request, "faculty_portal/class_tabulation_sheet.html", context)
 
 

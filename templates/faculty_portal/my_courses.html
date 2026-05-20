@@ -585,6 +585,11 @@
             <a class="btn btn-outline-secondary" href="{% url 'faculty_portal:offering_enrollment' offering.id %}">
               Class List
             </a>
+            {% if offering.final_template_period %}
+            <a class="btn btn-outline-success" href="{% url 'faculty_portal:period_final_clearance' offering.id offering.final_template_period.id %}">
+              Print Final Clearance
+            </a>
+            {% endif %}
             {% if offering.can_undo_acceptance %}
             <form method="post" action="{% url 'faculty_portal:faculty_assignment_undo_accept' offering.assignment.id %}" class="d-inline">
               {% csrf_token %}

@@ -1496,15 +1496,26 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Class Tabulation Sheet")
-        self.assertContains(response, "logos/ncba-logo.png")
+        self.assertContains(response, "/media/logos/ncba-logo.png")
+        self.assertContains(response, "Print PDF")
         self.assertContains(response, "Q1")
         self.assertContains(response, "90.00")
         self.assertContains(response, "PRELIM")
         self.assertContains(response, "MIDTERM")
         self.assertContains(response, "PRE-FINAL")
         self.assertContains(response, "FINAL")
-        self.assertContains(response, "Final Grades")
+        self.assertContains(response, "Final Grade")
         self.assertContains(response, "Prepared and Submitted By")
+        self.assertContains(response, "**** NOTHING FOLLOWS *****")
+        self.assertNotContains(response, ">ACTIVE</td>")
+
+        pdf_response = self.client.get(
+            reverse("faculty_portal:offering_class_tabulation_sheet", kwargs={"offering_id": self.offering.id})
+            + "?format=pdf"
+        )
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertEqual(pdf_response["Content-Type"], "application/pdf")
+        self.assertTrue(pdf_response.content.startswith(b"%PDF"))
 
     def test_period_summary_hides_official_period_and_final_grades_before_deadline(self):
         student = Student.objects.create(
@@ -2505,6 +2516,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
                 kwargs={"offering_id": self.offering.id, "period_id": self.final.id},
             ),
         )
+        self.assertContains(response, "Print Final Clearance")
 
     def test_offering_periods_shows_final_clearance_action_on_final_period(self):
         self.assignment.accepted_at = timezone.now()
@@ -2832,6 +2844,50 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Final Clearance")
         self.assertContains(response, self.faculty_user.full_name)
+
+    def test_faculty_final_clearance_lists_only_accepted_assignments(self):
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.accepted_by = self.faculty_user
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        pending_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="PENDING-SEC",
+            name="Pending Section",
+        )
+        pending_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=pending_section,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=pending_offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+            response_status=FacultyAssignment.ResponseStatus.PENDING,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_final_clearance",
+                kwargs={"offering_id": self.offering.id, "period_id": self.final.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.section.code)
+        self.assertNotContains(response, pending_section.code)
 
     def test_faculty_final_clearance_post_generates_pdf_report(self):
         self.assignment.accepted_at = timezone.now()

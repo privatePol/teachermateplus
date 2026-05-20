@@ -7,7 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
-- Added a Faculty Portal class tabulation sheet that becomes available after all active grading periods for a class are submitted, printing the full-term activity scores, averages, exams, period grades, final grades, school header, faculty metadata, and prepared/submitted-by footer.
+- Added a Faculty Portal class tabulation sheet that becomes available after all active grading periods for a class are submitted, printing the full-term activity scores, averages, exams, period grades, final grades, school header, faculty metadata, and prepared/submitted-by footer. The sheet now supports a legal-landscape PDF output with NCBA watermark, fixed `/media/logos/ncba-logo.png` branding, all period blocks aligned across one student row, blank ACTIVE statuses, and a `**** NOTHING FOLLOWS *****` closing row.
 - Added an explicit `faculty_final_clearance.read` RBAC permission for Admin Portal Faculty Final Clearance preview and verification, with migration support that preserves access for roles that previously inherited it through Faculty Assignments.
 - Added `docs/INSTITUTION_IMPLEMENTATION_REFERENCE.md`, a plain-English superadmin guide for production institution setup, required master data, tenant configuration, faculty grading readiness, bulk import order, and related governance.
 - Student Portal local foundation: added the ignored local `apps/student_portal` prototype app with `StudentAccountLink`, `student_portal.access`, a global `FEATURE_STUDENT_PORTAL_ENABLED` guard, read-only dashboard/courses/profile/account pages under `/student/`, and focused tenant/campus/student isolation tests.
@@ -23,6 +23,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Faculty Final Clearance now evaluates only officially accepted faculty assignments, and accepted course cards include a direct `Print Final Clearance` action.
 - Faculty Portal final-period cards now again include a `Print Final Clearance` action, while keeping the newer single Final Clearance shortcut on `My Classes`.
 - Admin Portal enrollment create/edit course-offering dropdowns now group active offerings by `Campus | Term | Section` and sort course titles alphabetically within each group for easier selection.
 - Admin Portal Course Offerings list now displays columns as Campus, Term, Section, Course, Room/Office/Lab, Status, Record State, and Actions, with rows sorted by campus, term, section, and course title.
