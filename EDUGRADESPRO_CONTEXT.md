@@ -307,6 +307,7 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - The `My Classes` page exposes `Final Clearance` inside the Faculty Portal through a single dedicated action area, so faculty can preview their own campus-term clearance status and generate the official final-clearance PDF without switching to the Admin Portal.
 - The final-period card also includes a `Print Final Clearance` action, giving faculty both the class-level entry point and the consolidated `My Classes` shortcut.
 - Admin Portal Faculty Final Clearance preview and verification is controlled by the explicit `faculty_final_clearance.read` permission. Existing roles that previously had `faculty_assignments.read` are granted the new permission by migration to preserve access, after which admins can manage the clearance permission separately.
+- When all active grading periods in a class are submitted, the Faculty Portal class period page shows `Print Class Tabulation`. The printable full-term sheet includes all period sections, activity scores, computed averages, exam values, official period grades, final grades, school header information, faculty metadata, and a prepared/submitted-by footer.
 - Final-clearance evaluation is now stricter:
   - classes with zero `ACTIVE` students are no longer auto-marked `COMPLETE`
   - official period and final grades must be positive values, not just non-null placeholders, to satisfy clearance readiness.

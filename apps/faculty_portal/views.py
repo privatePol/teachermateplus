@@ -1087,6 +1087,80 @@ def _build_summary_row_values(row, summary_layout, score_by_activity):
     }
 
 
+def _all_template_periods_submitted(offering, periods):
+    if not periods:
+        return False
+    return all(
+        GradingGovernanceService.is_submitted(offering=offering, template_period=period)
+        for period in periods
+    )
+
+
+def _build_class_tabulation_period_section(*, offering, period, enrollments, stored_grade_map):
+    activities = list(
+        GradeActivity.objects.filter(
+            offering_id=offering.id,
+            template_period_id=period.id,
+            is_active=True,
+        )
+        .select_related("template_component", "template_subcomponent", "template_detail")
+        .order_by(
+            "template_component__sort_order",
+            "template_subcomponent__sort_order",
+            "template_detail__sort_order",
+            "activity_date",
+            "id",
+        )
+    )
+    summary_layout = _build_summary_layout(period, activities)
+    score_by_activity = {
+        (score.student_id, score.activity_id): Decimal(score.computed_score)
+        for score in StudentActivityScore.objects.filter(
+            activity_id__in=[activity.id for activity in activities],
+            is_active=True,
+            activity__is_active=True,
+        )
+    }
+    period_grade_map = stored_grade_map.get(period.id, {})
+    rows = []
+    for enrollment in enrollments:
+        grade_row = period_grade_map.get(enrollment.student_id)
+        base_row = {
+            "student": enrollment.student,
+            "enrollment_status": enrollment.enrollment_status,
+            "component_scores": {},
+            "period_grade": grade_row.period_grade if grade_row else None,
+        }
+        summary_values = _build_summary_row_values(base_row, summary_layout, score_by_activity)
+        rows.append(
+            {
+                "student": enrollment.student,
+                "enrollment_status": enrollment.enrollment_status,
+                "class_standing_blocks": summary_values["class_standing_blocks"],
+                "exam_values": summary_values["exam_values"],
+                "period_grade": _format_official_grade_display(grade_row.period_grade if grade_row else None),
+            }
+        )
+
+    colspan = 4
+    for block in summary_layout["class_standing_blocks"]:
+        for section in block["sections"]:
+            if section["uses_nested"]:
+                for group in section["groups"]:
+                    colspan += len(group["activity_columns"]) + 1
+            else:
+                colspan += len(section["activity_columns"]) + 1
+        colspan += 1
+    colspan += len(summary_layout["exam_components"]) + 1
+
+    return {
+        "period": period,
+        "summary_layout": summary_layout,
+        "rows": rows,
+        "colspan": colspan,
+    }
+
+
 @portal_required("FACULTY")
 @permission_required("dashboard.read")
 def dashboard_view(request):
@@ -2871,6 +2945,7 @@ def offering_periods_view(request, offering_id: int):
               }
           )
 
+    all_periods_submitted = _all_template_periods_submitted(offering, periods)
     context = {
         "offering": offering,
         "faculty_scope_state": offering.faculty_scope_state,
@@ -2886,6 +2961,7 @@ def offering_periods_view(request, offering_id: int):
             tenant_id=offering.tenant_id,
         ),
         "active_grading_period": active_grading_period,
+        "all_periods_submitted": all_periods_submitted,
         "deadline_banner": _build_deadline_reminder_for_period_cards(
             offering,
             period_cards,
@@ -2893,6 +2969,96 @@ def offering_periods_view(request, offering_id: int):
         ),
     }
     return render(request, "faculty_portal/offering_periods.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def offering_class_tabulation_sheet_view(request, offering_id: int):
+    assignment = _find_faculty_assignment(request.user, offering_id)
+    if assignment and not assignment.is_accepted:
+        messages.error(request, "Please accept this faculty assignment first before opening the class.")
+        return redirect("faculty_portal:my_courses")
+    offering = _require_faculty_offering_or_404(request, offering_id)
+    try:
+        template = FacultyGradingService.resolve_template_for_offering(offering)
+        periods = list(FacultyGradingService.get_template_periods(template))
+    except ValidationError as exc:
+        messages.error(request, str(exc))
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    if not _all_template_periods_submitted(offering, periods):
+        messages.error(request, "The class tabulation sheet is available only after all grading periods are submitted.")
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    FacultyGradingService.recompute_final_grades_from_stored_periods(
+        user=request.user,
+        offering=offering,
+        template=template,
+    )
+    enrollments = list(
+        Enrollment.objects.filter(course_offering_id=offering.id, is_active=True)
+        .select_related("student")
+        .order_by("student__last_name", "student__first_name", "student__student_no")
+    )
+    stored_grade_map = defaultdict(dict)
+    for grade_row in StudentPeriodGrade.objects.filter(
+        offering_id=offering.id,
+        template_period_id__in=[period.id for period in periods],
+    ):
+        stored_grade_map[grade_row.template_period_id][grade_row.student_id] = grade_row
+
+    final_grade_map = {
+        row.student_id: row.final_grade
+        for row in StudentFinalGrade.objects.filter(offering_id=offering.id)
+    }
+    period_sections = [
+        _build_class_tabulation_period_section(
+            offering=offering,
+            period=period,
+            enrollments=enrollments,
+            stored_grade_map=stored_grade_map,
+        )
+        for period in periods
+    ]
+    final_grade_rows = []
+    for enrollment in enrollments:
+        final_grade_rows.append(
+            {
+                "student": enrollment.student,
+                "enrollment_status": enrollment.enrollment_status,
+                "period_grades": [
+                    _format_official_grade_display(
+                        stored_grade_map.get(period.id, {}).get(enrollment.student_id).period_grade
+                        if stored_grade_map.get(period.id, {}).get(enrollment.student_id)
+                        else None
+                    )
+                    for period in periods
+                ],
+                "final_grade": _format_official_grade_display(final_grade_map.get(enrollment.student_id)),
+            }
+        )
+
+    print_header_name = SystemSettingService.get(
+        "PRINT_HEADER_SCHOOL_NAME",
+        tenant_id=offering.tenant_id,
+        default="NATIONAL COLLEGE OF BUSINESS AND ARTS",
+    )
+    print_header_address = SystemSettingService.get(
+        "PRINT_HEADER_SCHOOL_ADDRESS",
+        tenant_id=offering.tenant_id,
+        default=getattr(offering.campus, "address", "") or "",
+    )
+    context = {
+        "offering": offering,
+        "template": template,
+        "periods": periods,
+        "period_sections": period_sections,
+        "final_grade_rows": final_grade_rows,
+        "print_header_name": print_header_name,
+        "print_header_address": print_header_address,
+        "generated_at": timezone.localtime(),
+    }
+    return render(request, "faculty_portal/class_tabulation_sheet.html", context)
 
 
 @portal_required("FACULTY")

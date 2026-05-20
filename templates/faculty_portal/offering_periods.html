@@ -270,6 +270,11 @@
     {{ offering.course.code }} | {{ offering.section.code }} | {{ offering.term.code }}
   </h2>
   <div class="d-flex gap-2">
+    {% if all_periods_submitted %}
+    <a class="btn btn-sm btn-success" href="{% url 'faculty_portal:offering_class_tabulation_sheet' offering.id %}">
+      Print Class Tabulation
+    </a>
+    {% endif %}
     <a class="btn btn-sm btn-outline-primary" href="{% url 'faculty_portal:offering_grading_template' offering.id %}">View Grading Template</a>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:my_courses' %}">Back</a>
   </div>

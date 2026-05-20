@@ -1431,6 +1431,81 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Course Title:")
         self.assertContains(response, "Prelim Grade")
 
+    def test_class_tabulation_sheet_available_after_all_periods_are_submitted(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-TAB-001",
+            last_name="Tabulation",
+            first_name="Ready",
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            title="Q1",
+            total_score=Decimal("20.00"),
+            activity_date=date(2025, 7, 1),
+            created_by_user=self.faculty_user,
+        )
+        StudentActivityScore.objects.create(
+            activity=activity,
+            student=student,
+            raw_score=Decimal("18.00"),
+            computed_score=Decimal("90.00"),
+            encoded_by_user=self.faculty_user,
+        )
+        for index, period in enumerate([self.prelim, self.midterm, self.prefinal, self.final], start=1):
+            StudentPeriodGrade.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=period,
+                student=student,
+                period_grade=Decimal(80 + index),
+            )
+            GradeSubmission.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=period,
+                status=GradeSubmission.Status.SUBMITTED,
+                submitted_by_user=self.faculty_user,
+                submitted_at=timezone.now(),
+            )
+        StudentFinalGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            student=student,
+            final_grade=Decimal("88.00"),
+            is_submitted=True,
+        )
+
+        self.client.force_login(self.faculty_user)
+        periods_response = self.client.get(
+            reverse("faculty_portal:offering_periods", kwargs={"offering_id": self.offering.id})
+        )
+        self.assertContains(periods_response, "Print Class Tabulation")
+
+        response = self.client.get(
+            reverse("faculty_portal:offering_class_tabulation_sheet", kwargs={"offering_id": self.offering.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Class Tabulation Sheet")
+        self.assertContains(response, "logos/ncba-logo.png")
+        self.assertContains(response, "Q1")
+        self.assertContains(response, "90.00")
+        self.assertContains(response, "PRELIM")
+        self.assertContains(response, "MIDTERM")
+        self.assertContains(response, "PRE-FINAL")
+        self.assertContains(response, "FINAL")
+        self.assertContains(response, "Final Grades")
+        self.assertContains(response, "Prepared and Submitted By")
+
     def test_period_summary_hides_official_period_and_final_grades_before_deadline(self):
         student = Student.objects.create(
             tenant=self.tenant,

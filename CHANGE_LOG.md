@@ -7,6 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added a Faculty Portal class tabulation sheet that becomes available after all active grading periods for a class are submitted, printing the full-term activity scores, averages, exams, period grades, final grades, school header, faculty metadata, and prepared/submitted-by footer.
 - Added an explicit `faculty_final_clearance.read` RBAC permission for Admin Portal Faculty Final Clearance preview and verification, with migration support that preserves access for roles that previously inherited it through Faculty Assignments.
 - Added `docs/INSTITUTION_IMPLEMENTATION_REFERENCE.md`, a plain-English superadmin guide for production institution setup, required master data, tenant configuration, faculty grading readiness, bulk import order, and related governance.
 - Student Portal local foundation: added the ignored local `apps/student_portal` prototype app with `StudentAccountLink`, `student_portal.access`, a global `FEATURE_STUDENT_PORTAL_ENABLED` guard, read-only dashboard/courses/profile/account pages under `/student/`, and focused tenant/campus/student isolation tests.

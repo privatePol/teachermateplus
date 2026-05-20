@@ -1,0 +1,381 @@
+{% extends "faculty_portal/base.html" %}
+{% load static %}
+{% get_media_prefix as MEDIA_URL %}
+
+{% block faculty_content %}
+<style>
+  .tabulation-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .tabulation-sheet {
+    background: #fff;
+    color: #111827;
+    padding: 1rem;
+  }
+  .tabulation-header {
+    border-bottom: 2px solid #1f5d36;
+    padding-bottom: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .tabulation-brand-row {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+  }
+  .tabulation-logo {
+    width: 68px;
+    height: 68px;
+    object-fit: contain;
+  }
+  .tabulation-school h1 {
+    font-size: 1.25rem;
+    margin: 0;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #123b25;
+  }
+  .tabulation-address {
+    font-size: 0.86rem;
+    color: #374151;
+  }
+  .tabulation-title {
+    margin-top: 0.65rem;
+    font-weight: 800;
+    text-align: center;
+    text-transform: uppercase;
+    color: #123b25;
+  }
+  .tabulation-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.3rem 1rem;
+    margin-top: 0.7rem;
+    font-size: 0.88rem;
+  }
+  .tabulation-meta .full {
+    grid-column: 1 / -1;
+  }
+  .tabulation-meta b {
+    text-transform: uppercase;
+    color: #123b25;
+  }
+  .tabulation-period {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin: 1.1rem 0;
+  }
+  .tabulation-period h3 {
+    background: #e8f2e8;
+    color: #123b25;
+    border: 1px solid #cbdcc9;
+    font-size: 0.95rem;
+    margin: 0;
+    padding: 0.45rem 0.55rem;
+    text-transform: uppercase;
+  }
+  .tabulation-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.72rem;
+  }
+  .tabulation-table th,
+  .tabulation-table td {
+    border: 1px solid #cfd8cf;
+    padding: 0.24rem 0.3rem;
+    vertical-align: middle;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .tabulation-table th {
+    background: #f4f8f4;
+    font-weight: 800;
+  }
+  .tabulation-table .student-name {
+    text-align: left;
+    min-width: 150px;
+  }
+  .tabulation-table .metric {
+    font-weight: 800;
+    background: #f8fbf8;
+  }
+  .tabulation-table .period-grade,
+  .tabulation-table .final-grade {
+    font-weight: 800;
+    background: #fff7d6;
+  }
+  .highest-row td {
+    background: #f1f7f1;
+    color: #374151;
+  }
+  .tabulation-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 1.25rem;
+    font-size: 0.86rem;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .signature-box {
+    min-width: 260px;
+    text-align: center;
+    padding-top: 2rem;
+  }
+  .signature-line {
+    border-top: 1px solid #111827;
+    padding-top: 0.3rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .signature-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    color: #374151;
+  }
+  @page {
+    size: legal landscape;
+    margin: 10mm;
+  }
+  @media print {
+    .no-print,
+    .faculty-sidebar,
+    .faculty-topbar,
+    .help-fab {
+      display: none !important;
+    }
+    body {
+      background: #fff !important;
+    }
+    .faculty-main,
+    .faculty-content {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      max-width: none !important;
+    }
+    .tabulation-sheet {
+      padding: 0;
+    }
+    .tabulation-table {
+      font-size: 0.62rem;
+    }
+  }
+</style>
+
+<div class="tabulation-toolbar no-print">
+  <div>
+    <h2 class="h4 mb-0">Class Tabulation Sheet</h2>
+    <div class="text-muted">{{ offering.course.title }} | {{ offering.section.code }} | {{ offering.term.name|default:offering.term.code }}</div>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-success btn-sm" type="button" onclick="window.print();">Print Class Tabulation</button>
+    <a class="btn btn-outline-secondary btn-sm" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+  </div>
+</div>
+
+<section class="tabulation-sheet">
+  <header class="tabulation-header">
+    <div class="tabulation-brand-row">
+      <img class="tabulation-logo" src="{{ MEDIA_URL }}logos/ncba-logo.png" alt="NCBA">
+      <div class="tabulation-school">
+        <h1>{{ print_header_name }}</h1>
+        {% if print_header_address %}
+        <div class="tabulation-address">{{ print_header_address }}</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="tabulation-title">Class Tabulation Sheet</div>
+    <div class="tabulation-meta">
+      <div><b>Tenant:</b> {{ offering.tenant.name }}</div>
+      <div><b>Campus:</b> {{ offering.campus.name }}</div>
+      <div><b>Academic Year:</b> {{ offering.academic_year.code }}</div>
+      <div><b>Semester / Term:</b> {{ offering.term.name|default:offering.term.code }}</div>
+      <div><b>Section:</b> {{ offering.section.code }}</div>
+      <div><b>Faculty:</b> {{ request.user.full_name|default:request.user.username }}</div>
+      <div><b>Course Code:</b> {{ offering.course.code }}</div>
+      <div><b>Room:</b> {{ offering.room|default:"TBA" }}</div>
+      <div class="full"><b>Course Title:</b> {{ offering.course.title }}</div>
+      <div><b>Generated:</b> {{ generated_at|date:"Y-m-d H:i" }}</div>
+    </div>
+  </header>
+
+  {% for section in period_sections %}
+  <article class="tabulation-period">
+    <h3>{{ section.period.name }} ({{ section.period.code }})</h3>
+    <div class="table-responsive">
+      <table class="tabulation-table">
+        <thead>
+          <tr>
+            <th rowspan="4">No.</th>
+            <th rowspan="4">Student No</th>
+            <th rowspan="4">Student Name</th>
+            <th rowspan="4">Status</th>
+            {% for block in section.summary_layout.class_standing_blocks %}
+              <th colspan="{{ block.colspan }}">{{ block.label }}</th>
+            {% endfor %}
+            {% for exam in section.summary_layout.exam_components %}
+              <th rowspan="4">{{ exam.label }}</th>
+            {% endfor %}
+            <th rowspan="4" class="period-grade">{{ section.period.name|upper }} Grade</th>
+          </tr>
+          <tr>
+            {% for block in section.summary_layout.class_standing_blocks %}
+              {% for subsection in block.sections %}
+                <th colspan="{{ subsection.colspan }}">{{ subsection.label }}</th>
+              {% endfor %}
+              <th></th>
+            {% endfor %}
+          </tr>
+          <tr>
+            {% for block in section.summary_layout.class_standing_blocks %}
+              {% for subsection in block.sections %}
+                {% if subsection.uses_nested %}
+                  {% for group in subsection.groups %}
+                    <th colspan="{{ group.colspan }}">{{ group.label }}</th>
+                  {% endfor %}
+                {% else %}
+                  <th colspan="{{ subsection.colspan }}"></th>
+                {% endif %}
+              {% endfor %}
+              <th></th>
+            {% endfor %}
+          </tr>
+          <tr>
+            {% for block in section.summary_layout.class_standing_blocks %}
+              {% for subsection in block.sections %}
+                {% if subsection.uses_nested %}
+                  {% for group in subsection.groups %}
+                    {% for column in group.activity_columns %}
+                      <th>{{ column.label }}</th>
+                    {% endfor %}
+                    <th>{{ group.avg_label }}</th>
+                  {% endfor %}
+                {% else %}
+                  {% for column in subsection.activity_columns %}
+                    <th>{{ column.label }}</th>
+                  {% endfor %}
+                  <th>{{ subsection.avg_label }}</th>
+                {% endif %}
+              {% endfor %}
+              <th>{{ block.total_label }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="highest-row">
+            <td></td>
+            <td></td>
+            <td class="student-name">Highest Possible Score</td>
+            <td></td>
+            {% for block in section.summary_layout.class_standing_blocks %}
+              {% for subsection in block.sections %}
+                {% if subsection.uses_nested %}
+                  {% for group in subsection.groups %}
+                    {% for column in group.activity_columns %}
+                      <td>{{ column.total_score|default:"" }}</td>
+                    {% endfor %}
+                    <td></td>
+                  {% endfor %}
+                {% else %}
+                  {% for column in subsection.activity_columns %}
+                    <td>{{ column.total_score|default:"" }}</td>
+                  {% endfor %}
+                  <td></td>
+                {% endif %}
+              {% endfor %}
+              <td></td>
+            {% endfor %}
+            {% for exam in section.summary_layout.exam_components %}
+              <td>
+                {% if exam.sections and exam.sections.0.activity_columns %}
+                  {{ exam.sections.0.activity_columns.0.total_score|default:"" }}
+                {% endif %}
+              </td>
+            {% endfor %}
+            <td></td>
+          </tr>
+          {% for row in section.rows %}
+          <tr>
+            <td>{{ forloop.counter }}</td>
+            <td>{{ row.student.student_no }}</td>
+            <td class="student-name">{{ row.student.last_name }}, {{ row.student.first_name }}</td>
+            <td>{{ row.enrollment_status }}</td>
+            {% for block in row.class_standing_blocks %}
+              {% for subsection in block.sections %}
+                {% if subsection.uses_nested %}
+                  {% for group in subsection.groups %}
+                    {% for value in group.activity_values %}
+                      <td>{{ value|default:"" }}</td>
+                    {% endfor %}
+                    <td class="metric">{{ group.average|default:"" }}</td>
+                  {% endfor %}
+                {% else %}
+                  {% for value in subsection.activity_values %}
+                    <td>{{ value|default:"" }}</td>
+                  {% endfor %}
+                  <td class="metric">{{ subsection.average|default:"" }}</td>
+                {% endif %}
+              {% endfor %}
+              <td class="metric">{{ block.total|default:"" }}</td>
+            {% endfor %}
+            {% for value in row.exam_values %}
+              <td>{{ value|default:"" }}</td>
+            {% endfor %}
+            <td class="period-grade">{{ row.period_grade|default:"" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="{{ section.colspan }}">No students found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+  {% endfor %}
+
+  <article class="tabulation-period">
+    <h3>Final Grades</h3>
+    <table class="tabulation-table">
+      <thead>
+        <tr>
+          <th>No.</th>
+          <th>Student No</th>
+          <th>Student Name</th>
+          <th>Status</th>
+          {% for period in periods %}
+          <th>{{ period.name|upper }}</th>
+          {% endfor %}
+          <th class="final-grade">Final Grade</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in final_grade_rows %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td>{{ row.student.student_no }}</td>
+          <td class="student-name">{{ row.student.last_name }}, {{ row.student.first_name }}</td>
+          <td>{{ row.enrollment_status }}</td>
+          {% for value in row.period_grades %}
+          <td>{{ value|default:"" }}</td>
+          {% endfor %}
+          <td class="final-grade">{{ row.final_grade|default:"" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="{{ periods|length|add:5 }}">No students found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+
+  <footer class="tabulation-footer">
+    <div>**** NONE FOLLOWS *****</div>
+    <div class="signature-box">
+      <div class="signature-line">{{ request.user.full_name|default:request.user.username }}</div>
+      <div class="signature-label">Prepared and Submitted By</div>
+    </div>
+  </footer>
+</section>
+{% endblock %}

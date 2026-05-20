@@ -22,6 +22,7 @@ from .views import (
     offering_grading_calculator_view,
     offering_grading_template_view,
     offering_enrollment_view,
+    offering_class_tabulation_sheet_view,
     offering_periods_view,
     period_final_clearance_view,
     period_view_history_view,
@@ -77,6 +78,11 @@ urlpatterns = [
         name="faculty_assignment_response",
     ),
     path("faculty/my-courses/<int:offering_id>/periods/", offering_periods_view, name="offering_periods"),
+    path(
+        "faculty/my-courses/<int:offering_id>/class-tabulation/",
+        offering_class_tabulation_sheet_view,
+        name="offering_class_tabulation_sheet",
+    ),
     path(
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/view-history/",
         period_view_history_view,
