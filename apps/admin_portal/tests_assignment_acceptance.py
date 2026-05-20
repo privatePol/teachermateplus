@@ -143,6 +143,10 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             module="faculty_assignments",
             action="read",
         )
+        faculty_final_clearance_read, _ = Permission.objects.get_or_create(
+            code="faculty_final_clearance.read",
+            defaults={"module": "faculty_final_clearance", "action": "read"},
+        )
         faculty_assignment_create = Permission.objects.create(
             code="faculty_assignments.create",
             module="faculty_assignments",
@@ -161,6 +165,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         RolePermission.objects.create(role=faculty_role, permission=faculty_access)
         RolePermission.objects.create(role=admin_role, permission=admin_access)
         RolePermission.objects.create(role=admin_role, permission=faculty_assignment_read)
+        RolePermission.objects.create(role=admin_role, permission=faculty_final_clearance_read)
         RolePermission.objects.create(role=admin_role, permission=faculty_assignment_create)
         RolePermission.objects.create(role=admin_role, permission=faculty_assignment_update)
         RolePermission.objects.create(role=admin_role, permission=system_settings_update)

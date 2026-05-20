@@ -7,6 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added an explicit `faculty_final_clearance.read` RBAC permission for Admin Portal Faculty Final Clearance preview and verification, with migration support that preserves access for roles that previously inherited it through Faculty Assignments.
 - Added `docs/INSTITUTION_IMPLEMENTATION_REFERENCE.md`, a plain-English superadmin guide for production institution setup, required master data, tenant configuration, faculty grading readiness, bulk import order, and related governance.
 - Student Portal local foundation: added the ignored local `apps/student_portal` prototype app with `StudentAccountLink`, `student_portal.access`, a global `FEATURE_STUDENT_PORTAL_ENABLED` guard, read-only dashboard/courses/profile/account pages under `/student/`, and focused tenant/campus/student isolation tests.
 - SIS periodic grades API now has a tenant-level Configuration Management toggle (`FEATURE_SIS_PERIODIC_GRADES_API_ENABLED`) so colleges can disable third-party grade reads when integration is not required; existing tenants are enabled by migration, while new tenants default off until configured.
@@ -21,6 +22,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Faculty Portal final-period cards now again include a `Print Final Clearance` action, while keeping the newer single Final Clearance shortcut on `My Classes`.
 - Admin Portal enrollment create/edit course-offering dropdowns now group active offerings by `Campus | Term | Section` and sort course titles alphabetically within each group for easier selection.
 - Admin Portal Course Offerings list now displays columns as Campus, Term, Section, Course, Room/Office/Lab, Status, Record State, and Actions, with rows sorted by campus, term, section, and course title.
 - Admin Portal Faculty Assignments now uses distinct colored `h4` card headers for `Unassigned Course Offerings` and `Assigned Offerings`, making the assign/unassign areas easier to distinguish.

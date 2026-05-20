@@ -6028,6 +6028,7 @@ def role_permissions_view(request, role_id: int):
             "grading_analytics.read": "Allows viewing admin grading analytics.",
             "grade_distribution_monitor.read": "Allows viewing faculty grade distribution monitoring reports.",
             "faculty_analytics.read": "Allows viewing faculty-side analytics.",
+            "faculty_final_clearance.read": "Allows previewing and verifying Faculty Final Clearance reports.",
             "gradebook.view_student_identity": "Allows authorized gradebook reviewers to see unmasked student numbers and names within their allowed scope.",
             "system_settings.update": "Allows changing tenant/system configuration settings.",
             "menus.update": "Allows changing portal navigation menu setup.",
@@ -7402,7 +7403,7 @@ def grade_prediction_monitor_view(request):
 
 
 @portal_required("ADMIN")
-@permission_required("faculty_assignments.read")
+@permission_required("faculty_final_clearance.read")
 def faculty_final_clearance_view(request):
     current_tenant_id = getattr(request, "scope", {}).get("tenant_id")
     current_campus_id = getattr(request, "scope", {}).get("campus_id")
@@ -7516,7 +7517,7 @@ def faculty_final_clearance_view(request):
 
 
 @portal_required("ADMIN")
-@permission_required("faculty_assignments.read")
+@permission_required("faculty_final_clearance.read")
 def faculty_final_clearance_verify_view(request, report_id: int):
     report_obj = get_object_or_404(
         FacultyFinalClearanceReport.objects.select_related(

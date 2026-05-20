@@ -304,8 +304,9 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
   - the embedded `Students At Risk` dashboard container was removed so the command area focuses on Priority Actions; the separate Students At-Risk Monitor remains available from navigation
 - Faculty period Summary print output now provides an NCBA-branded `Summary of Periodic Grades` sheet for Pinnacle encoding, with logo, school heading/address, grading period, academic year, semester/term, faculty name, course code/title, units, section, student list, periodic grade, and status.
 - When a period becomes closed under active grading period governance, the faculty period card still keeps `Attendance` and `Summary` available as read-only review pages, while write actions remain blocked unless the period becomes active again, is formally reopened, or has an approved correction window.
-- The `My Classes` page now exposes `Final Clearance` inside the Faculty Portal through a single dedicated action area, so faculty can preview their own campus-term clearance status and generate the official final-clearance PDF without opening the period page first or switching to the Admin Portal.
-- That page-level clearance action now also uses a stronger print-style button treatment with a print icon so faculty can identify it more quickly.
+- The `My Classes` page exposes `Final Clearance` inside the Faculty Portal through a single dedicated action area, so faculty can preview their own campus-term clearance status and generate the official final-clearance PDF without switching to the Admin Portal.
+- The final-period card also includes a `Print Final Clearance` action, giving faculty both the class-level entry point and the consolidated `My Classes` shortcut.
+- Admin Portal Faculty Final Clearance preview and verification is controlled by the explicit `faculty_final_clearance.read` permission. Existing roles that previously had `faculty_assignments.read` are granted the new permission by migration to preserve access, after which admins can manage the clearance permission separately.
 - Final-clearance evaluation is now stricter:
   - classes with zero `ACTIVE` students are no longer auto-marked `COMPLETE`
   - official period and final grades must be positive values, not just non-null placeholders, to satisfy clearance readiness.

@@ -2431,7 +2431,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             ),
         )
 
-    def test_offering_periods_no_longer_shows_final_clearance_action(self):
+    def test_offering_periods_shows_final_clearance_action_on_final_period(self):
         self.assignment.accepted_at = timezone.now()
         self.assignment.accepted_by = self.faculty_user
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
@@ -2443,13 +2443,14 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(
+        self.assertContains(
             response,
             reverse(
                 "faculty_portal:period_final_clearance",
                 kwargs={"offering_id": self.offering.id, "period_id": self.final.id},
             ),
         )
+        self.assertContains(response, "Print Final Clearance")
 
     def test_offering_periods_close_non_active_periods_under_active_period_governance(self):
         canonical_period = TenantTermGradingPeriod.objects.create(

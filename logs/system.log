@@ -1200,3 +1200,62 @@
 2026-05-17 23:25:26,582 INFO [django.server] "GET /admin-portal/grading/tenant-profiles/ HTTP/1.1" 200 55117
 2026-05-17 23:26:17,544 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 62125
 2026-05-17 23:26:35,120 INFO [django.server] "GET /admin-portal/guide/ HTTP/1.1" 200 119857
+2026-05-20 21:24:43,790 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-20 21:24:49,143 INFO [django.server] "GET /admin-portal/ HTTP/1.1" 302 0
+2026-05-20 21:24:49,168 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 3801
+2026-05-20 21:24:49,277 INFO [django.server] "GET /media/logos/edugradepro_logo.png HTTP/1.1" 200 2211507
+2026-05-20 21:24:49,317 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 71332
+2026-05-20 21:24:55,883 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
+2026-05-20 21:24:56,228 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 61662
+2026-05-20 21:24:56,325 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 71332
+2026-05-20 21:25:00,550 INFO [django.server] "GET /admin-portal/enrollment/ HTTP/1.1" 200 164915
+2026-05-20 21:25:04,254 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:25:08,548 INFO [django.server] "GET /admin-portal/academics/offerings/ HTTP/1.1" 200 62662
+2026-05-20 21:25:14,941 INFO [django.server] "GET /admin-portal/enrollment/ HTTP/1.1" 200 164915
+2026-05-20 21:25:18,055 INFO [django.server] "GET /admin-portal/enrollment/212/edit/?next=%2Fadmin-portal%2Fenrollment%2F HTTP/1.1" 200 100385
+2026-05-20 21:26:05,040 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:26:06,635 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27293
+2026-05-20 21:26:06,674 INFO [django.server] "GET /media/logos/egp_logo_official.png HTTP/1.1" 200 1465036
+2026-05-20 21:27:05,698 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:27:10,018 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71360
+2026-05-20 21:28:06,747 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:29:07,450 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:30:08,102 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:31:08,855 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:31:38,135 INFO [django.server] "GET /admin-portal/tools/configurable-features/ HTTP/1.1" 200 116100
+2026-05-20 21:31:56,930 INFO [django.server] "GET /admin-portal/security/roles/ HTTP/1.1" 200 60168
+2026-05-20 21:32:01,240 INFO [django.server] "GET /admin-portal/security/roles/6/permissions/ HTTP/1.1" 200 198043
+2026-05-20 21:32:09,669 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:32:13,931 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71360
+2026-05-20 21:32:48,743 INFO [django.server] "GET /admin-portal/academics/faculty-final-clearance/ HTTP/1.1" 200 48710
+2026-05-20 21:32:59,193 INFO [django.server] "GET /admin-portal/academics/faculty-final-clearance/?scope_tenant_id=8&scope_campus_id=14 HTTP/1.1" 200 48971
+2026-05-20 21:33:02,774 INFO [django.server] "GET /admin-portal/academics/faculty-final-clearance/?scope_tenant_id=8&scope_campus_id=9 HTTP/1.1" 200 49158
+2026-05-20 21:33:10,394 INFO [django.server] "GET /admin-portal/academics/faculty-final-clearance/?term_id=7&faculty_user_id=2 HTTP/1.1" 200 56155
+2026-05-20 21:33:10,683 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:34:11,341 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:35:11,951 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:36:12,581 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:37:13,291 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:37:17,550 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71360
+2026-05-20 21:38:11,992 INFO [django.server] "GET /admin-portal/logout/ HTTP/1.1" 302 0
+2026-05-20 21:38:11,998 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 7237
+2026-05-20 21:38:12,082 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 71332
+2026-05-20 21:38:14,427 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:39:15,564 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:40:15,968 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:41:16,769 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:42:17,540 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:42:21,900 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71360
+2026-05-20 21:43:18,670 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:44:03,647 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-20 21:44:04,434 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-20 21:44:13,539 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-20 21:44:14,249 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-20 21:44:19,375 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:45:20,100 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:46:20,818 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:47:21,496 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:47:25,734 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71360
+2026-05-20 21:48:22,371 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:49:23,020 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
+2026-05-20 21:50:23,630 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357

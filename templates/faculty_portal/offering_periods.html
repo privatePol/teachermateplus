@@ -476,6 +476,16 @@
                 &#9998;
               </a>
             {% endif %}
+            {% if item.is_final_period %}
+              <a
+                class="btn btn-sm btn-outline-success"
+                href="{% url 'faculty_portal:period_final_clearance' offering.id item.period.id %}"
+                title="Print Final Clearance"
+                aria-label="Print Final Clearance"
+              >
+                &#128424;
+              </a>
+            {% endif %}
           </div>
         </div>
       </article>

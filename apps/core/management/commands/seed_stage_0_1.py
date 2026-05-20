@@ -69,6 +69,7 @@ class Command(BaseCommand):
         ("faculty_assignments.create", "faculty_assignments", "create"),
         ("faculty_assignments.update", "faculty_assignments", "update"),
         ("faculty_assignments.import", "faculty_assignments", "import"),
+        ("faculty_final_clearance.read", "faculty_final_clearance", "read"),
         ("gradebook.view_student_identity", "gradebook", "view_student_identity"),
         ("students.read", "students", "read"),
         ("students.create", "students", "create"),
@@ -488,7 +489,7 @@ class Command(BaseCommand):
                 "Faculty Final Clearance",
                 "admin_portal:faculty_final_clearance",
                 66,
-                "faculty_assignments.read",
+                "faculty_final_clearance.read",
             ),
             (
                 "ADMIN",
