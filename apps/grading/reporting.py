@@ -876,6 +876,10 @@ class FacultyFinalClearanceReportService:
         return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     @classmethod
+    def _draw_page_background(cls, canvas, doc):
+        ClassTabulationSheetPdfService._draw_page_background(canvas, doc)
+
+    @classmethod
     def _signature_enabled_for_document(cls, *, tenant_id, document_type: str) -> bool:
         return CorrectionOfficialReportService._signature_enabled_for_document(
             tenant_id=tenant_id,
@@ -1364,7 +1368,7 @@ class FacultyFinalClearanceReportService:
                 ]
             )
 
-        doc.build(story)
+        doc.build(story, onFirstPage=cls._draw_page_background, onLaterPages=cls._draw_page_background)
         for usage_kwargs in signature_usage_entries:
             UserSignatureService.log_signature_usage(**usage_kwargs)
         return buffer.getvalue()

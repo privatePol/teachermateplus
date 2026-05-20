@@ -1340,3 +1340,16 @@
 2026-05-20 22:35:34,013 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
 2026-05-20 22:35:34,714 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 22:36:02,007 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:37:02,587 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:37:57,147 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71693
+2026-05-20 22:38:03,467 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:39:04,159 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:40:04,916 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:41:05,726 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:42:06,474 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:42:59,133 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71693
+2026-05-20 22:43:07,454 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:43:42,773 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
+2026-05-20 22:43:43,471 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-20 22:44:08,296 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:45:09,865 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690

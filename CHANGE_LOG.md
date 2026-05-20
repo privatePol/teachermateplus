@@ -23,6 +23,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Faculty Final Clearance PDFs now use the same repeated small NCBA watermark treatment as the class tabulation sheet.
 - Faculty Final Clearance now evaluates only officially accepted faculty assignments, and accepted course cards include a direct `Print Final Clearance` action.
 - Faculty Portal final-period cards now again include a `Print Final Clearance` action, while keeping the newer single Final Clearance shortcut on `My Classes`.
 - Admin Portal enrollment create/edit course-offering dropdowns now group active offerings by `Campus | Term | Section` and sort course titles alphabetically within each group for easier selection.
