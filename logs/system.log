@@ -1195,3 +1195,8 @@
 2026-05-17 23:17:44,211 INFO [django.server] "GET /admin-portal/academics/faculty-assignments/?faculty_user_id=2&faculty_q=&assign=1 HTTP/1.1" 200 247203
 2026-05-17 23:17:52,997 INFO [django.server] "GET /admin-portal/academics/faculty-assignments/?faculty_q=&faculty_user_id=2&assign=1&offering_q=&section_id=110 HTTP/1.1" 200 77003
 2026-05-17 23:18:01,527 INFO [django.server] "GET /admin-portal/academics/faculty-assignments/?faculty_q=&faculty_user_id=2&assign=1&offering_q=&section_id= HTTP/1.1" 200 247419
+2026-05-17 23:24:29,696 INFO [django.server] "GET /admin-portal/academics/faculty-assignments/?faculty_q=&faculty_user_id=2&assign=1&offering_q=&section_id= HTTP/1.1" 200 248338
+2026-05-17 23:25:18,891 INFO [django.server] "GET /admin-portal/academics/offerings/ HTTP/1.1" 200 62691
+2026-05-17 23:25:26,582 INFO [django.server] "GET /admin-portal/grading/tenant-profiles/ HTTP/1.1" 200 55117
+2026-05-17 23:26:17,544 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 62125
+2026-05-17 23:26:35,120 INFO [django.server] "GET /admin-portal/guide/ HTTP/1.1" 200 119857

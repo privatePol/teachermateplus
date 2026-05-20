@@ -21,6 +21,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Admin Portal enrollment create/edit course-offering dropdowns now show active offerings as `Campus | Term | Section | Course Title (Code)` and sort by campus, term, section, then course title for easier selection.
 - Admin Portal Faculty Assignments now uses distinct colored `h4` card headers for `Unassigned Course Offerings` and `Assigned Offerings`, making the assign/unassign areas easier to distinguish.
 - Admin Portal Faculty Assignments now applies unassigned-offering filters with an in-page refresh so the assignment cards update without a noticeable full-page reload.
 - Admin Portal Faculty Assignments now explains Primary versus Secondary load tags in the Assigned Offerings card and labels the column as `Load Role`.
@@ -39,6 +40,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin Portal grading-template Builder now keeps the softer rotating period color scheme and makes the small weight, metadata, and detail cards more prominent with accent borders, shadows, and subtle gradients.
 
 ### Fixed
+- Admin Portal Faculty Grade Book Monitor now lists and opens only accepted faculty assignments, so AC/Dean/CAO reviewers do not see pending, declined, clarification, or expired loads in the gradebook class dropdown.
 - Admin Portal Faculty Assignments now waits for the explicit `Filter` button before applying the unassigned course-offering course/section filters, preventing the page from refreshing on every typed character.
 - Faculty Portal course period cards now display the configured grading-template period name, so `FX` periods named `Final Exam` no longer fall back to a `PRELIM` heading or prelim guidance.
 - Admin Portal grading-template Builder now displays the major component `Score Entry Method` value correctly.

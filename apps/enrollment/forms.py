@@ -7,6 +7,7 @@ def _offering_label(obj):
     course = getattr(obj, "course", None)
     section = getattr(obj, "section", None)
     term = getattr(obj, "term", None)
+    campus = getattr(obj, "campus", None)
 
     course_title = (getattr(course, "title", "") or "").strip()
     course_code = (getattr(course, "code", "") or "").strip()
@@ -14,6 +15,8 @@ def _offering_label(obj):
     section_code = (getattr(section, "code", "") or "").strip()
     term_name = (getattr(term, "name", "") or "").strip()
     term_code = (getattr(term, "code", "") or "").strip()
+    campus_name = (getattr(campus, "name", "") or "").strip()
+    campus_code = (getattr(campus, "code", "") or "").strip()
 
     course_label = f"{course_title} ({course_code})" if course_title and course_code else (course_title or course_code or str(obj))
     section_label = (
@@ -22,7 +25,26 @@ def _offering_label(obj):
         else (section_name or section_code or "-")
     )
     term_label = term_name or term_code or "-"
-    return f"{course_label} | {section_label} | {term_label}"
+    campus_label = campus_name or campus_code or "-"
+    return f"{campus_label} | {term_label} | {section_label} | {course_label}"
+
+
+def _active_offerings_for_enrollment(queryset):
+    return (
+        queryset.filter(is_active=True)
+        .select_related("campus", "term", "course", "section")
+        .order_by(
+            "campus__name",
+            "campus__code",
+            "term__sequence_no",
+            "term__name",
+            "section__name",
+            "section__code",
+            "course__title",
+            "course__code",
+            "id",
+        )
+    )
 
 
 class EnrollmentForm(forms.ModelForm):
@@ -33,7 +55,7 @@ class EnrollmentForm(forms.ModelForm):
     def __init__(self, *args, offering_queryset=None, student_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if offering_queryset is not None:
-            self.fields["course_offering"].queryset = offering_queryset.filter(is_active=True)
+            self.fields["course_offering"].queryset = _active_offerings_for_enrollment(offering_queryset)
         if student_queryset is not None:
             self.fields["student"].queryset = student_queryset.filter(is_active=True)
         self.fields["course_offering"].label_from_instance = _offering_label

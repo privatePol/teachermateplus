@@ -6952,7 +6952,12 @@ def faculty_gradebook_monitor_view(request):
     if selected_faculty:
         selected_faculty_assignments = (
             AdminScopeService.scoped_faculty_assignments(request)
-            .filter(faculty_user_id=selected_faculty.id, is_active=True)
+            .filter(
+                faculty_user_id=selected_faculty.id,
+                is_active=True,
+                response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+                accepted_at__isnull=False,
+            )
             .select_related(
                 "offering",
                 "offering__course",
@@ -7173,7 +7178,12 @@ def faculty_gradebook_monitor_view(request):
 def faculty_gradebook_explanation_view(request, offering_id: int, period_id: int, student_id: int, grade_type: str):
     scoped_assignment = (
         AdminScopeService.scoped_faculty_assignments(request)
-        .filter(offering_id=offering_id, is_active=True)
+        .filter(
+            offering_id=offering_id,
+            is_active=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at__isnull=False,
+        )
         .select_related("offering", "offering__course", "offering__section", "offering__term", "offering__academic_year", "offering__campus")
         .first()
     )

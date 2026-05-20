@@ -22,6 +22,7 @@ from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyA
 from apps.auditlog.models import AuditLog
 from apps.admin_portal.services import AdminScopeService
 from apps.core.services.scope import ScopeService
+from apps.enrollment.forms import EnrollmentForm
 from apps.enrollment.models import Enrollment
 from apps.enrollment.services import EnrollmentService
 from apps.grading.models import (
@@ -145,6 +146,14 @@ class FacultyMonitoringScopeTests(TestCase):
             is_primary=True,
         )
 
+    def _accept_assignment(self, assignment=None):
+        assignment = assignment or self.assignment
+        assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        assignment.accepted_at = timezone.now()
+        assignment.accepted_by = self.faculty_user
+        assignment.save(update_fields=["response_status", "accepted_at", "accepted_by", "updated_at"])
+        return assignment
+
     def _build_request(self):
         request = self.factory.get("/")
         request.user = self.ac_user
@@ -153,6 +162,7 @@ class FacultyMonitoringScopeTests(TestCase):
         return request
 
     def _seed_gradebook_explanation_fixture(self):
+        self._accept_assignment()
         template = GradingTemplate.objects.create(
             tenant=self.tenant,
             code="GENED_EXPLAIN",
@@ -493,6 +503,46 @@ class FacultyMonitoringScopeTests(TestCase):
                 portal=Enrollment.SourcePortal.ADMIN,
             )
 
+    def test_enrollment_form_orders_active_offerings_by_campus_term_section_course_title(self):
+        alpha_course = Course.objects.create(
+            tenant=self.tenant,
+            code="ALPHA",
+            title="Accounting Basics",
+        )
+        zulu_course = Course.objects.create(
+            tenant=self.tenant,
+            code="ZULU",
+            title="Zoology for Business",
+        )
+        alpha_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_college,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=alpha_course,
+            section=self.section,
+        )
+        zulu_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_college,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=zulu_course,
+            section=self.section,
+        )
+
+        form = EnrollmentForm(offering_queryset=CourseOffering.objects.filter(id__in=[zulu_offering.id, alpha_offering.id, self.offering.id]))
+        offering_ids = list(form.fields["course_offering"].queryset.values_list("id", flat=True))
+        labels = [form.fields["course_offering"].label_from_instance(row) for row in form.fields["course_offering"].queryset]
+
+        self.assertEqual(offering_ids[:2], [alpha_offering.id, self.offering.id])
+        self.assertIn("Fairview | Second Term | BSIT-1A | Accounting Basics (ALPHA)", labels[0])
+        self.assertIn("Fairview | Second Term | BSIT-1A | IT Application Tools (A132-ITAPPS)", labels[1])
+
     def test_active_user_activity_rows_respects_current_session_timeout_policy(self):
         recent_user = User.objects.create_user(
             username="recent_admin_scope",
@@ -571,6 +621,7 @@ class FacultyMonitoringScopeTests(TestCase):
         self.assertNotIn(stale_user.username, usernames)
 
     def test_gradebook_monitor_masks_student_identity_and_logs_view(self):
+        self._accept_assignment()
         template = GradingTemplate.objects.create(
             tenant=self.tenant,
             code="GENED_V1",
@@ -696,7 +747,71 @@ class FacultyMonitoringScopeTests(TestCase):
         self.assertEqual(audit_log.portal, AuditLog.Portal.ADMIN)
         self.assertEqual(audit_log.metadata_json.get("masked_student_identity"), True)
 
+    def test_gradebook_monitor_lists_only_accepted_faculty_assignments(self):
+        self._accept_assignment()
+        template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="GENED_ACCEPTED_ONLY",
+            name="Accepted Only Template",
+            is_published=True,
+        )
+        GradingTemplatePeriod.objects.create(
+            template=template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+            weight_percentage=Decimal("100.00"),
+        )
+        CourseTemplateAssignment.objects.create(course=self.course, grading_template=template)
+        pending_course = Course.objects.create(
+            tenant=self.tenant,
+            code="PENDING-LOAD",
+            title="Pending Faculty Load",
+        )
+        pending_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_college,
+            program=self.program,
+            code="PENDING-1A",
+            name="Pending 1A",
+        )
+        pending_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_college,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=pending_course,
+            section=pending_section,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=pending_offering,
+            faculty_user=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.PENDING,
+            is_primary=False,
+        )
+
+        request = self.factory.get(
+            "/admin-portal/academics/faculty-gradebook/",
+            {"faculty_user_id": self.faculty_user.id},
+        )
+        request.user = self.ac_user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+
+        response = faculty_gradebook_monitor_view.__wrapped__.__wrapped__(request)
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn(self.course.title, content)
+        self.assertNotIn(pending_course.title, content)
+
     def test_gradebook_monitor_unmasks_student_identity_for_authorized_reviewer(self):
+        self._accept_assignment()
         template = GradingTemplate.objects.create(
             tenant=self.tenant,
             code="GENED_UNMASK",
