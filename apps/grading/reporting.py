@@ -647,10 +647,22 @@ class ClassTabulationSheetPdfService:
         canvas.saveState()
         page_width, page_height = doc.pagesize
         canvas.setFillColor(colors.HexColor("#eef4ee"))
-        canvas.setFont("Helvetica-Bold", 72)
-        canvas.translate(page_width / 2, page_height / 2)
-        canvas.rotate(32)
-        canvas.drawCentredString(0, 0, "NCBA")
+        canvas.setFont("Helvetica-Bold", 10)
+        horizontal_spacing = 34 * mm
+        vertical_spacing = 24 * mm
+        y = 24 * mm
+        row_index = 0
+        while y < page_height - 16 * mm:
+            x = 18 * mm + ((row_index % 2) * 17 * mm)
+            while x < page_width - 12 * mm:
+                canvas.saveState()
+                canvas.translate(x, y)
+                canvas.rotate(28)
+                canvas.drawCentredString(0, 0, "NCBA")
+                canvas.restoreState()
+                x += horizontal_spacing
+            y += vertical_spacing
+            row_index += 1
         canvas.restoreState()
 
         canvas.saveState()

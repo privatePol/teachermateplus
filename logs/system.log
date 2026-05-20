@@ -1331,3 +1331,12 @@
 2026-05-20 22:29:55,484 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:30:03,557 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
 2026-05-20 22:30:04,237 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-20 22:30:56,091 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:31:56,701 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:32:55,364 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71693
+2026-05-20 22:32:59,721 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:34:00,527 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:35:01,251 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-20 22:35:34,013 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
+2026-05-20 22:35:34,714 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-20 22:36:02,007 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
