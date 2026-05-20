@@ -537,11 +537,19 @@ class FacultyMonitoringScopeTests(TestCase):
 
         form = EnrollmentForm(offering_queryset=CourseOffering.objects.filter(id__in=[zulu_offering.id, alpha_offering.id, self.offering.id]))
         offering_ids = list(form.fields["course_offering"].queryset.values_list("id", flat=True))
-        labels = [form.fields["course_offering"].label_from_instance(row) for row in form.fields["course_offering"].queryset]
+        grouped_choices = list(form.fields["course_offering"].choices)
+        group_label, group_options = grouped_choices[0]
 
         self.assertEqual(offering_ids[:2], [alpha_offering.id, self.offering.id])
-        self.assertIn("Fairview | Second Term | BSIT-1A | Accounting Basics (ALPHA)", labels[0])
-        self.assertIn("Fairview | Second Term | BSIT-1A | IT Application Tools (A132-ITAPPS)", labels[1])
+        self.assertEqual(group_label, "Fairview | Second Term | BSIT-1A")
+        self.assertEqual(
+            group_options[:3],
+            [
+                (alpha_offering.id, "Accounting Basics (ALPHA)"),
+                (self.offering.id, "IT Application Tools (A132-ITAPPS)"),
+                (zulu_offering.id, "Zoology for Business (ZULU)"),
+            ],
+        )
 
     def test_active_user_activity_rows_respects_current_session_timeout_policy(self):
         recent_user = User.objects.create_user(

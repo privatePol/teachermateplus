@@ -5,12 +5,17 @@ from .models import Enrollment
 
 def _offering_label(obj):
     course = getattr(obj, "course", None)
+    course_title = (getattr(course, "title", "") or "").strip()
+    course_code = (getattr(course, "code", "") or "").strip()
+
+    return f"{course_title} ({course_code})" if course_title and course_code else (course_title or course_code or str(obj))
+
+
+def _offering_group_label(obj):
     section = getattr(obj, "section", None)
     term = getattr(obj, "term", None)
     campus = getattr(obj, "campus", None)
 
-    course_title = (getattr(course, "title", "") or "").strip()
-    course_code = (getattr(course, "code", "") or "").strip()
     section_name = (getattr(section, "name", "") or "").strip()
     section_code = (getattr(section, "code", "") or "").strip()
     term_name = (getattr(term, "name", "") or "").strip()
@@ -18,7 +23,6 @@ def _offering_label(obj):
     campus_name = (getattr(campus, "name", "") or "").strip()
     campus_code = (getattr(campus, "code", "") or "").strip()
 
-    course_label = f"{course_title} ({course_code})" if course_title and course_code else (course_title or course_code or str(obj))
     section_label = (
         f"{section_name} ({section_code})"
         if section_name and section_code and section_name != section_code
@@ -26,7 +30,7 @@ def _offering_label(obj):
     )
     term_label = term_name or term_code or "-"
     campus_label = campus_name or campus_code or "-"
-    return f"{campus_label} | {term_label} | {section_label} | {course_label}"
+    return f"{campus_label} | {term_label} | {section_label}"
 
 
 def _active_offerings_for_enrollment(queryset):
@@ -47,6 +51,18 @@ def _active_offerings_for_enrollment(queryset):
     )
 
 
+def _grouped_offering_choices(queryset):
+    grouped = []
+    group_index = {}
+    for offering in queryset:
+        group_label = _offering_group_label(offering)
+        if group_label not in group_index:
+            group_index[group_label] = len(grouped)
+            grouped.append((group_label, []))
+        grouped[group_index[group_label]][1].append((offering.pk, _offering_label(offering)))
+    return grouped
+
+
 class EnrollmentForm(forms.ModelForm):
     class Meta:
         model = Enrollment
@@ -55,7 +71,9 @@ class EnrollmentForm(forms.ModelForm):
     def __init__(self, *args, offering_queryset=None, student_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if offering_queryset is not None:
-            self.fields["course_offering"].queryset = _active_offerings_for_enrollment(offering_queryset)
+            offering_queryset = _active_offerings_for_enrollment(offering_queryset)
+            self.fields["course_offering"].queryset = offering_queryset
+            self.fields["course_offering"].choices = _grouped_offering_choices(offering_queryset)
         if student_queryset is not None:
             self.fields["student"].queryset = student_queryset.filter(is_active=True)
         self.fields["course_offering"].label_from_instance = _offering_label

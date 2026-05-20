@@ -6677,6 +6677,17 @@ def offering_list_view(request):
         queryset = queryset.filter(
             Q(course__code__icontains=q) | Q(section__code__icontains=q) | Q(schedule_text__icontains=q)
         )
+    queryset = queryset.order_by(
+        "campus__name",
+        "campus__code",
+        "term__sequence_no",
+        "term__name",
+        "section__name",
+        "section__code",
+        "course__title",
+        "course__code",
+        "id",
+    )
     context = {"q": q}
     context.update(_active_inactive_pages(request, queryset))
     _with_inactive_record_metadata(request, context, model_key="offering")

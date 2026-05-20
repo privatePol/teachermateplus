@@ -21,7 +21,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
-- Admin Portal enrollment create/edit course-offering dropdowns now show active offerings as `Campus | Term | Section | Course Title (Code)` and sort by campus, term, section, then course title for easier selection.
+- Admin Portal enrollment create/edit course-offering dropdowns now group active offerings by `Campus | Term | Section` and sort course titles alphabetically within each group for easier selection.
+- Admin Portal Course Offerings list now displays columns as Campus, Term, Section, Course, Room/Office/Lab, Status, Record State, and Actions, with rows sorted by campus, term, section, and course title.
 - Admin Portal Faculty Assignments now uses distinct colored `h4` card headers for `Unassigned Course Offerings` and `Assigned Offerings`, making the assign/unassign areas easier to distinguish.
 - Admin Portal Faculty Assignments now applies unassigned-offering filters with an in-page refresh so the assignment cards update without a noticeable full-page reload.
 - Admin Portal Faculty Assignments now explains Primary versus Secondary load tags in the Assigned Offerings card and labels the column as `Load Role`.

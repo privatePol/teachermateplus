@@ -65,7 +65,8 @@ EduGradesPro V1 is a multi-tenant, multi-campus academic grading and governance 
 - The Admin `Non-Compliance on Periodic Grades Submission` monitor lists overdue unsubmitted classes only when the faculty assignment has already been accepted. Pagination preserves filters, and missing-record counts are computed for visible page rows to keep large reports responsive.
 - The Admin `Grade Submissions` list includes accepted faculty names and can be searched by faculty name or username in addition to course, section, and period.
 - The Admin Faculty Grade Book Monitor lists and opens accepted faculty assignments only. Pending, declined, clarification, and expired loads remain visible in Faculty Assignments for governance follow-up, but they are not treated as reviewable gradebooks.
-- Admin Portal enrollment create/edit forms list active course offerings in campus, term, section, then course-title order, with dropdown labels formatted as `Campus | Term | Section | Course Title (Code)`.
+- Admin Portal enrollment create/edit forms group active course offerings by `Campus | Term | Section`, with course options sorted alphabetically by title inside each group.
+- Admin Portal Course Offerings list columns are ordered Campus, Term, Section, Course, Room/Office/Lab, Status, Record State, and Actions. Rows sort by campus, term, section, then course title/code.
 - Faculty Portal course period cards use the configured grading-template period name for the card heading and classify card styling/guidance from both period code and name; `FX` periods named `Final Exam` display as `FINAL EXAM`, not as the prelim fallback.
 - Organization: tenants, campuses, departments, programs
 - NCBA organizational structure for actual-data setup:
