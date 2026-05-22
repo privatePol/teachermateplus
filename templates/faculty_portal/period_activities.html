@@ -25,6 +25,15 @@
     This period is locked by admin. Editing is disabled.
   {% endif %}
 </div>
+{% elif is_auto_closed_after_deadline %}
+<div class="alert alert-danger">
+  Encoding closed automatically because the deadline already passed.
+  {% if pending_reopen_request %}
+    Your reopen request is pending admin review.
+  {% else %}
+    Go to Summary to submit a complete gradebook or request campus admin reopen.
+  {% endif %}
+</div>
 {% elif is_non_compliant %}
 <div class="alert alert-danger">
   Submission deadline already passed. You may continue encoding and submit as soon as possible, but this class is already listed in the non-compliance monitor.
@@ -44,7 +53,7 @@
   <div class="card-body">
     {% if editing_activity %}
     <div class="alert alert-light border small">
-      Updating <strong>{{ editing_activity.title }}</strong>. If encoded scores already exist, EduGradesPro will recompute them using the updated activity settings.
+      Updating <strong>{{ editing_activity.title }}</strong>. If encoded scores already exist, EduGrade+ will recompute them using the updated activity settings.
     </div>
     {% endif %}
     <form method="post" class="row g-2" novalidate id="activity-edit-form" action="{% if editing_activity %}{% url 'faculty_portal:period_activity_edit' offering.id period.id editing_activity.id %}{% else %}{% url 'faculty_portal:period_activities' offering.id period.id %}{% endif %}">
@@ -81,7 +90,7 @@
       <div class="col-md-3">
         <label class="form-label">Total Score</label>
         {{ form.total_score }}
-        <div class="form-text">For Direct Percentage items, EduGradesPro automatically uses 100.</div>
+        <div class="form-text">For Direct Percentage items, EduGrade+ automatically uses 100.</div>
         {% for e in form.total_score.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
       </div>
       <div class="col-md-3">

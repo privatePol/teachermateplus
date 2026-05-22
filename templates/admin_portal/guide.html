@@ -1,7 +1,7 @@
 {% extends "admin_portal/base.html" %}
 {% load static %}
 
-{% block title %}Admin Portal User Guide | EduGradesPro{% endblock %}
+{% block title %}Admin Portal User Guide | EduGrade+{% endblock %}
 
 {% block extra_head %}
 {{ block.super }}
@@ -554,7 +554,7 @@
             <li>Create course and section masters first, then create the actual course offerings.</li>
             <li>Assign faculty only after the offering is already complete and properly scoped.</li>
             <li>Go to <strong>Course Template Assignments</strong> after offerings are ready so every course has grading-template coverage before operations begin.</li>
-            <li>When many courses share one template, use the bulk assignment screen and let EduGradesPro skip courses that already have a prior assignment in the same term scope.</li>
+            <li>When many courses share one template, use the bulk assignment screen and let EduGrade+ skip courses that already have a prior assignment in the same term scope.</li>
             <li>Before moving to enrollment, imports, or grading operations, verify that all referenced setup records are active and that no needed course or current offering is left without a grading template.</li>
           </ol>
           <div class="guide-note">
@@ -579,7 +579,7 @@
       <div class="guide-grid">
         <div>
           <ul class="guide-list">
-            <li>Use the calculator to validate how EduGradesPro will compute a grading template before live use.</li>
+            <li>Use the calculator to validate how EduGrade+ will compute a grading template before live use.</li>
             <li>The calculator is read-only and uses sample raw score and total score values only. It does not create grades, activities, or student records.</li>
             <li>Testing inputs are accepted at the lowest active level of the selected template:
               detail if present, otherwise subcomponent, otherwise component.</li>
@@ -657,7 +657,7 @@
               <tr>
                 <td>Active Grading Period</td>
                 <td><strong>Admin Portal -> Tools -> Active Grading Period</strong></td>
-                <td>Define the canonical period catalog for the selected term, choose the active period per campus, decide whether EduGradesPro should auto-advance after the current active period deadline, and control which faculty period card stays open for normal work. Auto-advance moves forward only; changing a deadline afterward does not move the active period backward.</td>
+                <td>Define the canonical period catalog for the selected term, choose the active period per campus, decide whether EduGrade+ should auto-advance after the current active period deadline, and control which faculty period card stays open for normal work. Auto-advance moves forward only; changing a deadline afterward does not move the active period backward.</td>
               </tr>
               <tr>
                 <td>Correction Governance</td>
@@ -702,7 +702,7 @@
               <tr>
                 <td>Tenant Grading Formula</td>
                 <td><strong>Admin Portal -> Grading -> Tenant Grading Profiles</strong></td>
-                <td>Define the matched grading template, passing threshold override, and final-grade formula for a tenant scope. Default mode averages all active template periods; weighted mode lets you declare specific period weights per tenant/campus/department/program/course scope. If the profile leaves passing threshold blank, EduGradesPro now falls back to the grading template threshold before using the tenant default.</td>
+                <td>Define the matched grading template, passing threshold override, and final-grade formula for a tenant scope. Default mode averages all active template periods; weighted mode lets you declare specific period weights per tenant/campus/department/program/course scope. If the profile leaves passing threshold blank, EduGrade+ now falls back to the grading template threshold before using the tenant default.</td>
               </tr>
             </tbody>
           </table>
@@ -755,7 +755,7 @@
               <tr>
                 <td>Courses</td>
                 <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
-                <td>Load course masters in bulk using the required EduGradesPro template structure.</td>
+                <td>Load course masters in bulk using the required EduGrade+ template structure.</td>
               </tr>
               <tr>
                 <td>Students</td>
@@ -788,7 +788,7 @@
           <ol class="guide-steps">
             <li>Open <strong>Admin Portal -> Tools -> Bulk Imports</strong> and choose the import type you need.</li>
             <li>Download and use only the system-generated CSV template for that import type.</li>
-            <li>Populate the CSV using valid business keys such as codes, usernames, and tenant/campus values expected by EduGradesPro.</li>
+            <li>Populate the CSV using valid business keys such as codes, usernames, and tenant/campus values expected by EduGrade+.</li>
             <li>Upload the CSV and review the validation result first. No insert should happen yet during this stage.</li>
             <li>Review row-level errors, duplicate warnings, and unresolved references before confirming.</li>
             <li>Fix the source file, re-upload if needed, then confirm only when the preview is clean.</li>
@@ -843,7 +843,12 @@
               <tr>
                 <td>Non-Compliance Monitor</td>
                 <td><strong>Admin Portal -> Grading -> Non-Compliance on Periodic Grades Submission</strong></td>
-                <td>Track overdue class-period rows after deadline. Unsubmitted gradebooks remain open for faculty encoding, while authorized academic users monitor non-compliance and missing-record readiness here.</td>
+                <td>Track overdue class-period rows after deadline. Under compliance-only policy, unsubmitted gradebooks remain open for faculty encoding; under auto-close policy, faculty must request reopen if more encoding is needed.</td>
+              </tr>
+              <tr>
+                <td>Deadline Enforcement Policy</td>
+                <td><strong>Admin Portal -> Tools -> Configuration Management -> Grade Deadline Enforcement</strong></td>
+                <td>Choose between compliance-only deadlines and automatic encoding close after deadline. Auto-close still lets faculty submit a complete gradebook, but blocks activity, score, and attendance edits until a reopen request is approved.</td>
               </tr>
               <tr>
                 <td>Grade Submission Status</td>
@@ -875,8 +880,9 @@
             <li>Use <strong>Is active</strong> to enable or disable the rule. Inactive rules stay available for review but are ignored by faculty pages, deadline checks, and scheduled auto-lock processing.</li>
             <li>Use <strong>Grade Submissions</strong> to monitor open classes as the deadline approaches and follow up on rows that are still pending.</li>
             <li>After deadline, use <strong>Non-Compliance on Periodic Grades Submission</strong> to see accepted faculty assignments that still have overdue unsubmitted grade books for each grading period.</li>
-            <li>Unsubmitted overdue grade books remain open until the faculty submits them. The deadline acts as a compliance checkpoint, not an automatic encoding shutdown.</li>
-            <li>Use correction workflow only for already submitted grade books that need changes. Do not use deadline policy to force reopen for unfinished but unsubmitted encoding.</li>
+            <li>Use <strong>Configuration Management -> Grade Deadline Enforcement</strong> to decide whether overdue unsubmitted grade books stay open as compliance-only items or automatically close encoding after the deadline.</li>
+            <li>When auto-close is enabled, faculty can still submit if readiness is complete. If the gradebook needs additional encoding, the faculty files a reopen request from Summary and campus admin reviews it from <strong>Submission Reopen Requests</strong>.</li>
+            <li>Use correction workflow only for already submitted grade books that need grade changes. Use deadline reopen requests for unfinished unsubmitted encoding under the auto-close policy.</li>
           </ol>
           <div class="guide-subhead">Reopening a Submitted Class (Admin Procedure)</div>
           <ol class="guide-steps">
@@ -950,7 +956,7 @@
           <ol class="guide-steps">
             <li>Faculty files the paper correction form.</li>
             <li>Manual approvals are completed outside the system.</li>
-            <li>After final paper approval, authorized admin reopens the class-period in EduGradesPro.</li>
+            <li>After final paper approval, authorized admin reopens the class-period in EduGrade+.</li>
             <li>Faculty applies the approved correction and re-submits grades.</li>
           </ol>
 
@@ -1000,7 +1006,7 @@
               </tr>
               <tr>
                 <td>Privacy Consent Flow</td>
-                <td>Requires users to review the current EduGradesPro Privacy Consent, tick the consent box, and type the non-personal confirmation phrase before using the portal.</td>
+                <td>Requires users to review the current EduGrade+ Privacy Consent, tick the consent box, and type the non-personal confirmation phrase before using the portal.</td>
                 <td>Shown automatically at login when consent has not yet been recorded for the current version. Admins can review status and reset a single active user from <strong>Admin Portal -> Security -> Users</strong>.</td>
               </tr>
                 <tr>
@@ -1070,7 +1076,7 @@
             <li>When assigning offerings, set the course or section filter and click <strong>Filter</strong> before selecting rows. The offering panels update in place.</li>
             <li>Use <strong>Primary</strong> for the lead faculty assignment and <strong>Secondary</strong> for supporting or shared-load faculty.</li>
             <li>Assign the offering and include instructions when needed.</li>
-            <li>By default, EduGradesPro can mark new faculty assignments as primary. If that tenant setting is turned off, use the <strong>Set Primary</strong> button manually for the lead load.</li>
+            <li>By default, EduGrade+ can mark new faculty assignments as primary. If that tenant setting is turned off, use the <strong>Set Primary</strong> button manually for the lead load.</li>
             <li>Monitor the load status for <strong>Pending</strong>, <strong>Accepted</strong>, <strong>Clarification Requested</strong>, <strong>Declined</strong>, or <strong>Expired</strong>.</li>
             <li>Use the metric cards to watch <strong>Accepted</strong>, <strong>Pending Acceptance</strong>, <strong>Due Within 24 Hours</strong>, and <strong>Expired</strong>.</li>
             <li>Review clarification or decline notes before editing or reissuing the assignment.</li>
@@ -1173,7 +1179,7 @@
             <li>Remember the cadence: first communication is <strong>Notice for Non-Compliance</strong>, second is <strong>Warning for Continued Non-Compliance</strong>, and third onward is <strong>Escalation for Unresolved Non-Compliance</strong> until the affected grading period is submitted.</li>
           </ol>
           <div class="guide-note">
-            Best practice is to run the notice scheduler daily, not every three days. EduGradesPro checks the configured repeat interval and only issues a new communication when the next stage is actually due.
+            Best practice is to run the notice scheduler daily, not every three days. EduGrade+ checks the configured repeat interval and only issues a new communication when the next stage is actually due.
           </div>
           <div class="guide-note mt-3">
             Scheduled job command: <code>manage.py issue_submission_non_compliance_notices</code><br>
@@ -1201,7 +1207,7 @@
               <li>Open <strong>Faculty Final Clearance</strong> once final submissions are complete to preview which assigned classes are already complete or still incomplete per faculty member, and to verify already generated official clearance reports.</li>
               <li>Faculty generates the official clearance in the Faculty Portal. Authorized personnel may verify a printed copy either by scanning the printed QR code or by entering the printed <strong>Reference No.</strong> and <strong>Verification Code</strong> in the Admin Portal verification lookup.</li>
               <li><strong>Configuration Management</strong> now includes a <strong>User Signatures</strong> card so NCBA can decide whether encrypted account signatures are allowed at all, and whether they may appear on Faculty Final Clearance and Correction Official Report PDFs.</li>
-              <li>Sensitive correction attachments and official correction reports open through authenticated EduGradesPro views and are recorded in audit logs. IT must still ensure protected media folders are not directly exposed by the production web server.</li>
+              <li>Sensitive correction attachments and official correction reports open through authenticated EduGrade+ views and are recorded in audit logs. IT must still ensure protected media folders are not directly exposed by the production web server.</li>
               <li>Review audit logs and analytics before final release/export.</li>
             </ul>
         </div>
@@ -1291,7 +1297,7 @@
               </tr>
               <tr>
                 <td>4. Check Server Health</td>
-                <td>Review gunicorn, nginx, EduGradesPro logs, disk space, and recent release state first.</td>
+                <td>Review gunicorn, nginx, EduGrade+ logs, disk space, and recent release state first.</td>
                 <td>Production server logs and the Ubuntu deployment environment.</td>
               </tr>
               <tr>

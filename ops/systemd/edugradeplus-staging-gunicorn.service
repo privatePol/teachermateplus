@@ -1,0 +1,18 @@
+[Unit]
+Description=edugradeplus Staging Gunicorn Service
+After=network.target
+
+[Service]
+Type=simple
+User=edugradeplus-staging
+Group=edugradeplus-staging
+WorkingDirectory=/opt/edugradeplus-staging
+EnvironmentFile=/etc/edugradeplus-staging/edugradeplus.env
+ExecStart=/opt/edugradeplus-staging/.venv/bin/gunicorn config.wsgi:application --workers 2 --timeout 120 --bind unix:/run/edugradeplus-staging/gunicorn.sock --access-logfile - --error-logfile -
+RuntimeDirectory=edugradeplus-staging
+RuntimeDirectoryMode=0755
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

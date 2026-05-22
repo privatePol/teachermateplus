@@ -58,7 +58,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <div>
     <h2 class="h5 mb-1">Active Grading Period</h2>
-    <div class="text-muted">Set the current grading period per campus and term, then let EduGradesPro reflect it across Admin and Faculty portals.</div>
+    <div class="text-muted">Set the current grading period per campus and term, then let EduGrade+ reflect it across Admin and Faculty portals.</div>
   </div>
   <a class="btn btn-outline-secondary btn-sm" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
 </div>
@@ -67,8 +67,8 @@
   <div class="fw-semibold mb-1">How this works</div>
   <div class="agp-note mb-0">
     Step 1: choose the campus and term. Step 2: define the grading periods for that term. Step 3: select which one is active now.
-    When auto-advance is enabled, EduGradesPro moves forward to the next configured period after the current active period's deadline passes.
-    If you later edit that deadline, EduGradesPro does not move the active period backward; set it manually here when a rollback is needed.
+    When auto-advance is enabled, EduGrade+ moves forward to the next configured period after the current active period's deadline passes.
+    If you later edit that deadline, EduGrade+ does not move the active period backward; set it manually here when a rollback is needed.
   </div>
 </div>
 
@@ -192,7 +192,7 @@
         <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
           <div>
             <h3 class="h6 mb-1">Term Period Catalog</h3>
-            <div class="agp-note">These are the canonical grading periods for the selected term. EduGradesPro uses them for active-period governance and deadline auto-advance.</div>
+            <div class="agp-note">These are the canonical grading periods for the selected term. EduGrade+ uses them for active-period governance and deadline auto-advance.</div>
           </div>
           <form method="post" class="m-0">
             {% csrf_token %}

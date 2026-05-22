@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f4f7f5;font-family:Arial,sans-serif;color:#1f3328;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7f5;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #dce7df;border-radius:8px;overflow:hidden;">
+            <tr>
+              <td style="background:#0f5f3c;color:#ffffff;padding:18px 22px;">
+                {% if email_logo_src %}<img src="{{ email_logo_src }}" alt="" width="52" height="52" style="vertical-align:middle;margin-right:12px;">{% endif %}
+                <span style="font-size:18px;font-weight:700;vertical-align:middle;">{{ school_name }}</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:22px;">
+                <h1 style="font-size:20px;margin:0 0 14px;color:#17452d;">{{ subject_message }}</h1>
+                <p style="margin:0 0 16px;">A faculty gradebook reopen request is waiting for admin review.</p>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;">
+                  <tr><td style="padding:7px;border-bottom:1px solid #edf2ef;font-weight:700;">Reference No.</td><td style="padding:7px;border-bottom:1px solid #edf2ef;">{{ reference_no }}</td></tr>
+                  <tr><td style="padding:7px;border-bottom:1px solid #edf2ef;font-weight:700;">Campus</td><td style="padding:7px;border-bottom:1px solid #edf2ef;">{{ campus_name }}</td></tr>
+                  <tr><td style="padding:7px;border-bottom:1px solid #edf2ef;font-weight:700;">Class</td><td style="padding:7px;border-bottom:1px solid #edf2ef;">{{ course_title }} ({{ course_code }}) / {{ section_name }}</td></tr>
+                  <tr><td style="padding:7px;border-bottom:1px solid #edf2ef;font-weight:700;">Period</td><td style="padding:7px;border-bottom:1px solid #edf2ef;">{{ period_name }}</td></tr>
+                  <tr><td style="padding:7px;border-bottom:1px solid #edf2ef;font-weight:700;">Requested by</td><td style="padding:7px;border-bottom:1px solid #edf2ef;">{{ requester_name }}</td></tr>
+                  <tr><td style="padding:7px;border-bottom:1px solid #edf2ef;font-weight:700;">Requested at</td><td style="padding:7px;border-bottom:1px solid #edf2ef;">{{ submitted_at|date:"Y-m-d H:i" }}</td></tr>
+                  <tr><td style="padding:7px;border-bottom:1px solid #edf2ef;font-weight:700;">Status</td><td style="padding:7px;border-bottom:1px solid #edf2ef;">{{ submission_status }}</td></tr>
+                </table>
+                <div style="margin-top:16px;padding:14px;background:#f7fbf8;border:1px solid #dce7df;border-radius:6px;">
+                  <strong>Justification</strong>
+                  <div style="margin-top:8px;white-space:pre-wrap;">{{ justification }}</div>
+                </div>
+                <p style="margin:18px 0 0;color:#50685a;">Review this request in Admin Portal -> Grading -> Submission Reopen Requests.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

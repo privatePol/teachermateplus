@@ -1,22 +1,22 @@
-# NCBA EduGradesPro Go-Live Checklist
+# NCBA EduGrade+ Go-Live Checklist
 
-This checklist is the practical go-live guide for NCBA before opening EduGradesPro to real Admin and Faculty users.
+This checklist is the practical go-live guide for NCBA before opening EduGrade+ to real Admin and Faculty users.
 
 ## 1. Read These `.md` Files First
 
 Read these in this exact order:
 
-1. [AGENTS.md](/d:/edugradespro/AGENTS.md)
-2. [EDUGRADESPRO_CONTEXT.md](/d:/edugradespro/EDUGRADESPRO_CONTEXT.md)
-3. [CHANGE_LOG.md](/d:/edugradespro/CHANGE_LOG.md)
-4. [DEPLOYMENT_UBUNTU.md](/d:/edugradespro/docs/DEPLOYMENT_UBUNTU.md)
-5. [STAGING_WORKFLOW.md](/d:/edugradespro/docs/STAGING_WORKFLOW.md)
-6. [PRODUCTION_DATA_PROMOTION.md](/d:/edugradespro/docs/PRODUCTION_DATA_PROMOTION.md)
-7. [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradespro/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
-8. [DB_SCHEMA.md](/d:/edugradespro/docs/DB_SCHEMA.md)
-9. [guide.html](/d:/edugradespro/templates/admin_portal/guide.html)
-10. [guide.html](/d:/edugradespro/templates/faculty_portal/guide.html)
-11. [guide_manual.html](/d:/edugradespro/templates/faculty_portal/guide_manual.html)
+1. [AGENTS.md](/d:/edugradeplus/AGENTS.md)
+2. [EduGrade+_CONTEXT.md](/d:/edugradeplus/EduGrade+_CONTEXT.md)
+3. [CHANGE_LOG.md](/d:/edugradeplus/CHANGE_LOG.md)
+4. [DEPLOYMENT_UBUNTU.md](/d:/edugradeplus/docs/DEPLOYMENT_UBUNTU.md)
+5. [STAGING_WORKFLOW.md](/d:/edugradeplus/docs/STAGING_WORKFLOW.md)
+6. [PRODUCTION_DATA_PROMOTION.md](/d:/edugradeplus/docs/PRODUCTION_DATA_PROMOTION.md)
+7. [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradeplus/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
+8. [DB_SCHEMA.md](/d:/edugradeplus/docs/DB_SCHEMA.md)
+9. [guide.html](/d:/edugradeplus/templates/admin_portal/guide.html)
+10. [guide.html](/d:/edugradeplus/templates/faculty_portal/guide.html)
+11. [guide_manual.html](/d:/edugradeplus/templates/faculty_portal/guide_manual.html)
 
 ## 2. Infrastructure Readiness
 
@@ -35,12 +35,12 @@ Confirm:
 
 Confirm the server layout:
 
-1. production app path: `/opt/edugradespro`
-2. staging app path: `/opt/edugradespro-staging`
-3. production env path: `/etc/edugradespro/edugradespro.env`
-4. staging env path: `/etc/edugradespro-staging/edugradespro.env`
-5. production log path: `/var/log/edugradespro`
-6. staging log path: `/var/log/edugradespro-staging`
+1. production app path: `/opt/edugradeplus`
+2. staging app path: `/opt/edugradeplus-staging`
+3. production env path: `/etc/edugradeplus/edugradeplus.env`
+4. staging env path: `/etc/edugradeplus-staging/edugradeplus.env`
+5. production log path: `/var/log/edugradeplus`
+6. staging log path: `/var/log/edugradeplus-staging`
 
 ## 4. Database Readiness
 
@@ -66,8 +66,8 @@ Confirm:
 
 Prepare from these templates:
 
-1. [edugradespro.production.env.example](/d:/edugradespro/ops/env/edugradespro.production.env.example)
-2. [edugradespro.staging.env.example](/d:/edugradespro/ops/env/edugradespro.staging.env.example)
+1. [edugradeplus.production.env.example](/d:/edugradeplus/ops/env/edugradeplus.production.env.example)
+2. [edugradeplus.staging.env.example](/d:/edugradeplus/ops/env/edugradeplus.staging.env.example)
 
 Confirm:
 
@@ -83,13 +83,13 @@ Confirm:
 Prepare and verify:
 
 1. production service file:
-   - [edugradespro-gunicorn.service](/d:/edugradespro/ops/systemd/edugradespro-gunicorn.service)
+   - [edugradeplus-gunicorn.service](/d:/edugradeplus/ops/systemd/edugradeplus-gunicorn.service)
 2. staging service file:
-   - [edugradespro-staging-gunicorn.service](/d:/edugradespro/ops/systemd/edugradespro-staging-gunicorn.service)
+   - [edugradeplus-staging-gunicorn.service](/d:/edugradeplus/ops/systemd/edugradeplus-staging-gunicorn.service)
 3. production nginx config:
-   - [edugradespro.conf](/d:/edugradespro/ops/nginx/edugradespro.conf)
+   - [edugradeplus.conf](/d:/edugradeplus/ops/nginx/edugradeplus.conf)
 4. staging nginx config:
-   - [edugradespro-staging.conf](/d:/edugradespro/ops/nginx/edugradespro-staging.conf)
+   - [edugradeplus-staging.conf](/d:/edugradeplus/ops/nginx/edugradeplus-staging.conf)
 
 Confirm:
 
@@ -102,7 +102,7 @@ Confirm:
 
 Before importing real data:
 
-1. review [PRODUCTION_DATA_PROMOTION.md](/d:/edugradespro/docs/PRODUCTION_DATA_PROMOTION.md)
+1. review [PRODUCTION_DATA_PROMOTION.md](/d:/edugradeplus/docs/PRODUCTION_DATA_PROMOTION.md)
 2. export the reviewed setup bundle from local
 3. inspect the JSON bundle
 4. confirm there are no junk/test records
@@ -185,7 +185,7 @@ Confirm:
 1. DB backup command is tested
 2. media backup plan exists
 3. rollback decision path is clear
-4. [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradespro/docs/PRODUCTION_INCIDENT_RUNBOOK.md) is available to the responsible admin
+4. [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradeplus/docs/PRODUCTION_INCIDENT_RUNBOOK.md) is available to the responsible admin
 
 ## 15. Final Go / No-Go Questions
 

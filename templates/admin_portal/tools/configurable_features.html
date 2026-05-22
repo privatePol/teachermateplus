@@ -743,6 +743,30 @@
   </div>
 
   <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-deadline-policy" aria-expanded="false" aria-controls="feature-card-grade-deadline-policy">
+      <strong>Grade Deadline Enforcement</strong>
+      <span class="toggle-indicator" aria-hidden="true">+</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-deadline-policy" aria-expanded="false" aria-controls="feature-card-grade-deadline-policy">
+      <span class="settings-card-summary-title">Grade Deadline Enforcement</span>
+      <span class="settings-card-summary-text">Choose whether deadlines only mark non-compliance or automatically close encoding until campus admin approval.</span>
+    </button>
+    <div id="feature-card-grade-deadline-policy" class="collapse">
+    <div class="card-body">
+      <label class="form-label" for="{{ form.grade_deadline_enforcement_policy.id_for_label }}">{{ form.grade_deadline_enforcement_policy.label }}</label>
+      {{ form.grade_deadline_enforcement_policy }}
+      {% if form.grade_deadline_enforcement_policy.help_text %}
+      <div class="form-text">{{ form.grade_deadline_enforcement_policy.help_text }}</div>
+      {% endif %}
+      {% for error in form.grade_deadline_enforcement_policy.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      <div class="alert alert-light border small mb-0 mt-3">
+        Option 2 blocks activity creation, score encoding, and attendance updates after the deadline. Faculty may still submit a complete gradebook, or file a reopen request from the Summary page.
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
     <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-distribution" aria-expanded="false" aria-controls="feature-card-grade-distribution">
       <strong>Faculty Grade Distribution Monitor</strong>
       <span class="toggle-indicator" aria-hidden="true">âŒ„</span>
@@ -956,7 +980,7 @@
         {% elif selected_term %}
           Select one or more classes under <strong>{{ selected_term.code }}</strong> if you want to store a class-level override in addition to the tenant default.
         {% else %}
-          Select the term first so EduGradesPro can narrow the class list to the current tenant, campus, and term scope. Then optionally choose a faculty name to filter the class list even further.
+          Select the term first so EduGrade+ can narrow the class list to the current tenant, campus, and term scope. Then optionally choose a faculty name to filter the class list even further.
         {% endif %}
       </div>
       <div class="alert alert-light border small mb-0">

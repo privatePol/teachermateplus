@@ -153,7 +153,7 @@ class FacultyReminderServiceTests(TestCase):
             is_active=True,
         )
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@edugradespro.local")
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@EduGrade+.local")
     def test_queue_and_process_faculty_reminder_email(self):
         reminder = FacultyReminder.objects.create(
             tenant=self.tenant,
@@ -331,7 +331,7 @@ class FacultyReminderServiceTests(TestCase):
         self.assertIsNotNone(reminder)
         self.assertFalse(reminder.send_email)
 
-    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@edugradespro.local")
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@EduGrade+.local")
     def test_submission_non_compliance_notice_progression_and_resolution(self):
         SystemSettingService.set(
             FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY,

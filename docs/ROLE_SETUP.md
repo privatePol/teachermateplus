@@ -7,9 +7,9 @@ The `AC`, `Dean`, or `CAO` role should control Admin Portal monitoring scope.
 
 **NCBA Academic Structure Reference**
 
-EduGradesPro should treat the academic governance area as the practical department scope for actual-data setup.
+EduGrade+ should treat the academic governance area as the practical department scope for actual-data setup.
 
-| Branch | Governance Level | EduGradesPro setup guidance |
+| Branch | Governance Level | EduGrade+ setup guidance |
 |---|---|---|
 | Academic | Graduate | Create campus-specific department records when Graduate needs separate security, templates, reporting, or correction routing. |
 | Academic | College - BA | Create campus-specific BA department/area records; Cubao currently has no BA Academic Chairman, so avoid assigning a Cubao BA AC role unless NCBA later creates that post. |
@@ -26,7 +26,7 @@ Recommended mapping rule:
 
 Use broad department records such as `COLLEGE` or `BASIC_ED` only when the same person, template, or monitor scope genuinely covers the whole broad unit. Otherwise, use area-specific records such as BA, IS/CS, LA, Accountancy, Elementary, JHS, or SHS.
 
-EduGradesPro now supports parent-child department hierarchy. Recommended setup:
+EduGrade+ now supports parent-child department hierarchy. Recommended setup:
 
 | Parent Division | Child Areas |
 |---|---|

@@ -1,12 +1,12 @@
 # OWASP_GAP_ASSESSMENT.md
 
 ## Purpose
-This document is a practical security gap assessment for **EduGradesPro V1** using an **OWASP-aligned** lens.
+This document is a practical security gap assessment for **EduGrade+ V1** using an **OWASP-aligned** lens.
 
 It is **not** a formal certification report and should not be presented as proof of full OWASP compliance.
 
 Instead, it answers:
-- what EduGradesPro already does well
+- what EduGrade+ already does well
 - what is partially implemented
 - what still needs hardening
 - what is code-level vs production-configuration work
@@ -34,7 +34,7 @@ This document uses a practical mix of:
 ## 1. Overall Position
 
 ### Safe Statement
-**EduGradesPro already implements many OWASP-aligned controls, but it has not yet been formally assessed or certified as fully compliant with OWASP standards.**
+**EduGrade+ already implements many OWASP-aligned controls, but it has not yet been formally assessed or certified as fully compliant with OWASP standards.**
 
 ### Current Strengths
 - Django CSRF protection is enabled
@@ -83,12 +83,12 @@ This document uses a practical mix of:
 
 **What exists**
 - Django password validators plus custom complexity validator:
-  - [validators.py](/d:/edugradespro/apps/accounts/validators.py)
-  - [base.py](/d:/edugradespro/config/settings/base.py)
+  - [validators.py](/d:/edugradeplus/apps/accounts/validators.py)
+  - [base.py](/d:/edugradeplus/config/settings/base.py)
 - forced password change
 - privacy consent gate after login
 - temporary login lockout after repeated failures:
-  - [services.py](/d:/edugradespro/apps/accounts/services.py)
+  - [services.py](/d:/edugradeplus/apps/accounts/services.py)
 - portal-specific lockout state tracking
 
 **Why this is strong**
@@ -116,7 +116,7 @@ This document uses a practical mix of:
 - `SESSION_COOKIE_SAMESITE = "Lax"`
 - `CSRF_COOKIE_SAMESITE = "Lax"`
 - secure cookies in production:
-  - [production.py](/d:/edugradespro/config/settings/production.py)
+  - [production.py](/d:/edugradeplus/config/settings/production.py)
 - single-device session enforcement is part of current security behavior
 
 **Why this is good**
@@ -140,12 +140,12 @@ This document uses a practical mix of:
 
 **What exists**
 - portal access checks in middleware:
-  - [middleware.py](/d:/edugradespro/apps/core/middleware.py)
+  - [middleware.py](/d:/edugradeplus/apps/core/middleware.py)
 - permission decorators on admin/faculty views
 - scoped RBAC with tenant/campus/department awareness
 - governance-sensitive actions are permission-aware
 
-**Why this is one of EduGradesPro’s strengths**
+**Why this is one of EduGrade+’s strengths**
 - the platform was designed around governed workflows, not open CRUD
 - tenant/campus scope is a core principle in the codebase
 
@@ -213,7 +213,7 @@ This document uses a practical mix of:
   - HSTS preload/includeSubdomains
 
 **What this means**
-The codebase supports strong transport security, but EduGradesPro is only secure here if:
+The codebase supports strong transport security, but EduGrade+ is only secure here if:
 - HTTPS is actually configured
 - Nginx/TLS is correctly set up
 - production env vars are set correctly
@@ -259,7 +259,7 @@ The codebase supports strong transport security, but EduGradesPro is only secure
 - correction, template governance, reopen, and monitoring actions are auditable
 
 **Why this matters**
-For OWASP-style accountability and incident response, EduGradesPro is stronger than many internal systems because auditability is built into the workflow design.
+For OWASP-style accountability and incident response, EduGrade+ is stronger than many internal systems because auditability is built into the workflow design.
 
 **Remaining gaps**
 - no centralized SIEM/log aggregation process documented
@@ -359,13 +359,13 @@ For OWASP-style accountability and incident response, EduGradesPro is stronger t
 
 ---
 
-## 5. What EduGradesPro Can Safely Claim Today
+## 5. What EduGrade+ Can Safely Claim Today
 
 ### Safe claim
-> EduGradesPro implements multiple OWASP-aligned security controls, including strong password validation, login lockout, CSRF protection, role-based access control, secure production cookie support, audit logging, and governed academic workflows.
+> EduGrade+ implements multiple OWASP-aligned security controls, including strong password validation, login lockout, CSRF protection, role-based access control, secure production cookie support, audit logging, and governed academic workflows.
 
 ### Unsafe claim
-> EduGradesPro is fully OWASP compliant.
+> EduGrade+ is fully OWASP compliant.
 
 That second claim should only be made after a deliberate assessment and evidence-based review.
 
@@ -380,7 +380,7 @@ That second claim should only be made after a deliberate assessment and evidence
 ---
 
 ## 7. Final Position
-EduGradesPro is already in a **good practical security position for an internally governed academic platform**, especially because of:
+EduGrade+ is already in a **good practical security position for an internally governed academic platform**, especially because of:
 - RBAC
 - auditability
 - grading governance controls

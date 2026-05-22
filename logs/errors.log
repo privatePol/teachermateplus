@@ -4,11 +4,11 @@ Traceback (most recent call last):
     response = get_response(request)
   File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
     response = wrapped_callback(request, *callback_args, **callback_kwargs)
-  File "D:\edugradespro\apps\core\decorators.py", line 52, in _wrapped
+  File "D:\edugradeplus\apps\core\decorators.py", line 52, in _wrapped
     return view_func(request, *args, **kwargs)
-  File "D:\edugradespro\apps\core\decorators.py", line 27, in _wrapped
+  File "D:\edugradeplus\apps\core\decorators.py", line 27, in _wrapped
     return view_func(request, *args, **kwargs)
-  File "D:\edugradespro\apps\admin_portal\views.py", line 5622, in user_privacy_consent_reset_view
+  File "D:\edugradeplus\apps\admin_portal\views.py", line 5622, in user_privacy_consent_reset_view
     return render(
         request,
     ...<6 lines>...

@@ -5,8 +5,8 @@ from apps.tenants.models import Campus, Department, Tenant
 
 
 class ScopeService:
-    SESSION_TENANT_KEY = "edugradespro_scope_tenant_id"
-    SESSION_CAMPUS_KEY = "edugradespro_scope_campus_id"
+    SESSION_TENANT_KEY = "EduGrade+_scope_tenant_id"
+    SESSION_CAMPUS_KEY = "EduGrade+_scope_campus_id"
 
     @staticmethod
     def _parse_int(value):

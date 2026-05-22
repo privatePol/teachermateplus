@@ -1,6 +1,6 @@
-# EduGradesPro Production Incident Runbook
+# EduGrade+ Production Incident Runbook
 
-This runbook is the operational response guide for production issues in EduGradesPro.
+This runbook is the operational response guide for production issues in EduGrade+.
 
 Use this when:
 - `/admin-portal/` or `/faculty/` suddenly shows errors
@@ -8,7 +8,7 @@ Use this when:
 - users report missing data or broken workflows
 - a fresh deployment introduced a regression
 
-This runbook assumes the Ubuntu deployment flow documented in [DEPLOYMENT_UBUNTU.md](/d:/edugradespro/docs/DEPLOYMENT_UBUNTU.md).
+This runbook assumes the Ubuntu deployment flow documented in [DEPLOYMENT_UBUNTU.md](/d:/edugradeplus/docs/DEPLOYMENT_UBUNTU.md).
 
 ## 1. Incident Goals
 
@@ -131,17 +131,17 @@ df -h
 free -m
 ```
 
-### EduGradesPro logs
+### EduGrade+ logs
 
 ```bash
-sudo ls -lah /var/log/edugradespro/
-sudo tail -n 200 /var/log/edugradespro/*.log
+sudo ls -lah /var/log/edugradeplus/
+sudo tail -n 200 /var/log/edugradeplus/*.log
 ```
 
 ### Recent release state
 
 ```bash
-cd /opt/edugradespro
+cd /opt/edugradeplus
 git log --oneline -n 10
 git status --short
 ```
@@ -151,7 +151,7 @@ git status --short
 Run these only after capturing evidence:
 
 ```bash
-cd /opt/edugradespro
+cd /opt/edugradeplus
 source .venv/bin/activate
 python manage.py check
 python manage.py showmigrations
@@ -164,7 +164,7 @@ Useful checks:
 - `showmigrations` confirms migration drift
 - shell check confirms production config values are loading
 
-## 8. EduGradesPro-Specific Triage
+## 8. EduGrade+-Specific Triage
 
 ### If Admin Portal fails
 
@@ -255,7 +255,7 @@ With that, Codex can:
 If the release helper script was used, first identify the last known good revision.
 
 ```bash
-cd /opt/edugradespro
+cd /opt/edugradeplus
 git log --oneline -n 20
 ```
 
@@ -287,7 +287,7 @@ Before high-risk recovery actions:
 Example SQLite backup:
 
 ```bash
-cd /opt/edugradespro
+cd /opt/edugradeplus
 cp db.sqlite3 "db.sqlite3.backup.$(Get-Date -Format yyyyMMdd-HHmmss)"
 ```
 
@@ -301,13 +301,13 @@ cp db.sqlite3 "db.sqlite3.backup.$(date +%Y%m%d-%H%M%S)"
 
 Use a short, calm update:
 
-> EduGradesPro is currently experiencing a production issue affecting [portal/feature].  
+> EduGrade+ is currently experiencing a production issue affecting [portal/feature].  
 > Scope observed: [tenant/campus/users].  
 > Investigation is in progress. Please avoid retrying high-risk actions such as repeated submissions until further notice.
 
 When fixed:
 
-> EduGradesPro service has been restored for [portal/feature].  
+> EduGrade+ service has been restored for [portal/feature].  
 > Users may now resume normal operations.  
 > We will continue monitoring for stability.
 
@@ -330,7 +330,7 @@ Recommended prevention actions:
 - add safer feature gating
 - strengthen guide/runbook notes for the affected workflow
 
-## 16. EduGradesPro Production Readiness Checklist
+## 16. EduGrade+ Production Readiness Checklist
 
 Before go-live or before the next release, confirm:
 
@@ -344,7 +344,7 @@ Before go-live or before the next release, confirm:
 
 ## 17. Escalation Summary
 
-If EduGradesPro suddenly shows production errors:
+If EduGrade+ suddenly shows production errors:
 
 1. do not panic
 2. capture evidence

@@ -38,6 +38,7 @@ from .views import (
     period_correction_finalize_view,
     period_corrections_view,
     grade_explanation_view,
+    period_reopen_request_view,
     period_self_reopen_view,
     period_submit_view,
     period_summary_view,
@@ -162,6 +163,11 @@ urlpatterns = [
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/self-reopen/",
         period_self_reopen_view,
         name="period_self_reopen",
+    ),
+    path(
+        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/reopen-request/",
+        period_reopen_request_view,
+        name="period_reopen_request",
     ),
     path(
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/corrections/",

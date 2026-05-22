@@ -45,12 +45,12 @@ User = get_user_model()
 
 
 def _send_faculty_password_reset_email(request, user, reset_url: str) -> int:
-    subject = "EduGradesPro Faculty Password Reset"
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
+    subject = "EduGrade+ Faculty Password Reset"
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
     recipient = [user.email]
     logo_context = build_email_logo_context(
         filename="egp_logo_official.png",
-        cid="edugradespro-logo",
+        cid="EduGrade+-logo",
         external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
         configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
     )
@@ -74,7 +74,7 @@ def _send_faculty_password_reset_email(request, user, reset_url: str) -> int:
         message,
         src=logo_context["email_logo_src"],
         filename="egp_logo_official.png",
-        cid="edugradespro-logo",
+        cid="EduGrade+-logo",
         configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
     )
     message.attach_alternative(html_body, "text/html")

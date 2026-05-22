@@ -127,7 +127,7 @@
     <div class="mt-3">
       <div class="template-tree-title">Final Grade Rule</div>
       <div class="template-formula">{{ final_formula }}</div>
-      <div class="template-note mt-1">EduGradesPro follows the tenant grading policy matched to this class. If no special tenant formula is configured, it falls back to the default average across the active grading periods of the assigned template.</div>
+      <div class="template-note mt-1">EduGrade+ follows the tenant grading policy matched to this class. If no special tenant formula is configured, it falls back to the default average across the active grading periods of the assigned template.</div>
     </div>
     {% endif %}
   </div>
@@ -182,7 +182,7 @@
   <div class="card template-period-card mb-3">
     <div class="template-period-header {% if 'PREFINAL' in code or 'PRE-FINAL' in name or 'PRE FINAL' in name %}prefinal{% elif 'MIDTERM' in code or 'MIDTERM' in name %}midterm{% elif 'FINAL' in code or 'FINAL' in name or 'EXAM' in code %}final{% elif 'PRELIM' in code or 'PRELIM' in name %}prelim{% else %}default{% endif %}">
       <div class="fw-semibold">{{ period.row.name }}</div>
-      <div class="small opacity-75">This is the grading structure used when EduGradesPro computes this period.</div>
+      <div class="small opacity-75">This is the grading structure used when EduGrade+ computes this period.</div>
     </div>
     <div class="card-body">
       <div class="template-formula mb-2">{{ period.formula }}</div>

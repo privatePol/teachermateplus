@@ -1,0 +1,6 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+*/5 * * * * cd /opt/edugradeplus && source /etc/edugradeplus/edugradeplus.env && /opt/edugradeplus/.venv/bin/python manage.py auto_lock_period_deadlines >> /var/log/edugradeplus/auto_lock_period_deadlines.log 2>&1
+*/10 * * * * cd /opt/edugradeplus && source /etc/edugradeplus/edugradeplus.env && /opt/edugradeplus/.venv/bin/python manage.py auto_lapse_correction_windows >> /var/log/edugradeplus/auto_lapse_correction_windows.log 2>&1
+0 * * * * cd /opt/edugradeplus && source /etc/edugradeplus/edugradeplus.env && /opt/edugradeplus/.venv/bin/python manage.py queue_period_reminders >> /var/log/edugradeplus/queue_period_reminders.log 2>&1

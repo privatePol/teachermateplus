@@ -25,25 +25,25 @@ class EmailAssetTests(SimpleTestCase):
             with override_settings(MEDIA_ROOT=Path(tmpdir), EMAIL_LOGO_URL=""):
                 context = build_email_logo_context(
                     filename="egp_logo_official.png",
-                    cid="edugradespro-logo",
+                    cid="EduGrade+-logo",
                 )
                 message = EmailMultiAlternatives(subject="Test", body="Text", to=["user@example.test"])
 
-                self.assertEqual(context["logo_url"], "cid:edugradespro-logo")
+                self.assertEqual(context["logo_url"], "cid:EduGrade+-logo")
                 self.assertTrue(
                     attach_logo_for_src(
                         message,
                         src=context["email_logo_src"],
                         filename="egp_logo_official.png",
-                        cid="edugradespro-logo",
+                        cid="EduGrade+-logo",
                     )
                 )
-                self.assertEqual(message.attachments[0]["Content-ID"], "<edugradespro-logo>")
+                self.assertEqual(message.attachments[0]["Content-ID"], "<EduGrade+-logo>")
 
     def test_external_logo_url_does_not_attach_inline_image(self):
         context = build_email_logo_context(
             filename="egp_logo_official.png",
-            cid="edugradespro-logo",
+            cid="EduGrade+-logo",
             external_url="https://cdn.example.test/logo.png",
         )
         message = EmailMultiAlternatives(subject="Test", body="Text", to=["user@example.test"])
@@ -54,7 +54,7 @@ class EmailAssetTests(SimpleTestCase):
                 message,
                 src=context["email_logo_src"],
                 filename="egp_logo_official.png",
-                cid="edugradespro-logo",
+                cid="EduGrade+-logo",
             )
         )
         self.assertEqual(message.attachments, [])

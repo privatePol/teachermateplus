@@ -56,7 +56,7 @@ from apps.grading.models import (
     TemplateHotfixRequest,
 )
 from apps.grading.explanations import GradeExplanationService
-from apps.grading.notifications import CorrectionNotificationService
+from apps.grading.notifications import CorrectionNotificationService, GradebookReopenNotificationService
 from apps.grading.reporting import (
     ClassTabulationSheetPdfService,
     CorrectionOfficialReportService,
@@ -575,6 +575,10 @@ def _period_edit_state(offering, period):
         offering=offering,
         template_period=period,
     )
+    is_auto_closed_after_deadline = GradingGovernanceService.is_auto_closed_after_deadline(
+        offering=offering,
+        template_period=period,
+    )
     completion_window_state = GradingGovernanceService.get_completion_window_state(
         offering=offering,
         template_period=period,
@@ -587,12 +591,17 @@ def _period_edit_state(offering, period):
     )
     is_editable = (
         ((not is_locked and not is_submitted) or is_correction_active)
+        and not is_auto_closed_after_deadline
         and not governance_state["is_closed_by_active_period"]
     )
     can_submit_period = (
         not is_submitted
         and not governance_state["is_closed_by_active_period"]
         and (not is_locked or is_auto_locked_reopened_after_deadline)
+    )
+    pending_reopen_request = GradingGovernanceService.get_pending_reopen_request(
+        offering=offering,
+        template_period=period,
     )
     can_self_reopen = GradingGovernanceService.can_faculty_self_reopen_before_deadline(
         offering=offering,
@@ -612,13 +621,22 @@ def _period_edit_state(offering, period):
             template_period=period,
         ),
         "completion_grace_until": None,
-        "encoding_close_deadline": None,
+        "encoding_close_deadline": completion_window_state["encoding_close_deadline"],
+        "is_auto_closed_after_deadline": is_auto_closed_after_deadline,
         "is_within_completion_grace": False,
         "grace_expired": False,
         "is_non_compliant": completion_window_state["is_non_compliant"],
         "is_overdue": completion_window_state.get("is_overdue", completion_window_state["is_non_compliant"]),
         "active_late_completion_request": None,
         "pending_late_completion_request": None,
+        "pending_reopen_request": pending_reopen_request,
+        "can_request_deadline_reopen": (
+            GradingGovernanceService.can_request_reopen_after_auto_close(
+                offering=offering,
+                template_period=period,
+            )
+            and not scope_state["read_only"]
+        ),
         "has_active_late_completion_request": False,
         "has_pending_late_completion_request": False,
         "can_request_late_completion": False,
@@ -992,7 +1010,7 @@ def _build_faculty_template_preview(template):
     if active_period_names:
         final_formula = (
             "FINAL GRADE follows the tenant grading profile formula for the class. "
-            "If no special formula is configured, EduGradesPro averages the active grading periods "
+            "If no special formula is configured, EduGrade+ averages the active grading periods "
             f"({', '.join(active_period_names)})."
         )
 
@@ -1872,7 +1890,7 @@ def _build_deadline_reminder_for_offerings(offerings, *, now=None):
                 "has_deadline": False,
                 "title": "No matching deadline for your active classes yet",
                 "note": (
-                    "A submission deadline exists in EduGradesPro, but it does not match the campus, academic year, "
+                    "A submission deadline exists in EduGrade+, but it does not match the campus, academic year, "
                     "or term of your accepted classes."
                 ),
                 "variant": "neutral",
@@ -3257,7 +3275,7 @@ def offering_grading_calculator_view(request, offering_id: int):
             raise InvalidOperation
     except (InvalidOperation, ValueError):
         sample_value = GradingTemplateTestingCalculatorService.DEFAULT_SAMPLE_VALUE
-        messages.warning(request, "The sample value was invalid, so EduGradesPro used 85.00 instead.")
+        messages.warning(request, "The sample value was invalid, so EduGrade+ used 85.00 instead.")
 
     calculation = GradingTemplateTestingCalculatorService.build_calculation(
         template=template,
@@ -3268,7 +3286,7 @@ def offering_grading_calculator_view(request, offering_id: int):
     if calculation["input_errors"]:
         messages.warning(
             request,
-            "Some sample rows had invalid percentages, so EduGradesPro temporarily used the default sample value for those rows.",
+            "Some sample rows had invalid percentages, so EduGrade+ temporarily used the default sample value for those rows.",
         )
 
     context = {
@@ -3747,6 +3765,9 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         "completion_grace_until": state["completion_grace_until"],
         "is_within_completion_grace": state["is_within_completion_grace"],
         "is_non_compliant": state["is_non_compliant"],
+        "is_auto_closed_after_deadline": state["is_auto_closed_after_deadline"],
+        "pending_reopen_request": state["pending_reopen_request"],
+        "can_request_deadline_reopen": state["can_request_deadline_reopen"],
         "pending_late_completion_request": state["pending_late_completion_request"],
         "active_late_completion_request": state["active_late_completion_request"],
         "can_request_late_completion": state["can_request_late_completion"],
@@ -3945,6 +3966,7 @@ def activity_scores_view(request, offering_id: int, period_id: int, activity_id:
         "is_editable": state["is_editable"],
         "submission_status": state["submission_status"],
         "is_auto_locked_reopened_after_deadline": state["is_auto_locked_reopened_after_deadline"],
+        "is_auto_closed_after_deadline": state["is_auto_closed_after_deadline"],
         "system_correction_enabled": state["system_correction_enabled"],
         "completion_grace_until": state["completion_grace_until"],
         "is_within_completion_grace": state["is_within_completion_grace"],
@@ -3952,6 +3974,8 @@ def activity_scores_view(request, offering_id: int, period_id: int, activity_id:
         "pending_late_completion_request": state["pending_late_completion_request"],
         "active_late_completion_request": state["active_late_completion_request"],
         "can_request_late_completion": state["can_request_late_completion"],
+        "pending_reopen_request": state["pending_reopen_request"],
+        "can_request_deadline_reopen": state["can_request_deadline_reopen"],
     }
     return render(request, "faculty_portal/activity_scores.html", context)
 
@@ -4087,6 +4111,7 @@ def period_attendance_view(request, offering_id: int, period_id: int):
         "is_editable": state["is_editable"],
         "submission_status": state["submission_status"],
         "is_auto_locked_reopened_after_deadline": state["is_auto_locked_reopened_after_deadline"],
+        "is_auto_closed_after_deadline": state["is_auto_closed_after_deadline"],
         "is_governance_closed": state["is_governance_closed"],
         "governance_message": state["governance_message"],
         "system_correction_enabled": state["system_correction_enabled"],
@@ -4096,9 +4121,12 @@ def period_attendance_view(request, offering_id: int, period_id: int):
         "pending_late_completion_request": state["pending_late_completion_request"],
         "active_late_completion_request": state["active_late_completion_request"],
         "can_request_late_completion": state["can_request_late_completion"],
+        "pending_reopen_request": state["pending_reopen_request"],
+        "can_request_deadline_reopen": state["can_request_deadline_reopen"],
         "can_manage_sessions": (
             not state["is_locked"]
             and not state["is_submitted"]
+            and not state["is_auto_closed_after_deadline"]
             and not state["is_governance_closed"]
             and not state["is_read_only_class"]
         ),
@@ -4403,6 +4431,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "can_print_gradebook_summary": can_print_gradebook_summary,
         "can_submit_period": state["can_submit_period"],
         "is_auto_locked_reopened_after_deadline": state["is_auto_locked_reopened_after_deadline"],
+        "is_auto_closed_after_deadline": state["is_auto_closed_after_deadline"],
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
         "submission_status": state["submission_status"],
@@ -4425,6 +4454,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "pending_late_completion_request": state["pending_late_completion_request"],
         "active_late_completion_request": state["active_late_completion_request"],
         "can_request_late_completion": state["can_request_late_completion"],
+        "pending_reopen_request": state["pending_reopen_request"],
+        "can_request_deadline_reopen": state["can_request_deadline_reopen"],
         "summary_status_counts": status_counts,
         "summary_passed_count": passed_count,
         "summary_failed_count": failed_count,
@@ -4884,7 +4915,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         {
             "title": "1. Start with only active students and active records",
             "body": (
-                "EduGradesPro reads only ACTIVE students in the class. Students marked DRP, W, or INC are not used "
+                "EduGrade+ reads only ACTIVE students in the class. Students marked DRP, W, or INC are not used "
                 "in the prediction computation. It also reads only active grade activities and active attendance sessions "
                 "in the selected grading period."
             ),
@@ -4906,7 +4937,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         {
             "title": "4. Build three period outcomes",
             "body": (
-                "For each student, EduGradesPro keeps a current value from encoded records, a worst-case value that treats "
+                "For each student, EduGrade+ keeps a current value from encoded records, a worst-case value that treats "
                 "missing work as zero, and a best-case value that treats missing work as full score."
             ),
         },
@@ -4968,21 +4999,21 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         {
             "title": "Raw-to-computed score using Base 50",
             "body": (
-                "For normal raw-score activities, EduGradesPro converts the raw score into a computed score using: "
+                "For normal raw-score activities, EduGrade+ converts the raw score into a computed score using: "
                 "Computed Score = ((Raw Score / Total Score) × Base Value) + (100 − Base Value)."
             ),
         },
         {
             "title": "Default base behavior",
             "body": (
-                "If the class does not have a more specific base-value override, EduGradesPro ultimately falls back to "
+                "If the class does not have a more specific base-value override, EduGrade+ ultimately falls back to "
                 "Base 50. That means zero raw score starts at 50.00 and perfect raw score reaches 100.00."
             ),
         },
         {
             "title": "Direct percentage mode",
             "body": (
-                "If an activity uses Direct Percentage mode, EduGradesPro does not transmute the raw score through Base 50. "
+                "If an activity uses Direct Percentage mode, EduGrade+ does not transmute the raw score through Base 50. "
                 "The entered percentage itself becomes the computed score."
             ),
         },
@@ -5005,8 +5036,8 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
 
     period_grade_steps = [
         "Each encoded activity score is first converted into a computed score using the active scoring rule of that activity.",
-        "If a subcomponent has details, EduGradesPro averages those details upward using the detail weights.",
-        "If a component has subcomponents, EduGradesPro averages those subcomponents upward using the subcomponent weights.",
+        "If a subcomponent has details, EduGrade+ averages those details upward using the detail weights.",
+        "If a component has subcomponents, EduGrade+ averages those subcomponents upward using the subcomponent weights.",
         "The period grade is then the weighted sum of all active top-level components in the selected period.",
         "If the template has a configured exam component and there is still no exam data, the official period grade remains unavailable until the exam side has data.",
     ]
@@ -5017,9 +5048,9 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
     )
 
     final_grade_steps = [
-        "EduGradesPro stores an official period grade per active grading period when that period is recomputed.",
+        "EduGrade+ stores an official period grade per active grading period when that period is recomputed.",
         "The official final grade record is then computed using the final-grade formula resolved from the matched tenant grading profile.",
-        "If no special tenant formula is configured, EduGradesPro falls back to averaging the active grading periods of the assigned template.",
+        "If no special tenant formula is configured, EduGrade+ falls back to averaging the active grading periods of the assigned template.",
     ]
 
     final_grade_formula = (
@@ -5047,7 +5078,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         {
             "title": "Example 3: Using What-If Simulation",
             "body": (
-                "If the faculty enters 80% as Remaining Performance, EduGradesPro does not save any grade. "
+                "If the faculty enters 80% as Remaining Performance, EduGrade+ does not save any grade. "
                 "It only answers: 'If the student performs at around 80% on the remaining items, what might the period grade become?' "
                 "The result is for planning and advising only."
             ),
@@ -5064,7 +5095,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
             "title": "Example 5: Average Needed to Pass Final",
             "body": (
                 "If PRELIM is 91.43 and MIDTERM is 99.80, and the passing final grade is 75.00, "
-                "EduGradesPro can show the average still needed across the remaining final periods. "
+                "EduGrade+ can show the average still needed across the remaining final periods. "
                 "For example, it may say '54.39% average needed across PRE-FINAL, FX'."
             ),
         },
@@ -5255,6 +5286,68 @@ def period_self_reopen_view(request, offering_id: int, period_id: int):
 
 
 @portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def period_reopen_request_view(request, offering_id: int, period_id: int):
+    if request.method != "POST":
+        return redirect("faculty_portal:period_summary", offering_id=offering_id, period_id=period_id)
+
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
+    if period is None:
+        return redirect("faculty_portal:offering_periods", offering_id=offering_id)
+
+    state = _period_edit_state(offering, period)
+    if state["is_read_only_class"]:
+        messages.error(request, state["faculty_scope_state"]["reason"])
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+    if not state["can_request_deadline_reopen"]:
+        messages.error(request, "This gradebook is not available for a deadline reopen request.")
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+
+    justification = (request.POST.get("justification") or "").strip()
+    try:
+        reopen_request = GradingGovernanceService.create_reopen_request_for_period(
+            user=request.user,
+            offering=offering,
+            template_period=period,
+            justification=justification,
+        )
+    except ValidationError as exc:
+        messages.error(request, str(exc))
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+
+    email_result = GradebookReopenNotificationService.send_reopen_request_notifications(
+        request_obj=reopen_request,
+    )
+    AuditService.log_event(
+        action="CREATE",
+        portal="FACULTY",
+        entity_type="GradeSubmissionReopenRequest",
+        entity_id=reopen_request.id,
+        actor=request.user,
+        tenant=offering.tenant,
+        campus=offering.campus,
+        after_data=model_before_after(reopen_request),
+        metadata={
+            "mode": "FACULTY_DEADLINE_REOPEN_REQUEST",
+            "offering_id": offering.id,
+            "period_id": period.id,
+            "email_result": email_result,
+        },
+        request=request,
+    )
+    messages.success(
+        request,
+        "Reopen request submitted. The campus approver can review it from the Admin Portal queue.",
+    )
+    return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+
+
+@portal_required("FACULTY")
 @permission_required("corrections.create")
 def period_corrections_view(request, offering_id: int, period_id: int):
     GradingGovernanceService.auto_lapse_expired_correction_windows()
@@ -5392,7 +5485,7 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                     )
                 messages.success(
                     request,
-                    "Correction request submitted for review. Once approved, EduGradesPro will post the corrected values automatically.",
+                    "Correction request submitted for review. Once approved, EduGrade+ will post the corrected values automatically.",
                 )
                 return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
 

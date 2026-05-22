@@ -25,6 +25,15 @@
     This period is locked by admin. Attendance editing is disabled.
   {% endif %}
 </div>
+{% elif is_auto_closed_after_deadline %}
+<div class="alert alert-danger">
+  Encoding closed automatically because the deadline already passed.
+  {% if pending_reopen_request %}
+    Your reopen request is pending admin review.
+  {% else %}
+    Go to Summary to submit a complete gradebook or request campus admin reopen.
+  {% endif %}
+</div>
 {% elif is_non_compliant %}
 <div class="alert alert-danger">
   Submission deadline already passed. You may continue encoding and submit as soon as possible, but this class is already listed in the non-compliance monitor.

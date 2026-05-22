@@ -1,6 +1,6 @@
-# EduGradesPro V1
+# EduGrade+ V1
 
-This repository contains **EduGradesPro V1**, a multi-tenant, multi-campus academic grading platform with:
+This repository contains **EduGrade+ V1**, a multi-tenant, multi-campus academic grading platform with:
 
 - **Admin Portal**: `/admin-portal/`
 - **Faculty Portal**: `/faculty/`
@@ -12,7 +12,7 @@ This repository contains **EduGradesPro V1**, a multi-tenant, multi-campus acade
 When starting work in this repo, align in this order:
 
 1. Read [`AGENTS.md`](AGENTS.md) first (working contract and guardrails).
-2. Read [`EDUGRADESPRO_CONTEXT.md`](EDUGRADESPRO_CONTEXT.md) for current system context.
+2. Read [`EduGrade+_CONTEXT.md`](EduGrade+_CONTEXT.md) for current system context.
 3. Read [`CHANGE_LOG.md`](CHANGE_LOG.md) for recent changes.
 4. Read only the relevant docs under [`docs/`](docs/) for the task at hand.
 
@@ -28,7 +28,7 @@ If the task is user-facing (UI/behavior/policy), also review the affected guide 
 
 Always work from:
 
-`D:\edugradespro`
+`D:\edugradeplus`
 
 ---
 
@@ -75,7 +75,7 @@ For targeted smoke tests, cover:
 If behavior changes, update:
 
 1. [`CHANGE_LOG.md`](CHANGE_LOG.md)
-2. [`EDUGRADESPRO_CONTEXT.md`](EDUGRADESPRO_CONTEXT.md)
+2. [`EduGrade+_CONTEXT.md`](EduGrade+_CONTEXT.md)
 3. Relevant Faculty/Admin guide pages
 
 ---

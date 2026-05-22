@@ -769,7 +769,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Prediction Methodology")
         self.assertContains(response, "Main Factors Used by the Prediction Engine")
         self.assertContains(response, "Computed From / Factors")
-        self.assertContains(response, "How EduGradesPro Transmutes Scores with Base 50")
+        self.assertContains(response, "How EduGrade+ Transmutes Scores with Base 50")
         self.assertContains(response, "How Periodic Grades Are Computed")
         self.assertContains(response, "How Final Grades Are Computed")
         self.assertContains(response, "Computed Score = ((Raw Score / Total Score)")

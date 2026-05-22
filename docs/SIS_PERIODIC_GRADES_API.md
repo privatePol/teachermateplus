@@ -1,6 +1,6 @@
 # SIS Integration: Periodic Grades API
 
-EduGradesPro exposes a pull API so the School Information System (SIS) can fetch periodic grades directly.
+EduGrade+ exposes a pull API so the School Information System (SIS) can fetch periodic grades directly.
 
 ## Feature toggle
 

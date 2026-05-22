@@ -1,13 +1,13 @@
 2026-05-05 12:55:53,651 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-05 12:55:54,821 INFO [django.server] "GET /admin-portal/grading/templates/6/builder/ HTTP/1.1" 200 90897
 2026-05-05 12:56:13,338 INFO [django.server] "GET /admin-portal/grading/components/9/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F6%2Fbuilder%2F HTTP/1.1" 200 55319
-2026-05-05 12:56:19,076 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\data_reset.py changed, reloading.
+2026-05-05 12:56:19,076 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\data_reset.py changed, reloading.
 2026-05-05 12:56:19,785 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-05 12:56:29,627 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-05 12:56:29,627 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-05 12:56:30,887 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-05 12:57:20,241 INFO [django.server] "GET /admin-portal/grading/components/?template_id=6&period_id=10 HTTP/1.1" 200 48743
 2026-05-05 12:57:21,598 INFO [django.server] "GET /admin-portal/grading/components/create/?template_id=6&period_id=10&next=%2Fadmin-portal%2Fgrading%2Fcomponents%2F%3Ftemplate_id%3D6%26period_id%3D10 HTTP/1.1" 200 55328
-2026-05-05 12:58:38,994 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\api_views.py changed, reloading.
+2026-05-05 12:58:38,994 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\api_views.py changed, reloading.
 2026-05-05 12:58:39,851 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-05 13:03:09,084 INFO [django.server] "GET /admin-portal/grading/components/create/?template_id=6&period_id=10&next=%2Fadmin-portal%2Fgrading%2Fcomponents%2F%3Ftemplate_id%3D6%26period_id%3D10&scope_tenant_id=8&scope_campus_id=14 HTTP/1.1" 200 55589
 2026-05-05 13:03:17,432 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 51261
@@ -186,20 +186,20 @@
 2026-05-05 14:26:26,200 INFO [django.server] "GET /admin-portal/grading/tenant-profiles/ HTTP/1.1" 200 48907
 2026-05-05 14:26:59,423 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 51273
 2026-05-05 14:27:23,127 INFO [django.server] "GET /admin-portal/grading/tenant-profiles/ HTTP/1.1" 200 48907
-2026-05-05 14:27:45,969 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\forms.py changed, reloading.
+2026-05-05 14:27:45,969 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\forms.py changed, reloading.
 2026-05-05 14:27:46,856 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-05 14:27:51,679 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\forms.py changed, reloading.
+2026-05-05 14:27:51,679 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\forms.py changed, reloading.
 2026-05-05 14:27:52,469 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-05 14:29:27,600 INFO [django.server] "GET /admin-portal/grading/tenant-profiles/ HTTP/1.1" 200 48907
 2026-05-05 14:29:29,167 INFO [django.server] "GET /admin-portal/grading/tenant-profiles/create/?next=%2Fadmin-portal%2Fgrading%2Ftenant-profiles%2F HTTP/1.1" 200 99235
-2026-05-05 14:31:12,162 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-05 14:31:12,162 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-05 14:31:12,922 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-05 14:31:21,959 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\urls.py changed, reloading.
+2026-05-05 14:31:21,959 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\urls.py changed, reloading.
 2026-05-05 14:31:22,738 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-05 14:32:47,444 INFO [django.server] "POST /admin-portal/grading/tenant-profiles/create/?next=%2Fadmin-portal%2Fgrading%2Ftenant-profiles%2F HTTP/1.1" 302 0
 2026-05-05 14:32:47,545 INFO [django.server] "GET /admin-portal/grading/tenant-profiles/ HTTP/1.1" 200 53730
 2026-05-05 14:33:06,368 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 51726
-2026-05-05 14:34:08,183 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-05 14:34:08,183 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-05 14:34:08,985 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-05 14:34:36,986 INFO [django.server] "POST /admin-portal/grading/templates/6/duplicate/ HTTP/1.1" 302 0
 2026-05-05 14:34:37,095 INFO [django.server] "GET /admin-portal/grading/templates/7/builder/ HTTP/1.1" 200 115022
@@ -227,7 +227,7 @@
 2026-05-05 14:40:22,509 INFO [django.server] "GET /admin-portal/grading/template-hotfixes/ HTTP/1.1" 200 48770
 2026-05-05 14:40:30,097 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 61531
 2026-05-05 14:41:05,331 INFO [django.server] "GET /admin-portal/grading/templates/6/builder/ HTTP/1.1" 200 91475
-2026-05-05 14:42:55,991 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-05 14:42:55,991 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-05 14:42:56,935 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-05 14:42:57,832 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 61531
 2026-05-05 14:43:01,707 INFO [django.server] "GET /admin-portal/grading/templates/6/builder/ HTTP/1.1" 200 111420
@@ -265,7 +265,7 @@
 2026-05-05 14:49:05,304 INFO [django.server] "GET /admin-portal/grading/templates/7/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 57849
 2026-05-05 14:49:11,983 INFO [django.server] "POST /admin-portal/grading/templates/7/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 302 0
 2026-05-05 14:49:12,064 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 65053
-2026-05-05 14:50:04,895 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-05 14:50:04,895 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-05 14:50:05,661 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-05 14:50:11,207 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 61535
 2026-05-05 14:50:24,351 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 61535
@@ -470,7 +470,7 @@
 2026-05-05 20:21:08,485 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 66782
 2026-05-05 20:21:13,568 INFO [django.server] "GET /admin-portal/grading/templates/6/builder/ HTTP/1.1" 200 122949
 2026-05-05 20:21:51,041 INFO [django.server] "GET /admin-portal/grading/components/?template_id=6&period_id=11 HTTP/1.1" 200 50262
-2026-05-05 20:21:51,126 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-05 20:21:51,126 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-05 20:21:53,524 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-05 20:21:55,597 INFO [django.server] "GET /admin-portal/grading/subcomponents/?template_id=6&period_id=11&component_id=13 HTTP/1.1" 200 48489
 2026-05-05 20:25:41,763 INFO [django.server] "GET /admin-portal/grading/templates/6/builder/ HTTP/1.1" 200 122949
@@ -700,9 +700,9 @@
 2026-05-05 21:55:03,175 INFO [django.server] "POST /admin-portal/grading/templates/9/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 302 0
 2026-05-05 21:55:03,617 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 77271
 2026-05-05 21:55:34,788 INFO [django.server] "GET /admin-portal/grading/templates/calculator/?grading_template=6&sample_value=85.00 HTTP/1.1" 200 124841
-2026-05-05 22:03:09,633 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\services.py changed, reloading.
+2026-05-05 22:03:09,633 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\services.py changed, reloading.
 2026-05-05 22:03:11,360 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-05 22:03:45,309 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-05 22:03:45,309 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-05 22:03:46,787 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-06 06:30:25,413 INFO [django.server] "GET /admin-portal/grading/templates/calculator/?grading_template=6&sample_value=85.00 HTTP/1.1" 302 0
 2026-05-06 06:30:25,446 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 3801
@@ -725,13 +725,13 @@
 2026-05-06 07:04:07,462 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 45738
 2026-05-06 07:04:13,832 INFO [django.server] "GET /faculty/my-courses/428/grading-template/ HTTP/1.1" 200 32935
 2026-05-06 07:06:00,970 INFO [django.server] "POST /admin-portal/grading/templates/calculator/?grading_template=6&sample_value=85.00 HTTP/1.1" 200 101450
-2026-05-06 07:09:05,253 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\services.py changed, reloading.
+2026-05-06 07:09:05,253 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\services.py changed, reloading.
 2026-05-06 07:09:07,426 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-06 07:09:11,016 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-06 07:09:11,016 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-06 07:09:12,728 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-06 07:09:24,968 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-06 07:09:24,968 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-06 07:09:26,728 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-06 07:09:31,308 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\urls.py changed, reloading.
+2026-05-06 07:09:31,308 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\urls.py changed, reloading.
 2026-05-06 07:09:32,592 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-06 07:15:35,404 INFO [django.server] "GET /faculty/my-courses/428/grading-template/ HTTP/1.1" 200 33078
 2026-05-06 07:15:39,958 INFO [django.server] "GET /faculty/my-courses/428/grading-template/calculator/?sample_value=85.00 HTTP/1.1" 200 52760
@@ -746,15 +746,15 @@
 2026-05-06 07:22:13,677 INFO [django.server] "GET /faculty/my-courses/428/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 38170
 2026-05-06 07:22:22,479 INFO [django.server] "GET /faculty/my-courses/428/periods/8/activities/?next=%2Ffaculty%2Fmy-courses%2F428%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 32522
 2026-05-06 07:22:27,699 INFO [django.server] "GET /faculty/my-courses/428/periods/9/activities/?next=%2Ffaculty%2Fmy-courses%2F428%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 32536
-2026-05-06 07:30:03,167 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\data_reset.py changed, reloading.
+2026-05-06 07:30:03,167 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\data_reset.py changed, reloading.
 2026-05-06 07:30:04,615 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-06 07:30:32,265 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-06 07:30:32,265 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-06 07:30:34,123 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-06 07:40:27,212 INFO [django.server] "POST /admin-portal/grading/templates/calculator/?grading_template=6&sample_value=85.00 HTTP/1.1" 200 101450
 2026-05-06 07:40:57,871 INFO [django.server] "GET /admin-portal/tools/actual-data-reset/ HTTP/1.1" 200 71846
-2026-05-06 07:44:50,287 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\data_reset.py changed, reloading.
+2026-05-06 07:44:50,287 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\data_reset.py changed, reloading.
 2026-05-06 07:44:52,363 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-06 07:45:16,536 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-06 07:45:16,536 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-06 07:45:18,641 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-16 22:12:22,568 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-16 22:12:40,186 INFO [django.server] "GET / HTTP/1.1" 200 5987
@@ -772,7 +772,7 @@
 2026-05-16 22:13:50,039 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/?tenant_id=8&course_id=652&term_id=7&q= HTTP/1.1" 200 88966
 2026-05-16 22:13:51,245 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/?tenant_id=8&course_id=652&term_id=7&q= HTTP/1.1" 200 88966
 2026-05-16 22:15:21,394 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/create/?next=%2Fadmin-portal%2Fgrading%2Fcourse-template-assignments%2F%3Ftenant_id%3D8%26course_id%3D652%26term_id%3D7%26q%3D HTTP/1.1" 200 84298
-2026-05-16 22:38:41,682 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-16 22:38:41,682 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-16 22:38:42,591 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-16 22:38:43,489 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 74040
 2026-05-16 22:38:51,191 INFO [django.server] "GET /admin-portal/grading/templates/9/structure/ HTTP/1.1" 200 65679
@@ -879,21 +879,21 @@
 2026-05-16 23:20:00,933 INFO [django.server] "GET /admin-portal/imports/batches/ HTTP/1.1" 200 59312
 2026-05-16 23:20:17,098 INFO [django.server] "GET /admin-portal/students/ HTTP/1.1" 200 48600
 2026-05-16 23:21:07,572 INFO [django.server] "GET /admin-portal/tools/actual-data-reset/ HTTP/1.1" 200 72195
-2026-05-16 23:22:05,177 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\forms.py changed, reloading.
+2026-05-16 23:22:05,177 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\forms.py changed, reloading.
 2026-05-16 23:22:06,075 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:22:25,229 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-16 23:22:25,229 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-16 23:22:25,989 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:22:28,934 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-16 23:22:28,934 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-16 23:22:29,658 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:22:32,586 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-16 23:22:32,586 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-16 23:22:33,364 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:22:37,273 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-16 23:22:37,273 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-16 23:22:37,998 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:22:40,874 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-16 23:22:40,874 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-16 23:22:41,610 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:22:43,565 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-16 23:22:43,565 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-16 23:22:44,305 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:22:47,188 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-16 23:22:47,188 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-16 23:22:47,937 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-16 23:25:26,769 INFO [django.server] "GET /admin-portal/tools/configurable-features/ HTTP/1.1" 200 405116
 2026-05-16 23:47:53,712 INFO [django.server] "GET /admin-portal/organization/departments/ HTTP/1.1" 200 61527
@@ -911,21 +911,21 @@
 2026-05-16 23:55:44,072 INFO [django.server] "GET /admin-portal/organization/departments/ HTTP/1.1" 200 61527
 2026-05-16 23:55:59,669 INFO [django.server] "GET /admin-portal/organization/departments/18/edit/?next=%2Fadmin-portal%2Forganization%2Fdepartments%2F HTTP/1.1" 200 60290
 2026-05-16 23:56:23,479 INFO [django.server] "GET /admin-portal/organization/departments/?active_page=2 HTTP/1.1" 200 58785
-2026-05-16 23:57:52,234 INFO [django.utils.autoreload] D:\edugradespro\apps\imports\models.py changed, reloading.
+2026-05-16 23:57:52,234 INFO [django.utils.autoreload] D:\edugradeplus\apps\imports\models.py changed, reloading.
 2026-05-16 23:57:52,992 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:58:13,059 INFO [django.utils.autoreload] D:\edugradespro\apps\imports\services.py changed, reloading.
+2026-05-16 23:58:13,059 INFO [django.utils.autoreload] D:\edugradeplus\apps\imports\services.py changed, reloading.
 2026-05-16 23:58:13,759 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:58:41,099 INFO [django.utils.autoreload] D:\edugradespro\apps\imports\services.py changed, reloading.
+2026-05-16 23:58:41,099 INFO [django.utils.autoreload] D:\edugradeplus\apps\imports\services.py changed, reloading.
 2026-05-16 23:58:41,802 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:59:13,091 INFO [django.utils.autoreload] D:\edugradespro\apps\imports\services.py changed, reloading.
+2026-05-16 23:59:13,091 INFO [django.utils.autoreload] D:\edugradeplus\apps\imports\services.py changed, reloading.
 2026-05-16 23:59:13,793 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:59:18,532 INFO [django.utils.autoreload] D:\edugradespro\apps\imports\services.py changed, reloading.
+2026-05-16 23:59:18,532 INFO [django.utils.autoreload] D:\edugradeplus\apps\imports\services.py changed, reloading.
 2026-05-16 23:59:19,222 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:59:38,272 INFO [django.utils.autoreload] D:\edugradespro\apps\imports\services.py changed, reloading.
+2026-05-16 23:59:38,272 INFO [django.utils.autoreload] D:\edugradeplus\apps\imports\services.py changed, reloading.
 2026-05-16 23:59:38,973 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:59:44,780 INFO [django.utils.autoreload] D:\edugradespro\apps\imports\services.py changed, reloading.
+2026-05-16 23:59:44,780 INFO [django.utils.autoreload] D:\edugradeplus\apps\imports\services.py changed, reloading.
 2026-05-16 23:59:45,471 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-16 23:59:51,218 INFO [django.utils.autoreload] D:\edugradespro\apps\imports\services.py changed, reloading.
+2026-05-16 23:59:51,218 INFO [django.utils.autoreload] D:\edugradeplus\apps\imports\services.py changed, reloading.
 2026-05-16 23:59:51,963 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-17 00:08:27,126 INFO [django.server] "GET /admin-portal/organization/departments/?active_page=2 HTTP/1.1" 200 58785
 2026-05-17 00:08:33,033 INFO [django.server] "GET /admin-portal/imports/batches/ HTTP/1.1" 200 60052
@@ -1061,31 +1061,31 @@
 2026-05-17 08:59:16,427 INFO [django.server] "GET /media/imahe/techsupp.jpg HTTP/1.1" 200 1100794
 2026-05-17 08:59:16,432 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
 2026-05-17 08:59:16,436 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
-2026-05-17 09:25:39,297 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\import_views.py changed, reloading.
+2026-05-17 09:25:39,297 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\import_views.py changed, reloading.
 2026-05-17 09:25:40,419 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-17 09:25:51,390 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\import_views.py changed, reloading.
+2026-05-17 09:25:51,390 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\import_views.py changed, reloading.
 2026-05-17 09:25:52,088 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-17 09:26:24,632 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\import_views.py changed, reloading.
+2026-05-17 09:26:24,632 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\import_views.py changed, reloading.
 2026-05-17 09:26:25,355 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-17 10:31:11,124 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-17 10:31:11,124 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-17 10:31:11,872 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-17 10:31:20,969 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\urls.py changed, reloading.
+2026-05-17 10:31:20,969 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\urls.py changed, reloading.
 2026-05-17 10:31:21,682 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-17 10:31:28,449 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-17 10:31:28,449 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-17 10:31:29,133 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-17 10:34:50,083 INFO [django.server] "GET /admin-portal/security/users/ HTTP/1.1" 302 0
 2026-05-17 10:34:50,096 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 3801
 2026-05-17 10:34:50,212 INFO [django.server] "GET /media/logos/edugradepro_logo.png HTTP/1.1" 200 2211507
 2026-05-17 10:34:50,235 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 71332
-2026-05-17 10:34:52,600 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\forms.py changed, reloading.
+2026-05-17 10:34:52,600 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\forms.py changed, reloading.
 2026-05-17 10:34:53,342 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-17 10:34:57,800 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
 2026-05-17 10:34:58,032 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 61662
 2026-05-17 10:34:58,181 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 71332
 2026-05-17 10:35:02,651 INFO [django.server] "GET /admin-portal/security/users/ HTTP/1.1" 200 89671
-2026-05-17 10:35:16,834 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-17 10:35:16,834 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-17 10:35:17,564 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-17 10:38:07,801 INFO [django.utils.autoreload] D:\edugradespro\apps\accounts\forms.py changed, reloading.
+2026-05-17 10:38:07,801 INFO [django.utils.autoreload] D:\edugradeplus\apps\accounts\forms.py changed, reloading.
 2026-05-17 10:38:08,606 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-17 11:00:57,880 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27293
 2026-05-17 11:00:58,016 INFO [django.server] "GET /static/faculty_portal/css/public_index.css HTTP/1.1" 200 13128
@@ -1140,17 +1140,17 @@
 2026-05-17 22:20:38,947 INFO [django.server] "POST /admin-portal/academics/offerings/create/?next=%2Fadmin-portal%2Facademics%2Fofferings%2F&scope_tenant_id=8&scope_campus_id=9 HTTP/1.1" 200 97822
 2026-05-17 22:21:25,585 INFO [django.server] "POST /admin-portal/academics/offerings/create/?next=%2Fadmin-portal%2Facademics%2Fofferings%2F&scope_tenant_id=8&scope_campus_id=9 HTTP/1.1" 200 97821
 2026-05-17 22:21:37,130 INFO [django.server] "POST /admin-portal/academics/offerings/create/?next=%2Fadmin-portal%2Facademics%2Fofferings%2F&scope_tenant_id=8&scope_campus_id=9 HTTP/1.1" 200 97821
-2026-05-17 22:24:46,268 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\forms.py changed, reloading.
+2026-05-17 22:24:46,268 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\forms.py changed, reloading.
 2026-05-17 22:24:48,294 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-17 22:25:23,245 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\forms.py changed, reloading.
+2026-05-17 22:25:23,245 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\forms.py changed, reloading.
 2026-05-17 22:25:24,885 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-17 22:25:36,996 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-17 22:25:36,996 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-17 22:25:38,320 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-17 22:40:00,762 INFO [django.server] "POST /admin-portal/academics/offerings/create/?next=%2Fadmin-portal%2Facademics%2Fofferings%2F&scope_tenant_id=8&scope_campus_id=9 HTTP/1.1" 200 99621
-2026-05-17 22:43:33,688 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\forms.py changed, reloading.
+2026-05-17 22:43:33,688 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\forms.py changed, reloading.
 2026-05-17 22:43:35,569 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-17 22:49:11,838 INFO [django.server] "POST /admin-portal/academics/offerings/create/?next=%2Fadmin-portal%2Facademics%2Fofferings%2F&scope_tenant_id=8&scope_campus_id=9 HTTP/1.1" 200 118847
-2026-05-17 22:50:51,690 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\forms.py changed, reloading.
+2026-05-17 22:50:51,690 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\forms.py changed, reloading.
 2026-05-17 22:50:53,578 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-17 22:51:55,260 INFO [django.server] "POST /admin-portal/academics/offerings/create/?next=%2Fadmin-portal%2Facademics%2Fofferings%2F&scope_tenant_id=8&scope_campus_id=9 HTTP/1.1" 200 118847
 2026-05-17 22:52:24,462 INFO [django.server] "POST /admin-portal/academics/offerings/create/?next=%2Fadmin-portal%2Facademics%2Fofferings%2F&scope_tenant_id=8&scope_campus_id=9 HTTP/1.1" 200 124136
@@ -1247,9 +1247,9 @@
 2026-05-20 21:42:17,540 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
 2026-05-20 21:42:21,900 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71360
 2026-05-20 21:43:18,670 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
-2026-05-20 21:44:03,647 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-20 21:44:03,647 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-20 21:44:04,434 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-20 21:44:13,539 INFO [django.utils.autoreload] D:\edugradespro\apps\admin_portal\views.py changed, reloading.
+2026-05-20 21:44:13,539 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\views.py changed, reloading.
 2026-05-20 21:44:14,249 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 21:44:19,375 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
 2026-05-20 21:45:20,100 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
@@ -1263,11 +1263,11 @@
 2026-05-20 21:52:25,426 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
 2026-05-20 21:52:29,764 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71360
 2026-05-20 21:53:26,476 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71357
-2026-05-20 21:53:58,439 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\urls.py changed, reloading.
+2026-05-20 21:53:58,439 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\urls.py changed, reloading.
 2026-05-20 21:53:59,115 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-20 21:54:21,153 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-20 21:54:21,153 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-20 21:54:21,762 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-20 21:54:46,692 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-20 21:54:46,692 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-20 21:54:47,363 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 21:55:28,042 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 21:56:28,895 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
@@ -1280,7 +1280,7 @@
 2026-05-20 22:02:33,677 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:02:38,026 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71693
 2026-05-20 22:03:34,645 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
-2026-05-20 22:04:18,026 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
+2026-05-20 22:04:18,026 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\reporting.py changed, reloading.
 2026-05-20 22:04:18,759 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 22:04:35,419 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:05:36,148 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
@@ -1305,31 +1305,31 @@
 2026-05-20 22:21:48,540 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:22:49,182 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:22:53,473 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71693
-2026-05-20 22:23:13,539 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
+2026-05-20 22:23:13,539 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\reporting.py changed, reloading.
 2026-05-20 22:23:14,324 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 22:23:50,219 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
-2026-05-20 22:24:20,786 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
+2026-05-20 22:24:20,786 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\reporting.py changed, reloading.
 2026-05-20 22:24:21,571 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-20 22:24:30,466 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-20 22:24:30,466 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-20 22:24:31,204 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 22:24:51,787 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
-2026-05-20 22:25:00,831 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-20 22:25:00,831 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-20 22:25:01,613 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-20 22:25:14,634 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-20 22:25:14,634 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-20 22:25:15,362 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-20 22:25:23,211 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-20 22:25:23,211 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-20 22:25:23,916 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 22:25:52,534 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
-2026-05-20 22:26:36,728 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
+2026-05-20 22:26:36,728 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\reporting.py changed, reloading.
 2026-05-20 22:26:37,462 INFO [django.utils.autoreload] Watching for file changes with StatReloader
-2026-05-20 22:26:45,299 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
+2026-05-20 22:26:45,299 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\reporting.py changed, reloading.
 2026-05-20 22:26:45,999 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 22:26:53,244 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:27:53,881 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71693
 2026-05-20 22:27:56,206 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:28:54,917 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:29:55,484 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
-2026-05-20 22:30:03,557 INFO [django.utils.autoreload] D:\edugradespro\apps\faculty_portal\views.py changed, reloading.
+2026-05-20 22:30:03,557 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-20 22:30:04,237 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 22:30:56,091 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:31:56,701 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
@@ -1337,7 +1337,7 @@
 2026-05-20 22:32:59,721 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:34:00,527 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:35:01,251 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
-2026-05-20 22:35:34,013 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
+2026-05-20 22:35:34,013 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\reporting.py changed, reloading.
 2026-05-20 22:35:34,714 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 22:36:02,007 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:37:02,587 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
@@ -1349,7 +1349,102 @@
 2026-05-20 22:42:06,474 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:42:59,133 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 71693
 2026-05-20 22:43:07,454 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
-2026-05-20 22:43:42,773 INFO [django.utils.autoreload] D:\edugradespro\apps\grading\reporting.py changed, reloading.
+2026-05-20 22:43:42,773 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\reporting.py changed, reloading.
 2026-05-20 22:43:43,471 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-20 22:44:08,296 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
 2026-05-20 22:45:09,865 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 71690
+2026-05-22 20:44:00,972 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-22 20:44:02,939 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:44:52,615 INFO [django.server] "GET /faculty/at-risk-monitor/ HTTP/1.1" 302 0
+2026-05-22 20:44:52,630 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27293
+2026-05-22 20:44:52,681 INFO [django.server] "GET /static/faculty_portal/css/public_index.css HTTP/1.1" 304 0
+2026-05-22 20:44:52,721 INFO [django.server] "GET /static/faculty_portal/js/public_index.js HTTP/1.1" 304 0
+2026-05-22 20:44:52,917 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 72016
+2026-05-22 20:45:03,564 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:45:20,921 INFO [django.server] "POST /faculty/login/ HTTP/1.1" 200 3894
+2026-05-22 20:45:38,242 INFO [django.server] "POST /faculty/login/ HTTP/1.1" 200 3894
+2026-05-22 20:46:04,205 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:46:29,372 INFO [django.server] "POST /faculty/login/ HTTP/1.1" 302 0
+2026-05-22 20:46:29,542 INFO [django.server] "GET /faculty/dashboard/ HTTP/1.1" 200 44883
+2026-05-22 20:46:36,751 INFO [django.server] "GET /faculty/guide/ HTTP/1.1" 200 74033
+2026-05-22 20:46:37,032 INFO [django.server] "GET /media/portal-img/faculty_portal_guide.png HTTP/1.1" 200 1508973
+2026-05-22 20:46:37,109 INFO [django.server] "GET /media/portal-img/focused_checking.png HTTP/1.1" 200 1442928
+2026-05-22 20:46:37,126 INFO [django.server] "GET /media/portal-img/recommended_daily_faculty_workflow.png HTTP/1.1" 200 2063648
+2026-05-22 20:46:37,131 INFO [django.server] "GET /media/portal-img/daily_work_rythm.png HTTP/1.1" 200 1470398
+2026-05-22 20:46:37,138 INFO [django.server] "GET /media/portal-img/submission_rules.png HTTP/1.1" 200 2445019
+2026-05-22 20:46:37,148 INFO [django.server] "GET /media/portal-img/activities_encoding_scores_workflow.png HTTP/1.1" 200 2398373
+2026-05-22 20:46:47,757 INFO [django.server] "GET /media/logos/egp_logo_official.png HTTP/1.1" 200 1465036
+2026-05-22 20:46:52,399 INFO [django.server] "GET /faculty/logout/ HTTP/1.1" 302 0
+2026-05-22 20:46:52,404 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 30729
+2026-05-22 20:46:54,792 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72044
+2026-05-22 20:46:58,563 INFO [django.server] "GET /admin-portal/ HTTP/1.1" 302 0
+2026-05-22 20:46:58,573 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 3801
+2026-05-22 20:46:58,624 INFO [django.server] "GET /media/logos/edugradepro_logo.png HTTP/1.1" 200 2211507
+2026-05-22 20:47:05,103 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:47:07,197 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
+2026-05-22 20:47:07,540 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 61662
+2026-05-22 20:47:19,858 INFO [django.server] "GET /admin-portal/guide/ HTTP/1.1" 200 120618
+2026-05-22 20:47:19,959 INFO [django.server] "GET /media/portal-img/grades_prediction.png HTTP/1.1" 200 2025032
+2026-05-22 20:47:19,968 INFO [django.server] "GET /media/portal-img/1.png HTTP/1.1" 200 495839
+2026-05-22 20:47:20,021 INFO [django.server] "GET /media/portal-img/4.png HTTP/1.1" 200 577763
+2026-05-22 20:47:20,051 INFO [django.server] "GET /media/portal-img/3.png HTTP/1.1" 200 433873
+2026-05-22 20:47:20,134 INFO [django.server] "GET /media/portal-img/6.png HTTP/1.1" 200 583828
+2026-05-22 20:47:20,154 INFO [django.server] "GET /media/portal-img/7.png HTTP/1.1" 200 1363028
+2026-05-22 20:47:20,161 INFO [django.server] "GET /media/portal-img/admin_operations_checklist.png HTTP/1.1" 200 2347784
+2026-05-22 20:47:20,190 INFO [django.server] "GET /media/portal-img/policies_governance_reference.png HTTP/1.1" 200 2859481
+2026-05-22 20:47:20,199 INFO [django.server] "GET /media/portal-img/settings_guide.png HTTP/1.1" 200 2630363
+2026-05-22 20:47:59,835 INFO [django.server] "GET /media/logos/edugradepro_logo.png HTTP/1.1" 200 2211507
+2026-05-22 20:48:05,846 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:49:06,608 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:50:07,232 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:51:07,808 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:51:56,400 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72044
+2026-05-22 20:52:08,712 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:53:09,439 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:54:10,183 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:55:10,841 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:56:12,029 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:56:56,576 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72044
+2026-05-22 20:57:12,916 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:58:13,700 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 20:58:34,532 INFO [django.server] "GET /admin-portal/guide/ HTTP/1.1" 200 120619
+2026-05-22 20:58:34,600 INFO [django.server] "GET /media/logos/edugradeplus_logo.png HTTP/1.1" 200 2244225
+2026-05-22 20:59:14,211 INFO [django.server] "GET /admin-portal/guide/ HTTP/1.1" 200 120619
+2026-05-22 20:59:14,285 INFO [django.server] "GET /media/logos/edugradeplus_logo.png HTTP/1.1" 304 0
+2026-05-22 20:59:14,470 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 21:00:15,100 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 21:01:15,760 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 21:01:31,124 INFO [django.utils.autoreload] D:\edugradeplus\apps\admin_portal\forms.py changed, reloading.
+2026-05-22 21:01:32,004 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-22 21:01:58,223 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72044
+2026-05-22 21:02:16,568 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 21:03:17,152 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 21:03:23,313 INFO [django.server] "GET /admin-portal/guide/ HTTP/1.1" 200 120574
+2026-05-22 21:03:23,377 INFO [django.server] "GET /media/logos/edugradeplus_logo.png HTTP/1.1" 304 0
+2026-05-22 21:03:33,164 INFO [django.server] "GET /admin-portal/guide/?scope_tenant_id=8&scope_campus_id=14 HTTP/1.1" 200 120835
+2026-05-22 21:04:16,243 INFO [django.server] "GET /admin-portal/logout/ HTTP/1.1" 302 0
+2026-05-22 21:04:16,257 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 7231
+2026-05-22 21:04:16,357 INFO [django.server] "GET /media/logos/edugradepro_logo.png HTTP/1.1" 200 2211507
+2026-05-22 21:04:17,830 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 21:04:20,363 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27236
+2026-05-22 21:04:20,412 INFO [django.server] "GET /media/logos/egp_logo_official.png HTTP/1.1" 200 1465036
+2026-05-22 21:04:20,498 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
+2026-05-22 21:04:20,532 INFO [django.server] "GET /media/imahe/techsupp.jpg HTTP/1.1" 200 1100794
+2026-05-22 21:04:20,607 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
+2026-05-22 21:04:30,337 INFO [django.server] "POST /faculty/login/ HTTP/1.1" 302 0
+2026-05-22 21:04:30,466 INFO [django.server] "GET /faculty/dashboard/ HTTP/1.1" 200 44862
+2026-05-22 21:04:35,533 INFO [django.server] "GET /faculty/logout/ HTTP/1.1" 302 0
+2026-05-22 21:04:35,537 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 30672
+2026-05-22 21:04:52,554 INFO [django.server] "POST /faculty/login/ HTTP/1.1" 302 0
+2026-05-22 21:04:52,690 INFO [django.server] "GET /faculty/dashboard/ HTTP/1.1" 200 44862
+2026-05-22 21:05:04,055 INFO [django.server] "GET /faculty/guide/ HTTP/1.1" 200 73985
+2026-05-22 21:05:04,206 INFO [django.server] "GET /media/portal-img/daily_work_rythm.png HTTP/1.1" 200 1470398
+2026-05-22 21:05:04,207 INFO [django.server] "GET /media/portal-img/recommended_daily_faculty_workflow.png HTTP/1.1" 200 2063648
+2026-05-22 21:05:04,248 INFO [django.server] "GET /media/portal-img/activities_encoding_scores_workflow.png HTTP/1.1" 200 2398373
+2026-05-22 21:05:04,258 INFO [django.server] "GET /media/portal-img/faculty_portal_guide.png HTTP/1.1" 200 1508973
+2026-05-22 21:05:04,288 INFO [django.server] "GET /media/portal-img/submission_rules.png HTTP/1.1" 200 2445019
+2026-05-22 21:05:04,296 INFO [django.server] "GET /media/portal-img/focused_checking.png HTTP/1.1" 200 1442928
+2026-05-22 21:05:18,475 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 21:06:19,197 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72041
+2026-05-22 21:06:33,722 INFO [django.utils.autoreload] D:\edugradeplus\config\settings\base.py changed, reloading.
+2026-05-22 21:06:34,556 INFO [django.utils.autoreload] Watching for file changes with StatReloader

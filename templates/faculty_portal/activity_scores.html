@@ -87,7 +87,7 @@
 {% if is_editable %}
 <div class="alert alert-secondary small">
   Enter a score only for students you want to record now. Leave the field blank to keep the student unencoded.
-  If you clear an already saved score and click Save Scores, EduGradesPro will remove that saved score from this activity.
+  If you clear an already saved score and click Save Scores, EduGrade+ will remove that saved score from this activity.
 </div>
 {% endif %}
 
@@ -104,6 +104,15 @@
     This period is locked because the reopened gradebook was not resubmitted before the deadline. Score editing is disabled; go to Summary to finalize and resubmit the existing records.
   {% else %}
     This period is locked by admin. Score editing is disabled.
+  {% endif %}
+</div>
+{% elif is_auto_closed_after_deadline %}
+<div class="alert alert-danger">
+  Encoding closed automatically because the deadline already passed.
+  {% if pending_reopen_request %}
+    Your reopen request is pending admin review.
+  {% else %}
+    Go to Summary to submit a complete gradebook or request campus admin reopen.
   {% endif %}
 </div>
 {% elif is_submitted %}

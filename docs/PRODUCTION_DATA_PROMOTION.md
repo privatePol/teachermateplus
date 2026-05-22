@@ -1,6 +1,6 @@
-# EduGradesPro Production Data Promotion Guide
+# EduGrade+ Production Data Promotion Guide
 
-This guide explains how to safely promote your existing EduGradesPro data from your current local environment into staging and production.
+This guide explains how to safely promote your existing EduGrade+ data from your current local environment into staging and production.
 
 Use this if your current database already contains real records such as:
 
@@ -95,7 +95,7 @@ Copy-Item .\db.sqlite3 ".\\db.sqlite3.backup.$(Get-Date -Format 'yyyyMMdd-HHmmss
 
 ## 6. Step 3. Export the Data Bundle From Local
 
-From `D:\edugradespro`, use the provided helper script.
+From `D:\edugradeplus`, use the provided helper script.
 
 ### Export setup bundle
 
@@ -119,7 +119,7 @@ powershell -ExecutionPolicy Bypass -File .\ops\scripts\export_data_bundle.ps1 -M
 
 The helper script is:
 
-- [export_data_bundle.ps1](/d:/edugradespro/ops/scripts/export_data_bundle.ps1)
+- [export_data_bundle.ps1](/d:/edugradeplus/ops/scripts/export_data_bundle.ps1)
 
 It exports these model groups:
 
@@ -209,11 +209,11 @@ Before importing the data, staging must already have:
 Example:
 
 ```bash
-cd /opt/edugradespro-staging
-source /etc/edugradespro-staging/edugradespro.env
-/opt/edugradespro-staging/.venv/bin/python manage.py migrate --noinput
-/opt/edugradespro-staging/.venv/bin/python manage.py collectstatic --noinput
-/opt/edugradespro-staging/.venv/bin/python manage.py check
+cd /opt/edugradeplus-staging
+source /etc/edugradeplus-staging/edugradeplus.env
+/opt/edugradeplus-staging/.venv/bin/python manage.py migrate --noinput
+/opt/edugradeplus-staging/.venv/bin/python manage.py collectstatic --noinput
+/opt/edugradeplus-staging/.venv/bin/python manage.py check
 ```
 
 ## 10. Step 6. Copy the Bundle to Staging
@@ -228,20 +228,20 @@ scp .\setup_bundle.json youruser@your-server:/tmp/setup_bundle.json
 
 Use the provided helper:
 
-- [import_data_bundle.sh](/d:/edugradespro/ops/scripts/import_data_bundle.sh)
+- [import_data_bundle.sh](/d:/edugradeplus/ops/scripts/import_data_bundle.sh)
 
 Example:
 
 ```bash
-cd /opt/edugradespro-staging
-bash ./ops/scripts/import_data_bundle.sh /etc/edugradespro-staging/edugradespro.env /tmp/setup_bundle.json
+cd /opt/edugradeplus-staging
+bash ./ops/scripts/import_data_bundle.sh /etc/edugradeplus-staging/edugradeplus.env /tmp/setup_bundle.json
 ```
 
 If you are loading into a fresh staging DB that may safely be cleared first:
 
 ```bash
-cd /opt/edugradespro-staging
-bash ./ops/scripts/import_data_bundle.sh /etc/edugradespro-staging/edugradespro.env /tmp/setup_bundle.json --flush
+cd /opt/edugradeplus-staging
+bash ./ops/scripts/import_data_bundle.sh /etc/edugradeplus-staging/edugradeplus.env /tmp/setup_bundle.json --flush
 ```
 
 ### Important
@@ -287,8 +287,8 @@ After staging is confirmed:
 Example import:
 
 ```bash
-cd /opt/edugradespro
-bash ./ops/scripts/import_data_bundle.sh /etc/edugradespro/edugradespro.env /tmp/setup_bundle.json
+cd /opt/edugradeplus
+bash ./ops/scripts/import_data_bundle.sh /etc/edugradeplus/edugradeplus.env /tmp/setup_bundle.json
 ```
 
 ## 14. First Go-Live Recommendation
@@ -321,10 +321,10 @@ Then test the affected workflows locally.
 Deploy the updated code to staging, then:
 
 ```bash
-cd /opt/edugradespro-staging
-source /etc/edugradespro-staging/edugradespro.env
-/opt/edugradespro-staging/.venv/bin/python manage.py migrate --noinput
-/opt/edugradespro-staging/.venv/bin/python manage.py check
+cd /opt/edugradeplus-staging
+source /etc/edugradeplus-staging/edugradeplus.env
+/opt/edugradeplus-staging/.venv/bin/python manage.py migrate --noinput
+/opt/edugradeplus-staging/.venv/bin/python manage.py check
 ```
 
 Then smoke-test the affected staging flows.
@@ -340,10 +340,10 @@ Before migrating production:
 Then:
 
 ```bash
-cd /opt/edugradespro
-source /etc/edugradespro/edugradespro.env
-/opt/edugradespro/.venv/bin/python manage.py migrate --noinput
-/opt/edugradespro/.venv/bin/python manage.py check
+cd /opt/edugradeplus
+source /etc/edugradeplus/edugradeplus.env
+/opt/edugradeplus/.venv/bin/python manage.py migrate --noinput
+/opt/edugradeplus/.venv/bin/python manage.py check
 ```
 
 Then smoke-test production immediately.
@@ -369,13 +369,13 @@ Use this sequence every time:
 ### MariaDB backup
 
 ```bash
-mysqldump -u edugradespro_user -p --databases edugradespro > edugradespro_backup.sql
+mysqldump -u EduGrade+_user -p --databases EduGrade+ > EduGrade+_backup.sql
 ```
 
 ### Staging MariaDB backup
 
 ```bash
-mysqldump -u edugradespro_staging_user -p --databases edugradespro_staging > edugradespro_staging_backup.sql
+mysqldump -u EduGrade+_staging_user -p --databases EduGrade+_staging > EduGrade+_staging_backup.sql
 ```
 
 ## 18. Final Guidance

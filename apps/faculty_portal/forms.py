@@ -139,10 +139,10 @@ class GradeActivityForm(forms.ModelForm):
             "Examples: Q1, Q2, R1, A1, AC1, Prelim Exam."
         )
         self.fields["total_score"].help_text = (
-            "Required for Raw Score (Base-50). For Direct Percentage items, EduGradesPro will use 100 automatically."
+            "Required for Raw Score (Base-50). For Direct Percentage items, EduGrade+ will use 100 automatically."
         )
         self.fields["activity_date"].help_text = (
-            "Use the actual activity date. EduGradesPro uses this for activity order, audit clarity, and class record review."
+            "Use the actual activity date. EduGrade+ uses this for activity order, audit clarity, and class record review."
         )
 
         for name, field in self.fields.items():

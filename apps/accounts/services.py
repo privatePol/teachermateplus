@@ -497,18 +497,18 @@ class LoginOtpService:
         if sent_count <= 0:
             return LoginOtpResult(
                 success=False,
-                message="EduGradesPro could not send the verification code. Please try again or contact your administrator.",
+                message="EduGrade+ could not send the verification code. Please try again or contact your administrator.",
                 challenge=challenge,
             )
         return LoginOtpResult(success=True, challenge=challenge)
 
     @classmethod
     def _send_email(cls, *, request, user, challenge: LoginOtpChallenge, code: str) -> int:
-        subject = "NCBA EduGradesPro Login Verification"
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
+        subject = "NCBA EduGrade+ Login Verification"
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
         logo_context = build_email_logo_context(
             filename="egp_logo_official.png",
-            cid="edugradespro-logo",
+            cid="EduGrade+-logo",
             external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
             configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
         )
@@ -527,7 +527,7 @@ class LoginOtpService:
             message,
             src=logo_context["email_logo_src"],
             filename="egp_logo_official.png",
-            cid="edugradespro-logo",
+            cid="EduGrade+-logo",
             configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
         )
         message.attach_alternative(html_body, "text/html")
@@ -627,18 +627,18 @@ class AdminPasswordResetOtpService:
         if sent_count <= 0:
             return LoginOtpResult(
                 success=False,
-                message="EduGradesPro could not send the reset verification code. Please try again or contact your administrator.",
+                message="EduGrade+ could not send the reset verification code. Please try again or contact your administrator.",
                 challenge=challenge,
             )
         return LoginOtpResult(success=True, challenge=challenge)
 
     @classmethod
     def _send_email(cls, *, request, user, challenge: LoginOtpChallenge, code: str) -> int:
-        subject = "EduGradesPro Admin Password Reset Code"
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
+        subject = "EduGrade+ Admin Password Reset Code"
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
         logo_context = build_email_logo_context(
             filename="egp_logo_official.png",
-            cid="edugradespro-logo",
+            cid="EduGrade+-logo",
             external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
             configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
         )
@@ -657,7 +657,7 @@ class AdminPasswordResetOtpService:
             message,
             src=logo_context["email_logo_src"],
             filename="egp_logo_official.png",
-            cid="edugradespro-logo",
+            cid="EduGrade+-logo",
             configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
         )
         message.attach_alternative(html_body, "text/html")
@@ -744,7 +744,7 @@ class UserSignatureService:
             if len(decoded) != 32:
                 raise ValidationError("SIGNATURE_ENCRYPTION_KEY must decode to exactly 32 bytes.")
             return decoded
-        return hashlib.sha256((getattr(settings, "SECRET_KEY", "") or "edugradespro-signature-key").encode("utf-8")).digest()
+        return hashlib.sha256((getattr(settings, "SECRET_KEY", "") or "EduGrade+-signature-key").encode("utf-8")).digest()
 
     @classmethod
     def _normalize_image(cls, uploaded_file) -> SignatureImagePayload:

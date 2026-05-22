@@ -1,4 +1,4 @@
-# EduGradesPro V1
+# EduGrade+ V1
 ## Faculty Portal Prioritized Roadmap
 
 Prepared for board and academic presentation
@@ -126,7 +126,7 @@ Expected value:
 ---
 
 ## 3. Strategic Priority
-These features give EduGradesPro a stronger long-term identity beyond a traditional faculty grade book.
+These features give EduGrade+ a stronger long-term identity beyond a traditional faculty grade book.
 
 ### 3.1 Faculty notification center
 Possible notifications:
@@ -159,7 +159,7 @@ Possible outputs:
 ## 4. Recommended Board Message
 Suggested positioning for presentation:
 
-EduGradesPro Faculty Portal is moving from a simple grade entry system to a guided academic operations platform.
+EduGrade+ Faculty Portal is moving from a simple grade entry system to a guided academic operations platform.
 
 The immediate phase focuses on:
 - deadline discipline

@@ -1,12 +1,14 @@
 # CHANGE_LOG.md
 
-All notable changes to **EduGradesPro V1** should be documented in this file.
+All notable changes to **EduGrade+ V1** should be documented in this file.
 
 This project follows a practical changelog format inspired by Keep a Changelog.
 
 ## [Unreleased]
 
 ### Added
+- Added configurable grade-deadline enforcement with two policies: compliance-only deadlines preserve the current overdue/non-compliance behavior, while auto-close deadlines block faculty activity, score, and attendance encoding after the deadline and let faculty submit a complete gradebook or request campus-admin reopen from Summary.
+- Added faculty-submitted gradebook reopen requests for auto-closed overdue periods, including admin queue reuse and email notification to scoped reopen reviewers.
 - Added a Faculty Portal class tabulation sheet that becomes available after all active grading periods for a class are submitted, printing the full-term activity scores, averages, exams, period grades, final grades, school header, faculty metadata, and prepared/submitted-by footer. The sheet now supports a legal-landscape PDF output with repeated small NCBA watermarks, fixed `/media/logos/ncba-logo.png` branding, all period blocks aligned across one student row, blank ACTIVE statuses, and a `**** NOTHING FOLLOWS *****` closing row.
 - Added an explicit `faculty_final_clearance.read` RBAC permission for Admin Portal Faculty Final Clearance preview and verification, with migration support that preserves access for roles that previously inherited it through Faculty Assignments.
 - Added `docs/INSTITUTION_IMPLEMENTATION_REFERENCE.md`, a plain-English superadmin guide for production institution setup, required master data, tenant configuration, faculty grading readiness, bulk import order, and related governance.
@@ -23,6 +25,9 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Normalized deployment directory/config identifiers to `edugradeplus`, including local path references, `/opt`, `/etc`, `/run`, `/var/log`, cron, nginx, systemd, environment examples, backup defaults, and logging configuration names.
+- Renamed EduGrade+ product text across project templates, docs, config examples, scripts, tests, logs, and exported text fixtures.
+- Admin Portal sidebar branding now uses `/media/logos/edugradeplus_logo.png`.
 - Faculty Final Clearance PDFs now use the same repeated small NCBA watermark treatment as the class tabulation sheet.
 - Faculty Final Clearance now evaluates only officially accepted faculty assignments, and accepted course cards include a direct `Print Final Clearance` action.
 - Faculty Portal final-period cards now again include a `Print Final Clearance` action, while keeping the newer single Final Clearance shortcut on `My Classes`.
@@ -94,7 +99,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Grading maintenance lists now separate active and inactive records into distinct cards for grading templates, template periods/components/subcomponents/details, tenant grading profiles, course-template assignments, course base value overrides, and period lock rules. The course-template assignment “courses with no grading template” report remains a missing-active-assignment view.
 - Grading maintenance pages now use maintenance-scoped querysets so permitted admin users can review inactive grading setup rows on those pages without widening operational active-only reads.
 - Inactive maintenance sections now show a `Used In` dependency column and expose guarded permanent deletion for inactive records that are not referenced by related tables. Permanent deletion is controlled by the dedicated `inactive_records.delete` permission, is always available to superusers, requires typing the record's confirmation code, and is blocked server-side when related usage exists.
-- EDUGRADESPRO_CONTEXT now records NCBA's Academic/Administrative branch distinction, Academic department/area structure, CAO/Dean/Academic Chairman/Principal/Coordinator governance model, and the recommended setup rule that academic records be mapped to the most specific owning department or area.
+- EduGrade+_CONTEXT now records NCBA's Academic/Administrative branch distinction, Academic department/area structure, CAO/Dean/Academic Chairman/Principal/Coordinator governance model, and the recommended setup rule that academic records be mapped to the most specific owning department or area.
 - Admin Portal Tools now includes an `Actual Data Reset` page governed by the assignable `actual_data_reset.run` permission; it previews and hard-deletes actual setup/transaction data while preserving users, roles, permissions, menu configuration, migrations, Django auth metadata, and global settings.
 - Admin Portal user-role management now separates active `Current Assignments` from `Inactive Assignments`, making dormant scoped roles easier to identify during account setup.
 - Admin Portal campus scope now ignores faculty-only role assignments when a user already has an active non-faculty admin role, preventing faculty roles from exposing governance monitors for campuses where the admin/AC role is inactive.
@@ -212,8 +217,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - the admin non-compliance monitor now shows the latest notice stage and issue date for each overdue unsubmitted class
   - `Configuration Management` now includes a dedicated `Submission Non-Compliance Notices` card for enablement, interval, academic-head roles, and HR escalation recipients
 - Documentation refinement:
-  - `EDUGRADESPRO_CONTEXT.md` now explicitly documents how attendance participates in grading: it is template-driven through `is_attendance_component`, inherits normal weight roll-up, contributes to class standing only when placed under a non-exam component, and uses the internal status-to-score mapping for attendance records
-  - `EDUGRADESPRO_CONTEXT.md` now also includes a worked attendance computation example showing status conversion, averaging, and weighted roll-up into class standing / period grade
+  - `EduGrade+_CONTEXT.md` now explicitly documents how attendance participates in grading: it is template-driven through `is_attendance_component`, inherits normal weight roll-up, contributes to class standing only when placed under a non-exam component, and uses the internal status-to-score mapping for attendance records
+  - `EduGrade+_CONTEXT.md` now also includes a worked attendance computation example showing status conversion, averaging, and weighted roll-up into class standing / period grade
 - Tenant grading profile formula governance:
   - `Tenant Grading Profile` now supports a configurable final-grade formula mode per scope
   - default mode keeps the current NCBA-style behavior by averaging all active grading periods of the matched template
@@ -239,7 +244,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - Correction Official Report can now place stored requester and reviewer/approver signatures on the PDF when the feature is enabled and the signer has a stored signature on file
   - signature placements are logged to a dedicated signature-usage audit table so NCBA can trace when a stored signature was actually used on a generated document
 - Faculty score-entry guidance:
-  - when faculty cancel the unsaved-changes leave warning on the score-entry page, EduGradesPro now scrolls back to the `Save Scores` button and briefly shows a visual arrow prompt pointing to the save action
+  - when faculty cancel the unsaved-changes leave warning on the score-entry page, EduGrade+ now scrolls back to the `Save Scores` button and briefly shows a visual arrow prompt pointing to the save action
   - save-action arrow cues on Activity and Attendance forms are now hidden on clean pages and only appear after the faculty actually changes something that needs saving
   - the Activity form action row is now right-aligned, with the save cue placed beside the `Save Activity` button instead of above it
 - Faculty final-clearance entry point:
@@ -247,7 +252,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - admin-side Faculty Final Clearance is now preview-and-verify only; official PDF generation is reserved for the Faculty Portal
   - the page-level clearance action now also includes a print icon and stronger visual treatment so faculty recognize it faster as a printable end-of-term document
 - Production operations support:
-  - added `docs/PRODUCTION_INCIDENT_RUNBOOK.md` with EduGradesPro-specific outage triage, evidence capture, server-check, rollback-vs-hotfix, and remote Codex support guidance
+  - added `docs/PRODUCTION_INCIDENT_RUNBOOK.md` with EduGrade+-specific outage triage, evidence capture, server-check, rollback-vs-hotfix, and remote Codex support guidance
   - Admin guide now includes a `Production Incident Response` section so operations staff can quickly see the first-response flow during a live issue
   - the `Production Incident Response` section in the Admin guide is now visible only to `SUPER_ADMIN`
   - Ubuntu deployment documentation now points to the production incident runbook for emergency recovery guidance.
@@ -284,26 +289,26 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - the `Currently Logged-in Users` widget now applies the current session-timeout policy when deciding whether a user is still effectively logged in, so stale session rows created before a timeout change no longer appear as active just because their old stored Django session expiry is still far in the future
 - Deployment documentation expansion:
   - `docs/DEPLOYMENT_UBUNTU.md` is now a fuller production deployment guide covering Ubuntu, MariaDB/MySQL recommendation, GitHub-based deployment, pre-production preparation, staging strategy, first go-live workflow, backups, and release discipline
-  - the deployment guide now starts with a stage-by-stage rollout sequence and explicitly documents the multi-Django-app server pattern plus why EduGradesPro should live under `/opt/edugradespro` instead of `/var/www/html/edugradespro`
+  - the deployment guide now starts with a stage-by-stage rollout sequence and explicitly documents the multi-Django-app server pattern plus why EduGrade+ should live under `/opt/edugradeplus` instead of `/var/www/html/EduGrade+`
   - added `docs/STAGING_WORKFLOW.md` with a beginner-friendly explanation of staging and a simple `local -> GitHub -> staging -> production` workflow
-  - added `docs/PRODUCTION_DATA_PROMOTION.md` with exact data-promotion steps for carrying approved local EduGradesPro data into staging and production, including migration workflow guidance for later schema changes
+  - added `docs/PRODUCTION_DATA_PROMOTION.md` with exact data-promotion steps for carrying approved local EduGrade+ data into staging and production, including migration workflow guidance for later schema changes
   - added `docs/NCBA_GO_LIVE_CHECKLIST.md` with an NCBA-oriented launch checklist that begins with the exact Markdown reading order before go-live work starts
-  - added `docs/EDUGRADESPRO_ACADEMIC_PRESENTATION.md` as a presentation-ready academic briefing outline covering template-driven processing, faculty grading structure, correction governance, template lifecycle, governance settings, and other major platform features
+  - added `docs/EduGrade+_ACADEMIC_PRESENTATION.md` as a presentation-ready academic briefing outline covering template-driven processing, faculty grading structure, correction governance, template lifecycle, governance settings, and other major platform features
   - the academic presentation guide now also includes optional add-on slides for `Faculty Support Features` and `Active Grading Period Governance` without changing the original presentation flow
   - added helper scripts:
     - `ops/scripts/export_data_bundle.ps1` for exporting reviewed setup or operational data bundles from the current local database
     - `ops/scripts/import_data_bundle.sh` for loading a reviewed bundle into staging or production with explicit env-file control
   - added deployment-ready templates:
-    - `ops/env/edugradespro.production.env.example`
-    - `ops/env/edugradespro.staging.env.example`
-    - `ops/systemd/edugradespro-staging-gunicorn.service`
-    - `ops/nginx/edugradespro-staging.conf`
+    - `ops/env/edugradeplus.production.env.example`
+    - `ops/env/edugradeplus.staging.env.example`
+    - `ops/systemd/edugradeplus-staging-gunicorn.service`
+    - `ops/nginx/edugradeplus-staging.conf`
   - added `docs/DB_SCHEMA.md` as a generated database dictionary covering tables, fields, relationships, and structural notes from the current Django model registry
   - added `ops/scripts/generate_db_schema.py` so the schema dictionary can be regenerated from code when models change
   - `manage.py` now defaults to `config.settings` so environment-driven settings selection works correctly for staging/production command runs such as `migrate` and `check`
   - `.env.example` now aligns with that environment-aware settings pattern by using `DJANGO_SETTINGS_MODULE=config.settings`.
 - Security review documentation:
-  - added `docs/OWASP_GAP_ASSESSMENT.md` as a practical EduGradesPro security review using an OWASP-aligned lens
+  - added `docs/OWASP_GAP_ASSESSMENT.md` as a practical EduGrade+ security review using an OWASP-aligned lens
   - the assessment distinguishes between implemented controls, partial controls, missing items, and production-configuration dependencies so leadership discussions do not overstate full OWASP compliance
 - Faculty Portal public homepage content expansion:
   - added a new `Faculty Portal Entry Experience` section that explains what faculty sees first when entering the portal
@@ -401,7 +406,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - portal session timeout is now explicitly configured to 1 hour
   - active use now refreshes the session window, while inactive users must sign in again after the 1-hour timeout
   - `.env.example` plus staging/production env templates now include explicit session-timeout settings for deployment consistency
-  - EduGradesPro now supports temporary portal-specific login lockout after repeated failed sign-in attempts
+  - EduGrade+ now supports temporary portal-specific login lockout after repeated failed sign-in attempts
   - lockout state is tracked separately for Admin Portal and Faculty Portal usernames
   - lockout settings are configurable from `Admin Portal -> Tools -> Configuration Management -> Login Security`
   - Admin Portal now also includes a `Security -> Login Lockouts` monitor page where authorized admins can review active lockouts and clear them without direct database access
@@ -419,7 +424,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
     - temporary login lockout
   - faculty help text for lost-password recovery now also explains temporary lockout behavior.
 - Privacy consent statement refresh:
-  - Admin and Faculty privacy-consent screens now use the revised common `EduGradesPro Privacy Consent` statement provided for institutional rollout.
+  - Admin and Faculty privacy-consent screens now use the revised common `EduGrade+ Privacy Consent` statement provided for institutional rollout.
 - Template governance workflow (Phase 1):
   - new tenant-scoped `Template Governance` tools page for assigning allowed roles to draft, submit, review, publish, request hotfix, and review/apply hotfix stages
   - workflow safeguards now cover approval-before-publish and same-user separation for submit/review, review/publish, and hotfix request/apply duties
@@ -460,7 +465,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin grading-template testing calculator:
   - new read-only Admin Portal page for validating grading-template computation using sample fixed data
   - now starts from sample raw score + total score so admins can see the raw-to-computed conversion path before weighted rollups
-  - computes and shows period-by-period results plus final grade using the same current EduGradesPro computation logic
+  - computes and shows period-by-period results plus final grade using the same current EduGrade+ computation logic
   - period cards now present the math as clearer step-by-step walkthroughs with color-coded period headers for easier reading during template validation
   - calculator presentation was further simplified to match the grading-template builder more closely:
     - period formulas now use plain expressions such as `PRELIM GRADE = Prelim Exam (40%) + Class Standing (60%)`
@@ -522,9 +527,9 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Gradebook print action in faculty period summary.
 - Ubuntu production deployment package:
   - `docs/DEPLOYMENT_UBUNTU.md`
-  - `ops/systemd/edugradespro-gunicorn.service`
-  - `ops/nginx/edugradespro.conf`
-  - `ops/cron/edugradespro.cron`
+  - `ops/systemd/edugradeplus-gunicorn.service`
+  - `ops/nginx/edugradeplus.conf`
+  - `ops/cron/edugradeplus.cron`
   - `ops/scripts/deploy_release.sh`
 - Threshold-aware admin grading analytics:
   - failed students by period
@@ -559,7 +564,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Official correction PDF generation for approved correction requests:
   - registrar-ready printable/exportable report
   - includes campus where the correction applies, approval summary, and a registrar-facing cross-tab of official grade original vs corrected values
-  - detailed correction items remain available inside EduGradesPro instead of the registrar PDF
+  - detailed correction items remain available inside EduGrade+ instead of the registrar PDF
   - available through faculty and admin correction screens when feature-enabled.
 - Configurable correction submission approval email:
   - when enabled, faculty correction request submission emails selected approval roles such as CAO and college dean
@@ -728,7 +733,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Changed
-- Faculty submission deadline reminders now explain scope mismatches more clearly. When a deadline exists in EduGradesPro but does not match the faculty member's accepted class campus/term scope, the banner now says so instead of only saying that no deadline is set.
+- Faculty submission deadline reminders now explain scope mismatches more clearly. When a deadline exists in EduGrade+ but does not match the faculty member's accepted class campus/term scope, the banner now says so instead of only saying that no deadline is set.
 - Admin `Period Lock` setup now validates period codes against actual grading-template periods, preventing term codes such as `2526_2NDSEM` from being saved as if they were grading periods.
 - Active Grading Period governance is now introduced as a campus-term setting with its own term-period catalog, shared visibility in both portals, and optional deadline-driven auto-advance to the next configured period.
 

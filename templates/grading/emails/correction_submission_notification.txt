@@ -2,7 +2,7 @@ NATIONAL COLLEGE OF BUSINESS AND ARTS
 
 Approval Notification
 
-There is a petition for correction of grades awaiting your approval in EduGradesPro.
+There is a petition for correction of grades awaiting your approval in EduGrade+.
 
 Petitioner: {{ petitioner_name }}
 Reference No.: {{ reference_no }}
@@ -11,4 +11,4 @@ Course / Section: {{ course_title }} / {{ section_name }}
 Period: {{ period_name }}
 Submitted At: {{ submitted_at|date:"Y-m-d H:i" }}
 
-Please sign in to EduGradesPro to review the petition in the correction approval queue.
+Please sign in to EduGrade+ to review the petition in the correction approval queue.

@@ -1,7 +1,7 @@
 {% extends "shared/base_public.html" %}
 {% load static %}
 
-{% block title %}Faculty Portal | EduGradesPro{% endblock %}
+{% block title %}Faculty Portal | EduGrade+{% endblock %}
 {% block extra_head %}
 <style>
   :root {
@@ -346,10 +346,10 @@
       <div class="d-flex align-items-center gap-2">
         <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar" data-tour-id="sidebar-toggle">&#9776;</button>
         <span class="d-inline-flex align-items-center">
-          <img src="{% get_media_prefix %}logos/egp_logo_official.png" alt="EduGradesPro" class="faculty-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/edp_logo.png';">
+          <img src="{% get_media_prefix %}logos/egp_logo_official.png" alt="EduGrade+" class="faculty-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/edp_logo.png';">
         </span>
         <div class="d-none d-sm-block">
-          <div class="faculty-brand-title">NCBA | EduGradesPro</div>
+          <div class="faculty-brand-title">NCBA | EduGrade+</div>
           <div class="faculty-brand-subtitle">
             Faculty Portal
             <span class="faculty-academic-scope">
@@ -506,7 +506,7 @@
 
     const layout = document.getElementById("faculty-layout");
     const toggleBtn = document.getElementById("faculty-sidebar-toggle");
-    const storageKey = "edugradespro_faculty_sidebar_collapsed";
+    const storageKey = "EduGrade+_faculty_sidebar_collapsed";
     if (layout && toggleBtn) {
       const savedCollapsed = localStorage.getItem(storageKey) === "1";
       if (savedCollapsed) {
@@ -520,7 +520,7 @@
 
     const tourCard = document.getElementById("faculty-tour-card");
     const tourBackdrop = document.getElementById("faculty-tour-backdrop");
-    if (tourCard && tourBackdrop && sessionStorage.getItem("edugradespro_faculty_tour_seen") !== "1") {
+    if (tourCard && tourBackdrop && sessionStorage.getItem("EduGrade+_faculty_tour_seen") !== "1") {
       const allSteps = [
         { id: "faculty-header", title: "Faculty Portal Header", text: "Use this area to confirm you are in the Faculty Portal, manage your signature, change your password, or log out." },
         { id: "sidebar-toggle", title: "Navigation Menu", text: "Collapse or expand the sidebar when you need more space while encoding grades." },
@@ -564,7 +564,7 @@
         if (activeTarget) activeTarget.classList.remove("faculty-tour-highlight");
         tourBackdrop.classList.remove("is-visible");
         tourCard.classList.remove("is-visible");
-        sessionStorage.setItem("edugradespro_faculty_tour_seen", "1");
+        sessionStorage.setItem("EduGrade+_faculty_tour_seen", "1");
       }
 
       function positionCard(target) {

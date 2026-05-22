@@ -21,6 +21,7 @@ from apps.academics.models import (
     Term,
 )
 from apps.core.services.settings import SystemSettingService
+from apps.core.services.features import FeatureSettingsService
 from apps.enrollment.services import EnrollmentService
 from apps.imports.services import BulkImportService
 from apps.grading.models import (
@@ -1331,7 +1332,7 @@ class GradingTemplateForm(forms.ModelForm):
         self.fields["name"].help_text = "Readable template name shown to admins and faculty."
         self.fields["description"].help_text = "Optional notes that explain when or where this template should be used."
         self.fields["default_base_value"].help_text = (
-            "Default base value used when EduGradesPro transmutes raw scores under this template."
+            "Default base value used when EduGrade+ transmutes raw scores under this template."
         )
         self.fields["passing_grade_threshold"].help_text = (
             "Optional template-level passing threshold. Use this when the passing rule belongs to the template itself. "
@@ -1477,7 +1478,7 @@ class GradingTemplateComponentForm(forms.ModelForm):
         )
         self.fields["is_exam_component"].label = "Exam component"
         self.fields["is_exam_component"].help_text = (
-            "Enable this for the major exam component of the period. EduGradesPro uses this flag, not the component code, "
+            "Enable this for the major exam component of the period. EduGrade+ uses this flag, not the component code, "
             "to separate exam grade from class standing."
         )
         _enforce_active_reference_choices(self)
@@ -1642,7 +1643,7 @@ class GradingTemplateTestingCalculatorForm(forms.Form):
         max_value=Decimal("100"),
         initial=Decimal("85.00"),
         label="Default sample raw score",
-        help_text="This value will prefill blank raw-score inputs. For Base-50 items, EduGradesPro will still compute the percentage from raw score and total score.",
+        help_text="This value will prefill blank raw-score inputs. For Base-50 items, EduGrade+ will still compute the percentage from raw score and total score.",
     )
 
     def __init__(self, *args, template_queryset=None, **kwargs):
@@ -1787,7 +1788,7 @@ class GradingPeriodLockForm(forms.ModelForm):
         self.fields["deadline_at"].input_formats = ["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"]
         self.fields["deadline_at"].help_text = (
             "Submission deadline for this period scope. Unsubmitted grade books remain open after this timestamp, "
-            "but EduGradesPro marks them as overdue for faculty reminder banners and admin non-compliance monitoring."
+            "but EduGrade+ marks them as overdue for faculty reminder banners and admin non-compliance monitoring."
         )
         self.fields["scope_type"].help_text = (
             "Choose Campus to apply the same rule to all course offerings in the selected campus, term, and period. "
@@ -2090,14 +2091,14 @@ class TenantGradingProfileForm(forms.ModelForm):
             "Select the grading template that will drive period, component, subcomponent, attendance, and activity computation for this profile scope."
         )
         self.fields["default_base_value"].help_text = (
-            "Optional profile-level base value for raw-score transmutation. Leave blank to let EduGradesPro fall back to course or template defaults."
+            "Optional profile-level base value for raw-score transmutation. Leave blank to let EduGrade+ fall back to course or template defaults."
         )
         self.fields["passing_grade_threshold"].help_text = (
             "Optional passing threshold for analytics and governance at this profile scope "
             "(example: 75.00). Leave blank to use tenant default."
         )
         self.fields["final_grade_formula_mode"].help_text = (
-            "Choose how EduGradesPro computes the official final grade for offerings matched by this profile. "
+            "Choose how EduGrade+ computes the official final grade for offerings matched by this profile. "
             "Use the default average mode for NCBA-style equal-period averaging, or choose weighted mode when a tenant uses specific period weights."
         )
         self.fields["priority"].help_text = (
@@ -2142,7 +2143,7 @@ class TenantGradingProfileForm(forms.ModelForm):
             )
         else:
             self.fields["final_grade_period_weights_text"].help_text += (
-                " Select the grading template first so EduGradesPro can show the valid period codes for this formula."
+                " Select the grading template first so EduGrade+ can show the valid period codes for this formula."
             )
 
         if not self.is_bound and getattr(self.instance, "final_grade_formula_json", None):
@@ -2347,7 +2348,7 @@ class ActiveGradingPeriodSettingForm(forms.Form):
     auto_advance_enabled = forms.BooleanField(
         required=False,
         label="Auto-advance after deadline",
-        help_text="When enabled, EduGradesPro will move to the next configured period after the current period deadline passes.",
+        help_text="When enabled, EduGrade+ will move to the next configured period after the current period deadline passes.",
     )
 
     def __init__(self, *args, campus_queryset=None, term_queryset=None, period_queryset=None, **kwargs):
@@ -2459,6 +2460,21 @@ class DocumentPrintSettingForm(forms.Form):
 
 
 class ConfigurableFeatureSettingForm(forms.Form):
+    grade_deadline_enforcement_policy = forms.ChoiceField(
+        required=True,
+        label="Grade deadline enforcement",
+        choices=[
+            (FeatureSettingsService.GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY, "Option 1: Compliance checkpoint only"),
+            (
+                FeatureSettingsService.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN,
+                "Option 2: Auto-close encoding and require reopen request",
+            ),
+        ],
+        help_text=(
+            "Compliance checkpoint keeps overdue unsubmitted gradebooks open for encoding. "
+            "Auto-close blocks activity, score, and attendance encoding after the deadline while still allowing submission if complete."
+        ),
+    )
     student_portal_enabled = forms.BooleanField(
         required=False,
         label="Enable Student Portal",
@@ -2497,17 +2513,17 @@ class ConfigurableFeatureSettingForm(forms.Form):
     user_signatures_final_clearance_enabled = forms.BooleanField(
         required=False,
         label="Allow stored signatures on Faculty Final Clearance",
-        help_text="When enabled, EduGradesPro may place the generating faculty member's stored signature on the printed Final Clearance PDF.",
+        help_text="When enabled, EduGrade+ may place the generating faculty member's stored signature on the printed Final Clearance PDF.",
     )
     user_signatures_correction_report_enabled = forms.BooleanField(
         required=False,
         label="Allow stored signatures on Correction Official Report",
-        help_text="When enabled, EduGradesPro may place stored requester and approver signatures on the official correction PDF when those users have uploaded a signature.",
+        help_text="When enabled, EduGrade+ may place stored requester and approver signatures on the official correction PDF when those users have uploaded a signature.",
     )
     correction_submission_approval_email_enabled = forms.BooleanField(
         required=False,
         label="Enable approval notification email on correction submission",
-        help_text="When enabled, EduGradesPro emails the selected approval-role recipients as soon as a faculty member submits a petition for correction of grades.",
+        help_text="When enabled, EduGrade+ emails the selected approval-role recipients as soon as a faculty member submits a petition for correction of grades.",
     )
     correction_submission_approval_email_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
@@ -2518,7 +2534,7 @@ class ConfigurableFeatureSettingForm(forms.Form):
     correction_registrar_auto_email_enabled = forms.BooleanField(
         required=False,
         label="Enable automatic registrar email after final approval",
-        help_text="When enabled, EduGradesPro may email the official correction PDF automatically after academic approval.",
+        help_text="When enabled, EduGrade+ may email the official correction PDF automatically after academic approval.",
     )
     correction_registrar_auto_email_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
@@ -2570,13 +2586,13 @@ class ConfigurableFeatureSettingForm(forms.Form):
     submission_non_compliance_notice_enabled = forms.BooleanField(
         required=False,
         label="Enable non-compliance notices for overdue grade submissions",
-        help_text="When enabled, EduGradesPro can issue notice, warning, and escalation follow-ups for overdue unsubmitted periodic grades.",
+        help_text="When enabled, EduGrade+ can issue notice, warning, and escalation follow-ups for overdue unsubmitted periodic grades.",
     )
     submission_non_compliance_notice_interval_days = forms.IntegerField(
         required=True,
         min_value=1,
         label="Notice repeat interval (days)",
-        help_text="How many days EduGradesPro waits before sending the next follow-up while the period is still overdue and unsubmitted.",
+        help_text="How many days EduGrade+ waits before sending the next follow-up while the period is still overdue and unsubmitted.",
     )
     submission_non_compliance_head_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
@@ -2663,7 +2679,7 @@ class ConfigurableFeatureSettingForm(forms.Form):
         queryset=Term.objects.none(),
         required=False,
         label="Term for class override",
-        help_text="Choose the term first so EduGradesPro can list only the classes under the selected tenant, campus, and term.",
+        help_text="Choose the term first so EduGrade+ can list only the classes under the selected tenant, campus, and term.",
     )
     class_master_list_faculty = forms.ModelChoiceField(
         queryset=User.objects.none(),
@@ -3188,7 +3204,7 @@ class TemplateGovernanceSettingForm(forms.Form):
     sequential_approval_enabled = forms.BooleanField(
         required=False,
         label="Use a sequential template approval chain",
-        help_text="When enabled, EduGradesPro will require Template Review first, then Final Approval.",
+        help_text="When enabled, EduGrade+ will require Template Review first, then Final Approval.",
     )
     approval_review_step_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
@@ -3207,7 +3223,7 @@ class TemplateGovernanceSettingForm(forms.Form):
     sequential_hotfix_enabled = forms.BooleanField(
         required=False,
         label="Use a sequential hotfix workflow",
-        help_text="When enabled, EduGradesPro will require Hotfix Review first, then Hotfix Final Apply.",
+        help_text="When enabled, EduGrade+ will require Hotfix Review first, then Hotfix Final Apply.",
     )
     hotfix_review_step_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),

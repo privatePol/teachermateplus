@@ -1370,7 +1370,7 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
     faculty_public_url = request.build_absolute_uri(reverse("faculty_portal:public_index"))
     logo_context = build_email_logo_context(
         filename="egp_logo_official.png",
-        cid="edugradespro-logo",
+        cid="EduGrade+-logo",
         external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
         configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
     )
@@ -1385,16 +1385,16 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
     text_body = render_to_string("admin_portal/emails/new_user_credentials.txt", context)
     html_body = render_to_string("admin_portal/emails/new_user_credentials.html", context)
     message = EmailMultiAlternatives(
-        subject="EduGradesPro Account Created",
+        subject="EduGrade+ Account Created",
         body=text_body,
-        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local"),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local"),
         to=[user.email],
     )
     attach_logo_for_src(
         message,
         src=logo_context["email_logo_src"],
         filename="egp_logo_official.png",
-        cid="edugradespro-logo",
+        cid="EduGrade+-logo",
         configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
     )
     message.attach_alternative(html_body, "text/html")
@@ -3426,6 +3426,9 @@ def configurable_features_settings_view(request):
     current_submission_non_compliance_hr_recipients = (
         FeatureSettingsService.get_submission_non_compliance_hr_recipients(tenant_id=tenant_id)
     )
+    current_grade_deadline_enforcement_policy = FeatureSettingsService.get_grade_deadline_enforcement_policy(
+        tenant_id=tenant_id,
+    )
     current_enrollment_ownership_mode = EnrollmentService.get_enrollment_mode(tenant_id)
     current_enrollment_student_mode = BulkImportService.get_enrollment_student_mode(tenant_id)
     current_faculty_drp_allowed_through_period = EnrollmentService.get_faculty_drp_allowed_through_period(tenant_id)
@@ -3593,6 +3596,7 @@ def configurable_features_settings_view(request):
                 code__in=current_submission_non_compliance_head_role_codes
             ),
             "submission_non_compliance_hr_recipients": ", ".join(current_submission_non_compliance_hr_recipients),
+            "grade_deadline_enforcement_policy": current_grade_deadline_enforcement_policy,
             "grade_distribution_high_grade_band_min": current_grade_distribution_settings["high_grade_band_min"],
             "grade_distribution_high_grade_band_max": current_grade_distribution_settings["high_grade_band_max"],
             "grade_distribution_high_grade_concentration_threshold_percent": current_grade_distribution_settings[
@@ -3861,6 +3865,13 @@ def configurable_features_settings_view(request):
             is_active=True,
         )
         SystemSettingService.set(
+            FeatureSettingsService.GRADE_DEADLINE_ENFORCEMENT_POLICY_KEY,
+            str(form.cleaned_data["grade_deadline_enforcement_policy"]),
+            tenant_id=tenant_id,
+            value_type="STRING",
+            is_active=True,
+        )
+        SystemSettingService.set(
             GradeDistributionMonitorService.SETTING_KEYS["high_grade_band_min"],
             str(form.cleaned_data["grade_distribution_high_grade_band_min"]),
             tenant_id=tenant_id,
@@ -4115,6 +4126,7 @@ def configurable_features_settings_view(request):
                 "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
                 "submission_non_compliance_head_role_codes": current_submission_non_compliance_head_role_codes,
                 "submission_non_compliance_hr_recipients": current_submission_non_compliance_hr_recipients,
+                "grade_deadline_enforcement_policy": current_grade_deadline_enforcement_policy,
                 "grade_distribution_settings": current_grade_distribution_audit_settings,
                 "enrollment_ownership_mode": current_enrollment_ownership_mode,
                 "enrollment_student_mode": current_enrollment_student_mode,
@@ -4193,6 +4205,7 @@ def configurable_features_settings_view(request):
                 ),
                 "submission_non_compliance_head_role_codes": selected_submission_non_compliance_head_role_codes,
                 "submission_non_compliance_hr_recipients": selected_submission_non_compliance_hr_recipients,
+                "grade_deadline_enforcement_policy": str(form.cleaned_data["grade_deadline_enforcement_policy"]),
                 "grade_distribution_settings": {
                     "high_grade_band_min": str(form.cleaned_data["grade_distribution_high_grade_band_min"]),
                     "high_grade_band_max": str(form.cleaned_data["grade_distribution_high_grade_band_max"]),
@@ -8940,7 +8953,7 @@ def grading_template_calculator_view(request):
             if calculation["input_errors"]:
                 messages.warning(
                     request,
-                    "Some sample rows had invalid percentages, so EduGradesPro temporarily used the default sample value for those rows.",
+                    "Some sample rows had invalid percentages, so EduGrade+ temporarily used the default sample value for those rows.",
                 )
 
     context = {
@@ -8951,8 +8964,8 @@ def grading_template_calculator_view(request):
         "usage_notes": [
             "This tool is read-only. It does not create grades, activities, or student records.",
             "Enter sample raw score and total score values at the lowest active level of the selected template.",
-            "EduGradesPro will first convert raw score to computed percentage, then roll the result upward into component, period, and final grades.",
-            "Period grades follow the same current EduGradesPro computation logic used by the official grading engine.",
+            "EduGrade+ will first convert raw score to computed percentage, then roll the result upward into component, period, and final grades.",
+            "Period grades follow the same current EduGrade+ computation logic used by the official grading engine.",
             "The final-grade section uses the matched active tenant grading profile for this template. If no active profile matches, it shows the active-period average fallback.",
         ],
     }
@@ -10524,7 +10537,7 @@ def course_template_assignment_create_view(request):
     context = {
         "form": form,
         "title": "Bulk Assign Course Templates",
-        "term_scope_help": "EduGradesPro will skip courses that already have a prior assignment in the same term scope.",
+        "term_scope_help": "EduGrade+ will skip courses that already have a prior assignment in the same term scope.",
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/course_template_assignment_bulk_form.html", context)
@@ -11231,9 +11244,9 @@ def grade_submission_reopen_request_list_view(request):
     if q:
         queryset = queryset.filter(
             Q(offering__course__code__icontains=q)
+            | Q(offering__course__title__icontains=q)
             | Q(offering__section__code__icontains=q)
             | Q(requested_by_user__username__icontains=q)
-            | Q(initiated_by_user__username__icontains=q)
             | Q(justification__icontains=q)
         )
     context = {
@@ -11282,7 +11295,11 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
                 offering=reopen_request.offering,
                 template_period=reopen_request.template_period,
             )
-            if approved and not has_force_reopen:
+            is_deadline_auto_close_request = reopen_request.submission.status in {
+                GradeSubmission.Status.DRAFT,
+                GradeSubmission.Status.REOPENED,
+            }
+            if approved and not has_force_reopen and not is_deadline_auto_close_request:
                 if not lock or not lock.deadline_at:
                     form.add_error(
                         None,
@@ -11351,7 +11368,11 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
                         )
                     messages.success(
                         request,
-                        "Reopen request approved and submission reopened."
+                        (
+                            "Reopen request approved. Faculty encoding is available until the gradebook is submitted."
+                            if is_deadline_auto_close_request
+                            else "Reopen request approved and submission reopened."
+                        )
                         if approved
                         else "Reopen request rejected.",
                     )

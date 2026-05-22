@@ -30,13 +30,13 @@ class EmailDiagnosticsForm(forms.Form):
     subject = forms.CharField(
         required=True,
         max_length=160,
-        initial="EduGradesPro SMTP Diagnostic",
+        initial="EduGrade+ SMTP Diagnostic",
     )
     message = forms.CharField(
         required=True,
         widget=forms.Textarea(attrs={"rows": 5}),
         initial=(
-            "This is a test email from EduGradesPro.\n\n"
+            "This is a test email from EduGrade+.\n\n"
             "If you received this message, SMTP settings are working."
         ),
     )

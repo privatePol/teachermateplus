@@ -876,7 +876,7 @@ class CorrectionWorkflowTests(TestCase):
         for message in mail.outbox:
             self.assertEqual(
                 message.subject,
-                "NCBA-EDUGRADESPRO: Petition for Correction of Grades Awaiting Your Approval",
+                "NCBA-EduGrade+: Petition for Correction of Grades Awaiting Your Approval",
             )
             self.assertEqual(len(message.alternatives), 1)
             html_body = message.alternatives[0].content
@@ -971,7 +971,7 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(
             mail.outbox[0].subject,
-            "NCBA-EDUGRADESPRO: Approved Petition for Correction of Grades for Registrar Reference",
+            "NCBA-EduGrade+: Approved Petition for Correction of Grades for Registrar Reference",
         )
         self.assertEqual(mail.outbox[0].to, ["registrar@example.com"])
         pdf_filenames = [

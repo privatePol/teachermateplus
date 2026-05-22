@@ -8,14 +8,14 @@ from django.utils import timezone
 
 from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
 from apps.core.services.features import FeatureSettingsService
-from apps.grading.models import GradeCorrectionRequest
+from apps.grading.models import GradeCorrectionRequest, GradeSubmissionReopenRequest
 from apps.grading.reporting import CorrectionOfficialReportService
 from apps.rbac.models import UserRole
 
 
 class CorrectionNotificationService:
     SCHOOL_NAME = "NATIONAL COLLEGE OF BUSINESS AND ARTS"
-    SUBJECT_PREFIX = "NCBA-EDUGRADESPRO: "
+    SUBJECT_PREFIX = "NCBA-EduGrade+: "
     SUBJECT_MESSAGE = "Petition for Correction of Grades Awaiting Your Approval"
 
     @classmethod
@@ -87,7 +87,7 @@ class CorrectionNotificationService:
         if not recipients:
             return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_matching_role_recipients"}
 
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
         subject = f"{cls.SUBJECT_PREFIX}{cls.SUBJECT_MESSAGE}"
         petitioner_name = (
             getattr(request_obj.requested_by_user, "full_name", None)
@@ -178,8 +178,8 @@ class CorrectionNotificationService:
         if not recipient_emails:
             return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_registrar_recipient"}
 
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
-        subject = "NCBA-EDUGRADESPRO: Approved Petition for Correction of Grades for Registrar Reference"
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+        subject = "NCBA-EduGrade+: Approved Petition for Correction of Grades for Registrar Reference"
         pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=request_obj)
         petitioner_name = (
             getattr(request_obj.requested_by_user, "full_name", None)
@@ -232,5 +232,113 @@ class CorrectionNotificationService:
             "sent": sent,
             "errors": [],
             "recipients": recipient_emails if sent else [],
+            "reason": None if sent else "send_failed",
+        }
+
+
+class GradebookReopenNotificationService:
+    SCHOOL_NAME = "NATIONAL COLLEGE OF BUSINESS AND ARTS"
+    SUBJECT_PREFIX = "NCBA-EduGrade+: "
+    SUBJECT_MESSAGE = "Gradebook Reopen Request Awaiting Review"
+
+    @classmethod
+    def _logo_context(cls) -> dict[str, str]:
+        return build_email_logo_context(
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            external_url=getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+        )
+
+    @classmethod
+    def _recipient_rows(cls, *, request_obj: GradeSubmissionReopenRequest):
+        rows = (
+            UserRole.objects.filter(
+                is_active=True,
+                role__is_active=True,
+                user__is_active=True,
+                role__role_permissions__permission__code="reopen_requests.review",
+                role__role_permissions__permission__is_active=True,
+                tenant_id__in=[request_obj.tenant_id, None],
+                campus_id__in=[request_obj.campus_id, None],
+            )
+            .select_related("user", "role")
+            .order_by("role__name", "user__last_name", "user__first_name", "user__id")
+            .distinct()
+        )
+        recipients = []
+        seen = set()
+        for row in rows:
+            email = (row.user.email or "").strip()
+            if not email:
+                continue
+            key = (row.user_id, email.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            recipients.append({"user": row.user, "role": row.role, "email": email})
+        return recipients
+
+    @classmethod
+    def send_reopen_request_notifications(cls, *, request_obj: GradeSubmissionReopenRequest):
+        recipients = cls._recipient_rows(request_obj=request_obj)
+        if not recipients:
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_review_recipients"}
+
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+        subject = f"{cls.SUBJECT_PREFIX}{cls.SUBJECT_MESSAGE}"
+        requester_name = (
+            getattr(request_obj.requested_by_user, "full_name", None)
+            or request_obj.requested_by_user.get_full_name()
+            or request_obj.requested_by_user.username
+        )
+        context_base = {
+            "school_name": cls.SCHOOL_NAME,
+            "subject_message": cls.SUBJECT_MESSAGE,
+            "campus_name": request_obj.campus.name,
+            "course_title": request_obj.offering.course.title,
+            "course_code": request_obj.offering.course.code,
+            "section_name": request_obj.offering.section.name or request_obj.offering.section.code,
+            "period_name": request_obj.template_period.name or request_obj.template_period.code,
+            "reference_no": f"GBR-{request_obj.id:06d}",
+            "submitted_at": timezone.localtime(request_obj.created_at),
+            "requester_name": requester_name,
+            "justification": request_obj.justification,
+            "submission_status": request_obj.submission.status,
+        }
+
+        sent = 0
+        errors = []
+        notified_emails = []
+        for recipient in recipients:
+            context = {**context_base, "recipient_role_name": recipient["role"].name}
+            message = EmailMultiAlternatives(subject=subject, body="", from_email=from_email, to=[recipient["email"]])
+            logo_context = cls._logo_context()
+            context.update(logo_context)
+            attach_logo_for_src(
+                message,
+                src=logo_context["email_logo_src"],
+                filename="ncba-logo.png",
+                cid="ncba-logo",
+                configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+            )
+            text_body = render_to_string("grading/emails/gradebook_reopen_request_notification.txt", context)
+            html_body = render_to_string("grading/emails/gradebook_reopen_request_notification.html", context)
+            message.body = text_body
+            message.attach_alternative(html_body, "text/html")
+            try:
+                result = message.send(fail_silently=False)
+            except Exception as exc:  # pragma: no cover
+                errors.append({"email": recipient["email"], "error": str(exc)})
+                continue
+            if result:
+                sent += 1
+                notified_emails.append(recipient["email"])
+
+        return {
+            "attempted": len(recipients),
+            "sent": sent,
+            "errors": errors,
+            "recipients": notified_emails,
             "reason": None if sent else "send_failed",
         }

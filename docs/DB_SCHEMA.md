@@ -1,13 +1,13 @@
-# EduGradesPro Database Schema Dictionary
+# EduGrade+ Database Schema Dictionary
 
-This document is generated from the current Django model registry so it reflects the actual EduGradesPro schema at generation time.
+This document is generated from the current Django model registry so it reflects the actual EduGrade+ schema at generation time.
 
 ## Notes
 
 - **Django Type** shows the Django field class used by the model.
 - Production MySQL/MariaDB column types may differ slightly at the storage level from Django field names.
 - Relationship targets are shown using both the database table name and the Django model label.
-- This dictionary includes both EduGradesPro application tables and the small number of built-in Django framework tables used by the project.
+- This dictionary includes both EduGrade+ application tables and the small number of built-in Django framework tables used by the project.
 
 ## Application Areas
 
@@ -22,7 +22,7 @@ This document is generated from the current Django model registry so it reflects
 ### `login_otp_challenges`
 
 - **Model:** `accounts.LoginOtpChallenge`
-- **Purpose:** EduGradesPro application table.
+- **Purpose:** EduGrade+ application table.
 
 **Relationships**
 - `user` -> `users` (`accounts.User`)
@@ -64,14 +64,14 @@ This document is generated from the current Django model registry so it reflects
 | `window_started_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
 | `last_failed_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
 | `locked_until` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
-| `last_ip` | `GenericIPAddressField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
+| `last_ip` | `GenericIPAddressField` | `Yes` | `Yes` | `No` | - | Application field used by EduGrade+. |
 | `created_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was created. |
 | `updated_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was last updated. |
 
 ### `user_deactivation_schedules`
 
 - **Model:** `accounts.UserDeactivationSchedule`
-- **Purpose:** EduGradesPro application table.
+- **Purpose:** EduGrade+ application table.
 
 **Relationships**
 - `user` -> `users` (`accounts.User`)
@@ -113,8 +113,8 @@ This document is generated from the current Django model registry so it reflects
 |---|---|---:|---:|---:|---|---|
 | `id` | `BigAutoField` | `No` | `Yes` | `Yes` | - | Primary key for the table. |
 | `user` | `OneToOneField` | `No` | `No` | `No` | `users` (`accounts.User`) | Related user account. |
-| `encrypted_blob` | `BinaryField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
-| `encryption_nonce` | `BinaryField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
+| `encrypted_blob` | `BinaryField` | `Yes` | `Yes` | `No` | - | Application field used by EduGrade+. |
+| `encryption_nonce` | `BinaryField` | `Yes` | `Yes` | `No` | - | Application field used by EduGrade+. |
 | `original_filename` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `mime_type` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `image_format` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
@@ -188,7 +188,7 @@ This document is generated from the current Django model registry so it reflects
 | `faculty_quick_tour_disabled` | `BooleanField` | `No` | `No` | `No` | - | Boolean flag used by the workflow or record. |
 | `privacy_consent_version` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `privacy_consent_at` | `DateTimeField` | `Yes` | `Yes` | `No` | - | Date/time value used by the workflow or record. |
-| `privacy_consent_ip` | `GenericIPAddressField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
+| `privacy_consent_ip` | `GenericIPAddressField` | `Yes` | `Yes` | `No` | - | Application field used by EduGrade+. |
 | `created_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was created. |
 | `updated_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was last updated. |
 | `groups` | `ManyToManyField` | `-` | `-` | `No` | ``auth_group` (`auth.Group`)` | Many-to-many relationship managed through an intermediate table. |
@@ -335,7 +335,7 @@ This document is generated from the current Django model registry so it reflects
 | `campus` | `ForeignKey` | `Yes` | `Yes` | `No` | `campuses` (`tenants.Campus`) | Owning or effective campus scope for the record. |
 | `route_name` | `CharField` | `Yes` | `Yes` | `No` | - | Django route name captured for audit or navigation tracking. |
 | `http_method` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
-| `ip_address` | `GenericIPAddressField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
+| `ip_address` | `GenericIPAddressField` | `Yes` | `Yes` | `No` | - | Application field used by EduGrade+. |
 | `user_agent` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `before_json` | `JSONField` | `Yes` | `Yes` | `No` | - | JSON snapshot before a change. |
 | `after_json` | `JSONField` | `Yes` | `Yes` | `No` | - | JSON snapshot after a change. |
@@ -513,7 +513,7 @@ This document is generated from the current Django model registry so it reflects
 ### `tenant_api_keys`
 
 - **Model:** `tenants.TenantApiKey`
-- **Purpose:** EduGradesPro application table.
+- **Purpose:** EduGrade+ application table.
 
 **Relationships**
 - `tenant` -> `tenants` (`tenants.Tenant`)
@@ -916,7 +916,7 @@ This document is generated from the current Django model registry so it reflects
 | `tenant` | `ForeignKey` | `Yes` | `Yes` | `No` | `tenants` (`tenants.Tenant`) | Owning tenant scope for the record. |
 | `campus` | `ForeignKey` | `Yes` | `Yes` | `No` | `campuses` (`tenants.Campus`) | Owning or effective campus scope for the record. |
 | `status` | `CharField` | `No` | `No` | `No` | - | Workflow or operational status code. |
-| `source_file` | `FileField` | `Yes` | `Yes` | `No` | - | Application field used by EduGradesPro. |
+| `source_file` | `FileField` | `Yes` | `Yes` | `No` | - | Application field used by EduGrade+. |
 | `original_filename` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `expected_headers_json` | `JSONField` | `No` | `No` | `No` | - | Flexible JSON payload used for variable structured data. |
 | `actual_headers_json` | `JSONField` | `No` | `No` | `No` | - | Flexible JSON payload used for variable structured data. |
@@ -1007,7 +1007,7 @@ This document is generated from the current Django model registry so it reflects
 ### `faculty_final_clearance_reports`
 
 - **Model:** `grading.FacultyFinalClearanceReport`
-- **Purpose:** EduGradesPro application table.
+- **Purpose:** EduGrade+ application table.
 
 **Relationships**
 - `tenant` -> `tenants` (`tenants.Tenant`)
@@ -1031,7 +1031,7 @@ This document is generated from the current Django model registry so it reflects
 | `term` | `ForeignKey` | `No` | `No` | `No` | `terms` (`academics.Term`) | Academic term for the record. |
 | `faculty_user` | `ForeignKey` | `No` | `No` | `No` | `users` (`accounts.User`) | Faculty user assigned to the record. |
 | `generated_by_user` | `ForeignKey` | `Yes` | `Yes` | `No` | `users` (`accounts.User`) | Foreign-key reference to `accounts.User`. |
-| `report_uuid` | `UUIDField` | `No` | `No` | `No` | - | Application field used by EduGradesPro. |
+| `report_uuid` | `UUIDField` | `No` | `No` | `No` | - | Application field used by EduGrade+. |
 | `reference_no` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
 | `verification_code` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
 | `clearance_status` | `CharField` | `No` | `No` | `No` | - | Text value used by the workflow or record. |
@@ -1122,7 +1122,7 @@ This document is generated from the current Django model registry so it reflects
 | `created_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was created. |
 | `updated_at` | `DateTimeField` | `No` | `Yes` | `No` | - | Timestamp when the row was last updated. |
 | `correction_request` | `ForeignKey` | `No` | `No` | `No` | `grade_correction_requests` (`grading.GradeCorrectionRequest`) | Foreign-key reference to `grading.GradeCorrectionRequest`. |
-| `file` | `FileField` | `No` | `No` | `No` | - | Application field used by EduGradesPro. |
+| `file` | `FileField` | `No` | `No` | `No` | - | Application field used by EduGrade+. |
 | `original_filename` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `content_type` | `CharField` | `Yes` | `Yes` | `No` | - | Text value used by the workflow or record. |
 | `file_size_bytes` | `PositiveIntegerField` | `No` | `No` | `No` | - | Numeric value used by the workflow or computation. |
@@ -1917,7 +1917,7 @@ This document is generated from the current Django model registry so it reflects
 ### `submission_non_compliance_notices`
 
 - **Model:** `notifications.SubmissionNonComplianceNotice`
-- **Purpose:** EduGradesPro application table.
+- **Purpose:** EduGrade+ application table.
 
 **Relationships**
 - `tenant` -> `tenants` (`tenants.Tenant`)

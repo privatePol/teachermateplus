@@ -1,6 +1,6 @@
-# EduGradesPro Staging Workflow Guide
+# EduGrade+ Staging Workflow Guide
 
-This guide explains a simple staging workflow for EduGradesPro before production deployment.
+This guide explains a simple staging workflow for EduGrade+ before production deployment.
 
 ## 1. What Staging Is
 
@@ -37,10 +37,10 @@ That is much safer.
 
 If you only have one Ubuntu VPS, use:
 
-- production app at `/opt/edugradespro`
-- staging app at `/opt/edugradespro-staging`
-- production DB `edugradespro`
-- staging DB `edugradespro_staging`
+- production app at `/opt/edugradeplus`
+- staging app at `/opt/edugradeplus-staging`
+- production DB `EduGrade+`
+- staging DB `EduGrade+_staging`
 - production domain `grades.yourdomain.com`
 - staging domain `staging-grades.yourdomain.com`
 

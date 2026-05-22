@@ -231,7 +231,7 @@
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
   <div>
     <h2 class="h5 mb-1">Grading Template Testing Calculator</h2>
-    <div class="text-muted small">Use sample raw scores and totals to validate how EduGradesPro computes each period grade and the final grade from the selected grading template and its matched tenant grading profile.</div>
+    <div class="text-muted small">Use sample raw scores and totals to validate how EduGrade+ computes each period grade and the final grade from the selected grading template and its matched tenant grading profile.</div>
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-dark" href="{% url 'admin_portal:grading_template_list' %}">Back to Grading Templates</a>
@@ -644,7 +644,7 @@
           <div class="builder-summary mb-3">
             <div class="builder-formula mb-2">FINAL GRADE = {{ calculation.final_grade_detail.strategy.formula_label }}</div>
             <div class="small text-muted">
-              This final step uses the matched Tenant Grading Profile for the selected template. If no active profile matches, EduGradesPro previews the active-period average fallback.
+              This final step uses the matched Tenant Grading Profile for the selected template. If no active profile matches, EduGrade+ previews the active-period average fallback.
             </div>
           </div>
 

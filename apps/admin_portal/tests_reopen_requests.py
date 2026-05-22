@@ -1,13 +1,23 @@
 from datetime import date
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
-from apps.grading.models import GradeSubmission, GradeSubmissionReopenRequest, GradingTemplate, GradingTemplatePeriod
+from apps.core.services.features import FeatureSettingsService
+from apps.core.services.settings import SystemSettingService
+from apps.grading.models import (
+    GradeSubmission,
+    GradeSubmissionReopenRequest,
+    GradingPeriodLock,
+    GradingTemplate,
+    GradingTemplatePeriod,
+)
+from apps.grading.services import GradingGovernanceService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.tenants.models import Campus, Department, Program, Tenant
 
@@ -144,3 +154,62 @@ class GradeSubmissionReopenRequestReviewTests(TestCase):
         self.assertContains(response, "Only pending reopen requests can be reviewed.")
         reopen_request.refresh_from_db()
         self.assertEqual(reopen_request.status, GradeSubmissionReopenRequest.Status.APPROVED)
+
+    def test_auto_close_policy_blocks_encoding_until_reopen_request_is_approved(self):
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_DEADLINE_ENFORCEMENT_POLICY_KEY,
+            FeatureSettingsService.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN,
+            tenant_id=self.tenant.id,
+            value_type="STRING",
+            is_active=True,
+        )
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.period.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() - timezone.timedelta(hours=1),
+            is_locked=False,
+        )
+        self.submission.status = GradeSubmission.Status.DRAFT
+        self.submission.save(update_fields=["status", "updated_at"])
+
+        self.assertTrue(
+            GradingGovernanceService.is_auto_closed_after_deadline(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+        with self.assertRaises(ValidationError):
+            GradingGovernanceService.assert_encoding_allowed(
+                offering=self.offering,
+                template_period=self.period,
+            )
+
+        reopen_request = GradingGovernanceService.create_reopen_request_for_period(
+            user=self.admin_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Need to finish required records.",
+        )
+        GradingGovernanceService.review_reopen_request(
+            request_obj=reopen_request,
+            reviewer=self.admin_user,
+            approved=True,
+            review_remarks="Approved for completion.",
+        )
+
+        self.assertFalse(
+            GradingGovernanceService.is_auto_closed_after_deadline(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+        self.assertTrue(
+            GradingGovernanceService.assert_encoding_allowed(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )

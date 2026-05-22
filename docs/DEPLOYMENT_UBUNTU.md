@@ -1,6 +1,6 @@
-# EduGradesPro Production Deployment Guide
+# EduGrade+ Production Deployment Guide
 
-This guide is the recommended deployment path for **EduGradesPro V1** on **Ubuntu** using:
+This guide is the recommended deployment path for **EduGrade+ V1** on **Ubuntu** using:
 
 - `gunicorn`
 - `systemd`
@@ -22,11 +22,11 @@ If this is your first real rollout, use this:
 
 Related references:
 
-- [STAGING_WORKFLOW.md](/d:/edugradespro/docs/STAGING_WORKFLOW.md)
-- [PRODUCTION_DATA_PROMOTION.md](/d:/edugradespro/docs/PRODUCTION_DATA_PROMOTION.md)
-- [DB_SCHEMA.md](/d:/edugradespro/docs/DB_SCHEMA.md)
-- [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradespro/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
-- [NCBA_GO_LIVE_CHECKLIST.md](/d:/edugradespro/docs/NCBA_GO_LIVE_CHECKLIST.md)
+- [STAGING_WORKFLOW.md](/d:/edugradeplus/docs/STAGING_WORKFLOW.md)
+- [PRODUCTION_DATA_PROMOTION.md](/d:/edugradeplus/docs/PRODUCTION_DATA_PROMOTION.md)
+- [DB_SCHEMA.md](/d:/edugradeplus/docs/DB_SCHEMA.md)
+- [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradeplus/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
+- [NCBA_GO_LIVE_CHECKLIST.md](/d:/edugradeplus/docs/NCBA_GO_LIVE_CHECKLIST.md)
 
 ## Deployment Stages Only
 
@@ -47,8 +47,8 @@ If you want the shortest operational sequence, this is the staged flow:
 
 ### Stage 3. Prepare app directories
 
-1. create `/opt/edugradespro-staging`
-2. create `/opt/edugradespro`
+1. create `/opt/edugradeplus-staging`
+2. create `/opt/edugradeplus`
 3. create separate env files
 4. create separate log directories
 
@@ -111,15 +111,15 @@ That is completely fine, but each app should have its own:
 - database or schema strategy
 - log directory
 
-For EduGradesPro specifically, keep it isolated like this:
+For EduGrade+ specifically, keep it isolated like this:
 
-- app code: `/opt/edugradespro`
-- env file: `/etc/edugradespro/edugradespro.env`
-- logs: `/var/log/edugradespro`
-- socket: `/run/edugradespro/gunicorn.sock`
-- service: `edugradespro-gunicorn`
+- app code: `/opt/edugradeplus`
+- env file: `/etc/edugradeplus/edugradeplus.env`
+- logs: `/var/log/edugradeplus`
+- socket: `/run/edugradeplus/gunicorn.sock`
+- service: `edugradeplus-gunicorn`
 
-Do not mix EduGradesPro inside another Django app's folders or service definitions.
+Do not mix EduGrade+ inside another Django app's folders or service definitions.
 
 ## 1. Recommended Production Stack
 
@@ -139,7 +139,7 @@ For production, prefer **MariaDB/MySQL** over SQLite.
 Why:
 
 - SQLite is fine for local development and small pilot usage
-- EduGradesPro has concurrent admin and faculty activity
+- EduGrade+ has concurrent admin and faculty activity
 - production needs stronger locking/concurrency behavior
 - backups, monitoring, and recovery are easier with a server database
 
@@ -153,7 +153,7 @@ If your hosting provider or school infrastructure already standardizes on MySQL,
 
 - **MySQL 8.0 is also fine**
 
-EduGradesPro already supports MySQL-compatible deployment through the existing Django database settings and `PyMySQL`.
+EduGrade+ already supports MySQL-compatible deployment through the existing Django database settings and `PyMySQL`.
 
 ## 2. High-Level Environment Strategy
 
@@ -174,7 +174,7 @@ Recommended environments:
 
 For a beginner-friendly explanation of staging, also see:
 
-- [STAGING_WORKFLOW.md](/d:/edugradespro/docs/STAGING_WORKFLOW.md)
+- [STAGING_WORKFLOW.md](/d:/edugradeplus/docs/STAGING_WORKFLOW.md)
 
 ## 3. Simple Staging Workflow for Beginners
 
@@ -197,14 +197,14 @@ This is the easiest beginner-friendly staging setup if you only have one VPS.
 
 Example:
 
-- production app: `/opt/edugradespro`
-- staging app: `/opt/edugradespro-staging`
-- production env: `/etc/edugradespro/edugradespro.env`
-- staging env: `/etc/edugradespro-staging/edugradespro.env`
+- production app: `/opt/edugradeplus`
+- staging app: `/opt/edugradeplus-staging`
+- production env: `/etc/edugradeplus/edugradeplus.env`
+- staging env: `/etc/edugradeplus-staging/edugradeplus.env`
 - production domain: `grades.yourdomain.com`
 - staging domain: `staging-grades.yourdomain.com`
-- production DB: `edugradespro`
-- staging DB: `edugradespro_staging`
+- production DB: `EduGrade+`
+- staging DB: `EduGrade+_staging`
 
 This works well and is enough for many first deployments.
 
@@ -235,7 +235,7 @@ If you want a simpler first rollout, you can use only:
 
 but still deploy to staging first before production.
 
-## 5. What To Prepare Before Copying EduGradesPro to Production
+## 5. What To Prepare Before Copying EduGrade+ to Production
 
 Before you clone the repo on the production server, prepare these:
 
@@ -308,14 +308,14 @@ sudo apt install -y ufw certbot python3-certbot-nginx
 
 ## 8. Create App Users and Folders
 
-### Why `/opt/edugradespro` instead of `/var/www/html/edugradespro`?
+### Why `/opt/edugradeplus` instead of `/var/www/html/EduGrade+`?
 
-For EduGradesPro, `/opt/edugradespro` is the better layout.
+For EduGrade+, `/opt/edugradeplus` is the better layout.
 
 Why:
 
 - `/opt` is appropriate for self-contained application stacks
-- EduGradesPro is not just static web content; it includes code, venv, management commands, cron jobs, and service-managed runtime pieces
+- EduGrade+ is not just static web content; it includes code, venv, management commands, cron jobs, and service-managed runtime pieces
 - `/var/www/html` is commonly used for simple web roots and static/PHP-style hosting layouts
 - you said this server will host multiple Django apps, so keeping each app isolated under `/opt/<app-name>` is cleaner and safer
 
@@ -331,23 +331,23 @@ That structure scales better when one Ubuntu server runs multiple unrelated Djan
 ### Production
 
 ```bash
-sudo useradd --system --create-home --shell /bin/bash edugradespro
-sudo mkdir -p /opt/edugradespro
-sudo mkdir -p /etc/edugradespro
-sudo mkdir -p /var/log/edugradespro
-sudo chown -R edugradespro:edugradespro /opt/edugradespro
-sudo chown -R edugradespro:edugradespro /var/log/edugradespro
+sudo useradd --system --create-home --shell /bin/bash EduGrade+
+sudo mkdir -p /opt/edugradeplus
+sudo mkdir -p /etc/edugradeplus
+sudo mkdir -p /var/log/edugradeplus
+sudo chown -R EduGrade+:EduGrade+ /opt/edugradeplus
+sudo chown -R EduGrade+:EduGrade+ /var/log/edugradeplus
 ```
 
 ### Staging on the same server
 
 ```bash
-sudo useradd --system --create-home --shell /bin/bash edugradespro-staging
-sudo mkdir -p /opt/edugradespro-staging
-sudo mkdir -p /etc/edugradespro-staging
-sudo mkdir -p /var/log/edugradespro-staging
-sudo chown -R edugradespro-staging:edugradespro-staging /opt/edugradespro-staging
-sudo chown -R edugradespro-staging:edugradespro-staging /var/log/edugradespro-staging
+sudo useradd --system --create-home --shell /bin/bash edugradeplus-staging
+sudo mkdir -p /opt/edugradeplus-staging
+sudo mkdir -p /etc/edugradeplus-staging
+sudo mkdir -p /var/log/edugradeplus-staging
+sudo chown -R edugradeplus-staging:edugradeplus-staging /opt/edugradeplus-staging
+sudo chown -R edugradeplus-staging:edugradeplus-staging /var/log/edugradeplus-staging
 ```
 
 ## 9. Create the MariaDB/MySQL Database
@@ -361,18 +361,18 @@ sudo mysql
 Create production DB and user:
 
 ```sql
-CREATE DATABASE edugradespro CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'edugradespro_user'@'127.0.0.1' IDENTIFIED BY 'replace-with-strong-password';
-GRANT ALL PRIVILEGES ON edugradespro.* TO 'edugradespro_user'@'127.0.0.1';
+CREATE DATABASE EduGrade+ CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'EduGrade+_user'@'127.0.0.1' IDENTIFIED BY 'replace-with-strong-password';
+GRANT ALL PRIVILEGES ON EduGrade+.* TO 'EduGrade+_user'@'127.0.0.1';
 FLUSH PRIVILEGES;
 ```
 
 Create staging DB and user:
 
 ```sql
-CREATE DATABASE edugradespro_staging CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'edugradespro_staging_user'@'127.0.0.1' IDENTIFIED BY 'replace-with-strong-password';
-GRANT ALL PRIVILEGES ON edugradespro_staging.* TO 'edugradespro_staging_user'@'127.0.0.1';
+CREATE DATABASE EduGrade+_staging CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'EduGrade+_staging_user'@'127.0.0.1' IDENTIFIED BY 'replace-with-strong-password';
+GRANT ALL PRIVILEGES ON EduGrade+_staging.* TO 'EduGrade+_staging_user'@'127.0.0.1';
 FLUSH PRIVILEGES;
 ```
 
@@ -393,7 +393,7 @@ Best for a production pull-only workflow.
 Generate SSH key on server:
 
 ```bash
-sudo -u edugradespro ssh-keygen -t ed25519 -C "edugradespro-production" -f /home/edugradespro/.ssh/id_ed25519
+sudo -u EduGrade+ ssh-keygen -t ed25519 -C "EduGrade+-production" -f /home/EduGrade+/.ssh/id_ed25519
 ```
 
 Then add the public key to GitHub as a **Deploy Key** for the repo.
@@ -401,7 +401,7 @@ Then add the public key to GitHub as a **Deploy Key** for the repo.
 Test it:
 
 ```bash
-sudo -u edugradespro ssh -T git@github.com
+sudo -u EduGrade+ ssh -T git@github.com
 ```
 
 ### Option B: GitHub personal access token
@@ -413,15 +413,15 @@ Works too, but deploy keys are cleaner for servers.
 ### Production
 
 ```bash
-sudo -u edugradespro git clone git@github.com:YOUR-ORG/YOUR-REPO.git /opt/edugradespro
-cd /opt/edugradespro
+sudo -u EduGrade+ git clone git@github.com:YOUR-ORG/YOUR-REPO.git /opt/edugradeplus
+cd /opt/edugradeplus
 ```
 
 ### Staging
 
 ```bash
-sudo -u edugradespro-staging git clone git@github.com:YOUR-ORG/YOUR-REPO.git /opt/edugradespro-staging
-cd /opt/edugradespro-staging
+sudo -u edugradeplus-staging git clone git@github.com:YOUR-ORG/YOUR-REPO.git /opt/edugradeplus-staging
+cd /opt/edugradeplus-staging
 ```
 
 ## 12. Python Virtual Environment
@@ -429,28 +429,28 @@ cd /opt/edugradespro-staging
 ### Production
 
 ```bash
-sudo -u edugradespro python3 -m venv /opt/edugradespro/.venv
-sudo -u edugradespro /opt/edugradespro/.venv/bin/pip install --upgrade pip
-sudo -u edugradespro /opt/edugradespro/.venv/bin/pip install -r /opt/edugradespro/requirements/production.txt
+sudo -u EduGrade+ python3 -m venv /opt/edugradeplus/.venv
+sudo -u EduGrade+ /opt/edugradeplus/.venv/bin/pip install --upgrade pip
+sudo -u EduGrade+ /opt/edugradeplus/.venv/bin/pip install -r /opt/edugradeplus/requirements/production.txt
 ```
 
 ### Staging
 
 ```bash
-sudo -u edugradespro-staging python3 -m venv /opt/edugradespro-staging/.venv
-sudo -u edugradespro-staging /opt/edugradespro-staging/.venv/bin/pip install --upgrade pip
-sudo -u edugradespro-staging /opt/edugradespro-staging/.venv/bin/pip install -r /opt/edugradespro-staging/requirements/production.txt
+sudo -u edugradeplus-staging python3 -m venv /opt/edugradeplus-staging/.venv
+sudo -u edugradeplus-staging /opt/edugradeplus-staging/.venv/bin/pip install --upgrade pip
+sudo -u edugradeplus-staging /opt/edugradeplus-staging/.venv/bin/pip install -r /opt/edugradeplus-staging/requirements/production.txt
 ```
 
 ## 13. Production Environment File
 
 Create:
 
-- `/etc/edugradespro/edugradespro.env`
+- `/etc/edugradeplus/edugradeplus.env`
 
 Start from:
 
-- [edugradespro.production.env.example](/d:/edugradespro/ops/env/edugradespro.production.env.example)
+- [edugradeplus.production.env.example](/d:/edugradeplus/ops/env/edugradeplus.production.env.example)
 
 Recommended production example:
 
@@ -464,8 +464,8 @@ DJANGO_SECURE_SSL_REDIRECT=True
 DJANGO_SECURE_HSTS_SECONDS=31536000
 
 DB_ENGINE=django.db.backends.mysql
-DB_NAME=edugradespro
-DB_USER=edugradespro_user
+DB_NAME=EduGrade+
+DB_USER=EduGrade+_user
 DB_PASSWORD=replace-with-strong-password
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -489,25 +489,25 @@ ENFORCE_SINGLE_DEVICE_SESSION=True
 MAINTENANCE_MODE=False
 ACTUAL_DATA_RESET_ALLOW_PRODUCTION=False
 ACTUAL_DATA_RESET_EXTERNAL_BACKUP_CONFIRMED=False
-DJANGO_LOG_DIR=/var/log/edugradespro
+DJANGO_LOG_DIR=/var/log/edugradeplus
 ```
 
 Protect it:
 
 ```bash
-sudo chown root:edugradespro /etc/edugradespro/edugradespro.env
-sudo chmod 640 /etc/edugradespro/edugradespro.env
+sudo chown root:EduGrade+ /etc/edugradeplus/edugradeplus.env
+sudo chmod 640 /etc/edugradeplus/edugradeplus.env
 ```
 
 ### Staging environment file
 
 Create:
 
-- `/etc/edugradespro-staging/edugradespro.env`
+- `/etc/edugradeplus-staging/edugradeplus.env`
 
 Start from:
 
-- [edugradespro.staging.env.example](/d:/edugradespro/ops/env/edugradespro.staging.env.example)
+- [edugradeplus.staging.env.example](/d:/edugradeplus/ops/env/edugradeplus.staging.env.example)
 
 Recommended staging example:
 
@@ -521,8 +521,8 @@ DJANGO_SECURE_SSL_REDIRECT=True
 DJANGO_SECURE_HSTS_SECONDS=31536000
 
 DB_ENGINE=django.db.backends.mysql
-DB_NAME=edugradespro_staging
-DB_USER=edugradespro_staging_user
+DB_NAME=EduGrade+_staging
+DB_USER=EduGrade+_staging_user
 DB_PASSWORD=replace-with-strong-password
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -545,7 +545,7 @@ ENFORCE_SINGLE_DEVICE_SESSION=True
 MAINTENANCE_MODE=False
 ACTUAL_DATA_RESET_ALLOW_PRODUCTION=False
 ACTUAL_DATA_RESET_EXTERNAL_BACKUP_CONFIRMED=False
-DJANGO_LOG_DIR=/var/log/edugradespro-staging
+DJANGO_LOG_DIR=/var/log/edugradeplus-staging
 ```
 
 After migration, create tenant-bound SIS keys with:
@@ -559,8 +559,8 @@ Store the printed token securely. Rotate by creating a replacement key and revok
 Protect it:
 
 ```bash
-sudo chown root:edugradespro-staging /etc/edugradespro-staging/edugradespro.env
-sudo chmod 640 /etc/edugradespro-staging/edugradespro.env
+sudo chown root:edugradeplus-staging /etc/edugradeplus-staging/edugradeplus.env
+sudo chmod 640 /etc/edugradeplus-staging/edugradeplus.env
 ```
 
 ## 14. First Django Bootstrap
@@ -568,48 +568,48 @@ sudo chmod 640 /etc/edugradespro-staging/edugradespro.env
 ### Production
 
 ```bash
-cd /opt/edugradespro
-sudo -u edugradespro bash -lc 'set -a; source /etc/edugradespro/edugradespro.env; set +a; /opt/edugradespro/.venv/bin/python manage.py migrate --noinput'
-sudo -u edugradespro bash -lc 'set -a; source /etc/edugradespro/edugradespro.env; set +a; /opt/edugradespro/.venv/bin/python manage.py collectstatic --noinput'
-sudo -u edugradespro bash -lc 'set -a; source /etc/edugradespro/edugradespro.env; set +a; /opt/edugradespro/.venv/bin/python manage.py check'
+cd /opt/edugradeplus
+sudo -u EduGrade+ bash -lc 'set -a; source /etc/edugradeplus/edugradeplus.env; set +a; /opt/edugradeplus/.venv/bin/python manage.py migrate --noinput'
+sudo -u EduGrade+ bash -lc 'set -a; source /etc/edugradeplus/edugradeplus.env; set +a; /opt/edugradeplus/.venv/bin/python manage.py collectstatic --noinput'
+sudo -u EduGrade+ bash -lc 'set -a; source /etc/edugradeplus/edugradeplus.env; set +a; /opt/edugradeplus/.venv/bin/python manage.py check'
 ```
 
 ### Create superuser
 
 ```bash
-sudo -u edugradespro bash -lc 'set -a; source /etc/edugradespro/edugradespro.env; set +a; /opt/edugradespro/.venv/bin/python manage.py createsuperuser'
+sudo -u EduGrade+ bash -lc 'set -a; source /etc/edugradeplus/edugradeplus.env; set +a; /opt/edugradeplus/.venv/bin/python manage.py createsuperuser'
 ```
 
 ### Staging
 
 ```bash
-cd /opt/edugradespro-staging
-sudo -u edugradespro-staging bash -lc 'set -a; source /etc/edugradespro-staging/edugradespro.env; set +a; /opt/edugradespro-staging/.venv/bin/python manage.py migrate --noinput'
-sudo -u edugradespro-staging bash -lc 'set -a; source /etc/edugradespro-staging/edugradespro.env; set +a; /opt/edugradespro-staging/.venv/bin/python manage.py collectstatic --noinput'
-sudo -u edugradespro-staging bash -lc 'set -a; source /etc/edugradespro-staging/edugradespro.env; set +a; /opt/edugradespro-staging/.venv/bin/python manage.py check'
+cd /opt/edugradeplus-staging
+sudo -u edugradeplus-staging bash -lc 'set -a; source /etc/edugradeplus-staging/edugradeplus.env; set +a; /opt/edugradeplus-staging/.venv/bin/python manage.py migrate --noinput'
+sudo -u edugradeplus-staging bash -lc 'set -a; source /etc/edugradeplus-staging/edugradeplus.env; set +a; /opt/edugradeplus-staging/.venv/bin/python manage.py collectstatic --noinput'
+sudo -u edugradeplus-staging bash -lc 'set -a; source /etc/edugradeplus-staging/edugradeplus.env; set +a; /opt/edugradeplus-staging/.venv/bin/python manage.py check'
 ```
 
 ## 15. Gunicorn systemd Service
 
 The repo already includes:
 
-- `ops/systemd/edugradespro-gunicorn.service`
-- `ops/systemd/edugradespro-staging-gunicorn.service`
+- `ops/systemd/edugradeplus-gunicorn.service`
+- `ops/systemd/edugradeplus-staging-gunicorn.service`
 
 For production:
 
 ```bash
-sudo cp /opt/edugradespro/ops/systemd/edugradespro-gunicorn.service /etc/systemd/system/edugradespro-gunicorn.service
+sudo cp /opt/edugradeplus/ops/systemd/edugradeplus-gunicorn.service /etc/systemd/system/edugradeplus-gunicorn.service
 sudo systemctl daemon-reload
-sudo systemctl enable edugradespro-gunicorn
-sudo systemctl start edugradespro-gunicorn
-sudo systemctl status edugradespro-gunicorn --no-pager
+sudo systemctl enable edugradeplus-gunicorn
+sudo systemctl start edugradeplus-gunicorn
+sudo systemctl status edugradeplus-gunicorn --no-pager
 ```
 
 Logs:
 
 ```bash
-sudo journalctl -u edugradespro-gunicorn -f
+sudo journalctl -u edugradeplus-gunicorn -f
 ```
 
 ### Staging on same server
@@ -619,52 +619,52 @@ Create a second unit by copying and editing the production one.
 Example:
 
 ```bash
-sudo cp /opt/edugradespro/ops/systemd/edugradespro-gunicorn.service /etc/systemd/system/edugradespro-staging-gunicorn.service
+sudo cp /opt/edugradeplus/ops/systemd/edugradeplus-gunicorn.service /etc/systemd/system/edugradeplus-staging-gunicorn.service
 ```
 
 Then change:
 
-- `User=edugradespro-staging`
-- `Group=edugradespro-staging`
-- `WorkingDirectory=/opt/edugradespro-staging`
-- `EnvironmentFile=/etc/edugradespro-staging/edugradespro.env`
-- `ExecStart=/opt/edugradespro-staging/.venv/bin/gunicorn ... --bind unix:/run/edugradespro-staging/gunicorn.sock`
-- `RuntimeDirectory=edugradespro-staging`
+- `User=edugradeplus-staging`
+- `Group=edugradeplus-staging`
+- `WorkingDirectory=/opt/edugradeplus-staging`
+- `EnvironmentFile=/etc/edugradeplus-staging/edugradeplus.env`
+- `ExecStart=/opt/edugradeplus-staging/.venv/bin/gunicorn ... --bind unix:/run/edugradeplus-staging/gunicorn.sock`
+- `RuntimeDirectory=edugradeplus-staging`
 
 Then enable it:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable edugradespro-staging-gunicorn
-sudo systemctl start edugradespro-staging-gunicorn
+sudo systemctl enable edugradeplus-staging-gunicorn
+sudo systemctl start edugradeplus-staging-gunicorn
 ```
 
 ## 16. Nginx Site
 
 The repo already includes:
 
-- `ops/nginx/edugradespro.conf`
-- `ops/nginx/edugradespro-staging.conf`
+- `ops/nginx/edugradeplus.conf`
+- `ops/nginx/edugradeplus-staging.conf`
 
 ### Production
 
 Copy and edit it:
 
 ```bash
-sudo cp /opt/edugradespro/ops/nginx/edugradespro.conf /etc/nginx/sites-available/edugradespro
+sudo cp /opt/edugradeplus/ops/nginx/edugradeplus.conf /etc/nginx/sites-available/EduGrade+
 ```
 
 Make sure:
 
 - `server_name` uses your real production host
-- `/static/` points to `/opt/edugradespro/staticfiles/`
-- `/media/` points to `/opt/edugradespro/media/`
-- `proxy_pass` points to `/run/edugradespro/gunicorn.sock`
+- `/static/` points to `/opt/edugradeplus/staticfiles/`
+- `/media/` points to `/opt/edugradeplus/media/`
+- `proxy_pass` points to `/run/edugradeplus/gunicorn.sock`
 
 Enable it:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/edugradespro /etc/nginx/sites-enabled/edugradespro
+sudo ln -s /etc/nginx/sites-available/EduGrade+ /etc/nginx/sites-enabled/EduGrade+
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -674,20 +674,20 @@ sudo systemctl reload nginx
 Create another site file:
 
 ```bash
-sudo cp /opt/edugradespro/ops/nginx/edugradespro.conf /etc/nginx/sites-available/edugradespro-staging
+sudo cp /opt/edugradeplus/ops/nginx/edugradeplus.conf /etc/nginx/sites-available/edugradeplus-staging
 ```
 
 Change it to:
 
 - `server_name staging-grades.yourdomain.com`
-- `/static/ -> /opt/edugradespro-staging/staticfiles/`
-- `/media/ -> /opt/edugradespro-staging/media/`
-- `proxy_pass -> /run/edugradespro-staging/gunicorn.sock`
+- `/static/ -> /opt/edugradeplus-staging/staticfiles/`
+- `/media/ -> /opt/edugradeplus-staging/media/`
+- `proxy_pass -> /run/edugradeplus-staging/gunicorn.sock`
 
 Enable it:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/edugradespro-staging /etc/nginx/sites-enabled/edugradespro-staging
+sudo ln -s /etc/nginx/sites-available/edugradeplus-staging /etc/nginx/sites-enabled/edugradeplus-staging
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -728,13 +728,13 @@ After TLS is enabled, confirm:
 
 The repo already includes:
 
-- `ops/cron/edugradespro.cron`
+- `ops/cron/edugradeplus.cron`
 
 ### Production
 
 ```bash
-sudo -u edugradespro crontab /opt/edugradespro/ops/cron/edugradespro.cron
-sudo -u edugradespro crontab -l
+sudo -u EduGrade+ crontab /opt/edugradeplus/ops/cron/edugradeplus.cron
+sudo -u EduGrade+ crontab -l
 ```
 
 Current scheduled jobs:
@@ -767,7 +767,7 @@ Check:
 7. one Faculty class page
 8. one grading summary page
 9. one import page
-10. cron logs under `/var/log/edugradespro/`
+10. cron logs under `/var/log/edugradeplus/`
 
 ### Staging
 
@@ -817,7 +817,7 @@ The repo already includes:
 Use it:
 
 ```bash
-sudo bash /opt/edugradespro/ops/scripts/deploy_release.sh
+sudo bash /opt/edugradeplus/ops/scripts/deploy_release.sh
 ```
 
 It currently:
@@ -845,13 +845,13 @@ Do not go live without backups.
 ### MariaDB backup example
 
 ```bash
-mysqldump -u edugradespro_user -p --databases edugradespro > edugradespro_backup.sql
+mysqldump -u EduGrade+_user -p --databases EduGrade+ > EduGrade+_backup.sql
 ```
 
 ### Media backup example
 
 ```bash
-tar -czf edugradespro_media_backup.tar.gz /opt/edugradespro/media
+tar -czf EduGrade+_media_backup.tar.gz /opt/edugradeplus/media
 ```
 
 Keep:
@@ -862,9 +862,9 @@ Keep:
 
 ## 23. Production Incident Response
 
-If EduGradesPro shows live errors in production, use:
+If EduGrade+ shows live errors in production, use:
 
-- [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradespro/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
+- [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradeplus/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
 
 Use the incident runbook for:
 

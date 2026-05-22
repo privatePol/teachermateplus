@@ -144,7 +144,7 @@ class FacultyReminderService:
     @classmethod
     def _build_email_payload(cls, reminder: FacultyReminder):
         portal_url = cls._portal_url("faculty_portal:reminder_center")
-        subject = f"NCBA-EDUGRADESPRO: {reminder.title}"
+        subject = f"NCBA-EduGrade+: {reminder.title}"
         logo_context = build_email_logo_context(
             filename="ncba-logo.png",
             cid="ncba-logo",
@@ -368,7 +368,7 @@ class FacultyReminderService:
             entry.attempt_count += 1
             entry.save(update_fields=["status", "last_attempt_at", "attempt_count", "updated_at"])
             try:
-                from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
+                from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
                 message = EmailMultiAlternatives(
                     subject=entry.subject,
                     body=entry.text_body,
@@ -705,7 +705,7 @@ class SubmissionNonComplianceNoticeService:
         }
         text_body = render_to_string("notifications/emails/submission_non_compliance_notice.txt", context)
         html_body = render_to_string("notifications/emails/submission_non_compliance_notice.html", context)
-        subject = f"NCBA-EDUGRADESPRO: {notice.title} - {notice.template_period.name}"
+        subject = f"NCBA-EduGrade+: {notice.title} - {notice.template_period.name}"
         return subject, text_body, html_body
 
     @classmethod
@@ -721,7 +721,7 @@ class SubmissionNonComplianceNoticeService:
             return False
         subject, text_body, html_body = cls._build_email_payload(notice=notice)
         try:
-            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@edugradespro.local")
+            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
             message = EmailMultiAlternatives(
                 subject=subject,
                 body=text_body,

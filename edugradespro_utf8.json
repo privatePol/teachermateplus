@@ -8097,7 +8097,7 @@
       "total_rows": 0,
       "valid_rows": 0,
       "invalid_rows": 0,
-      "filename": "edugradespro_courses_w_records.csv"
+      "filename": "EduGrade+_courses_w_records.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T06:22:03.222Z"
@@ -8125,7 +8125,7 @@
       "total_rows": 417,
       "valid_rows": 415,
       "invalid_rows": 2,
-      "filename": "edugradespro_courses_w_records.csv"
+      "filename": "EduGrade+_courses_w_records.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T06:22:41.527Z"
@@ -8153,7 +8153,7 @@
       "total_rows": 416,
       "valid_rows": 415,
       "invalid_rows": 1,
-      "filename": "edugradespro_courses_w_records.csv"
+      "filename": "EduGrade+_courses_w_records.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T06:23:24.356Z"
@@ -8395,7 +8395,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T06:57:29.399Z"
@@ -8591,7 +8591,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T07:00:10.256Z"
@@ -8642,7 +8642,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T07:31:02.827Z"
@@ -8670,7 +8670,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T07:38:49.823Z"
@@ -8698,7 +8698,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T07:41:36.113Z"
@@ -8726,7 +8726,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T07:42:53.462Z"
@@ -8754,7 +8754,7 @@
       "total_rows": 0,
       "valid_rows": 0,
       "invalid_rows": 0,
-      "filename": "edugradespro_SECTIONS.csv"
+      "filename": "EduGrade+_SECTIONS.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T08:06:10.023Z"
@@ -8782,7 +8782,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T08:09:08.449Z"
@@ -8882,7 +8882,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T08:11:43.647Z"
@@ -8910,7 +8910,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T08:14:22.084Z"
@@ -8975,7 +8975,7 @@
       "total_rows": 402,
       "valid_rows": 363,
       "invalid_rows": 39,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T08:15:30.427Z"
@@ -9101,7 +9101,7 @@
       "total_rows": 402,
       "valid_rows": 363,
       "invalid_rows": 39,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T08:31:33.416Z"
@@ -9160,7 +9160,7 @@
       "total_rows": 402,
       "valid_rows": 0,
       "invalid_rows": 402,
-      "filename": "edugradespro_course_offerings.csv"
+      "filename": "EduGrade+_course_offerings.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T08:33:17.573Z"
@@ -10689,7 +10689,7 @@
       "total_rows": 0,
       "valid_rows": 0,
       "invalid_rows": 0,
-      "filename": "edugradespro_enrollment.csv"
+      "filename": "EduGrade+_enrollment.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T14:40:28.633Z"
@@ -10717,7 +10717,7 @@
       "total_rows": 25,
       "valid_rows": 0,
       "invalid_rows": 25,
-      "filename": "edugradespro_enrollment.csv"
+      "filename": "EduGrade+_enrollment.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T14:40:55.970Z"
@@ -10745,7 +10745,7 @@
       "total_rows": 25,
       "valid_rows": 0,
       "invalid_rows": 25,
-      "filename": "edugradespro_enrollment.csv"
+      "filename": "EduGrade+_enrollment.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T14:41:33.587Z"
@@ -11303,7 +11303,7 @@
       "total_rows": 25,
       "valid_rows": 25,
       "invalid_rows": 0,
-      "filename": "edugradespro_enrollment.csv"
+      "filename": "EduGrade+_enrollment.csv"
     },
     "metadata_json": {},
     "created_at": "2026-03-21T14:52:37.796Z"
@@ -18552,7 +18552,7 @@
       "last_login": "2026-03-31T01:41:04.179903+00:00",
       "is_superuser": true,
       "username": "superadmin",
-      "email": "superadmin@local.edugradespro",
+      "email": "superadmin@local.EduGrade+",
       "first_name": "",
       "last_name": "",
       "middle_name": null,
@@ -18572,7 +18572,7 @@
       "last_login": "2026-03-31T01:41:04.179903+00:00",
       "is_superuser": true,
       "username": "superadmin",
-      "email": "superadmin@local.edugradespro",
+      "email": "superadmin@local.EduGrade+",
       "first_name": "",
       "last_name": "",
       "middle_name": null,
@@ -18670,7 +18670,7 @@
       "last_login": "2026-03-31T01:41:04.179903+00:00",
       "is_superuser": true,
       "username": "superadmin",
-      "email": "superadmin@local.edugradespro",
+      "email": "superadmin@local.EduGrade+",
       "first_name": "",
       "last_name": "",
       "middle_name": null,
@@ -130976,7 +130976,7 @@
     "campus": null,
     "department": null,
     "code": "EL322-ELECT",
-    "title": "Elective: Teaching Multi –Grade Classes",
+    "title": "Elective: Teaching Multi ï¿½Grade Classes",
     "units": "3.00",
     "course_type": null,
     "default_base_value": "50.00"
@@ -145283,7 +145283,7 @@
     "student_no": "2025-10102",
     "last_name": "ARCILLA",
     "first_name": "JANICA MARGOE",
-    "middle_name": "IÑEGO",
+    "middle_name": "Iï¿½EGO",
     "sex": null,
     "year_level": "1",
     "status": "ACTIVE"
@@ -152329,8 +152329,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATION_FAILED",
-    "source_file": "imports/2026/03/edugradespro_courses_w_records.csv",
-    "original_filename": "edugradespro_courses_w_records.csv",
+    "source_file": "imports/2026/03/EduGrade+_courses_w_records.csv",
+    "original_filename": "EduGrade+_courses_w_records.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -152380,8 +152380,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_courses_w_records_6nAmf7y.csv",
-    "original_filename": "edugradespro_courses_w_records.csv",
+    "source_file": "imports/2026/03/EduGrade+_courses_w_records_6nAmf7y.csv",
+    "original_filename": "EduGrade+_courses_w_records.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -152448,8 +152448,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "CONFIRMED",
-    "source_file": "imports/2026/03/edugradespro_courses_w_records_fkDrqXY.csv",
-    "original_filename": "edugradespro_courses_w_records.csv",
+    "source_file": "imports/2026/03/EduGrade+_courses_w_records_fkDrqXY.csv",
+    "original_filename": "EduGrade+_courses_w_records.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -152595,8 +152595,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -152699,8 +152699,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_FVPdiMs.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_FVPdiMs.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -152803,8 +152803,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_VfWqiix.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_VfWqiix.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -152872,8 +152872,8 @@
     "tenant": null,
     "campus": null,
     "status": "CONFIRMED",
-    "source_file": "imports/2026/03/edugradespro_SECTIONS_CCajkHm.csv",
-    "original_filename": "edugradespro_SECTIONS.csv",
+    "source_file": "imports/2026/03/EduGrade+_SECTIONS_CCajkHm.csv",
+    "original_filename": "EduGrade+_SECTIONS.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -152935,8 +152935,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_bHvx7NJ.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_bHvx7NJ.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153004,8 +153004,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_yrVwon7.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_yrVwon7.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153073,8 +153073,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_mXMqXgo.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_mXMqXgo.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153142,8 +153142,8 @@
     "tenant": null,
     "campus": null,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_SECTIONS_31oUW3P.csv",
-    "original_filename": "edugradespro_SECTIONS.csv",
+    "source_file": "imports/2026/03/EduGrade+_SECTIONS_31oUW3P.csv",
+    "original_filename": "EduGrade+_SECTIONS.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153206,8 +153206,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_SECTIONS_s5ngsNY.csv",
-    "original_filename": "edugradespro_SECTIONS.csv",
+    "source_file": "imports/2026/03/EduGrade+_SECTIONS_s5ngsNY.csv",
+    "original_filename": "EduGrade+_SECTIONS.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153273,8 +153273,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_kjhPc23.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_kjhPc23.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153379,8 +153379,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_rYCatvH.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_rYCatvH.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153485,8 +153485,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_2KGwgkp.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_2KGwgkp.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153591,8 +153591,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_ffNG3xe.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_ffNG3xe.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153798,8 +153798,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "CONFIRMED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_ULFitIy.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_ULFitIy.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -153908,8 +153908,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_course_offerings_WohEWsK.csv",
-    "original_filename": "edugradespro_course_offerings.csv",
+    "source_file": "imports/2026/03/EduGrade+_course_offerings_WohEWsK.csv",
+    "original_filename": "EduGrade+_course_offerings.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -154014,8 +154014,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATION_FAILED",
-    "source_file": "imports/2026/03/edugradespro_enrollment.csv",
-    "original_filename": "edugradespro_enrollment.csv",
+    "source_file": "imports/2026/03/EduGrade+_enrollment.csv",
+    "original_filename": "EduGrade+_enrollment.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -154069,8 +154069,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_enrollment_kJOjcLD.csv",
-    "original_filename": "edugradespro_enrollment.csv",
+    "source_file": "imports/2026/03/EduGrade+_enrollment_kJOjcLD.csv",
+    "original_filename": "EduGrade+_enrollment.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -154179,8 +154179,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "VALIDATED",
-    "source_file": "imports/2026/03/edugradespro_enrollment_HMIifqk.csv",
-    "original_filename": "edugradespro_enrollment.csv",
+    "source_file": "imports/2026/03/EduGrade+_enrollment_HMIifqk.csv",
+    "original_filename": "EduGrade+_enrollment.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -154289,8 +154289,8 @@
     "tenant": 1,
     "campus": 4,
     "status": "CONFIRMED",
-    "source_file": "imports/2026/03/edugradespro_enrollment_K068LXY.csv",
-    "original_filename": "edugradespro_enrollment.csv",
+    "source_file": "imports/2026/03/EduGrade+_enrollment_K068LXY.csv",
+    "original_filename": "EduGrade+_enrollment.csv",
     "expected_headers_json": [
       "tenant_code",
       "campus_code",
@@ -158830,7 +158830,7 @@
       "campus_code": "",
       "department_code": "",
       "course_code": "EL322-ELECT",
-      "course_title": "Elective: Teaching Multi –Grade Classes",
+      "course_title": "Elective: Teaching Multi ï¿½Grade Classes",
       "units": "3",
       "course_type": "",
       "default_base_value": "50",
@@ -158841,7 +158841,7 @@
       "campus_id": null,
       "department_id": null,
       "code": "EL322-ELECT",
-      "title": "Elective: Teaching Multi –Grade Classes",
+      "title": "Elective: Teaching Multi ï¿½Grade Classes",
       "units": "3",
       "course_type": null,
       "default_base_value": "50",
@@ -173808,7 +173808,7 @@
       "campus_code": "",
       "department_code": "",
       "course_code": "EL322-ELECT",
-      "course_title": "Elective: Teaching Multi –Grade Classes",
+      "course_title": "Elective: Teaching Multi ï¿½Grade Classes",
       "units": "3",
       "course_type": "",
       "default_base_value": "50",
@@ -173819,7 +173819,7 @@
       "campus_id": null,
       "department_id": null,
       "code": "EL322-ELECT",
-      "title": "Elective: Teaching Multi –Grade Classes",
+      "title": "Elective: Teaching Multi ï¿½Grade Classes",
       "units": "3",
       "course_type": null,
       "default_base_value": "50",
@@ -422994,7 +422994,7 @@
       "student_no": "2025-10102",
       "student_last_name": "ARCILLA",
       "student_first_name": "JANICA MARGOE",
-      "student_middle_name": "IÑEGO",
+      "student_middle_name": "Iï¿½EGO",
       "student_sex": "",
       "student_year_level": "",
       "course_code": "A132-ITAPPS",
@@ -423013,7 +423013,7 @@
       "student_payload": {
         "last_name": "ARCILLA",
         "first_name": "JANICA MARGOE",
-        "middle_name": "IÑEGO",
+        "middle_name": "Iï¿½EGO",
         "sex": null,
         "year_level": null
       },
@@ -424269,7 +424269,7 @@
       "student_no": "2025-10102",
       "student_last_name": "ARCILLA",
       "student_first_name": "JANICA MARGOE",
-      "student_middle_name": "IÑEGO",
+      "student_middle_name": "Iï¿½EGO",
       "student_sex": "",
       "student_year_level": "",
       "course_code": "A132-ITAPPS",
@@ -424288,7 +424288,7 @@
       "student_payload": {
         "last_name": "ARCILLA",
         "first_name": "JANICA MARGOE",
-        "middle_name": "IÑEGO",
+        "middle_name": "Iï¿½EGO",
         "sex": null,
         "year_level": null
       },
@@ -425544,7 +425544,7 @@
       "student_no": "2025-10102",
       "student_last_name": "ARCILLA",
       "student_first_name": "JANICA MARGOE",
-      "student_middle_name": "IÑEGO",
+      "student_middle_name": "Iï¿½EGO",
       "student_sex": "",
       "student_year_level": "",
       "course_code": "A132-ITAPPS",
@@ -425563,7 +425563,7 @@
       "student_payload": {
         "last_name": "ARCILLA",
         "first_name": "JANICA MARGOE",
-        "middle_name": "IÑEGO",
+        "middle_name": "Iï¿½EGO",
         "sex": null,
         "year_level": null
       },

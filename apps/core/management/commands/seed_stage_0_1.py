@@ -8,7 +8,7 @@ from apps.tenants.models import Campus, Department, Program, SystemSetting, Tena
 
 
 class Command(BaseCommand):
-    help = "Seed EduGradesPro Stage 0.1 baseline data (idempotent)."
+    help = "Seed EduGrade+ Stage 0.1 baseline data (idempotent)."
 
     roles = [
         ("SUPER_ADMIN", "Super Admin"),
@@ -886,7 +886,7 @@ class Command(BaseCommand):
 
         User = get_user_model()
         default_username = "superadmin"
-        default_email = "superadmin@local.edugradespro"
+        default_email = "superadmin@local.EduGrade+"
         default_password = "Admin@12345"
 
         user, created = User.objects.get_or_create(

@@ -1,10 +1,10 @@
 # Tenant Grading Profile Setup Guide
 
-This guide explains how to configure EduGradesPro grading templates, course-template assignments, tenant grading profiles, and term-type rules for NCBA-style regular and summer grading.
+This guide explains how to configure EduGrade+ grading templates, course-template assignments, tenant grading profiles, and term-type rules for NCBA-style regular and summer grading.
 
 ## Purpose
 
-EduGradesPro separates grading setup into two related layers:
+EduGrade+ separates grading setup into two related layers:
 
 1. **Grading Templates**
    - define the grading structure
@@ -114,7 +114,7 @@ Example:
 
 Important behavior:
 
-EduGradesPro checks course-template assignments before using a grading profile to choose a template.
+EduGrade+ checks course-template assignments before using a grading profile to choose a template.
 
 Resolution order for template selection:
 
@@ -163,7 +163,7 @@ Instead, use Tenant Grading Profiles:
 | Regular CS Laboratory - General | blank / all campuses | default laboratory template |
 | Regular CS Laboratory - Taytay | Taytay | Computer Science Laboratory template |
 
-This allows EduGradesPro to choose the Taytay-specific template only for Taytay offerings.
+This allows EduGrade+ to choose the Taytay-specific template only for Taytay offerings.
 
 ## Tenant Grading Profile Setup
 
@@ -258,7 +258,7 @@ then use:
 Final Grade Formula Mode = Average All Active Template Periods
 ```
 
-This is the cleanest Summer setup because EduGradesPro will average only the active periods in the Summer template:
+This is the cleanest Summer setup because EduGrade+ will average only the active periods in the Summer template:
 
 ```text
 Final Grade = (Midterm + Pre-Final + Final Exam) / 3
@@ -429,9 +429,9 @@ FINAL=33.33
 
 because the weighted profile form expects the total to be exactly `100.00`, and those three values total only `99.99`.
 
-## How EduGradesPro Resolves The Profile
+## How EduGrade+ Resolves The Profile
 
-When computing grades for a course offering, EduGradesPro resolves the matching grading profile using this priority:
+When computing grades for a course offering, EduGrade+ resolves the matching grading profile using this priority:
 
 1. Course match
 2. Course type match
@@ -456,7 +456,7 @@ Course-template assignment controls the template selected for a course.
 
 Tenant grading profile controls final-grade formula, base value, and passing threshold for the matching scope.
 
-Even when a course-template assignment supplies the template, EduGradesPro can still use the matching grading profile to determine the final-grade formula.
+Even when a course-template assignment supplies the template, EduGrade+ can still use the matching grading profile to determine the final-grade formula.
 
 Recommended pattern:
 

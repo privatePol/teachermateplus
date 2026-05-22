@@ -47,11 +47,14 @@ class FeatureSettingsService:
     SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS"
     SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES"
     SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS"
+    GRADE_DEADLINE_ENFORCEMENT_POLICY_KEY = "FEATURE_GRADE_DEADLINE_ENFORCEMENT_POLICY"
     STUDENT_PORTAL_ENABLED_KEY = "FEATURE_STUDENT_PORTAL_ENABLED"
     STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY = "FEATURE_STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION"
     STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION_KEY = "FEATURE_STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION"
     STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY = "FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED"
     SIS_PERIODIC_GRADES_API_ENABLED_KEY = "FEATURE_SIS_PERIODIC_GRADES_API_ENABLED"
+    GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY = "COMPLIANCE_ONLY"
+    GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN = "AUTO_CLOSE_REQUIRES_REOPEN"
 
     @staticmethod
     def _positive_int(value, *, default: int, minimum: int = 0) -> int:
@@ -667,6 +670,34 @@ class FeatureSettingsService:
         if not isinstance(value, list):
             return []
         return [str(item).strip() for item in value if str(item).strip()]
+
+    @classmethod
+    def get_grade_deadline_enforcement_policy(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: str = GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY,
+    ) -> str:
+        value = str(
+            SystemSettingService.get(
+                cls.GRADE_DEADLINE_ENFORCEMENT_POLICY_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+            or default
+        ).strip().upper()
+        allowed = {
+            cls.GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY,
+            cls.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN,
+        }
+        return value if value in allowed else default
+
+    @classmethod
+    def is_grade_deadline_auto_close_enabled(cls, *, tenant_id: int | None) -> bool:
+        return (
+            cls.get_grade_deadline_enforcement_policy(tenant_id=tenant_id)
+            == cls.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN
+        )
 
     @classmethod
     def can_user_access_grade_prediction(cls, *, user, tenant_id: int | None) -> bool:

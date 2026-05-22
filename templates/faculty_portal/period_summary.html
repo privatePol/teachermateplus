@@ -476,6 +476,15 @@
     This period is locked by academic governance.
   {% endif %}
 </div>
+{% elif is_auto_closed_after_deadline %}
+<div class="alert alert-danger no-print">
+  Encoding closed automatically because the submission deadline already passed.
+  {% if pending_reopen_request %}
+    Your reopen request is pending admin review.
+  {% elif can_request_deadline_reopen %}
+    You may submit if the gradebook is already complete, or request campus admin reopen below if more encoding is needed.
+  {% endif %}
+</div>
 {% elif is_non_compliant %}
 <div class="alert alert-danger no-print">
   Submission deadline already passed for this period. You may continue encoding until you submit, but this class is already listed in the non-compliance monitor for authorized academic users.
@@ -587,6 +596,18 @@
       </button>
     </form>
     {% endif %}
+    {% if can_request_deadline_reopen %}
+    <div class="border-top mt-3 pt-3">
+      <button class="btn btn-outline-warning" type="button" data-bs-toggle="modal" data-bs-target="#deadlineReopenRequestModal">
+        Request Gradebook Reopen
+      </button>
+      <div class="form-text">Use this when the deadline closed encoding and the gradebook still needs activities, scores, or attendance records.</div>
+    </div>
+    {% elif pending_reopen_request %}
+    <div class="alert alert-warning py-2 mt-3 mb-0">
+      Reopen request #{{ pending_reopen_request.id }} is pending admin review.
+    </div>
+    {% endif %}
   </div>
 </div>
 
@@ -655,6 +676,29 @@
     });
   });
 </script>
+{% endif %}
+
+{% if can_request_deadline_reopen %}
+<div class="modal fade" id="deadlineReopenRequestModal" tabindex="-1" aria-labelledby="deadlineReopenRequestModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content" method="post" action="{% url 'faculty_portal:period_reopen_request' offering.id period.id %}">
+      {% csrf_token %}
+      <div class="modal-header">
+        <h5 class="modal-title" id="deadlineReopenRequestModalLabel">Request Gradebook Reopen</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">Explain why this period needs to be reopened after the deadline.</p>
+        <label class="form-label" for="deadline-reopen-justification">Justification</label>
+        <textarea id="deadline-reopen-justification" class="form-control" name="justification" rows="4" required maxlength="1000" placeholder="Example: One required activity was not encoded before the deadline because..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-warning">Submit Request</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% endif %}
 
 {% if not can_view_gradebook_summary %}

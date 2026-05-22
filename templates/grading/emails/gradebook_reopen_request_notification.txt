@@ -1,0 +1,16 @@
+{{ school_name }}
+
+{{ subject_message }}
+
+Reference No.: {{ reference_no }}
+Campus: {{ campus_name }}
+Class: {{ course_title }} ({{ course_code }}) / {{ section_name }}
+Period: {{ period_name }}
+Requested by: {{ requester_name }}
+Requested at: {{ submitted_at|date:"Y-m-d H:i" }}
+Current gradebook status: {{ submission_status }}
+
+Justification:
+{{ justification }}
+
+Please review this request in Admin Portal -> Grading -> Submission Reopen Requests.

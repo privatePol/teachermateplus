@@ -1,6 +1,6 @@
 # Live Production Update Guide
 
-Use this guide **after EduGradesPro is officially live**.
+Use this guide **after EduGrade+ is officially live**.
 
 This is different from the testing-phase guide. Once production is live, do **not** replace the production database with a development database, and do **not** run broad seed or reset commands unless there is a planned, approved maintenance activity.
 
@@ -46,7 +46,7 @@ Tell users when the system may be unavailable.
 Recommended message:
 
 ```text
-EduGradesPro will undergo maintenance on [date/time]. Please save your work and avoid encoding grades during the maintenance window.
+EduGrade+ will undergo maintenance on [date/time]. Please save your work and avoid encoding grades during the maintenance window.
 ```
 
 ### 2. Check Current Git State
@@ -219,13 +219,13 @@ Restart the service based on your hosting setup.
 Examples:
 
 ```powershell
-Restart-Service edugradespro
+Restart-Service EduGrade+
 ```
 
 or, on Linux:
 
 ```bash
-sudo systemctl restart edugradespro
+sudo systemctl restart EduGrade+
 sudo systemctl restart nginx
 ```
 

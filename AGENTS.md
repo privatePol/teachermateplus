@@ -1,10 +1,10 @@
 # AGENTS.md
 
 ## Purpose
-This file is the working contract for humans and coding agents contributing to **EduGradesPro V1**.
+This file is the working contract for humans and coding agents contributing to **EduGrade+ V1**.
 
 ## Project Identity
-- Product: **EduGradesPro V1**
+- Product: **EduGrade+ V1**
 - Domain: Multi-tenant, multi-campus academic grading platform
 - Primary portals:
   - **Admin Portal** (`/admin-portal/`)
@@ -47,7 +47,7 @@ This file is the working contract for humans and coding agents contributing to *
 ## Documentation Update Rule
 When changing behavior, also update:
 1. `CHANGE_LOG.md`
-2. `EDUGRADESPRO_CONTEXT.md`
+2. `EduGrade+_CONTEXT.md`
 3. Faculty/Admin guide pages if user-facing behavior changed
 
 ## Commit Message Pattern (Recommended)

@@ -1,6 +1,6 @@
 # Role-Based UAT Test Scenarios
 
-Use these scenarios to verify EduGradesPro role scope, campus scope, department/area scope, Faculty Portal access, Admin Portal monitoring, gradebook visibility, analytics visibility, and correction approval routing.
+Use these scenarios to verify EduGrade+ role scope, campus scope, department/area scope, Faculty Portal access, Admin Portal monitoring, gradebook visibility, analytics visibility, and correction approval routing.
 
 These scenarios are written for NCBA multi-campus testing across:
 

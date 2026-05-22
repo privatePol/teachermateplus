@@ -1,6 +1,6 @@
-# EduGradesPro Institution Implementation Reference
+# EduGrade+ Institution Implementation Reference
 
-This guide is for the superadmin or lead administrator who will prepare EduGradesPro for use in a real institution.
+This guide is for the superadmin or lead administrator who will prepare EduGrade+ for use in a real institution.
 
 Use it before opening the Faculty Portal for grade encoding. It explains:
 
@@ -10,7 +10,7 @@ Use it before opening the Faculty Portal for grade encoding. It explains:
 - the recommended order of setup
 - the governance checks that protect grades, permissions, corrections, and audit records
 
-EduGradesPro is strict about scope. Most records are tied to a tenant, campus, department, academic year, term, course, section, or offering. This is intentional. It protects multi-campus data and helps academic officers see only the records they are allowed to manage.
+EduGrade+ is strict about scope. Most records are tied to a tenant, campus, department, academic year, term, course, section, or offering. This is intentional. It protects multi-campus data and helps academic officers see only the records they are allowed to manage.
 
 ## 1. The Goal of Implementation
 
@@ -573,7 +573,7 @@ Encode:
 
 Why this matters:
 
-EduGradesPro checks course template assignments before using profile fallback rules.
+EduGrade+ checks course template assignments before using profile fallback rules.
 
 Template resolution order:
 
@@ -743,7 +743,7 @@ Recommended:
 - Configure a tenant default route.
 - Add department-specific routes only when a department has a different approval path.
 - Keep `MANUAL_ONLY` if the institution still requires paper forms.
-- Use `SYSTEM_REQUEST` if EduGradesPro will manage correction petitions and approvals.
+- Use `SYSTEM_REQUEST` if EduGrade+ will manage correction petitions and approvals.
 
 ### 6.5 Template Governance
 
@@ -1250,7 +1250,7 @@ Rules:
 
 ### 10.7 Inactive Records
 
-EduGradesPro uses active/inactive records for safety.
+EduGrade+ uses active/inactive records for safety.
 
 Operational screens normally use active records only.
 
@@ -1382,7 +1382,7 @@ If this pilot class works, repeat the same check for each campus and each major 
 
 ## 14. Simple Mental Model
 
-Think of EduGradesPro setup as a chain.
+Think of EduGrade+ setup as a chain.
 
 ```text
 Tenant
