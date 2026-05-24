@@ -4049,6 +4049,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Quick Jump:")
         self.assertContains(response, "You have unsaved encoded scores. If you leave this page, the encoded data will be lost. Continue?")
+        self.assertContains(response, 'event.key === "Enter"')
         self.assertContains(
             response,
             reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),

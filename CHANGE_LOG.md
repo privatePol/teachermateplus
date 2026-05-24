@@ -48,6 +48,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Email notifications now use the standardized `NCBA | EduGradePlus: <Message>` subject prefix, the NCBA logo from `media/logos/ncba-logo.png`, green-to-yellow card headers, and no embedded Data Privacy Notice block.
 - Login Security in Configuration Management now includes a tenant-level one-session login control. When enabled, a new login signs out the same user from other browsers/devices; when disabled, simultaneous sessions are allowed.
 - Faculty My Classes pending assignments now show only the Accept Assignment action; clarification or wrong-load concerns should be handled with admin before acceptance.
+- Faculty Portal activity score encoding now ignores the Enter key inside score input fields to prevent accidental form submission while faculty are encoding grades.
 - Faculty period cards now use one shared sticky guidance note, show lightweight subcomponent/detail activity metric cards per period, keep action icons at the bottom, and display submission deadlines as month-day-year dates.
 - Faculty Summary Period Snapshot is collapsed by default and simplified to fewer cards. Submission deadlines now show month-day-year dates plus a countdown, and the gradebook header shows the campus name instead of the campus code.
 - Faculty Portal Student Intervention Monitor sidebar visibility now follows the same Grade Prediction tenant feature and role-access checks as the prediction pages, so the link is hidden when prediction is disabled or the user role is not allowed.

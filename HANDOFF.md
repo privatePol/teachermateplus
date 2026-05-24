@@ -123,6 +123,9 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
   - Authorized admins can search a scoped student, select Academic Year and Term, and view consolidated enrollment rows with period grades, submission status, final grade, and encoded activity-score details.
   - Added audit event `VIEW_STUDENT_ENROLLMENT_QUERY` whenever a selected student/AY/term query is opened.
   - Added RBAC and navigation seed migrations so the page appears under the Admin Portal Students menu for authorized users.
+- Faculty activity score encoding:
+  - Disabled Enter-key form submission inside activity score inputs on `/faculty/my-courses/<offering>/periods/<period>/activities/<activity>/scores/`.
+  - Faculty must click `Save Scores`, reducing accidental saves while encoding grades row by row.
   - Default monitor now focuses on Student, Class / Period, Current Standing, Main Concern, Suggested Intervention, and Action.
   - Default monitor no longer shows likely-fail wording, prediction confidence, coverage percentage, projected final grade, or possible final-grade warning language.
   - Technical projection details remain on the separate prediction/analytics pages, with `Advanced Analytics` shown only when the user has `faculty_analytics.read`.
@@ -246,6 +249,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - The intervention monitor default view excludes `On Track` rows unless the faculty explicitly selects the On Track filter.
 - Student Enrollment Query is read-only and scoped through Admin Portal student visibility plus tenant/campus enrollment filters. It does not create or recompute grades.
 - `student_enrollment_query.read` is the permission to grant if an admin user should be able to open the consolidated one-student enrollment/grade lookup.
+- Activity score encoding intentionally blocks Enter-key submission only inside score inputs. It does not block clicking `Save Scores`.
 
 ## Pending Work
 - Continue with the next management/academic-head demo adjustment from the user.
@@ -267,6 +271,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Browser smoke tests were not run for the role-permissions Critical Access Safeguard visibility change; validation was command/test based.
 - Browser smoke tests were not run for the Admin Guide layout/wording change because the Browser tool was not callable in this session; validation was command/render based.
 - Browser smoke tests were not run for the new Admin Student Enrollment Query; validation was command/test based.
+- Browser smoke tests were not run for the Faculty activity-score Enter-key guard; validation was command/render-test based.
 - Browser smoke tests were not run for the Active Grading Period setup change; validation was command/test/data-inspection based.
 - Google Drive access depends on the institution's Google Workspace sharing settings. Faculty must use an allowed school Google account if the file is domain-restricted.
 - Email styling was validated by template rendering and focused email tests, not by opening emails in a real email client.
@@ -320,6 +325,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - [x] Required Faculty Portal assignment test suite - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance` (95 tests)
 - [x] Reopen/faculty combined regression suite - passed: `python manage.py test apps.admin_portal.tests_reopen_requests apps.faculty_portal.tests_assignment_acceptance` (104 tests)
 - [x] Admin Student Enrollment Query focused tests - passed: `python manage.py test apps.admin_portal.tests_student_enrollment_query` (2 tests)
+- [x] Faculty activity-score Enter-key guard focused test - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_activity_scores_shows_quick_jump_links_and_unsaved_warning_copy`
 - [x] Default monitor banned-term scan - passed: `rg -n "below passing|failing|likely to fail|possible final grade below passing|prediction confidence|coverage percentage|projected final grade|class ranking" templates\faculty_portal\student_at_risk_monitor.html templates\faculty_portal\dashboard.html apps\faculty_portal\services.py apps\faculty_portal\views.py` returned no matches.
 - [x] Admin Guide Grade Prediction enablement render check - passed: rendered `/admin-portal/guide/` with HTTP 200 and confirmed the Grade Prediction / At-Risk Monitor setup checklist is present.
 - [x] Email template render check - passed: rendered 9 touched HTML email templates and confirmed the green/yellow header pattern and no `Data Privacy Notice` text in those email templates.

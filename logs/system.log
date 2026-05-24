@@ -2643,3 +2643,27 @@
 2026-05-24 18:55:35,556 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
 2026-05-24 18:55:36,278 INFO [django.utils.autoreload] Watching for file changes with StatReloader
 2026-05-24 22:06:24,352 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-24 22:06:35,714 INFO [django.server] "GET /admin-portal/ HTTP/1.1" 302 0
+2026-05-24 22:06:35,755 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 3795
+2026-05-24 22:06:35,966 INFO [django.server] "GET /media/logos/edugradepro_logo.png HTTP/1.1" 200 2211507
+2026-05-24 22:06:36,004 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 72632
+2026-05-24 22:06:49,894 WARNING [django.server] "GET /admin-portal/ HTTP/1.1" 403 27
+2026-05-24 22:06:53,272 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
+2026-05-24 22:06:54,603 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 67920
+2026-05-24 22:06:54,879 INFO [django.server] "GET /media/logos/edugradeplus_logo.png HTTP/1.1" 200 2244225
+2026-05-24 22:06:54,937 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 72632
+2026-05-24 22:07:01,710 INFO [django.server] "GET /admin-portal/students/enrollment-query/ HTTP/1.1" 200 48048
+2026-05-24 22:07:12,124 INFO [django.server] "GET /admin-portal/students/ HTTP/1.1" 200 61617
+2026-05-24 22:07:24,953 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27215
+2026-05-24 22:07:25,216 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
+2026-05-24 22:07:25,288 INFO [django.server] "GET /media/imahe/techsupp.jpg HTTP/1.1" 200 1100794
+2026-05-24 22:07:25,376 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
+2026-05-24 22:07:34,172 INFO [django.server] "POST /faculty/login/ HTTP/1.1" 302 0
+2026-05-24 22:07:34,744 INFO [django.server] "GET /faculty/dashboard/ HTTP/1.1" 200 47174
+2026-05-24 22:07:40,368 INFO [django.server] - Broken pipe from ('127.0.0.1', 58860)
+2026-05-24 22:07:40,596 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 40107
+2026-05-24 22:07:46,444 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 48578
+2026-05-24 22:07:54,349 INFO [django.server] "GET /faculty/my-courses/419/periods/20/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 88419
+2026-05-24 22:08:02,731 INFO [django.server] "GET /admin-portal/students/enrollment-query/ HTTP/1.1" 200 48048
+2026-05-24 22:08:15,445 INFO [django.server] "GET /admin-portal/students/enrollment-query/?q=arcilla&academic_year_id=5&term_id=7 HTTP/1.1" 200 49030
+2026-05-24 22:08:19,762 INFO [django.server] "GET /admin-portal/students/enrollment-query/?q=arcilla&student_id=187&academic_year_id=5&term_id=7 HTTP/1.1" 200 58472
