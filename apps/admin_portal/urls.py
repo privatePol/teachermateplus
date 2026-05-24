@@ -111,6 +111,7 @@ from .views import (
     student_account_link_list_view,
     student_account_provision_view,
     student_create_view,
+    student_enrollment_query_view,
     student_list_view,
     student_update_view,
     tenant_create_view,
@@ -326,6 +327,11 @@ urlpatterns = [
         name="faculty_assignment_update",
     ),
     path("admin-portal/students/", student_list_view, name="student_list"),
+    path(
+        "admin-portal/students/enrollment-query/",
+        student_enrollment_query_view,
+        name="student_enrollment_query",
+    ),
     path("admin-portal/students/account-links/", student_account_link_list_view, name="student_account_link_list"),
     path(
         "admin-portal/students/account-links/create/",

@@ -21,3 +21,25 @@ Traceback (most recent call last):
   File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\template\loader.py", line 19, in get_template
     raise TemplateDoesNotExist(template_name, chain=chain)
 django.template.exceptions.TemplateDoesNotExist: admin_portal/security/privacy_consent_reset.html
+2026-05-24 18:51:50,225 ERROR [django.request] Internal Server Error: /faculty/my-courses/1/periods/1/submit/
+Traceback (most recent call last):
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "D:\edugradeplus\apps\core\decorators.py", line 52, in _wrapped
+    return view_func(request, *args, **kwargs)
+  File "D:\edugradeplus\apps\core\decorators.py", line 27, in _wrapped
+    return view_func(request, *args, **kwargs)
+  File "D:\edugradeplus\apps\faculty_portal\views.py", line 5316, in period_submit_view
+    submission = GradingGovernanceService.submit_period(
+        user=request.user,
+    ...<2 lines>...
+        remarks=request.POST.get("remarks"),
+    )
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\contextlib.py", line 85, in inner
+    return func(*args, **kwds)
+  File "D:\edugradeplus\apps\grading\services.py", line 3159, in submit_period
+    if can_resubmit_auto_locked_reopen:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NameError: name 'can_resubmit_auto_locked_reopen' is not defined

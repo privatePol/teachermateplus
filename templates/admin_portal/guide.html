@@ -666,12 +666,14 @@
             <li>Inactivate old records instead of deleting them.</li>
             <li>Keep codes consistent across imports and operations.</li>
             <li>Check related records before making large changes.</li>
+            <li>Use <strong>Students -> Student Enrollment Query</strong> when an authorized admin needs to check one student's consolidated enrollment and grade records for a selected Academic Year and Term.</li>
           </ul>
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
             <li>Filter -> Edit exact record -> Save -> Re-verify in list.</li>
             <li>Inactivate records instead of deleting when operations already depend on them.</li>
             <li>In <strong>Admin Portal -> Enrollment</strong>, use the status summary cards to quickly review how many rows are currently <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>W</strong>, or <strong>INC</strong> inside the current filtered scope.</li>
+            <li>For one-student checking, open <strong>Admin Portal -> Students -> Student Enrollment Query</strong>, search the student, select the Academic Year and Term, then review the enrollment and grade details shown on the page.</li>
           </ol>
           <div class="guide-note">
             Clean records help prevent grading problems.
@@ -819,7 +821,7 @@
               <tr>
                 <td>4</td>
                 <td>Grade Deadline Enforcement</td>
-                <td>After the deadline, complete gradebooks may still be submitted, but additional encoding requires reopen approval.</td>
+                <td>After the deadline, unsubmitted gradebooks require reopen approval before encoding or submission.</td>
                 <td>Once per tenant policy, then review when workflow labels or monitoring practice changes.</td>
               </tr>
               <tr>
@@ -1004,7 +1006,7 @@
             <li>Use <strong>Scope Type: Course Offering</strong> only when one class needs a different rule.</li>
             <li>Turn on <strong>Is active</strong>. Inactive rules are ignored.</li>
             <li>Use <strong>Configuration Management -> Grade Deadline Enforcement</strong> to keep the tenant's deadline workflow label aligned with policy.</li>
-            <li>After the deadline, faculty may still submit a complete gradebook, but any additional encoding requires a reopen request.</li>
+            <li>After the deadline or period lock, faculty must send a reopen request before encoding or submitting an unsubmitted gradebook.</li>
             <li>After the deadline, submitted/finalized gradebooks must use <strong>Correction of Grades</strong>. Do not use Gradebook Reopen Request for submitted gradebooks after deadline.</li>
             <li>After the deadline, monitor late rows in <strong>Non-Compliance on Periodic Grades Submission</strong>.</li>
             <li>Review faculty reopen requests in <strong>Submission Reopen Requests</strong>. Once approved, the reopen window lasts 24 hours only.</li>
@@ -1025,7 +1027,7 @@
               <tr>
                 <td>Before deadline, not yet submitted</td>
                 <td>Faculty continues normal encoding and submits when ready.</td>
-                <td>No reopen request is needed.</td>
+                <td>No reopen request is needed while the deadline has not passed.</td>
               </tr>
               <tr>
                 <td>Before deadline, already submitted</td>

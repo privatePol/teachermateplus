@@ -280,6 +280,85 @@ class GradeSubmissionReopenRequestReviewTests(TestCase):
             )
         )
 
+    def test_locked_period_submission_requires_active_approved_reopen_request(self):
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.period.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() - timezone.timedelta(hours=1),
+            is_locked=True,
+            is_active=True,
+        )
+        self.submission.status = GradeSubmission.Status.DRAFT
+        self.submission.save(update_fields=["status", "updated_at"])
+
+        with self.assertRaisesMessage(ValidationError, "Submit a gradebook reopen request first"):
+            GradingGovernanceService.submit_period(
+                user=self.admin_user,
+                offering=self.offering,
+                template_period=self.period,
+            )
+
+    def test_newer_active_reopen_request_overrides_older_expired_request(self):
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.period.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() - timezone.timedelta(days=2),
+            is_locked=True,
+            is_active=True,
+        )
+        self.submission.status = GradeSubmission.Status.DRAFT
+        self.submission.save(update_fields=["status", "updated_at"])
+        older_request = GradeSubmissionReopenRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            submission=self.submission,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.admin_user,
+            reviewed_by_user=self.admin_user,
+            reviewed_at=timezone.now() - timezone.timedelta(hours=25),
+            status=GradeSubmissionReopenRequest.Status.APPROVED,
+            justification="First approved window expired.",
+        )
+        newer_request = GradeSubmissionReopenRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            submission=self.submission,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.admin_user,
+            reviewed_by_user=self.admin_user,
+            reviewed_at=timezone.now(),
+            status=GradeSubmissionReopenRequest.Status.APPROVED,
+            justification="Second approved window is active.",
+        )
+
+        self.assertEqual(
+            GradingGovernanceService.get_active_approved_reopen_request(
+                offering=self.offering,
+                template_period=self.period,
+            ),
+            newer_request,
+        )
+        self.assertIsNone(
+            GradingGovernanceService.get_latest_expired_approved_reopen_request(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+        result = GradingGovernanceService.auto_lock_due_periods(at=timezone.now())
+
+        self.assertEqual(result["count"], 0)
+        self.assertNotIn(older_request.id, [row.get("reopen_request_id") for row in result["rows"]])
+
     def test_submitted_after_deadline_uses_correction_not_reopen_request(self):
         GradingPeriodLock.objects.create(
             tenant=self.tenant,

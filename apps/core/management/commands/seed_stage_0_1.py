@@ -75,6 +75,7 @@ class Command(BaseCommand):
         ("students.create", "students", "create"),
         ("students.update", "students", "update"),
         ("students.import", "students", "import"),
+        ("student_enrollment_query.read", "student_enrollment_query", "read"),
         ("enrollment.read", "enrollment", "read"),
         ("enrollment.create", "enrollment", "create"),
         ("enrollment.update", "enrollment", "update"),
@@ -502,6 +503,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "STUDENT_ENROLLMENT_QUERY",
+                groups["STUDENTS"],
+                "Student Enrollment Query",
+                "admin_portal:student_enrollment_query",
+                20,
+                "student_enrollment_query.read",
+            ),
+            (
+                "ADMIN",
                 "ENROLLMENTS",
                 groups["ENROLLMENT"],
                 "Enrollment",
@@ -879,6 +889,12 @@ class Command(BaseCommand):
             role_obj = role_map[role_code]
             for perm_code in reopen_requestor_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
+        for role_code in ["REGISTRAR", "CAMPUS_ADMIN", "TENANT_ADMIN"]:
+            role_obj = role_map[role_code]
+            RolePermission.objects.get_or_create(
+                role=role_obj,
+                permission=perm_map["student_enrollment_query.read"],
+            )
         for role_code in ["DEAN", "CAMPUS_ADMIN"]:
             role_obj = role_map[role_code]
             for perm_code in reopen_reviewer_permissions:

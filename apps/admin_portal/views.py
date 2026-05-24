@@ -6213,6 +6213,10 @@ def role_permissions_view(request, role_id: int):
             "label": "Student Portal Account Links",
             "description": "Controls linking student records to user accounts for Student Portal access.",
         },
+        "student_enrollment_query": {
+            "label": "Student Enrollment and Grade Query",
+            "description": "Allows authorized admin users to search one student and view that student's enrollment and grade details for a selected academic year and term.",
+        },
         "system_settings": {
             "label": "System Configuration",
             "description": "Controls tenant and system-level settings. Grant carefully because settings affect portal behavior.",
@@ -8480,6 +8484,209 @@ def student_list_view(request):
     context.update(_scope_context(request))
     context["programs"] = AdminScopeService.active_scoped_programs(request)
     return render(request, "admin_portal/students/student_list.html", context)
+
+
+def _student_enrollment_query_score_label(score):
+    activity = score.activity
+    label_parts = []
+    if activity.template_component:
+        label_parts.append(activity.template_component.name)
+    if activity.template_subcomponent:
+        label_parts.append(activity.template_subcomponent.name)
+    if activity.template_detail:
+        label_parts.append(activity.template_detail.name)
+    label_parts.append(activity.title)
+    return " / ".join(str(part) for part in label_parts if part)
+
+
+def _build_student_enrollment_query_rows(student, academic_year_id, term_id, request):
+    tenant_ids = AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True)
+    campus_ids = AdminScopeService.active_scoped_campuses(request).values_list("id", flat=True)
+    enrollments = (
+        Enrollment.objects.filter(
+            student=student,
+            academic_year_id=academic_year_id,
+            term_id=term_id,
+            tenant_id__in=tenant_ids,
+            campus_id__in=campus_ids,
+        )
+        .select_related(
+            "tenant",
+            "campus",
+            "academic_year",
+            "term",
+            "student",
+            "course_offering",
+            "course_offering__course",
+            "course_offering__section",
+            "course_offering__campus",
+            "course_offering__academic_year",
+            "course_offering__term",
+        )
+        .order_by("course_offering__course__code", "course_offering__section__code")
+    )
+    enrollment_rows = list(enrollments)
+    offering_ids = [row.course_offering_id for row in enrollment_rows]
+    if not offering_ids:
+        return []
+
+    period_grades_by_offering = defaultdict(list)
+    for grade in (
+        StudentPeriodGrade.objects.filter(student=student, offering_id__in=offering_ids)
+        .select_related("template_period", "computed_by_user")
+        .order_by("template_period__sequence_no", "template_period__name")
+    ):
+        period_grades_by_offering[grade.offering_id].append(grade)
+
+    submissions_by_offering_period = {
+        (submission.offering_id, submission.template_period_id): submission
+        for submission in GradeSubmission.objects.filter(offering_id__in=offering_ids).select_related(
+            "template_period", "submitted_by_user", "reopened_by_user"
+        )
+    }
+
+    final_grades_by_offering = {
+        final.offering_id: final
+        for final in StudentFinalGrade.objects.filter(student=student, offering_id__in=offering_ids).select_related(
+            "computed_by_user"
+        )
+    }
+
+    scores_by_offering_period = defaultdict(list)
+    for score in (
+        StudentActivityScore.objects.filter(student=student, activity__offering_id__in=offering_ids, is_active=True)
+        .select_related(
+            "activity",
+            "activity__template_period",
+            "activity__template_component",
+            "activity__template_subcomponent",
+            "activity__template_detail",
+            "encoded_by_user",
+        )
+        .order_by(
+            "activity__template_period__sequence_no",
+            "activity__template_component__sort_order",
+            "activity__template_subcomponent__sort_order",
+            "activity__template_detail__sort_order",
+            "activity__activity_date",
+            "activity__title",
+        )
+    ):
+        scores_by_offering_period[(score.activity.offering_id, score.activity.template_period_id)].append(
+            {
+                "label": _student_enrollment_query_score_label(score),
+                "raw_score": score.raw_score,
+                "computed_score": score.computed_score,
+                "total_score": score.activity.total_score,
+                "activity_date": score.activity.activity_date,
+                "encoded_by": score.encoded_by_user,
+                "updated_at": score.updated_at,
+                "remarks": score.remarks,
+            }
+        )
+
+    rows = []
+    for enrollment in enrollment_rows:
+        periods = []
+        for grade in period_grades_by_offering.get(enrollment.course_offering_id, []):
+            submission = submissions_by_offering_period.get((grade.offering_id, grade.template_period_id))
+            periods.append(
+                {
+                    "period": grade.template_period,
+                    "class_standing_grade": grade.class_standing_grade,
+                    "exam_grade": grade.exam_grade,
+                    "period_grade": grade.period_grade,
+                    "is_finalized": grade.is_finalized,
+                    "computed_at": grade.computed_at,
+                    "computed_by": grade.computed_by_user,
+                    "submission": submission,
+                    "scores": scores_by_offering_period.get((grade.offering_id, grade.template_period_id), []),
+                }
+            )
+        rows.append(
+            {
+                "enrollment": enrollment,
+                "offering": enrollment.course_offering,
+                "periods": periods,
+                "final_grade": final_grades_by_offering.get(enrollment.course_offering_id),
+            }
+        )
+    return rows
+
+
+@portal_required("ADMIN")
+@permission_required("student_enrollment_query.read")
+def student_enrollment_query_view(request):
+    q = request.GET.get("q", "").strip()
+    selected_student_id = request.GET.get("student_id", "").strip()
+    academic_year_id = request.GET.get("academic_year_id", "").strip()
+    term_id = request.GET.get("term_id", "").strip()
+    if selected_student_id and not selected_student_id.isdigit():
+        selected_student_id = ""
+    if academic_year_id and not academic_year_id.isdigit():
+        academic_year_id = ""
+    if term_id and not term_id.isdigit():
+        term_id = ""
+
+    student_queryset = AdminScopeService.scoped_students(request)
+    student_matches = []
+    if q:
+        student_matches = list(
+            student_queryset.filter(
+                Q(student_no__icontains=q)
+                | Q(last_name__icontains=q)
+                | Q(first_name__icontains=q)
+                | Q(middle_name__icontains=q)
+            ).order_by("last_name", "first_name", "student_no")[:25]
+        )
+
+    selected_student = None
+    if selected_student_id:
+        selected_student = get_object_or_404(student_queryset, id=selected_student_id)
+
+    academic_years = AdminScopeService.scoped_academic_years(request)
+    terms = Term.objects.filter(
+        academic_year_id__in=academic_years.values_list("id", flat=True),
+        tenant_id__in=AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True),
+    ).select_related("academic_year", "tenant")
+    if academic_year_id:
+        terms = terms.filter(academic_year_id=academic_year_id)
+    terms = terms.order_by("-academic_year__start_date", "sequence_no", "name")
+
+    result_rows = []
+    if selected_student and academic_year_id and term_id:
+        result_rows = _build_student_enrollment_query_rows(selected_student, academic_year_id, term_id, request)
+        AuditService.log_event(
+            action="VIEW_STUDENT_ENROLLMENT_QUERY",
+            portal="ADMIN",
+            entity_type="Student",
+            entity_id=selected_student.id,
+            actor=request.user,
+            tenant=selected_student.tenant_id,
+            campus=selected_student.campus_id,
+            metadata={
+                "student_no": selected_student.student_no,
+                "academic_year_id": academic_year_id,
+                "term_id": term_id,
+                "enrollment_count": len(result_rows),
+            },
+            request=request,
+        )
+
+    context = {
+        "title": "Student Enrollment Query",
+        "q": q,
+        "student_matches": student_matches,
+        "selected_student": selected_student,
+        "academic_years": academic_years,
+        "terms": terms,
+        "academic_year_id": academic_year_id,
+        "term_id": term_id,
+        "result_rows": result_rows,
+        "query_ready": bool(selected_student and academic_year_id and term_id),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/students/student_enrollment_query.html", context)
 
 
 @portal_required("ADMIN")

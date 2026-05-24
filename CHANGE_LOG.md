@@ -7,9 +7,10 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added an Admin Portal `Student Enrollment Query` page with the new `student_enrollment_query.read` permission. Authorized admins can search one scoped student, choose Academic Year and Term, then view the student's consolidated enrollment, period grade, submission, final grade, and encoded activity-score details.
 - Added course-level syllabus links for Google Drive or other approved URLs, with Admin Course maintenance support, a faculty-only assigned-offering redirect used by the My Classes syllabus icon, and audit logging whenever faculty open the syllabus link.
 - Added an opt-in DepEd K-12 period-grade formula on Tenant Grading Profiles. DepEd mode sums raw scores by component, converts each component to a percentage score, applies component weights to produce the initial grade, then uses a configurable transmutation table to store the official period grade.
-- Added configurable grade-deadline enforcement support. After a deadline or lock, faculty can still submit a complete gradebook, but additional encoding requires a reopen request reviewed through the admin queue.
+- Added configurable grade-deadline enforcement support. After a deadline or lock, unsubmitted gradebooks require an approved reopen request before faculty can continue encoding or submit.
 - Added faculty-submitted gradebook reopen requests for overdue or locked periods, including admin queue reuse and email notification to scoped reopen reviewers.
 - Added a Faculty Portal class tabulation sheet that becomes available after all active grading periods for a class are submitted, printing the full-term activity scores, averages, exams, period grades, final grades, school header, faculty metadata, and prepared/submitted-by footer. The sheet now supports a legal-landscape PDF output with repeated small NCBA watermarks, fixed `/media/logos/ncba-logo.png` branding, all period blocks aligned across one student row, blank ACTIVE statuses, and a `**** NOTHING FOLLOWS *****` closing row.
 - Added an explicit `faculty_final_clearance.read` RBAC permission for Admin Portal Faculty Final Clearance preview and verification, with migration support that preserves access for roles that previously inherited it through Faculty Assignments.
@@ -41,6 +42,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin Portal Guide now includes the confirmed submission route matrix distinguishing normal encoding, pre-deadline self-reopen, post-deadline gradebook reopen requests, and Correction of Grades.
 - Faculty Portal period cards now show a direct `Request Gradebook Reopen` icon/modal when a selected period is locked or past deadline and still needs additional encoding.
 - Approved gradebook reopen requests now override locked/overdue Faculty Portal period-card display and period work-page edit state for 24 hours from approval; expired approved reopen windows auto-lock again and require a new request.
+- Gradebook submission governance now requires the latest active approved reopen request before any locked or overdue unsubmitted gradebook can be submitted; older expired approved requests no longer override a newer active approval.
 - Faculty period submission now honors an active approved reopen window during the final summary recompute step, so a reopened locked/overdue period can be finalized and submitted within the 24-hour approval window.
 - Submitted gradebooks after the deadline are no longer eligible for the Gradebook Reopen Request path; post-deadline changes to submitted/finalized gradebooks must use Correction of Grades.
 - Email notifications now use the standardized `NCBA | EduGradePlus: <Message>` subject prefix, the NCBA logo from `media/logos/ncba-logo.png`, green-to-yellow card headers, and no embedded Data Privacy Notice block.
@@ -167,7 +169,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Faculty Final-period Summary now omits the separate exam-component column and keeps the final-period result in the period grade column such as `FX Grade`.
 - Faculty Summary of Grades is now hidden from view/print until the gradebook is submitted; submitted gradebooks may be self-reopened by faculty only before the deadline, and expired reopened gradebooks are auto-locked instead of auto-submitted. Faculty grading pages and My Classes now also apply that expired-reopened lock immediately after an admin moves the deadline into the past, without waiting for the scheduled command.
 - Official stored grading outputs are now whole-number grades: class standing, exam, period grades such as PRELIM/MIDTERM/PRE-FINAL/FINAL, and FINAL GRADE are rounded with `ROUND_HALF_UP` while raw/activity scores keep decimal precision.
-- Expired reopened gradebooks now lock score/activity/attendance editing but still allow faculty to finalize and resubmit the existing records from Summary; the temporary auto-lock is cleared after resubmission so the period returns to normal submitted state.
+- Expired reopened gradebooks now lock score/activity/attendance editing and submission until a new reopen request is approved.
 - Faculty Dashboard Priority Actions now includes expired reopened gradebooks as a high-priority resubmission task, with a direct link to the Summary page.
 - Faculty Dashboard no longer shows the embedded Students At Risk container; Priority Actions now uses the full command area.
 - Faculty My Classes now reports class size from active grading students only, so dropped, withdrawn, incomplete, or inactive enrollments do not inflate the card count.

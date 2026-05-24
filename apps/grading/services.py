@@ -2706,6 +2706,12 @@ class GradingGovernanceService:
             return None
         if request_obj.submission.status == GradeSubmission.Status.SUBMITTED:
             return None
+        latest_approved_request = cls.get_latest_approved_reopen_request(
+            offering=request_obj.offering,
+            template_period=request_obj.template_period,
+        )
+        if not latest_approved_request or latest_approved_request.id != request_obj.id:
+            return None
         expires_at = cls.reopen_request_expires_at(request_obj)
         if not expires_at or expires_at > now:
             return None
@@ -2847,34 +2853,36 @@ class GradingGovernanceService:
 
     @classmethod
     def get_active_approved_reopen_request(cls, *, offering, template_period: GradingTemplatePeriod):
-        submission = cls.get_submission(offering=offering, template_period=template_period)
-        if not submission or submission.status == GradeSubmission.Status.SUBMITTED:
-            return None
-        for request_obj in (
-            GradeSubmissionReopenRequest.objects.filter(
-                submission=submission,
-                status=GradeSubmissionReopenRequest.Status.APPROVED,
-            )
-            .order_by("-reviewed_at", "-updated_at", "-id")
-        ):
-            if cls.is_reopen_request_window_active(request_obj):
-                return request_obj
+        request_obj = cls.get_latest_approved_reopen_request(
+            offering=offering,
+            template_period=template_period,
+        )
+        if request_obj and cls.is_reopen_request_window_active(request_obj):
+            return request_obj
         return None
 
     @classmethod
-    def get_latest_expired_approved_reopen_request(cls, *, offering, template_period: GradingTemplatePeriod):
+    def get_latest_approved_reopen_request(cls, *, offering, template_period: GradingTemplatePeriod):
         submission = cls.get_submission(offering=offering, template_period=template_period)
         if not submission or submission.status == GradeSubmission.Status.SUBMITTED:
             return None
-        for request_obj in (
+        return (
             GradeSubmissionReopenRequest.objects.filter(
                 submission=submission,
                 status=GradeSubmissionReopenRequest.Status.APPROVED,
             )
             .order_by("-reviewed_at", "-updated_at", "-id")
-        ):
-            if not cls.is_reopen_request_window_active(request_obj):
-                return request_obj
+            .first()
+        )
+
+    @classmethod
+    def get_latest_expired_approved_reopen_request(cls, *, offering, template_period: GradingTemplatePeriod):
+        request_obj = cls.get_latest_approved_reopen_request(
+            offering=offering,
+            template_period=template_period,
+        )
+        if request_obj and not cls.is_reopen_request_window_active(request_obj):
+            return request_obj
         return None
 
     @classmethod
@@ -3065,18 +3073,25 @@ class GradingGovernanceService:
     @classmethod
     @transaction.atomic
     def submit_period(cls, *, user, offering, template_period: GradingTemplatePeriod, remarks: str | None = None):
+        active_approved_reopen_request = cls.get_active_approved_reopen_request(
+            offering=offering,
+            template_period=template_period,
+        )
         if cls.get_latest_expired_approved_reopen_request(offering=offering, template_period=template_period):
             raise ValidationError("The approved reopen window expired after 24 hours. Submit a new reopen request.")
-        can_resubmit_auto_locked_reopen = cls.is_auto_locked_reopened_after_deadline(
+        is_submitted = cls.is_submitted(offering=offering, template_period=template_period)
+        is_locked = cls.is_locked(offering=offering, template_period=template_period)
+        is_auto_closed = cls.is_auto_closed_after_deadline(
             offering=offering,
             template_period=template_period,
         )
-        can_submit_auto_closed = cls.is_auto_closed_after_deadline(
-            offering=offering,
-            template_period=template_period,
-        )
-        can_submit_locked = cls.is_locked(offering=offering, template_period=template_period)
-        if not can_resubmit_auto_locked_reopen and not can_submit_auto_closed and not can_submit_locked:
+        if is_submitted:
+            raise ValidationError(f"{template_period.code} has already been submitted.")
+        if (is_locked or is_auto_closed) and not active_approved_reopen_request:
+            raise ValidationError(
+                f"{template_period.code} is locked or past the deadline. Submit a gradebook reopen request first."
+            )
+        if not active_approved_reopen_request:
             cls.assert_encoding_allowed(offering=offering, template_period=template_period)
         readiness = cls.evaluate_submission_readiness(offering=offering, template_period=template_period)
         if readiness["eligible_student_count"] <= 0:
@@ -3141,13 +3156,13 @@ class GradingGovernanceService:
                 },
             },
         )
-        if can_resubmit_auto_locked_reopen:
+        if active_approved_reopen_request:
             lock = cls.resolve_lock(offering=offering, template_period=template_period)
-            if lock and lock.is_locked:
+            if lock and lock.is_locked and lock.course_offering_id == offering.id:
                 lock.is_locked = False
                 lock.reopened_by_user = user
                 lock.reopened_at = timezone.now()
-                lock.remarks = "Auto deadline lock cleared after faculty resubmission."
+                lock.remarks = "Course-level reopen lock cleared after faculty submission."
                 lock.save(update_fields=["is_locked", "reopened_by_user", "reopened_at", "remarks", "updated_at"])
         return submission
 

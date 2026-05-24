@@ -1853,7 +1853,7 @@ def _build_deadline_reminder_for_offerings(offerings, *, now=None):
                 else "Grade submission deadline reminder"
             ),
             "note": (
-                "This reopened gradebook was not resubmitted before the deadline. Score editing is disabled, but the faculty can still resubmit the gradebook from Summary."
+                "This reopened gradebook was not resubmitted before the deadline. Score editing and submission require a new approved reopen request."
                 if is_locked_reopened
                 else "This deadline already passed. Submit from Summary if the gradebook is complete, or request reopen if more encoding is needed."
                 if is_overdue
@@ -1983,7 +1983,7 @@ def _build_deadline_reminder_for_period_cards(offering, period_cards, *, now=Non
                 else "Class period deadline reminder"
             ),
             "note": (
-                "This reopened gradebook was not resubmitted before the deadline. Score editing is disabled, but the faculty can still resubmit the gradebook from Summary."
+                "This reopened gradebook was not resubmitted before the deadline. Score editing and submission require a new approved reopen request."
                 if is_locked_reopened
                 else "This class period deadline already passed. Continue encoding and submit as soon as the class period is complete. Late submission is recorded for non-compliance monitoring."
                 if is_overdue

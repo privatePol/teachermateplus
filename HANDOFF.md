@@ -7,7 +7,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 
 ## Current Session Summary
 - Date: 2026-05-24
-- Session focus: Continued management-demo adjustments, including configurable simultaneous-login behavior, Faculty Portal prediction/intervention access, Faculty Portal class-card/summary simplification, and Student Intervention Monitor redesign.
+- Session focus: Continued management-demo adjustments, including configurable simultaneous-login behavior, Faculty Portal prediction/intervention access, Faculty Portal class-card/summary simplification, Student Intervention Monitor redesign, and Admin Portal student enrollment/grade query.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\edugradeplus`; Django apps-based project using SQLite for development.
 
@@ -58,8 +58,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
   - Documented that Gradebook Reopen Request is for unfinished/unsubmitted gradebooks after deadline or lock, while Correction of Grades is for submitted/finalized gradebooks that need changes.
   - Clarified that submitted gradebooks may be reopened only before the configured deadline.
 - Faculty reopen request period-card adjustment:
-  - Updated policy per user direction: once a deadline is met or a period is locked, additional faculty encoding requires a reopen request regardless of the prior deadline enforcement policy label.
-  - Complete gradebooks may still be submitted from Summary after the deadline.
+  - Updated policy per user direction: once a deadline is met or a period is locked, additional faculty encoding and unsubmitted gradebook submission require an approved reopen request regardless of the prior deadline enforcement policy label.
   - Added a direct period-card `Request Gradebook Reopen` icon/modal so faculty can request reopen from the period card when a period is locked or closed after deadline.
 - Admin Dashboard reopen request visibility adjustment:
   - Added a scoped `Gradebook Reopen Requests` dashboard panel for users with `reopen_requests.read` or `reopen_requests.review`.
@@ -67,7 +66,8 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Faculty approved reopen display/edit-state adjustment:
   - Fixed Faculty Portal period-card and period work-page state so an approved gradebook reopen request overrides the raw period lock/deadline closure for a controlled reopen window.
   - Reopened periods now show a `Reopened` badge and approved reopen notice instead of staying visually locked after campus admin approval.
-  - Added a 24-hour validity window for approved gradebook reopen requests. When the 24-hour window expires before submission, EduGrade+ creates a course-level lock again and requires a new reopen request before further encoding or late submission.
+  - Added a 24-hour validity window for approved gradebook reopen requests. When the latest approved 24-hour window expires before submission, EduGrade+ creates a course-level lock again and requires a new reopen request before further encoding or late submission.
+  - Tightened submission governance so locked or overdue unsubmitted gradebooks can submit only during the latest active approved reopen window. Older expired approved requests remain audit history and no longer block a newer active approval.
   - Fixed final submission from an active approved reopen window by allowing the submission recompute step to proceed even when the underlying period lock is still present.
   - Enforced the confirmed route: submitted/finalized gradebooks after the deadline cannot use Gradebook Reopen Request and must use Correction of Grades. Submitted gradebooks can use reopen request only before the configured deadline.
 - Email notification standardization:
@@ -118,6 +118,11 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
   - Missing attendance records are treated as incomplete encoding, not as student attendance behavior.
   - Each row now emits one plain `main_concern` and one action-oriented `suggested_intervention`.
   - Current standing values are softened to `Needs attention`, `Close to threshold`, `On track`, or `Not ready to assess`.
+- Admin Student Enrollment Query:
+  - Added `/admin-portal/students/enrollment-query/`, governed by the new `student_enrollment_query.read` permission.
+  - Authorized admins can search a scoped student, select Academic Year and Term, and view consolidated enrollment rows with period grades, submission status, final grade, and encoded activity-score details.
+  - Added audit event `VIEW_STUDENT_ENROLLMENT_QUERY` whenever a selected student/AY/term query is opened.
+  - Added RBAC and navigation seed migrations so the page appears under the Admin Portal Students menu for authorized users.
   - Default monitor now focuses on Student, Class / Period, Current Standing, Main Concern, Suggested Intervention, and Action.
   - Default monitor no longer shows likely-fail wording, prediction confidence, coverage percentage, projected final grade, or possible final-grade warning language.
   - Technical projection details remain on the separate prediction/analytics pages, with `Advanced Analytics` shown only when the user has `faculty_analytics.read`.
@@ -131,6 +136,10 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 
 ## Files Created / Modified
 - Added: `apps/academics/migrations/0009_course_syllabus_url.py`
+- Added: `apps/admin_portal/tests_student_enrollment_query.py`
+- Added: `apps/rbac/migrations/0011_seed_student_enrollment_query_permission.py`
+- Added: `apps/navigation/migrations/0004_seed_student_enrollment_query_menu.py`
+- Added: `templates/admin_portal/students/student_enrollment_query.html`
 - Modified: `apps/academics/models.py`
 - Modified: `apps/academics/admin.py`
 - Modified: `apps/accounts/views.py`
@@ -141,10 +150,13 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Modified: `apps/accounts/tests_privacy_consent.py`
 - Modified: `apps/admin_portal/forms.py`
 - Modified: `apps/admin_portal/import_views.py`
+- Modified: `apps/admin_portal/urls.py`
+- Modified: `apps/admin_portal/views.py`
 - Modified: `apps/admin_portal/tests_department_dropdown_labels.py`
 - Modified: `apps/admin_portal/tests_reopen_requests.py`
 - Modified: `apps/admin_portal/tests_roles.py`
 - Modified: `apps/core/services/email_assets.py`
+- Modified: `apps/core/management/commands/seed_stage_0_1.py`
 - Modified: `apps/core/services/features.py`
 - Modified: `apps/core/context_processors.py`
 - Modified: `apps/core/tests_email_assets.py`
@@ -222,8 +234,8 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Active Grading Period setup uses a term-period catalog. Only active catalog rows can be selected as the current active grading period; inactive rows must be activated first.
 - Active Grading Period setup has two scopes: the period catalog is tenant+term scoped, while the selected active period is tenant+campus+term scoped.
 - Period Locks should be created per campus/term/period when each campus has its own deadline. Course-offering scope remains for class-specific exceptions.
-- Faculty deadline reopen requests are required after deadline or lock for additional encoding regardless of the stored deadline enforcement policy label. Complete gradebooks may still be submitted after deadline.
-- Approved gradebook reopen requests are limited to 24 hours from approval. If the faculty does not submit/resubmit within that window, the period is locked again and a new request is required.
+- Faculty deadline reopen requests are required after deadline or lock for both additional encoding and unsubmitted gradebook submission regardless of the stored deadline enforcement policy label.
+- Approved gradebook reopen requests are limited to 24 hours from approval. Only the latest approved request controls the current window. If the faculty does not submit/resubmit within that window, the period is locked again and a new request is required.
 - Submitted/finalized gradebooks after deadline must use Correction of Grades for changes. Reopen Request is reserved for unsubmitted overdue/locked gradebooks, plus submitted gradebooks only before the deadline.
 - Dashboard reopen request panel is permission-gated and scope-filtered through `AdminScopeService.scoped_grade_submission_reopen_requests`.
 - System email subjects should use `NCBA | EduGradePlus: <Message>`. Shared email card branding should use the NCBA logo and the green-to-yellow header, without embedding a Data Privacy Notice block in the email body.
@@ -232,6 +244,8 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Missing-record checks are based on missing saved score/attendance rows for required items. A saved zero score counts as encoded and should not be treated as missing.
 - Student Intervention Monitor uses the existing prediction snapshot engine as a data source but intentionally presents faculty-facing intervention labels and reasons. Projection details should stay on the separate prediction/analytics pages.
 - The intervention monitor default view excludes `On Track` rows unless the faculty explicitly selects the On Track filter.
+- Student Enrollment Query is read-only and scoped through Admin Portal student visibility plus tenant/campus enrollment filters. It does not create or recompute grades.
+- `student_enrollment_query.read` is the permission to grant if an admin user should be able to open the consolidated one-student enrollment/grade lookup.
 
 ## Pending Work
 - Continue with the next management/academic-head demo adjustment from the user.
@@ -252,6 +266,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Browser smoke tests were not run for the role-permissions save-position change; validation was command/test based.
 - Browser smoke tests were not run for the role-permissions Critical Access Safeguard visibility change; validation was command/test based.
 - Browser smoke tests were not run for the Admin Guide layout/wording change because the Browser tool was not callable in this session; validation was command/render based.
+- Browser smoke tests were not run for the new Admin Student Enrollment Query; validation was command/test based.
 - Browser smoke tests were not run for the Active Grading Period setup change; validation was command/test/data-inspection based.
 - Google Drive access depends on the institution's Google Workspace sharing settings. Faculty must use an allowed school Google account if the file is domain-restricted.
 - Email styling was validated by template rendering and focused email tests, not by opening emails in a real email client.
@@ -265,7 +280,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 
 ## Validation Completed
 - [x] `python manage.py check` - passed
-- [x] `python manage.py migrate` - passed; applied `academics.0009_course_syllabus_url`
+- [x] `python manage.py migrate` - passed; applied `academics.0009_course_syllabus_url` in earlier validation and later applied `rbac.0011_seed_student_enrollment_query_permission` and `navigation.0004_seed_student_enrollment_query_menu`
 - [x] `python manage.py makemigrations --check --dry-run` - passed; no changes detected
 - [x] Privacy Consent focused tests - passed: `python manage.py test apps.accounts.tests_privacy_consent`
 - [x] Syllabus focused tests - passed:
@@ -287,6 +302,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - [x] Approved reopen 24-hour expiry focused tests - passed: `python manage.py test apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_auto_close_policy_blocks_encoding_until_reopen_request_is_approved apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_approved_reopen_request_expires_after_24_hours_and_auto_locks apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_approved_reopen_request_overrides_locked_period_on_faculty_card`
 - [x] Active approved reopen submission focused test - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_submit_succeeds_during_active_approved_reopen_window apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_approved_reopen_request_overrides_locked_period_on_faculty_card apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_approved_reopen_request_expires_after_24_hours_and_auto_locks`
 - [x] Submitted-gradebook reopen route tests - passed: `python manage.py test apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_submitted_after_deadline_uses_correction_not_reopen_request apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_submitted_before_deadline_can_still_use_reopen_request apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_auto_close_policy_blocks_encoding_until_reopen_request_is_approved`
+- [x] Strict reopen submission governance tests - passed: `python manage.py test apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_locked_period_submission_requires_active_approved_reopen_request apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_newer_active_reopen_request_overrides_older_expired_request apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_approved_reopen_request_expires_after_24_hours_and_auto_locks apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_submit_succeeds_during_active_approved_reopen_window`
 - [x] Reopen/deadline governance regression tests - passed: `python manage.py test apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_approved_reopen_request_overrides_locked_period_on_faculty_card apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_card_shows_reopen_request_action_when_auto_closed_after_deadline apps.grading.tests.CompletionGraceWindowTests`
 - [x] Email notification focused tests - passed: `python manage.py test apps.notifications.tests.FacultyReminderServiceTests.test_queue_and_process_faculty_reminder_email apps.core.tests_email_assets apps.accounts.tests_login_otp apps.accounts.tests_admin_password_reset`
 - [x] Grading email focused tests - passed: `python manage.py test apps.grading.tests.CorrectionWorkflowTests.test_correction_submission_notification_emails_configured_roles apps.grading.tests.CorrectionWorkflowTests.test_registrar_official_report_email_sends_pdf_attachment`
@@ -302,6 +318,8 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - [x] Faculty Student Intervention Monitor refinement tests - passed through `python manage.py test apps.faculty_portal.tests_assignment_acceptance`, including missing-work priority, soft wording, banned default-monitor terms, status-label mapping, audit logging, and prediction-page coverage.
 - [x] Required Django check - passed: `python manage.py check`
 - [x] Required Faculty Portal assignment test suite - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance` (95 tests)
+- [x] Reopen/faculty combined regression suite - passed: `python manage.py test apps.admin_portal.tests_reopen_requests apps.faculty_portal.tests_assignment_acceptance` (104 tests)
+- [x] Admin Student Enrollment Query focused tests - passed: `python manage.py test apps.admin_portal.tests_student_enrollment_query` (2 tests)
 - [x] Default monitor banned-term scan - passed: `rg -n "below passing|failing|likely to fail|possible final grade below passing|prediction confidence|coverage percentage|projected final grade|class ranking" templates\faculty_portal\student_at_risk_monitor.html templates\faculty_portal\dashboard.html apps\faculty_portal\services.py apps\faculty_portal\views.py` returned no matches.
 - [x] Admin Guide Grade Prediction enablement render check - passed: rendered `/admin-portal/guide/` with HTTP 200 and confirmed the Grade Prediction / At-Risk Monitor setup checklist is present.
 - [x] Email template render check - passed: rendered 9 touched HTML email templates and confirmed the green/yellow header pattern and no `Data Privacy Notice` text in those email templates.

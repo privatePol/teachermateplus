@@ -475,7 +475,7 @@
 {% elif is_locked %}
 <div class="alert alert-danger no-print">
   {% if is_auto_locked_reopened_after_deadline %}
-    This reopened gradebook was not resubmitted before the deadline. Score editing is disabled, but you can still finalize and resubmit the gradebook below.
+    This reopened gradebook was not resubmitted before the deadline. Score editing and submission require a new approved reopen request.
   {% else %}
     This period is locked by academic governance.
   {% endif %}
@@ -486,12 +486,12 @@
   {% if pending_reopen_request %}
     Your reopen request is pending admin review.
   {% elif can_request_deadline_reopen %}
-    You may submit if the gradebook is already complete, or request campus admin reopen below if more encoding is needed.
+    Submit a gradebook reopen request below and wait for admin approval before encoding or submission.
   {% endif %}
 </div>
 {% elif is_non_compliant %}
 <div class="alert alert-danger no-print">
-  Submission deadline already passed for this period. You may still submit if the gradebook is complete, but further encoding requires a reopen request.
+  Submission deadline already passed for this period. Encoding and submission require an approved reopen request.
 </div>
 {% elif is_governance_closed %}
 <div class="alert alert-secondary no-print">

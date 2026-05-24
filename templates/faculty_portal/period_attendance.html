@@ -24,7 +24,7 @@
 {% elif is_locked %}
 <div class="alert alert-danger">
   {% if is_auto_locked_reopened_after_deadline %}
-    This period is locked because the reopened gradebook was not resubmitted before the deadline. Attendance editing is disabled; go to Summary to finalize and resubmit the existing records.
+    This period is locked because the reopened gradebook was not resubmitted before the deadline. Attendance editing and submission require a new approved reopen request.
   {% else %}
     This period is locked by admin. Attendance editing is disabled.
   {% endif %}
@@ -35,12 +35,12 @@
   {% if pending_reopen_request %}
     Your reopen request is pending admin review.
   {% else %}
-    Go to Summary to submit a complete gradebook or request campus admin reopen.
+    Go to Summary to request admin reopen before encoding or submission.
   {% endif %}
 </div>
 {% elif is_non_compliant %}
 <div class="alert alert-danger">
-  Submission deadline already passed. A complete gradebook may still be submitted from Summary, but attendance changes require a reopen request.
+  Submission deadline already passed. Attendance changes and submission require an approved reopen request.
 </div>
 {% elif is_governance_closed %}
 <div class="alert alert-secondary">

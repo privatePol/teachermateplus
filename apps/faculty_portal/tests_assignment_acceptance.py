@@ -2583,14 +2583,14 @@ class FacultyAssignmentAcceptanceTests(TestCase):
                 is_active=True,
             ).exists()
         )
-        self.assertContains(response, "Score editing is disabled; open Summary to finalize and resubmit")
+        self.assertContains(response, "Score editing and submission require a new approved reopen request")
         self.assertNotContains(response, "This grading period stays open until submitted")
 
         response = self.client.get(
             reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
         )
         self.assertContains(response, "Finalize and Submit Prelim Grades")
-        self.assertContains(response, "Score editing is disabled, but you can still finalize and resubmit")
+        self.assertContains(response, "Score editing and submission require a new approved reopen request")
         self.assertNotContains(response, "Submit this gradebook to view or print the official Summary of Grades")
 
         response = self.client.post(
@@ -2600,7 +2600,8 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         submission = GradeSubmission.objects.get(offering=self.offering, template_period=self.prelim)
-        self.assertEqual(submission.status, GradeSubmission.Status.SUBMITTED)
+        self.assertEqual(submission.status, GradeSubmission.Status.REOPENED)
+        self.assertContains(response, "Submit a gradebook reopen request first")
 
     def test_my_courses_locks_reopened_gradebook_when_admin_moves_deadline_to_past(self):
         self._accept_assignment()
@@ -2648,7 +2649,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             ).exists()
         )
         self.assertContains(response, "Reopened gradebook locked after deadline")
-        self.assertContains(response, "Score editing is disabled, but the faculty can still resubmit")
+        self.assertContains(response, "Score editing and submission require a new approved reopen request")
         self.assertNotContains(response, "You may continue encoding and submit as soon as possible")
 
     def test_locked_reopened_period_pages_use_read_only_messages(self):
@@ -2704,7 +2705,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         activities_response = self.client.get(
             reverse("faculty_portal:period_activities", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
         )
-        self.assertContains(activities_response, "Score editing is disabled; go to Summary to finalize and resubmit")
+        self.assertContains(activities_response, "Score editing and submission require a new approved reopen request")
         self.assertNotContains(activities_response, "You may continue encoding and submit as soon as possible")
 
         scores_response = self.client.get(
@@ -2713,7 +2714,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
                 kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id, "activity_id": activity.id},
             )
         )
-        self.assertContains(scores_response, "Score editing is disabled; go to Summary to finalize and resubmit")
+        self.assertContains(scores_response, "Score editing and submission require a new approved reopen request")
         self.assertNotContains(scores_response, "Enter a score only for students you want to record now")
         self.assertContains(scores_response, "disabled")
 

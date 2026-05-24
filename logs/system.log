@@ -2632,3 +2632,14 @@
 2026-05-24 18:34:02,698 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 40107
 2026-05-24 18:34:08,402 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 48578
 2026-05-24 18:34:15,698 INFO [django.server] "GET /faculty/my-courses/419/periods/21/prediction/ HTTP/1.1" 200 44997
+2026-05-24 18:50:36,049 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\services.py changed, reloading.
+2026-05-24 18:50:36,849 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-24 18:50:44,733 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\services.py changed, reloading.
+2026-05-24 18:50:45,454 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-24 18:50:56,359 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\services.py changed, reloading.
+2026-05-24 18:50:57,111 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-24 18:52:22,308 INFO [django.utils.autoreload] D:\edugradeplus\apps\grading\services.py changed, reloading.
+2026-05-24 18:52:23,291 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-24 18:55:35,556 INFO [django.utils.autoreload] D:\edugradeplus\apps\faculty_portal\views.py changed, reloading.
+2026-05-24 18:55:36,278 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-24 22:06:24,352 INFO [django.utils.autoreload] Watching for file changes with StatReloader
