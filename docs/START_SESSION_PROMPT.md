@@ -1,0 +1,7 @@
+Read:
+- AGENTS.md
+- EDUGRADESPRO_CONTEXT.md
+- CHANGE_LOG.md
+- HANDOFF.md
+
+Continue from HANDOFF.md.

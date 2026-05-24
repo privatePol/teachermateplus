@@ -27,6 +27,7 @@ class FeatureSettingsService:
     LOGIN_LOCKOUT_DURATION_MINUTES_KEY = "FEATURE_LOGIN_LOCKOUT_DURATION_MINUTES"
     LOGIN_EMAIL_OTP_ENABLED_KEY = "FEATURE_LOGIN_EMAIL_OTP_ENABLED"
     LOGIN_EMAIL_OTP_EXPIRY_MINUTES_KEY = "FEATURE_LOGIN_EMAIL_OTP_EXPIRY_MINUTES"
+    SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY = "FEATURE_SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED"
     SESSION_TIMEOUT_MINUTES_KEY = "FEATURE_SESSION_TIMEOUT_MINUTES"
     GRADE_PREDICTION_ENABLED_KEY = "FEATURE_GRADE_PREDICTION_ENABLED"
     GRADE_PREDICTION_ROLE_CODES_KEY = "FEATURE_GRADE_PREDICTION_ROLE_CODES"
@@ -317,6 +318,21 @@ class FeatureSettingsService:
             ),
             default=default,
             minimum=1,
+        )
+
+    @classmethod
+    def is_single_device_session_enforcement_enabled(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: bool = True,
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
         )
 
     @classmethod

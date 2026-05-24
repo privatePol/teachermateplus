@@ -19,9 +19,13 @@ class TermAdmin(admin.ModelAdmin):
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
-    list_display = ("tenant", "campus", "department", "code", "title", "units", "is_active")
-    search_fields = ("code", "title")
+    list_display = ("tenant", "campus", "department", "code", "title", "units", "has_syllabus", "is_active")
+    search_fields = ("code", "title", "syllabus_url")
     list_filter = ("tenant", "campus", "department", "is_active")
+
+    @admin.display(boolean=True, description="Syllabus")
+    def has_syllabus(self, obj):
+        return bool(obj.syllabus_url)
 
 
 @admin.register(Section)

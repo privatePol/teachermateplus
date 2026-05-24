@@ -468,6 +468,10 @@
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Corrections</a>.
   {% endif %}
 </div>
+{% elif active_approved_reopen_request %}
+<div class="alert alert-info no-print">
+  Reopen request #{{ active_approved_reopen_request.id }} was approved. The reopen window is 24 hours{% if active_approved_reopen_expires_at %}, until {{ active_approved_reopen_expires_at|date:"M d, Y g:i A" }}{% endif %}. Finish the allowed encoding and submit this period before the window expires.
+</div>
 {% elif is_locked %}
 <div class="alert alert-danger no-print">
   {% if is_auto_locked_reopened_after_deadline %}
@@ -478,7 +482,7 @@
 </div>
 {% elif is_auto_closed_after_deadline %}
 <div class="alert alert-danger no-print">
-  Encoding closed automatically because the submission deadline already passed.
+  Submission deadline already passed. Encoding is closed because the submission deadline already passed.
   {% if pending_reopen_request %}
     Your reopen request is pending admin review.
   {% elif can_request_deadline_reopen %}
@@ -487,7 +491,7 @@
 </div>
 {% elif is_non_compliant %}
 <div class="alert alert-danger no-print">
-  Submission deadline already passed for this period. You may continue encoding until you submit, but this class is already listed in the non-compliance monitor for authorized academic users.
+  Submission deadline already passed for this period. You may still submit if the gradebook is complete, but further encoding requires a reopen request.
 </div>
 {% elif is_governance_closed %}
 <div class="alert alert-secondary no-print">
@@ -515,7 +519,10 @@
   <span>
     Computation base value: <strong>{{ base_value }}</strong>
     {% if submission_deadline %}
-      | Submission deadline: <strong>{{ submission_deadline|date:"Y-m-d H:i" }}</strong>
+      | Submission deadline: <strong>{{ submission_deadline|date:"F j, Y" }}</strong>
+      {% if deadline_countdown_label %}
+        <span class="badge text-bg-warning ms-2">{{ deadline_countdown_label }}</span>
+      {% endif %}
     {% else %}
       | <span class="text-warning">Deadline not set by admin</span>
     {% endif %}
@@ -529,9 +536,18 @@
 </div>
 
 <div class="card border-0 shadow-sm mb-3 no-print">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <div>
+      <div class="small text-muted text-uppercase fw-semibold">Period Snapshot</div>
+      <div class="small text-muted">Quick readiness check for this period.</div>
+    </div>
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#periodSnapshotCollapse" aria-expanded="false" aria-controls="periodSnapshotCollapse">
+      Expand
+    </button>
+  </div>
+  <div id="periodSnapshotCollapse" class="collapse">
   <div class="card-body">
     <div class="mb-3">
-      <div class="small text-muted text-uppercase fw-semibold mb-1">Period Snapshot</div>
       <div class="readiness-card-grid mt-3">
         {% for card in readiness_cards %}
         <div class="card readiness-card tone-{{ card.tone }}">
@@ -545,9 +561,6 @@
       </div>
       <div class="small text-muted mt-2">
         Passing threshold used for pass/fail interpretation: <strong>{{ passing_threshold }}</strong>.
-        {% if not show_official_period_grade %}
-        Pass/Fail cards appear only after the official {{ period.name }} grade is allowed to be shown by the current release policy.
-        {% endif %}
       </div>
       {% if can_submit_period %}
       {% if submit_readiness.students_with_any_grade == 0 %}
@@ -571,7 +584,7 @@
       </div>
       {% elif submit_readiness.students_missing_any_grade > 0 %}
       <div class="alert alert-danger py-2 mt-2 mb-0">
-        Submission is blocked because some ACTIVE students still have blank required grade or attendance records.
+        Submission is blocked because some ACTIVE students still do not have a saved score or attendance row for every required item.
         Complete all visible records first, or update statuses to DRP/W/INC in
         <a href="{% url 'faculty_portal:offering_enrollment' offering.id %}">Enrollment</a>.
       </div>
@@ -608,6 +621,7 @@
       Reopen request #{{ pending_reopen_request.id }} is pending admin review.
     </div>
     {% endif %}
+  </div>
   </div>
 </div>
 
@@ -704,12 +718,12 @@
 {% if not can_view_gradebook_summary %}
 {% if is_auto_locked_reopened_after_deadline %}
 <div class="alert alert-warning border no-print">
-  This gradebook was reopened and missed the resubmission deadline. Editing is disabled; use the readiness cards above and the Finalize and Submit button to resubmit the existing records.
+  This gradebook was reopened and missed the resubmission deadline. Editing is disabled; expand the Period Snapshot above and use the Finalize and Submit button to resubmit the existing records.
 </div>
 {% else %}
 <div class="alert alert-warning border no-print">
   Submit this gradebook to view or print the official Summary of Grades for AIMS encoding.
-  Until submission, use the readiness cards above to complete missing records and template requirements.
+  Until submission, expand the Period Snapshot above to check readiness, missing records, and template requirements.
 </div>
 {% endif %}
 {% elif not can_print_gradebook_summary %}
@@ -786,7 +800,7 @@
     </div>
     <div class="caption-side">
       <div>Tenant: <strong>{{ offering.tenant.code }}</strong></div>
-      <div>Campus: <strong>{{ offering.campus.code }}</strong></div>
+      <div>Campus: <strong>{{ offering.campus.name|default:offering.campus.code }}</strong></div>
     </div>
   </div>
   <div class="table-responsive">
@@ -797,14 +811,8 @@
           <th rowspan="4" class="sticky-col-2 student-no-col">Student No</th>
           <th rowspan="4" class="sticky-col-3 student-name-col">Student Name</th>
           <th rowspan="4" class="sticky-col-4 status-col">Status</th>
-          {% for block in summary_layout.class_standing_blocks %}
-            <th colspan="{{ block.colspan }}" class="band-class-standing">{{ block.label }}</th>
-          {% endfor %}
           {% for prior in prior_period_headers %}
             <th rowspan="4" class="metric-col metric-final">{{ prior.label }}</th>
-          {% endfor %}
-          {% for exam in visible_exam_components %}
-            <th rowspan="4" class="band-exam metric-col metric-final">{{ exam.label }}</th>
           {% endfor %}
           {% if show_official_period_grade %}
           <th rowspan="4" class="metric-col metric-final">{{ period.name|upper }} Grade</th>
@@ -812,6 +820,12 @@
           {% if show_official_final_grade %}
           <th rowspan="4" class="metric-col metric-final">FINAL GRADE</th>
           {% endif %}
+          {% for block in summary_layout.class_standing_blocks %}
+            <th colspan="{{ block.colspan }}" class="band-class-standing">{{ block.label }}</th>
+          {% endfor %}
+          {% for exam in visible_exam_components %}
+            <th rowspan="4" class="band-exam metric-col metric-final">{{ exam.label }}</th>
+          {% endfor %}
         </tr>
         <tr>
           {% for block in summary_layout.class_standing_blocks %}
@@ -862,6 +876,15 @@
         <td class="sticky-col-2 student-no-col"></td>
         <td class="sticky-col-3 student-name-col fw-semibold">Highest Possible Score</td>
         <td class="sticky-col-4 status-col"></td>
+        {% for prior in prior_period_headers %}
+        <td class="metric-col metric-final"></td>
+        {% endfor %}
+        {% if show_official_period_grade %}
+        <td class="metric-col metric-final"></td>
+        {% endif %}
+        {% if show_official_final_grade %}
+        <td class="metric-col metric-final"></td>
+        {% endif %}
         {% for block in summary_layout.class_standing_blocks %}
           {% for section in block.sections %}
             {% if section.uses_nested %}
@@ -880,9 +903,6 @@
           {% endfor %}
           <td class="metric-col"></td>
         {% endfor %}
-        {% for prior in prior_period_headers %}
-        <td class="metric-col metric-final"></td>
-        {% endfor %}
         {% for exam in visible_exam_components %}
           <td class="metric-col metric-final">
             {% if exam.sections and exam.sections.0.activity_columns %}
@@ -890,12 +910,6 @@
             {% endif %}
           </td>
         {% endfor %}
-        {% if show_official_period_grade %}
-        <td class="metric-col metric-final"></td>
-        {% endif %}
-        {% if show_official_final_grade %}
-        <td class="metric-col metric-final"></td>
-        {% endif %}
       </tr>
       {% for row in rows %}
         <tr>
@@ -903,12 +917,29 @@
           <td class="sticky-col-2 student-no-col">{{ row.student.student_no }}</td>
           <td class="sticky-col-3 student-name-col">{{ row.student.last_name }}, {{ row.student.first_name }}</td>
           <td class="sticky-col-4 status-col">
-            {% if row.enrollment_status == "ACTIVE" %}
-              <span class="badge text-bg-success status-active-label">{{ row.enrollment_status }}</span>
-            {% else %}
+            {% if row.enrollment_status != "ACTIVE" %}
               <span class="badge text-bg-warning">{{ row.enrollment_status }}</span>
             {% endif %}
           </td>
+          {% for value in row.prior_period_grades %}
+          <td class="metric-col metric-final"><strong>{{ value|default:"" }}</strong></td>
+          {% endfor %}
+          {% if show_official_period_grade %}
+          <td class="metric-col metric-final">
+            <strong>{{ row.period_grade|default:"" }}</strong>
+            {% if row.period_explain_url %}
+            <button type="button" class="btn btn-sm grade-explain-btn ms-1" data-grade-explain-url="{{ row.period_explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
+            {% endif %}
+          </td>
+          {% endif %}
+          {% if show_official_final_grade %}
+          <td class="metric-col metric-final">
+            <strong>{{ row.final_grade|default:"" }}</strong>
+            {% if row.final_explain_url %}
+            <button type="button" class="btn btn-sm grade-explain-btn ms-1" data-grade-explain-url="{{ row.final_explain_url }}" aria-label="Explain final grade">&#128269; Explain</button>
+            {% endif %}
+          </td>
+          {% endif %}
           {% for block in row.class_standing_blocks %}
             {% for section in block.sections %}
               {% if section.uses_nested %}
@@ -927,28 +958,9 @@
             {% endfor %}
             <td class="metric-col"><strong>{{ block.total|default:"" }}</strong></td>
           {% endfor %}
-          {% for value in row.prior_period_grades %}
-          <td class="metric-col metric-final"><strong>{{ value|default:"" }}</strong></td>
-          {% endfor %}
           {% for value in row.exam_values %}
             <td class="metric-col metric-final">{{ value|default:"" }}</td>
           {% endfor %}
-          {% if show_official_period_grade %}
-          <td class="metric-col metric-final">
-            <strong>{{ row.period_grade|default:"" }}</strong>
-            {% if row.period_explain_url %}
-            <button type="button" class="btn btn-sm grade-explain-btn ms-1" data-grade-explain-url="{{ row.period_explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
-            {% endif %}
-          </td>
-          {% endif %}
-          {% if show_official_final_grade %}
-          <td class="metric-col metric-final">
-            <strong>{{ row.final_grade|default:"" }}</strong>
-            {% if row.final_explain_url %}
-            <button type="button" class="btn btn-sm grade-explain-btn ms-1" data-grade-explain-url="{{ row.final_explain_url }}" aria-label="Explain final grade">&#128269; Explain</button>
-            {% endif %}
-          </td>
-          {% endif %}
         </tr>
       {% empty %}
         <tr><td colspan="{{ summary_table_colspan }}" class="text-center text-muted py-4">No summary rows available.</td></tr>

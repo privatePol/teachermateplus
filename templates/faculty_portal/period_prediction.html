@@ -66,7 +66,7 @@
 </div>
 
 <div class="alert alert-info">
-  The main estimate on this page is for <strong>{{ period.name }}</strong>. The final-grade column is only a secondary guide showing how this period estimate may affect the overall final grade.
+  This page is mainly for <strong>{{ period.name }}</strong>. The final-grade column is only extra guidance, so faculty can see if the current period may affect the student's overall standing later.
   <div class="mt-2">
     <a class="alert-link" href="{% url 'faculty_portal:period_prediction_guide' offering.id period.id %}">Open the prediction interpretation guide</a>
     for column definitions, examples, and simulation reminders.
@@ -115,7 +115,7 @@
         </select>
       </div>
       <div class="col-lg-3">
-        <label class="form-label" title="Enter the average score to assume for the student's remaining activities in this grading period.">Assumed Score for Remaining Items (%)</label>
+        <label class="form-label" title="Enter the average score to assume for the student's remaining activities in this grading period.">Assumed Average for Missing Work (%)</label>
         <input class="form-control" type="number" step="0.01" min="0" max="100" name="assumed_remaining_percent" value="{{ request.POST.assumed_remaining_percent|default:'50' }}">
       </div>
       <div class="col-lg-3">
@@ -131,8 +131,8 @@
     <div class="alert alert-light border mt-3 mb-0">
       <strong>{{ what_if_student.last_name }}, {{ what_if_student.first_name }}</strong><br>
       Estimated {{ period.name }} Grade: <strong>{{ what_if_result.projected_period_grade|default:"-" }}</strong><br>
-      Possible Final Grade: <strong>{{ what_if_result.projected_final_grade|default:"-" }}</strong><br>
-      Needed Score in Future Periods:
+      Possible Final Grade for Guidance: <strong>{{ what_if_result.projected_final_grade|default:"-" }}</strong><br>
+      Future Standing Guide:
       <strong>{{ what_if_result.final_requirement.label }}</strong>
     </div>
     {% endif %}
@@ -159,15 +159,15 @@
           <tr>
             <th>Student No.</th>
             <th>Student Name</th>
-            <th>Estimated Grade</th>
-            {% if show_best_case %}<th>Highest Possible</th>{% endif %}
-            {% if show_worst_case %}<th>Lowest Possible</th>{% endif %}
-            <th title="This shows the possible effect of the current period estimate on the student's overall final grade.">Possible Final Grade</th>
-            <th>Can Still Pass?</th>
-            {% if show_target_needed %}<th title="This is the estimated average score needed in the remaining items to still reach passing.">Needed Score in Remaining Items</th>{% endif %}
-            <th>Progress</th>
-            <th>Remaining Items</th>
-            <th>Status</th>
+            <th>Estimated {{ period.name }} Grade</th>
+            {% if show_best_case %}<th>If Missing Work Is Perfect</th>{% endif %}
+            {% if show_worst_case %}<th>If Missing Work Is Zero</th>{% endif %}
+            <th title="This is only extra guidance. The main estimate is the selected period grade.">Possible Final Grade</th>
+            <th>Final Grade Outlook</th>
+            {% if show_target_needed %}<th title="This is the estimated average score needed in the remaining items to still reach passing.">Score Needed to Pass</th>{% endif %}
+            <th>Encoded Work</th>
+            <th>Still Missing</th>
+            <th>Period Alert</th>
           </tr>
         </thead>
         <tbody>

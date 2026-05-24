@@ -137,6 +137,8 @@ class GradingTemplateDuplicationService:
             grading_template=source.grading_template,
             default_base_value=source.default_base_value,
             passing_grade_threshold=source.passing_grade_threshold,
+            period_grade_formula_mode=source.period_grade_formula_mode,
+            period_grade_formula_json=deepcopy(source.period_grade_formula_json),
             final_grade_formula_mode=source.final_grade_formula_mode,
             final_grade_formula_json=deepcopy(source.final_grade_formula_json),
             priority=source.priority,

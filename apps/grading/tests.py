@@ -4,6 +4,7 @@ from io import BytesIO
 
 from django.conf import settings
 from django.core import mail
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
@@ -876,11 +877,11 @@ class CorrectionWorkflowTests(TestCase):
         for message in mail.outbox:
             self.assertEqual(
                 message.subject,
-                "NCBA-EduGrade+: Petition for Correction of Grades Awaiting Your Approval",
+                "NCBA | EduGradePlus: Petition for Correction of Grades Awaiting Your Approval",
             )
             self.assertEqual(len(message.alternatives), 1)
             html_body = message.alternatives[0].content
-            self.assertIn("NATIONAL COLLEGE OF BUSINESS AND ARTS", html_body)
+            self.assertIn('alt="NCBA"', html_body)
             self.assertIn("Approval Notification", html_body)
             self.assertIn("Petitioner:", html_body)
 
@@ -971,7 +972,7 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(
             mail.outbox[0].subject,
-            "NCBA-EduGrade+: Approved Petition for Correction of Grades for Registrar Reference",
+            "NCBA | EduGradePlus: Approved Petition for Correction of Grades for Registrar Reference",
         )
         self.assertEqual(mail.outbox[0].to, ["registrar@example.com"])
         pdf_filenames = [
@@ -1203,6 +1204,87 @@ class FinalGradeFormulaTests(TestCase):
 
         final_grade = StudentFinalGrade.objects.get(offering=self.offering, student=self.student)
         self.assertEqual(final_grade.final_grade, Decimal("36.00"))
+
+    def test_deped_period_formula_uses_raw_component_totals_then_transmutation(self):
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            profile_code="DEPED-G1",
+            profile_name="DepEd Grade 1",
+            grading_template=self.template,
+            period_grade_formula_mode=TenantGradingProfile.PeriodGradeFormulaMode.DEPED_TRANSMUTATION,
+            period_grade_formula_json={
+                "transmutation_table": FacultyGradingService.DEFAULT_DEPED_TRANSMUTATION_TABLE,
+            },
+            is_default=True,
+            is_active=True,
+        )
+        written = GradingTemplateComponent.objects.create(
+            template_period=self.prelim,
+            code="WW",
+            name="Written Works",
+            weight_percentage=Decimal("30.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        performance = GradingTemplateComponent.objects.create(
+            template_period=self.prelim,
+            code="PT",
+            name="Performance Tasks",
+            weight_percentage=Decimal("50.00"),
+            sort_order=2,
+            is_active=True,
+        )
+        quarterly = GradingTemplateComponent.objects.create(
+            template_period=self.prelim,
+            code="QA",
+            name="Quarterly Assessment",
+            weight_percentage=Decimal("20.00"),
+            sort_order=3,
+            is_exam_component=True,
+            is_active=True,
+        )
+
+        def add_score(component, title, raw, total):
+            activity = GradeActivity.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=self.prelim,
+                template_component=component,
+                title=title,
+                total_score=Decimal(total),
+                created_by_user=self.faculty_user,
+                is_active=True,
+            )
+            StudentActivityScore.objects.create(
+                activity=activity,
+                student=self.student,
+                raw_score=Decimal(raw),
+                computed_score=Decimal("0.00"),
+                encoded_by_user=self.faculty_user,
+                is_active=True,
+            )
+
+        add_score(written, "WW1", "15.00", "20.00")
+        add_score(written, "WW2", "24.00", "30.00")
+        add_score(performance, "PT1", "45.00", "50.00")
+        add_score(quarterly, "QA1", "38.00", "40.00")
+
+        result = FacultyGradingService.recompute_period_summary(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.prelim,
+        )
+
+        row = StudentPeriodGrade.objects.get(offering=self.offering, student=self.student, template_period=self.prelim)
+        self.assertEqual(result["rows"][0]["component_scores"]["WW"], Decimal("78.00"))
+        self.assertEqual(result["rows"][0]["component_scores"]["PT"], Decimal("90.00"))
+        self.assertEqual(result["rows"][0]["component_scores"]["QA"], Decimal("95.00"))
+        self.assertEqual(result["rows"][0]["period_grade_raw"], Decimal("87.40"))
+        self.assertEqual(row.period_grade, Decimal("92"))
 
     def test_regular_term_selects_regular_profile_over_general_profile(self):
         fallback = self._create_profile(code="GENERAL", priority=1, is_default=True)
@@ -2111,11 +2193,12 @@ class CompletionGraceWindowTests(TestCase):
             deadline_at=now - timedelta(hours=1),
         )
 
-    def test_assert_encoding_allowed_when_period_is_overdue_but_unsubmitted(self):
-        GradingGovernanceService.assert_encoding_allowed(
-            offering=self.offering,
-            template_period=self.period,
-        )
+    def test_assert_encoding_blocks_overdue_unsubmitted_period_until_reopen_request_is_approved(self):
+        with self.assertRaises(ValidationError):
+            GradingGovernanceService.assert_encoding_allowed(
+                offering=self.offering,
+                template_period=self.period,
+            )
 
     def test_auto_lock_does_not_lock_overdue_unsubmitted_period(self):
         result = GradingGovernanceService.auto_lock_due_periods(at=timezone.now())

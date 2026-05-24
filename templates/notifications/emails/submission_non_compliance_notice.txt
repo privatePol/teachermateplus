@@ -1,4 +1,4 @@
-NCBA-EduGrade+ Notice
+EduGradePlus Notice
 
 {{ notice.title }}
 Faculty: {{ notice.faculty_user.full_name }}

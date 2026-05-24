@@ -5,7 +5,7 @@ from apps.grading.services import GradingGovernanceService
 
 
 class Command(BaseCommand):
-    help = "Automatically lock reopened gradebooks that were not resubmitted before the deadline."
+    help = "Automatically lock reopened gradebooks that were not submitted before their deadline or 24-hour reopen window."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -36,7 +36,7 @@ class Command(BaseCommand):
         for row in result["rows"]:
             offering_label = row["course_offering_id"] if row["course_offering_id"] else "-"
             self.stdout.write(
-                " - Lock #{id} | {tenant}/{campus} | {academic_year} {term} | {period} | {scope} | offering {offering} | deadline {deadline}".format(
+                " - Lock #{id} | {tenant}/{campus} | {academic_year} {term} | {period} | {scope} | offering {offering} | lock time {deadline}".format(
                     id=row["id"],
                     tenant=row["tenant_code"] or "-",
                     campus=row["campus_code"] or "-",

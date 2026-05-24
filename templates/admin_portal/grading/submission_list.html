@@ -92,6 +92,8 @@
               >
                 Request Reopen
               </a>
+            {% elif row.requires_correction_after_deadline %}
+              <span class="small text-muted">Use Correction of Grades</span>
             {% elif row.status == "SUBMITTED" and can_create_reopen_request %}
               <span class="small text-muted">No request action available</span>
             {% endif %}

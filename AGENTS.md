@@ -20,6 +20,25 @@ This file is the working contract for humans and coding agents contributing to *
 7. Feature availability should support global control and, when appropriate, per-role control.
 8. User-manageable feature toggles/settings should be exposed through a dedicated configurable-features page instead of being scattered across unrelated screens.
 
+## Mandatory Session Handoff Procedure
+
+At the end of every implementation session, BEFORE stopping:
+
+1. Update HANDOFF.md
+2. Document:
+   - completed work
+   - pending work
+   - changed files
+   - validation performed
+   - known issues/risks
+   - exact next steps
+3. Include validation status truthfully.
+4. Do not mark validation complete unless actually executed.
+5. Preserve previous unresolved items unless confirmed resolved.
+6. Keep HANDOFF.md concise but operationally useful.
+
+This handoff update is REQUIRED before ending the session.
+
 ## Working Conventions
 - Backend: Django (apps-based architecture)
 - DB: SQLite (dev), production-ready for external RDBMS migration planning
@@ -57,3 +76,15 @@ When changing behavior, also update:
 
 Example:
 - `fix(grading): correct summary table ordering and period readiness checks`
+
+
+## Required Session Shutdown Procedure
+
+Before ending a session:
+1. Update HANDOFF.md
+2. Document completed work
+3. Document pending work
+4. Document changed files
+5. Document validation performed
+6. Document exact next steps
+7. A session is NOT considered complete until HANDOFF.md is updated.

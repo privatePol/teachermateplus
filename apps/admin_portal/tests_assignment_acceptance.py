@@ -469,6 +469,14 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             f"{self.term.name} - {self.academic_year.name} ({self.faculty_user.full_name})",
         )
 
+    def test_configurable_features_shows_single_device_login_setting(self):
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("admin_portal:configurable_features_settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Allow only one active login session per user")
+        self.assertContains(response, "a new login signs out the same user from any other browser or device")
+
     def test_assignment_dashboard_view_loads(self):
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse("admin_portal:faculty_assignment_dashboard"))
@@ -493,10 +501,12 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_reminder_email_enabled": "",
                 "faculty_memo_center_enabled": "",
                 "enrollment_ownership_mode": "ADMIN_ONLY",
+                "grade_deadline_enforcement_policy": "COMPLIANCE_ONLY",
                 "login_lockout_enabled": "",
                 "login_lockout_max_attempts": "5",
                 "login_lockout_window_minutes": "15",
                 "login_lockout_duration_minutes": "15",
+                "single_device_session_enforcement_enabled": "",
                 "session_timeout_minutes": "45",
                 "faculty_assignment_response_window_days": "5",
                 "faculty_assignment_first_reminder_days": "2",
@@ -513,7 +523,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 302, response.context["form"].errors if response.context else "")
         self.assertTrue(
             FeatureSettingsService.is_faculty_assignment_reminders_enabled(tenant_id=self.tenant.id)
         )
@@ -530,6 +540,9 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertEqual(
             FeatureSettingsService.get_session_timeout_minutes(tenant_id=self.tenant.id),
             45,
+        )
+        self.assertFalse(
+            FeatureSettingsService.is_single_device_session_enforcement_enabled(tenant_id=self.tenant.id)
         )
 
     def test_admin_can_enable_official_grade_release_to_faculty(self):

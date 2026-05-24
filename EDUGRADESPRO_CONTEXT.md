@@ -39,7 +39,7 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
   - password complexity validation
   - forced password change on issued/reset credentials
   - privacy consent acceptance tracking
-  - single-device session enforcement
+  - configurable tenant-level one-session login control; when enabled, a new login signs out the same user from other browsers/devices
   - configurable tenant-level session timeout with active-use refresh behavior
   - temporary login lockout after repeated failed attempts, configurable from `Tools -> Configuration Management -> Login Security`
   - optional email OTP after a successful password check, configurable from `Tools -> Configuration Management -> Login Security`
@@ -51,7 +51,17 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 - Role creation now supports optional permission-copying from an existing role before final permission fine-tuning.
 - Role management now also supports editing existing roles, including activation/deactivation from the Admin UI.
 - Role management separates active and inactive records. Inactive non-system roles may be hard-deleted from the inactive section only after typing the exact role code; related role-permission and user-role assignment rows are removed and the action is audited.
-- Critical role-permission changes now require a mandatory reason plus the typed phrase `CHANGE PERMISSIONS`. The role-permission page shows critical permission badges and a compact impact preview, including the active users currently assigned to the role, before saving high-impact access changes.
+- Critical role-permission changes now require a mandatory reason plus the typed phrase `CHANGE PERMISSIONS`. The role-permission page shows critical permission badges, and the Critical Access Safeguard panel stays hidden until a critical permission is added/removed or validation needs the fields. When shown, it includes a compact impact preview with the active users currently assigned to the role before saving high-impact access changes.
+- The role-permission page uses plain-English permission group labels and header descriptions to explain what each module controls. Display labels do not change the underlying permission codes, modules, or enforcement logic.
+- Role-permission section saves return to the saved section anchor and show a compact `Changes saved` badge, while full-page permission saves remain on the role-permissions page and restore the previous scroll position where the browser allows it.
+- The Admin Portal Guide at `/admin-portal/guide/` uses in-page table-of-contents links for its quick guide navigation, simpler English wording for admins, and header-based guide images for the later guide cards. The Submission section includes a direct plain-English procedure for setting periodic encoding deadline locks.
+- `Admin Portal -> Tools -> Active Grading Period` separates the term-period catalog from the active-period selection. The catalog now shows inactive rows so admins can reactivate them, while only active catalog rows are selectable as the current active grading period. The standard 4-period loader can also reactivate existing inactive PRELIM/MIDTERM/PREFINAL/FINAL rows.
+- Active Grading Period setup rule: the term-period catalog is shared by tenant and term, so admins normally load the standard 4-period set once per tenant/term. The active period is campus-specific, so admins must load each campus/term scope and save that campus's current active period.
+- Admin guide wording now explains how grading setup controls relate: Active Academic Scope sets the current AY/term, Active Grading Period sets the campus period focus, Period Locks set campus/period deadlines, Grade Deadline Enforcement decides post-deadline behavior, and Non-Compliance/Reopen pages monitor or resolve overdue work.
+- Admin guide section `7. Submission and Reopen Control` includes the confirmed route matrix: before-deadline normal encoding, before-deadline self-reopen for submitted gradebooks, after-deadline Gradebook Reopen Request for unsubmitted gradebooks, and Correction of Grades for submitted/finalized gradebooks after deadline.
+- Admin Dashboard now includes a scoped `Gradebook Reopen Requests` panel for users with `reopen_requests.read` or `reopen_requests.review`, showing pending/reviewed counts, latest pending faculty requests, and direct review links for authorized reviewers.
+- Admin Guide monitoring instructions include a simple enablement checklist for Grade Prediction and the Faculty Student Intervention Monitor: enable Grade Prediction, include the FACULTY role, enable the intervention monitor flag, save, then ask faculty to refresh or log in again.
+- System email notifications use the standard subject format `NCBA | EduGradePlus: <Message>`. Email cards use the NCBA logo from `media/logos/ncba-logo.png`, the green-to-yellow header style, and no embedded Data Privacy Notice footer/block.
 - User role management separates active `Current Assignments` from `Inactive Assignments` so scoped roles that no longer grant access are easier to distinguish.
 - User role assignment uses a campus-dependent Department dropdown; select the campus first so only that campus's departments are assignable.
 - The Admin Roles list uses icon-based row actions with tooltips for editing roles and managing permissions.
@@ -69,6 +79,7 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 - The Admin Faculty Grade Book Monitor lists and opens accepted faculty assignments only. Pending, declined, clarification, and expired loads remain visible in Faculty Assignments for governance follow-up, but they are not treated as reviewable gradebooks.
 - Admin Portal enrollment create/edit forms group active course offerings by `Campus | Term | Section`, with course options sorted alphabetically by title inside each group.
 - Admin Portal Course Offerings list columns are ordered Campus, Term, Section, Course, Room/Office/Lab, Status, Record State, and Actions. Rows sort by campus, term, section, then course title/code.
+- Course records now support an optional syllabus link, intended for Google Drive syllabus documents. Faculty Portal My Classes shows a syllabus icon only when the assigned course has a link, and the link opens through a faculty-only assigned-offering redirect that confirms the faculty assignment and matching course/offering tenant before handing off to Google Drive. Each successful faculty syllabus-link open is audited as `VIEW_SYLLABUS_LINK`.
 - Faculty Portal course period cards use the configured grading-template period name for the card heading and classify card styling/guidance from both period code and name; `FX` periods named `Final Exam` display as `FINAL EXAM`, not as the prelim fallback.
 - Organization: tenants, campuses, departments, programs
 - NCBA organizational structure for actual-data setup:
@@ -114,8 +125,23 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 - The Assigned Offerings card explains that `Primary` is the lead faculty assignment for class accountability, reports, reminders, and monitoring, while `Secondary` is for supporting or shared-load faculty; the table labels this as `Load Role`.
 - Faculty Portal class access follows the Admin-configured active Academic Year/Term. Current-scope classes remain editable under normal grading governance, while archived or outside-scope classes are treated as read-only history on direct class pages; edits, submission, self-reopen, and class-list updates are blocked there, with corrections handled through the governed correction workflow.
 - Faculty Portal topbar displays the active Academic Year/Term resolved from the faculty user's current/default tenant scope so faculty can confirm the operating academic scope while navigating.
+- Faculty Portal Current Active Grading Period banners display friendly campus labels derived from tenant plus campus name, such as `NCBA-Fairview`, and include the active AY before the term/period label.
 - Faculty Portal My Classes groups accepted classes under `Accepted Course Assignments`, treats them as the official accepted classes ready for grading workflows, uses campus names with campus codes as supporting text, applies larger section/card heading typography for easier scanning, and renders missing grading-template warnings in a danger/red style because those classes cannot proceed into normal grading setup.
-- Faculty Portal class period cards use badge-style `What to do` and `Why set this` labels with no light-green guidance background, and place the yellow `Active Period` badge beside the period code for quicker scanning.
+- Faculty Portal My Classes pending assignment cards expose only `Accept Assignment`. Faculty should contact admin or the academic head before accepting if a load is unclear or appears incorrect.
+- Faculty Portal class period pages use one shared sticky `What to do` / `Why set this` note above the period cards. Individual period cards show lightweight activity metric cards for each required subcomponent/detail bucket, bottom-aligned action icons, and month-day-year submission deadline dates.
+- Faculty Portal Summary of Periodic Grades shows visible period/final grade columns immediately after the Status column. ACTIVE enrollment statuses are intentionally blank in the summary table; only non-active statuses such as DRP, W, and INC are printed in the Status column.
+- Faculty Portal Summary Period Snapshot is collapsed by default and simplified to fewer readiness cards. The summary deadline uses Month day, year formatting with a countdown label, and the gradebook caption shows the campus name instead of the campus code.
+- Faculty Portal Grade Prediction and Student Intervention Monitor access both follow the Grade Prediction tenant configuration and allowed role list. If `FEATURE_GRADE_PREDICTION_ENABLED` is off, the user role is not included, or the intervention monitor flag is off, the related faculty links/pages are hidden or blocked.
+- Faculty Portal Student Intervention Monitor is the faculty-facing replacement for the old at-risk monitor wording. It still uses the existing prediction data source internally, but the default monitor shows only Student, Class / Period, Current Standing, Main Concern, Suggested Intervention, and Action. It uses softer intervention labels (`Needs Attention`, `Monitor`, `Missing Work`, `On Track`), treats missing attendance records as incomplete encoding, prioritizes missing score/attendance data before grade concerns, and keeps technical projection details on separate analytics/prediction pages.
+- Faculty Portal Grade Prediction is primarily a selected-period aid. The possible final-grade value remains secondary guidance only; faculty-facing labels avoid `Final At Risk` wording and the guide explains the page through a simple sample student record rather than technical formula sections.
+- Faculty Dashboard is intentionally simplified for the academic community: the lower dashboard uses a few clickable action cards instead of many passive metric cards, and each card routes to the page where the faculty can act.
+- Faculty Portal class grading-template pages are focused on read-only template review and template issue reporting; the visible `Open Grade Calculator` action has been removed from that page.
+- Faculty Final Clearance generation is allowed only when the evaluated campus-term clearance scope is `CLEARED`, meaning all accepted assigned courses in that scope are `COMPLETE`. Faculty may preview incomplete clearance status, but PDF generation and visible print actions are blocked until completion.
+- Faculty gradebook reopen request emails are sent to users whose effective permissions include `reopen_requests.review` for the request tenant/campus. This includes scoped roles, direct user permission grants, and active superusers, matching the Admin Portal review authorization model.
+- Faculty Portal period cards show a direct reopen request icon when the period is locked or past its deadline, the gradebook is not submitted, and no active/pending reopen already blocks the request. A complete gradebook may still be submitted from Summary after the deadline, but additional activity, score, or attendance encoding requires approved reopen.
+- Once an authorized admin approves a faculty gradebook reopen request, Faculty Portal treats that approved request as the active unlock even when the underlying period lock or deadline is still present, but only for 24 hours from approval. The period card shows `Reopened`, and Activities, Scores, Attendance, and Summary show the approved reopen notice and expiry time. If the 24-hour window expires before submission, EduGrade+ auto-locks the class-period again and the faculty must submit a new reopen request.
+- The final period submission path also honors the active approved reopen window during summary recomputation, so faculty can finalize and submit a locked/overdue reopened period within the 24-hour window.
+- Submitted/finalized gradebooks are protected after the deadline. Once the deadline has passed, submitted gradebooks are not eligible for the Gradebook Reopen Request path; any needed change must use Correction of Grades. Submitted gradebooks may still use the pre-deadline reopen path only while the configured deadline remains open.
 - Faculty reminder and memo class selectors default to accepted classes in the current active academic scope so old-term classes do not appear in day-to-day faculty planning dropdowns.
 - Enrollment management
 - Enrollment updates enforce the same tenant/campus match between student and offering as enrollment creation, preventing cross-campus or cross-tenant class-list rows.
@@ -131,6 +157,7 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
   - collapsed settings cards now display as compact summary cards in a responsive grid, while any expanded card returns to a full-width detailed settings layout
   - cards now open collapsed by default, with `Expand All` and `Collapse All` controls at the top of the page
   - Login Security settings now include optional email OTP and OTP expiry minutes for both Admin Portal and Faculty Portal sign-in
+  - Login Security settings now include a tenant-level one-session login control so admins can decide whether simultaneous logins are allowed
   - Faculty Memo settings now also include a Faculty Portal quick-tour toggle; individual faculty users may disable the tour for their own next logon
 - `Tools -> Actual Data Reset` provides guarded rebuild helpers for training/setup cycles. Access is controlled by the assignable `actual_data_reset.run` permission. Every reset requires a mandatory reason, exact confirmation phrase, and acknowledgement checkbox, creates a SQLite backup when applicable, and exports audit logs before deletion. Full reset deletes tenant/campus/department/program, academic, grading-template/profile, import, enrollment, faculty-loading, grading, prediction, notification, session, audit, and scoped-role data while preserving the application shell: users, roles, permissions, role-permission mappings, menus, migrations, Django auth metadata, and global settings. A scoped `Faculty assignments and grading transactions only` reset is also available for demonstrations; it preserves setup data such as tenants, departments, programs, courses, course offerings, templates, tenant grading profiles, course-template assignments, students, and enrollments by default, while clearing faculty assignments, activities, scores, attendance, submissions, corrections, period locks, prediction snapshots, reminders, notifications, final-clearance reports, and faculty template issue reports. The scoped reset can optionally clear enrollments/class lists. Invalid reset scopes are rejected without deleting data.
   - Grading management:
@@ -238,10 +265,10 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 - My Classes and Archived Classes
 - Faculty Portal sidebar keeps only the dedicated `Classes` block for the class list; the duplicate top-level `My Classes` nav entry was removed to avoid confusion.
 - Faculty deadline handling supports two tenant policies:
-  - under compliance-only policy, if a grading-period deadline passes before submission, the grade book stays open and faculty can continue encoding until submission
-  - under auto-close policy, activity creation, score encoding, and attendance updates close after deadline; faculty can still submit a complete gradebook or request campus-admin reopen from Summary
-  - the Faculty Portal shows the matching overdue / non-compliance or auto-closed warning
-  - authorized academic users review overdue classes from the admin non-compliance list, while auto-close reopen requests are reviewed from the Admin Submission Reopen Requests queue
+  - if a grading-period deadline passes before submission, activity creation, score encoding, and attendance updates require a reopen request
+  - faculty can still submit a complete gradebook from Summary after the deadline
+  - the Faculty Portal shows the matching closed-after-deadline or locked warning
+  - authorized academic users review overdue classes from the admin non-compliance list, while reopen requests are reviewed from the Admin Submission Reopen Requests queue
 - Grade correction remains reserved for already submitted grade books that need changes; overdue but unsubmitted grade books use the deadline policy rather than correction workflow.
 - Admin Portal now includes a read-only `Faculty Grade Distribution Monitor` for configured academic governance users with `grade_distribution_monitor.read`.
   - The monitor aggregates stored period grades or stored activity computed scores by scoped faculty/class/period/activity context.
@@ -287,7 +314,7 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 - Faculty Portal sidebar now organizes the main operational links as:
   - `Classes`
     - `My Classes`
-    - `Students At-Risk Monitor`
+    - `Student Intervention Monitor`
     - `Archived Classes`
   - `Reminders and Notes`
     - `Reminders`
@@ -302,8 +329,8 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
   - class period page
   so faculty can see the nearest active unsubmitted period deadline more clearly.
 - Faculty Dashboard now includes a read-only command-center area:
-  - `Priority Actions` lists the most urgent faculty follow-ups first, including overdue unsubmitted periods, missing grades, at-risk students, correction requests, and activities without scores
-  - the embedded `Students At Risk` dashboard container was removed so the command area focuses on Priority Actions; the separate Students At-Risk Monitor remains available from navigation
+  - `Priority Actions` lists the most urgent faculty follow-ups first, including overdue unsubmitted periods, missing grades, students needing intervention, correction requests, and activities without scores
+  - the embedded student-support dashboard container was removed so the command area focuses on Priority Actions; the separate Student Intervention Monitor remains available from navigation
 - Faculty period Summary print output now provides an NCBA-branded `Summary of Periodic Grades` sheet for Pinnacle encoding, with logo, school heading/address, grading period, academic year, semester/term, faculty name, course code/title, units, section, student list, periodic grade, and status.
 - When a period becomes closed under active grading period governance, the faculty period card still keeps `Attendance` and `Summary` available as read-only review pages, while write actions remain blocked unless the period becomes active again, is formally reopened, or has an approved correction window.
 - The `My Classes` page exposes `Final Clearance` inside the Faculty Portal through a single dedicated action area, so faculty can preview their own campus-term clearance status and generate the official final-clearance PDF without switching to the Admin Portal.
@@ -326,9 +353,9 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
   - actual email queue creation still happens in the background when the reminder becomes due
   - if the activity is deleted or no longer future-dated, the linked reminder is cancelled automatically
 - The Reminder Center page has been visually polished into clearer sections with summary cards, a guided create form, and easier-to-scan reminder cards.
-- Faculty Portal now also includes a Student At-Risk Monitor that groups prediction-based risk rows by class and current period so faculty can prioritize intervention before periods close.
-- The Student At-Risk Monitor now labels its recommended usage rhythm directly on the page: Prelim for early warning, Midterm as the main intervention period, Pre-Final as the last follow-up checkpoint, and Final mostly for confirmation.
-- When active grading period governance is configured, the faculty at-risk monitor focuses on that active period and keeps final-grade projection on the detailed prediction page to reduce confusion.
+- Faculty Portal now includes a Student Intervention Monitor that groups students by class and current period so faculty can prioritize follow-up before periods close.
+- The Student Intervention Monitor uses plain statuses and suggested interventions rather than technical projection wording in the default faculty view.
+- When active grading period governance is configured, the faculty intervention monitor focuses on that active period and keeps final-grade projection on the detailed prediction page to reduce confusion.
 - Prediction at-risk status now considers both the selected period estimate and the possible final grade; a student can be flagged at risk when the current period is passing but the possible final grade is still below the configured passing threshold.
 - Faculty Portal now also includes a class-period `Who Viewed` history page that lets faculty review admin-side read-only grade book monitor openings already recorded in the audit trail.
 - Faculty Grade Book Monitor student identity visibility is permission-controlled. Users with scoped access plus `gradebook.view_student_identity` may see unmasked student numbers and names for authorized gradebook or correction review; AC/Dean/CAO-style reviewers without that permission continue to see masked identity. The audit log records whether the view was masked or identity-visible.
@@ -362,6 +389,7 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 - Gradebook print view
 - Faculty guide/help center page
 - Faculty privacy-consent page now uses the revised shared `EduGrade+ Privacy Consent` statement for system data-processing acknowledgment, and Admin/Faculty consent screens require the non-personal typed confirmation phrase `I CONSENT` in addition to the consent checkbox before acceptance is recorded.
+- During pending Privacy Consent, Admin and Faculty portal layouts collapse and lock the left navigation and hide Change Password so first-login focus stays on the consent form until the current consent version is accepted.
 - Faculty guide/help center now uses section-specific `media/portal-img` visuals for workflow, activities/encoding, and submission guidance.
 - Workflow visual in faculty guide is embedded directly inside the "Recommended Daily Faculty Workflow" step container for clearer instructional flow.
 - Score correction request filing now supports:
@@ -447,8 +475,8 @@ All business operations should respect these dimensions and permissions.
   - same-user separation can also be enforced between review/final approval and hotfix review/final apply
   - publish can be forced to require prior approval or relaxed for direct steward publishing when policy allows.
 - Correction behavior is now intentionally simpler:
-  - unsubmitted grade books stay open after the deadline when the tenant uses compliance-only deadline enforcement
-  - when auto-close deadline enforcement is selected, faculty use the gradebook reopen request queue for unfinished overdue encoding
+  - unsubmitted grade books can still be submitted after the deadline if already complete
+  - faculty use the gradebook reopen request queue for unfinished overdue or locked encoding
   - correction workflow is reserved for already submitted grade books that need changes
 - Tenant-level correction process mode is now configurable:
   - `SYSTEM_REQUEST`: faculty can file in-portal correction requests (subject to route/policy)
@@ -606,11 +634,11 @@ All business operations should respect these dimensions and permissions.
 - Admin guide section `7. Submission and Reopen Control` now also uses a dedicated visible-border table style so policy tables are easier to scan and read during operations briefings.
 - Admin guide section `8. Grade Correction Process (System vs Manual)` now uses the same table-first presentation style and makes the system request path, official PDF artifact, approval notifications, and manual-only handling easier to distinguish.
 - Faculty guide and manual use a simple `Corrections and Reopen` section with a short system/manual mode summary to reduce confusion for faculty readers.
-- Faculty Portal formal manual content has been rewritten in simpler, more natural faculty-facing language while preserving the same sections for workflow, submission, corrections, prediction, at-risk monitoring, reminders, memos, student status, and privacy/audit.
+- Faculty Portal formal manual content has been rewritten in simpler, more natural faculty-facing language while preserving the same sections for workflow, submission, corrections, prediction, student intervention monitoring, reminders, memos, student status, and privacy/audit.
 - Faculty Portal main guide content has also been rewritten in simpler, more natural language and reorganized around grouped topic cards while preserving existing anchors for daily workflow, assignments, activities, summary, prediction, submission, corrections, class list, archived classes, password help, first login, privacy, reminders, and private memos.
 - Faculty Portal manual navigation has also been reorganized around grouped topic cards for portal basics, grades/submission, prediction/support, and records/security.
 - Faculty Portal guide and formal manual now use a stronger green/teal/gold visual theme with animated cards, anchor target highlighting, and bottom-left Back to top links that avoid the help button area.
-- Faculty Portal guide now includes an FAQ section linked from the topic cards, with short answers for common faculty questions about attendance sessions, official-grade visibility, active period behavior, corrections, readiness counts, and at-risk monitoring.
+- Faculty Portal guide now includes an FAQ section linked from the topic cards, with short answers for common faculty questions about attendance sessions, official-grade visibility, active period behavior, corrections, readiness counts, and student intervention monitoring.
 - Faculty Portal FAQ now also covers submission-adjacent questions about when faculty may mark DRP, when Final Clearance can be printed, what happens when required template components have no activity setup, what to do when a wrong class appears in My Classes, and how overdue submission/readiness blockers should be handled.
 - Faculty Portal base layout now displays an active-session notice when a superuser or account without an active FACULTY role opens faculty pages, explaining shared browser sessions and recommending incognito, another browser, or a separate browser profile for faculty-account testing.
 - Faculty Dashboard now uses a clearer "today first" layout with a stronger hero, shortcut cards for common tasks, a priority-action panel, a privacy-safe at-risk preview, and supporting KPI sections below.
@@ -670,11 +698,14 @@ Before changing anything:
 - Grade deadline enforcement is now configurable from `Tools -> Configuration Management -> Grade Deadline Enforcement`:
   - `COMPLIANCE_ONLY` keeps the simpler policy above, where overdue unsubmitted gradebooks stay open and are monitored as non-compliant.
   - `AUTO_CLOSE_REQUIRES_REOPEN` automatically closes activity creation, score encoding, and attendance updates after the configured deadline for unsubmitted gradebooks.
-  - Under auto-close, faculty can still submit from Summary if the gradebook is already complete; if more encoding is needed, faculty files a `Request Gradebook Reopen` from Summary.
+  - Faculty can still submit from Summary if the gradebook is already complete; if more encoding is needed after the deadline or lock, faculty files a `Request Gradebook Reopen`.
   - Faculty reopen requests are stored in the existing `GradeSubmissionReopenRequest` queue, email scoped users with `reopen_requests.review`, and are reviewed from `Admin Portal -> Grading -> Submission Reopen Requests`.
 - `GradingPeriodLock.deadline_at` is used as a compliance checkpoint and reminder trigger for overdue/unsubmitted grade books.
 - Faculty period workflow pages now surface overdue status directly:
   - faculty see that the class is already overdue/non-compliant
-  - faculty may continue encoding until submission
+  - faculty may submit if complete, but further encoding requires reopen approval
   - AC / Dean / CAO / authorized users monitor the late submission from `Admin Portal -> Grading -> Non-Compliance on Periodic Grades Submission`
 - `Admin Portal -> Grading -> Period Locks -> Create/Edit` now sorts the `Course Offering` selector by course title and renders it as an editable combobox-style picker backed by the original field, so admins can type directly to search offerings inside large scoped lists.
+- Tenant Grading Profiles now support a period-grade formula mode in addition to the final-grade formula mode:
+  - `Weighted Components` preserves the existing EduGrade+ computation path.
+  - `DepEd Transmutation Table` supports DepEd K-12 E-Class Record style quarterly grading by summing raw scores per component, converting each component to a percentage score, applying component weights to produce the initial grade, then transmuting the initial grade through a configurable table. The default table follows the Grade 1 ECR workbook pattern with `0.00-3.99` mapping to `60`.

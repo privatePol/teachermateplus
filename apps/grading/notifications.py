@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.mail import EmailMultiAlternatives
 from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 from apps.core.services.features import FeatureSettingsService
+from apps.core.services.permissions import PermissionService
 from apps.grading.models import GradeCorrectionRequest, GradeSubmissionReopenRequest
 from apps.grading.reporting import CorrectionOfficialReportService
-from apps.rbac.models import UserRole
+from apps.rbac.models import UserPermission, UserRole
+
+User = get_user_model()
 
 
 class CorrectionNotificationService:
     SCHOOL_NAME = "NATIONAL COLLEGE OF BUSINESS AND ARTS"
-    SUBJECT_PREFIX = "NCBA-EduGrade+: "
     SUBJECT_MESSAGE = "Petition for Correction of Grades Awaiting Your Approval"
 
     @classmethod
@@ -88,7 +91,7 @@ class CorrectionNotificationService:
             return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_matching_role_recipients"}
 
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
-        subject = f"{cls.SUBJECT_PREFIX}{cls.SUBJECT_MESSAGE}"
+        subject = format_email_subject(cls.SUBJECT_MESSAGE)
         petitioner_name = (
             getattr(request_obj.requested_by_user, "full_name", None)
             or request_obj.requested_by_user.get_full_name()
@@ -179,7 +182,7 @@ class CorrectionNotificationService:
             return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_registrar_recipient"}
 
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
-        subject = "NCBA-EduGrade+: Approved Petition for Correction of Grades for Registrar Reference"
+        subject = format_email_subject("Approved Petition for Correction of Grades for Registrar Reference")
         pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=request_obj)
         petitioner_name = (
             getattr(request_obj.requested_by_user, "full_name", None)
@@ -238,7 +241,6 @@ class CorrectionNotificationService:
 
 class GradebookReopenNotificationService:
     SCHOOL_NAME = "NATIONAL COLLEGE OF BUSINESS AND ARTS"
-    SUBJECT_PREFIX = "NCBA-EduGrade+: "
     SUBJECT_MESSAGE = "Gradebook Reopen Request Awaiting Review"
 
     @classmethod
@@ -252,12 +254,13 @@ class GradebookReopenNotificationService:
 
     @classmethod
     def _recipient_rows(cls, *, request_obj: GradeSubmissionReopenRequest):
-        rows = (
+        permission_code = "reopen_requests.review"
+        role_rows = list(
             UserRole.objects.filter(
                 is_active=True,
                 role__is_active=True,
                 user__is_active=True,
-                role__role_permissions__permission__code="reopen_requests.review",
+                role__role_permissions__permission__code=permission_code,
                 role__role_permissions__permission__is_active=True,
                 tenant_id__in=[request_obj.tenant_id, None],
                 campus_id__in=[request_obj.campus_id, None],
@@ -266,17 +269,45 @@ class GradebookReopenNotificationService:
             .order_by("role__name", "user__last_name", "user__first_name", "user__id")
             .distinct()
         )
+        candidate_user_ids = {row.user_id for row in role_rows}
+        candidate_user_ids.update(
+            UserPermission.objects.filter(
+                user__is_active=True,
+                permission__code=permission_code,
+                permission__is_active=True,
+                grant_type=UserPermission.GrantType.ALLOW,
+                tenant_id__in=[request_obj.tenant_id, None],
+                campus_id__in=[request_obj.campus_id, None],
+            ).values_list("user_id", flat=True)
+        )
+        candidate_user_ids.update(User.objects.filter(is_active=True, is_superuser=True).values_list("id", flat=True))
+
+        role_name_by_user_id = {}
+        for row in role_rows:
+            role_name_by_user_id.setdefault(row.user_id, row.role.name)
+
         recipients = []
         seen = set()
-        for row in rows:
-            email = (row.user.email or "").strip()
+        users = User.objects.filter(id__in=candidate_user_ids, is_active=True).order_by("last_name", "first_name", "id")
+        for user in users:
+            if not PermissionService.has_permission(
+                user,
+                permission_code,
+                tenant_id=request_obj.tenant_id,
+                campus_id=request_obj.campus_id,
+            ):
+                continue
+            email = (user.email or "").strip()
             if not email:
                 continue
-            key = (row.user_id, email.lower())
+            key = (user.id, email.lower())
             if key in seen:
                 continue
             seen.add(key)
-            recipients.append({"user": row.user, "role": row.role, "email": email})
+            role_name = role_name_by_user_id.get(user.id)
+            if not role_name and user.is_superuser:
+                role_name = "Superuser"
+            recipients.append({"user": user, "role_name": role_name or "Authorized Reopen Reviewer", "email": email})
         return recipients
 
     @classmethod
@@ -286,7 +317,7 @@ class GradebookReopenNotificationService:
             return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_review_recipients"}
 
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
-        subject = f"{cls.SUBJECT_PREFIX}{cls.SUBJECT_MESSAGE}"
+        subject = format_email_subject(cls.SUBJECT_MESSAGE)
         requester_name = (
             getattr(request_obj.requested_by_user, "full_name", None)
             or request_obj.requested_by_user.get_full_name()
@@ -311,7 +342,7 @@ class GradebookReopenNotificationService:
         errors = []
         notified_emails = []
         for recipient in recipients:
-            context = {**context_base, "recipient_role_name": recipient["role"].name}
+            context = {**context_base, "recipient_role_name": recipient["role_name"]}
             message = EmailMultiAlternatives(subject=subject, body="", from_email=from_email, to=[recipient["email"]])
             logo_context = cls._logo_context()
             context.update(logo_context)

@@ -1,0 +1,339 @@
+# HANDOFF.md
+
+Last updated by Codex: 2026-05-24
+
+## Purpose
+This file preserves continuity between Codex sessions for EduGrade+ V1.
+
+## Current Session Summary
+- Date: 2026-05-24
+- Session focus: Continued management-demo adjustments, including configurable simultaneous-login behavior, Faculty Portal prediction/intervention access, Faculty Portal class-card/summary simplification, and Student Intervention Monitor redesign.
+- Current branch: main
+- Current environment: Windows PowerShell workspace at `D:\edugradeplus`; Django apps-based project using SQLite for development.
+
+## Completed In This Session
+- Paused DepEd E-Class Record work per user direction; no additional DepEd work was performed after the pause.
+- Privacy Consent adjustment:
+  - Added `privacy_consent_pending` layout context for Admin and Faculty Privacy Consent views.
+  - Collapsed/locked Admin and Faculty left navigation while consent is pending.
+  - Removed normal sidebar menu links while consent is pending.
+  - Hid Change Password, My Signature, and floating guide shortcuts while consent is pending.
+  - Kept Logout available.
+- Syllabus link adjustment:
+  - Added `Course.syllabus_url` for Google Drive or approved external syllabus links.
+  - Added Admin Course form/list/Django admin support for syllabus links.
+  - Added `faculty_portal:offering_syllabus`, an internal faculty-only redirect that verifies the logged-in faculty has an active assignment for the offering and that the course tenant matches the offering tenant before redirecting to the stored URL.
+  - Added a syllabus icon on Faculty Portal My Classes accepted course cards only when a syllabus link exists.
+  - Documented that Google Drive/domain sharing remains the central storage permission layer.
+  - Added `VIEW_SYLLABUS_LINK` audit logging for each successful faculty syllabus-link open, scoped to actor, tenant, campus, course, offering, assignment, section, and term.
+- Faculty active-period display adjustment:
+  - Updated Faculty Dashboard/My Classes Current Active Grading Period chips to include the active AY.
+  - Replaced numeric campus-code display with tenant plus campus-name labels such as `NCBA-Fairview`.
+- Faculty Summary of Periodic Grades adjustment:
+  - Moved visible period/final grade columns directly after the Status column in the live summary table.
+  - Hid ACTIVE badges/values in the Status column while preserving visible non-active statuses such as DRP, W, and INC.
+- Gradebook reopen notification correction:
+  - Updated reopen request email recipients to mirror effective `reopen_requests.review` authorization for the request tenant/campus.
+  - Recipients now include scoped role holders, direct user permission grants, and active superusers with email addresses.
+- Admin role-permission usability adjustment:
+  - Added clearer display-only permission group labels on the role-permissions page.
+  - Added plain-English descriptions to each permission card header so admins can understand what the group controls before granting access.
+  - Changed section saves to return to the saved section anchor and show a compact `Changes saved` badge instead of landing at the top of the page.
+  - Changed full-page permission saves to remain on the role-permissions page and restore prior scroll position where browser session storage permits.
+  - Kept the Critical Access Safeguard enforcement but hid the panel during ordinary permission edits; it appears only when critical permissions are added/removed or when validation needs the reason/confirmation fields.
+- Admin Portal Guide usability adjustment:
+  - Converted the guide's top quick links and workstream links from direct Admin Portal page links into in-page table-of-contents anchors.
+  - Simplified wording across the guide, especially setup, deadline lock, correction, security, monitoring, and incident response instructions.
+  - Removed body screenshots from guide sections 2 and 3.
+  - Moved guide screenshots for later guide cards into card headers and added a direct `How To Set Periodic Encoding Deadline Lock` subsection under Submission and Reopen Control.
+- Admin Active Grading Period setup adjustment:
+  - Diagnosed `/admin-portal/tools/active-grading-period/?campus_id=9&term_id=7`: NCBA Fairview / 2ND term has PRELIM, MIDTERM, PREFINAL, and FINAL catalog rows, but all four were inactive, so the previous page logic hid them.
+  - Changed the Term Period Catalog table to show inactive rows so admins can reactivate them directly.
+  - Added a warning when a selected term has catalog rows but no active rows available for selection.
+  - Updated the standard 4-period loader so existing inactive standard rows count as changed/reactivated rows instead of reporting as if nothing happened.
+  - Added clearer setup instructions to the Active Grading Period page and Admin Guide: load the standard period catalog once per tenant/term, then save the active period separately per campus/term.
+  - Added a plain-English relationship map connecting Active Academic Scope, Active Grading Period, Period Locks, Grade Deadline Enforcement, Non-Compliance monitoring, and Submission Reopen Requests.
+- Admin Guide submission-route documentation:
+  - Added the confirmed route matrix to Admin Guide section `7. Submission and Reopen Control`.
+  - Documented that Gradebook Reopen Request is for unfinished/unsubmitted gradebooks after deadline or lock, while Correction of Grades is for submitted/finalized gradebooks that need changes.
+  - Clarified that submitted gradebooks may be reopened only before the configured deadline.
+- Faculty reopen request period-card adjustment:
+  - Updated policy per user direction: once a deadline is met or a period is locked, additional faculty encoding requires a reopen request regardless of the prior deadline enforcement policy label.
+  - Complete gradebooks may still be submitted from Summary after the deadline.
+  - Added a direct period-card `Request Gradebook Reopen` icon/modal so faculty can request reopen from the period card when a period is locked or closed after deadline.
+- Admin Dashboard reopen request visibility adjustment:
+  - Added a scoped `Gradebook Reopen Requests` dashboard panel for users with `reopen_requests.read` or `reopen_requests.review`.
+  - Panel shows pending review count, reviewed-today count, latest pending requests, and direct review links for users who can review.
+- Faculty approved reopen display/edit-state adjustment:
+  - Fixed Faculty Portal period-card and period work-page state so an approved gradebook reopen request overrides the raw period lock/deadline closure for a controlled reopen window.
+  - Reopened periods now show a `Reopened` badge and approved reopen notice instead of staying visually locked after campus admin approval.
+  - Added a 24-hour validity window for approved gradebook reopen requests. When the 24-hour window expires before submission, EduGrade+ creates a course-level lock again and requires a new reopen request before further encoding or late submission.
+  - Fixed final submission from an active approved reopen window by allowing the submission recompute step to proceed even when the underlying period lock is still present.
+  - Enforced the confirmed route: submitted/finalized gradebooks after the deadline cannot use Gradebook Reopen Request and must use Correction of Grades. Submitted gradebooks can use reopen request only before the configured deadline.
+- Email notification standardization:
+  - Added a shared email subject formatter so system-generated emails use `NCBA | EduGradePlus: <Message>`.
+  - Updated account/password, new-user credentials, faculty reminder, non-compliance, correction, registrar, gradebook reopen, and email diagnostic send paths to use the standard subject format.
+  - Switched email card branding to the NCBA logo (`media/logos/ncba-logo.png`) and the green-to-yellow card header style used by the password reset message.
+  - Removed embedded Data Privacy Notice blocks from email templates.
+- Login Security simultaneous-login configuration:
+  - Added tenant feature setting `FEATURE_SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED`.
+  - Exposed `Allow only one active login session per user` under `Admin Portal -> Tools -> Configuration Management -> Login Security`.
+  - Kept default behavior enabled, so existing tenants still sign out the older browser/device when the same user logs in elsewhere.
+  - When disabled for the tenant, simultaneous Admin/Faculty sessions for the same user are allowed.
+  - Updated Admin/Faculty guide wording to point admins to the Login Security setting.
+- Faculty Portal class-card and summary simplification:
+  - Pending assignments on `/faculty/my-courses/` now show only `Accept Assignment`; clarification/decline buttons and response textarea were removed from the faculty page.
+  - `/faculty/my-courses/<offering>/periods/` now uses one shared sticky `What to do` / `Why set this` note, removes repeated guidance from each period card, shows lightweight activity metric cards for each required subcomponent/detail bucket, and keeps action icons at the bottom of each card.
+  - Period-card and Summary deadline display now uses `Month day, year` formatting, with a countdown badge on the Summary page.
+  - `/faculty/my-courses/<offering>/periods/<period>/summary/` Period Snapshot is collapsed by default and simplified to fewer cards.
+  - The Summary gradebook caption now shows campus name instead of campus code.
+  - Faculty guide/manual wording was updated for the simplified assignment and snapshot behavior.
+- Faculty Portal Grade Prediction / At-Risk Monitor access check:
+  - Diagnosed the missing Faculty Portal grade prediction and non-working Students At-Risk Monitor as an NCBA tenant configuration issue in the dev database: Grade Prediction was disabled.
+  - Enabled NCBA dev settings for `FEATURE_GRADE_PREDICTION_ENABLED`, `FEATURE_GRADE_PREDICTION_ROLE_CODES` (`FACULTY`, `CAMPUS_ADMIN`, `TENANT_ADMIN`, `SUPER_ADMIN`), and `FEATURE_GRADE_PREDICTION_AT_RISK_ENABLED`.
+  - Added Faculty Portal layout context for prediction and at-risk feature access.
+  - Updated the Faculty Portal sidebar so `Students At-Risk Monitor` appears only when the current user is allowed by the same Grade Prediction feature and role checks used by the prediction pages.
+  - Added simple Admin Guide instructions for enabling Grade Prediction and the Faculty Students At-Risk Monitor from Configuration Management.
+- Faculty Portal Grade Prediction wording simplification:
+  - Clarified that the prediction page is mainly for the selected grading period; the possible final-grade value is secondary guidance only.
+  - Replaced confusing `Final At Risk` status wording with simpler labels such as `At Risk This Period`, `Needs Follow-up`, `Needs Scores`, and `On Track`.
+  - Simplified prediction table headers to faculty-friendly labels such as `Estimated [Period] Grade`, `Encoded Work`, `Still Missing`, and `Period Alert`.
+  - Replaced the technical prediction guide with a shorter sample-student walkthrough and plain column guide.
+- Faculty Dashboard simplification:
+  - Removed the lower sections of passive metric cards from `/faculty/dashboard/`.
+  - Added a smaller `Main Action Cards` area with clickable cards for unsubmitted classes, priority actions, student support/at-risk follow-up, and class-list status.
+  - At-Risk dashboard links now respect the faculty at-risk feature gate, falling back to My Classes when disabled.
+- Faculty grading-template page simplification:
+  - Removed the visible `Open Grade Calculator` button from `/faculty/my-courses/<offering>/grading-template/`.
+  - Removed faculty guide/manual wording that instructed faculty to use the calculator from the grading-template page.
+- Faculty Final Clearance print gating:
+  - Final Clearance preview remains available from My Classes / final-period context.
+  - Official Final Clearance PDF generation is blocked unless every accepted course assignment in the campus-term scope evaluates as `COMPLETE`.
+  - My Classes and final-period cards show print actions only when the scope can print; otherwise they show check/pending states.
+- Faculty Student Intervention Monitor redesign/refinement:
+  - Renamed the faculty-facing Students At-Risk Monitor to `Student Intervention Monitor` in the sidebar, quick tour, dashboard CTA, faculty guide/manual, and public Faculty Portal page copy.
+  - Added `StudentInterventionService` to translate existing prediction snapshots into plain intervention statuses without exposing technical prediction language in the default monitor.
+  - Default monitor statuses are now `Needs Attention`, `Monitor`, `Missing Work`, and `On Track`; internal status codes remain `CRITICAL`, `WARNING`, `MISSING_WORK`, and `ON_TRACK`.
+  - Refined classification to prioritize missing/incomplete encoded data before grade-based concerns.
+  - Missing attendance records are treated as incomplete encoding, not as student attendance behavior.
+  - Each row now emits one plain `main_concern` and one action-oriented `suggested_intervention`.
+  - Current standing values are softened to `Needs attention`, `Close to threshold`, `On track`, or `Not ready to assess`.
+  - Default monitor now focuses on Student, Class / Period, Current Standing, Main Concern, Suggested Intervention, and Action.
+  - Default monitor no longer shows likely-fail wording, prediction confidence, coverage percentage, projected final grade, or possible final-grade warning language.
+  - Technical projection details remain on the separate prediction/analytics pages, with `Advanced Analytics` shown only when the user has `faculty_analytics.read`.
+  - Added audit event `VIEW_STUDENT_INTERVENTION_MONITOR` whenever the faculty monitor is opened.
+- Added focused tests for pending-consent locks and syllabus link behavior.
+- Added a focused Faculty Dashboard active-period display test.
+- Added focused Faculty Summary table tests for grade-column order and status display.
+- Added a focused reopen request notification test for role, direct user-permission, and superuser recipients.
+- Added focused role-permissions page tests for module descriptions, section-save behavior, section anchor redirect, and saved label display.
+- Updated `CHANGE_LOG.md`, `EDUGRADESPRO_CONTEXT.md`, Admin guide, Faculty guide/manual, and institution implementation reference.
+
+## Files Created / Modified
+- Added: `apps/academics/migrations/0009_course_syllabus_url.py`
+- Modified: `apps/academics/models.py`
+- Modified: `apps/academics/admin.py`
+- Modified: `apps/accounts/views.py`
+- Modified: `apps/accounts/services.py`
+- Modified: `apps/accounts/tests_admin_password_reset.py`
+- Modified: `apps/accounts/tests_login_lockout.py`
+- Modified: `apps/accounts/tests_login_otp.py`
+- Modified: `apps/accounts/tests_privacy_consent.py`
+- Modified: `apps/admin_portal/forms.py`
+- Modified: `apps/admin_portal/import_views.py`
+- Modified: `apps/admin_portal/tests_department_dropdown_labels.py`
+- Modified: `apps/admin_portal/tests_reopen_requests.py`
+- Modified: `apps/admin_portal/tests_roles.py`
+- Modified: `apps/core/services/email_assets.py`
+- Modified: `apps/core/services/features.py`
+- Modified: `apps/core/context_processors.py`
+- Modified: `apps/core/tests_email_assets.py`
+- Modified: `apps/faculty_portal/views.py`
+- Modified: `apps/faculty_portal/services.py`
+- Modified: `apps/faculty_portal/forms.py`
+- Modified: `apps/faculty_portal/urls.py`
+- Modified: `apps/faculty_portal/tests_assignment_acceptance.py`
+- Modified: `apps/grading/notifications.py`
+- Modified: `apps/grading/management/commands/auto_lock_period_deadlines.py`
+- Modified: `apps/grading/services.py`
+- Modified: `apps/grading/tests.py`
+- Modified: `apps/notifications/services.py`
+- Modified: `templates/admin_portal/base.html`
+- Modified: `templates/admin_portal/academics/course_table.html`
+- Modified: `templates/admin_portal/security/role_permissions.html`
+- Modified: `templates/faculty_portal/base.html`
+- Modified: `templates/faculty_portal/dashboard.html`
+- Modified: `templates/faculty_portal/student_at_risk_monitor.html`
+- Modified: `templates/faculty_portal/offering_grading_template.html`
+- Modified: `templates/faculty_portal/period_final_clearance.html`
+- Modified: `templates/faculty_portal/period_prediction.html`
+- Modified: `templates/faculty_portal/period_prediction_guide.html`
+- Modified: `templates/faculty_portal/my_courses.html`
+- Modified: `templates/faculty_portal/activity_scores.html`
+- Modified: `templates/faculty_portal/offering_periods.html`
+- Modified: `templates/faculty_portal/period_activities.html`
+- Modified: `templates/faculty_portal/period_attendance.html`
+- Modified: `templates/faculty_portal/period_summary.html`
+- Modified: `templates/faculty_portal/public_index.html`
+- Modified: `templates/accounts/emails/login_otp.html`
+- Modified: `templates/accounts/emails/login_otp.txt`
+- Modified: `templates/accounts/emails/admin_password_reset_otp.html`
+- Modified: `templates/accounts/emails/admin_password_reset_otp.txt`
+- Modified: `templates/admin_portal/emails/new_user_credentials.html`
+- Modified: `templates/admin_portal/emails/new_user_credentials.txt`
+- Modified: `templates/faculty_portal/emails/password_reset.html`
+- Modified: `templates/faculty_portal/emails/password_reset.txt`
+- Modified: `templates/faculty_portal/emails/reminder_notification.html`
+- Modified: `templates/faculty_portal/emails/reminder_notification.txt`
+- Modified: `templates/notifications/emails/submission_non_compliance_notice.html`
+- Modified: `templates/notifications/emails/submission_non_compliance_notice.txt`
+- Modified: `templates/grading/emails/correction_submission_notification.html`
+- Modified: `templates/grading/emails/gradebook_reopen_request_notification.html`
+- Modified: `templates/grading/emails/registrar_official_report.html`
+- Modified: `templates/admin_portal/guide.html`
+- Modified: `templates/admin_portal/tools/configurable_features.html`
+- Modified: `templates/faculty_portal/guide.html`
+- Modified: `templates/faculty_portal/guide_manual.html`
+- Modified: `docs/INSTITUTION_IMPLEMENTATION_REFERENCE.md`
+- Modified: `CHANGE_LOG.md`
+- Modified: `EDUGRADESPRO_CONTEXT.md`
+- Modified: `HANDOFF.md`
+- Existing working tree notes not introduced by these requests:
+  - DepEd ECR compatibility changes from the prior turn remain in the working tree, including `apps/grading/migrations/0026_tenantgradingprofile_period_formula.py`.
+  - `AGENTS.md` was already modified.
+  - `logs/system.log` was already modified.
+  - `docs/SESSION_ENDING_PROMPT.md` was already untracked.
+  - `docs/START_SESSION_PROMPT.md` was already untracked.
+
+## Important Decisions
+- Syllabus storage stays in Google Drive; EduGrade+ stores only the URL.
+- EduGrade+ enforces tenant/faculty assignment visibility before redirecting to the link, but Google Workspace still enforces whether the opened document is viewable.
+- If a course has no syllabus link, Faculty My Classes renders no syllabus icon/action.
+- The syllabus URL is course-level metadata, so all offerings of the same course inherit the same link.
+- Successful faculty syllabus-link opens are audited without storing the raw Google Drive URL in audit metadata.
+- Privacy Consent access remains server-side through existing post-login security middleware; layout locks are additional first-login focus controls.
+- Faculty active-period campus display is derived from tenant code plus campus name, so `NCBA-01`/`NCBA-02`/`NCBA-03` style codes render as labels such as `NCBA-Cubao`, `NCBA-Fairview`, and `NCBA-Taytay` when campus names are configured that way.
+- Faculty Summary of Periodic Grades keeps ACTIVE status cells blank by design to reduce visual clutter, while non-active enrollment statuses remain visible for encoding attention.
+- Gradebook reopen emails are permission-driven: whoever the superadmin authorizes with effective `reopen_requests.review` for the tenant/campus is eligible to receive the request email.
+- Role permission group labels/descriptions are display-only. They do not rename permission codes or change permission enforcement.
+- Role permission section-save focus uses URL anchors and a small server-rendered saved badge; whole-page save scroll restoration uses browser session storage.
+- Critical Access Safeguard remains required server-side for critical role-permission changes, but the panel is hidden by default to keep routine permission edits less distracting.
+- Admin Guide quick/workstream navigation is intentionally guide-internal. The guide still names the actual Admin Portal paths in text, but the top navigation behaves like a TOC instead of leaving the page.
+- Active Grading Period setup uses a term-period catalog. Only active catalog rows can be selected as the current active grading period; inactive rows must be activated first.
+- Active Grading Period setup has two scopes: the period catalog is tenant+term scoped, while the selected active period is tenant+campus+term scoped.
+- Period Locks should be created per campus/term/period when each campus has its own deadline. Course-offering scope remains for class-specific exceptions.
+- Faculty deadline reopen requests are required after deadline or lock for additional encoding regardless of the stored deadline enforcement policy label. Complete gradebooks may still be submitted after deadline.
+- Approved gradebook reopen requests are limited to 24 hours from approval. If the faculty does not submit/resubmit within that window, the period is locked again and a new request is required.
+- Submitted/finalized gradebooks after deadline must use Correction of Grades for changes. Reopen Request is reserved for unsubmitted overdue/locked gradebooks, plus submitted gradebooks only before the deadline.
+- Dashboard reopen request panel is permission-gated and scope-filtered through `AdminScopeService.scoped_grade_submission_reopen_requests`.
+- System email subjects should use `NCBA | EduGradePlus: <Message>`. Shared email card branding should use the NCBA logo and the green-to-yellow header, without embedding a Data Privacy Notice block in the email body.
+- Single-device session enforcement is now tenant-configurable in Login Security. The global Django setting `ENFORCE_SINGLE_DEVICE_SESSION=False` still disables the behavior platform-wide; otherwise the tenant toggle decides whether the same user is limited to one active browser/device session.
+- Period-card setup counts intentionally use lightweight bucket-level activity counts. Avoid adding per-student detail to every card unless performance is rechecked, because that can multiply gradebook queries on `/faculty/my-courses/<offering>/periods/`.
+- Missing-record checks are based on missing saved score/attendance rows for required items. A saved zero score counts as encoded and should not be treated as missing.
+- Student Intervention Monitor uses the existing prediction snapshot engine as a data source but intentionally presents faculty-facing intervention labels and reasons. Projection details should stay on the separate prediction/analytics pages.
+- The intervention monitor default view excludes `On Track` rows unless the faculty explicitly selects the On Track filter.
+
+## Pending Work
+- Continue with the next management/academic-head demo adjustment from the user.
+- If the institution wants simultaneous logins allowed, turn off `Allow only one active login session per user` in `Admin Portal -> Tools -> Configuration Management -> Login Security`.
+- If Grade Prediction or Student Intervention Monitor is missing in another environment, enable it from `Admin Portal -> Tools -> Configuration Management -> Grade Prediction`, make sure the `FACULTY` role is included, and turn on the intervention/monitor flag.
+- Browser smoke test Admin Course create/edit/list and Faculty My Classes syllabus icon/redirect when convenient.
+- DepEd E-Class Record work is paused. Do not continue import/export, presets, MAPEH handling, or diagnostics unless the user resumes that topic.
+- Preserve previous unresolved continuity items:
+  - Future sessions should continue to use `AGENTS.md`, the context document, `CHANGE_LOG.md`, and this file as the first-read continuity set.
+  - Open governance/design topics remain in the context document, including expanded grading methodology options, active AY/Term governance, correction/reopen policy finalization, passing-threshold management, and configurable feature governance.
+
+## Known Issues / Risks
+- Browser smoke tests were not run for the syllabus feature; validation was command/test based.
+- Browser smoke tests were not run for the Faculty active-period display change; validation was command/test based.
+- Browser smoke tests were not run for the Faculty Summary table layout change; validation was command/test based.
+- Browser smoke tests were not run for the reopen notification recipient correction; validation was command/test based.
+- Browser smoke tests were not run for the role-permissions page description change; validation was command/test based.
+- Browser smoke tests were not run for the role-permissions save-position change; validation was command/test based.
+- Browser smoke tests were not run for the role-permissions Critical Access Safeguard visibility change; validation was command/test based.
+- Browser smoke tests were not run for the Admin Guide layout/wording change because the Browser tool was not callable in this session; validation was command/render based.
+- Browser smoke tests were not run for the Active Grading Period setup change; validation was command/test/data-inspection based.
+- Google Drive access depends on the institution's Google Workspace sharing settings. Faculty must use an allowed school Google account if the file is domain-restricted.
+- Email styling was validated by template rendering and focused email tests, not by opening emails in a real email client.
+- The simultaneous-login setting was validated by focused Django client/session tests, not by a manual browser smoke test.
+- The Faculty Portal assignment/period-card/summary UI changes were validated by focused Django render tests, not by a manual browser smoke test.
+- The Student Intervention Monitor redesign was validated by focused Django render tests and `manage.py check`, not by a manual browser smoke test.
+- The Grade Prediction / Students At-Risk Monitor fix was validated by configuration inspection, `manage.py check`, and focused Django tests, not by a manual browser smoke test.
+- The NCBA Grade Prediction feature was enabled in the local development database only; other environments must be configured through Configuration Management.
+- The prior DepEd implementation remains uncommitted in the same working tree. If the project wants that work parked or reverted, handle it explicitly and carefully.
+- `EDUGRADESPRO_CONTEXT.md` filename does not match its internal `EduGrade+_CONTEXT.md` heading or the requested documentation name. Future sessions should inspect the actual file present unless the project later renames it.
+
+## Validation Completed
+- [x] `python manage.py check` - passed
+- [x] `python manage.py migrate` - passed; applied `academics.0009_course_syllabus_url`
+- [x] `python manage.py makemigrations --check --dry-run` - passed; no changes detected
+- [x] Privacy Consent focused tests - passed: `python manage.py test apps.accounts.tests_privacy_consent`
+- [x] Syllabus focused tests - passed:
+  `python manage.py test apps.admin_portal.tests_department_dropdown_labels.DepartmentDropdownLabelTests.test_course_form_saves_syllabus_link apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_my_courses_shows_syllabus_icon_only_when_course_has_link apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_syllabus_redirect_requires_assigned_faculty_and_matching_tenant apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_syllabus_redirect_blocks_course_tenant_mismatch`
+- [x] Syllabus audit focused test - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_syllabus_redirect_requires_assigned_faculty_and_matching_tenant`
+- [x] Faculty active-period focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_active_grading_period_shows_ay_and_campus_name apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_offering_periods_highlights_active_grading_period`
+- [x] Faculty Summary table focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_shows_official_period_grade_by_default_without_release_restriction apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_hides_active_status_but_shows_non_active_status apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_final_period_summary_shows_prior_period_grade_columns_and_final_grade`
+- [x] Reopen notification focused test - passed: `python manage.py test apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_reopen_request_email_uses_effective_review_permission_recipients`
+- [x] Role-permissions page focused tests - passed: `python manage.py test apps.admin_portal.tests_roles.RoleManagementTests.test_role_permissions_page_shows_plain_language_module_descriptions apps.admin_portal.tests_roles.RoleManagementTests.test_role_permissions_page_shows_section_save_buttons apps.admin_portal.tests_roles.RoleManagementTests.test_role_permissions_section_save_updates_only_selected_module`
+- [x] Critical role-permission safeguard visibility/validation focused tests - passed: `python manage.py test apps.admin_portal.tests_roles.RoleManagementTests.test_role_permissions_page_shows_plain_language_module_descriptions apps.admin_portal.tests_roles.RoleManagementTests.test_critical_role_permission_change_requires_reason_and_confirmation apps.admin_portal.tests_roles.RoleManagementTests.test_role_permissions_section_save_updates_only_selected_module`
+- [x] Admin Guide render check - passed: rendered `admin_guide_view` for `/admin-portal/guide/` with HTTP 200 and confirmed `Admin Portal User Guide` in the response body.
+- [x] Active Grading Period focused tests - passed: `python manage.py test apps.academics.tests_active_grading_period.ActiveGradingPeriodServiceTests.test_seed_standard_periods_reactivates_existing_inactive_rows apps.admin_portal.tests_period_lock_form.GradingPeriodLockFormTests.test_active_grading_period_page_lists_inactive_catalog_rows_for_reactivation`
+- [x] Admin Guide Active Grading Period instruction render check - passed: rendered `/admin-portal/guide/` and confirmed the per-campus setup section and catalog-once wording are present.
+- [x] Admin Guide grading-control relationship render check - passed: rendered `/admin-portal/guide/` and confirmed the relationship map plus period-lock wording are present.
+- [x] Faculty period-card reopen request focused test - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_card_shows_reopen_request_action_when_auto_closed_after_deadline`
+- [x] Deadline/reopen governance focused tests - passed: `python manage.py test apps.grading.tests.CompletionGraceWindowTests apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_card_shows_reopen_request_action_when_auto_closed_after_deadline apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_hides_active_status_but_shows_non_active_status`
+- [x] Admin Dashboard reopen request focused test - passed: `python manage.py test apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_dashboard_shows_pending_reopen_requests_in_scope`
+- [x] Approved reopen Faculty Portal focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_approved_reopen_request_overrides_locked_period_on_faculty_card apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_card_shows_reopen_request_action_when_auto_closed_after_deadline`
+- [x] Approved reopen 24-hour expiry focused tests - passed: `python manage.py test apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_auto_close_policy_blocks_encoding_until_reopen_request_is_approved apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_approved_reopen_request_expires_after_24_hours_and_auto_locks apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_approved_reopen_request_overrides_locked_period_on_faculty_card`
+- [x] Active approved reopen submission focused test - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_submit_succeeds_during_active_approved_reopen_window apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_approved_reopen_request_overrides_locked_period_on_faculty_card apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_approved_reopen_request_expires_after_24_hours_and_auto_locks`
+- [x] Submitted-gradebook reopen route tests - passed: `python manage.py test apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_submitted_after_deadline_uses_correction_not_reopen_request apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_submitted_before_deadline_can_still_use_reopen_request apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests.test_auto_close_policy_blocks_encoding_until_reopen_request_is_approved`
+- [x] Reopen/deadline governance regression tests - passed: `python manage.py test apps.admin_portal.tests_reopen_requests.GradeSubmissionReopenRequestReviewTests apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_approved_reopen_request_overrides_locked_period_on_faculty_card apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_card_shows_reopen_request_action_when_auto_closed_after_deadline apps.grading.tests.CompletionGraceWindowTests`
+- [x] Email notification focused tests - passed: `python manage.py test apps.notifications.tests.FacultyReminderServiceTests.test_queue_and_process_faculty_reminder_email apps.core.tests_email_assets apps.accounts.tests_login_otp apps.accounts.tests_admin_password_reset`
+- [x] Grading email focused tests - passed: `python manage.py test apps.grading.tests.CorrectionWorkflowTests.test_correction_submission_notification_emails_configured_roles apps.grading.tests.CorrectionWorkflowTests.test_registrar_official_report_email_sends_pdf_attachment`
+- [x] Simultaneous-login focused tests - passed: `python manage.py test apps.accounts.tests_login_lockout.LoginLockoutTests.test_single_device_session_enforcement_signs_out_previous_browser_by_default apps.accounts.tests_login_lockout.LoginLockoutTests.test_single_device_session_enforcement_can_be_disabled_per_tenant`
+- [x] Configurable Features Login Security focused tests - passed: `python manage.py test apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_shows_single_device_login_setting apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_can_store_assignment_workflow_settings`
+- [x] Faculty Portal class-card/summary focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_my_courses_lists_pending_assignments_before_acceptance apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_card_shows_reopen_request_action_when_auto_closed_after_deadline apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_hides_active_status_but_shows_non_active_status`
+- [x] Faculty Grade Prediction / At-Risk Monitor focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_can_open_at_risk_monitor_when_prediction_is_enabled apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_prediction_page_uses_teacher_friendly_period_specific_labels`
+- [x] Faculty Grade Prediction wording/guide focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_prediction_guide_uses_simple_sample_and_column_labels apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_prediction_page_uses_teacher_friendly_period_specific_labels`
+- [x] Faculty Dashboard simplification focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_surfaces_incomplete_student_kpi apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_priority_actions_shows_zero_state_without_at_risk_container apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_priority_actions_appear_only_when_relevant apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_at_risk_priority_action_uses_only_active_scope_students`
+- [x] Faculty grading-template calculator removal focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_grading_template_page_hides_grade_calculator_button apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_can_open_read_only_grading_template_view_after_acceptance`
+- [x] Faculty Final Clearance print-gating focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_my_courses_shows_final_clearance_action apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_my_courses_blocks_final_clearance_print_when_courses_incomplete apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_offering_periods_shows_final_clearance_action_on_final_period apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_offering_periods_hides_final_clearance_print_when_courses_incomplete apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_final_clearance_page_is_available_from_final_period apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_final_clearance_post_generates_pdf_report apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_final_clearance_post_blocks_pdf_when_courses_incomplete`
+- [x] Faculty Student Intervention Monitor focused tests - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_can_open_at_risk_monitor_when_prediction_is_enabled apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_at_risk_priority_action_uses_only_active_scope_students apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_priority_actions_shows_zero_state_without_at_risk_container apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_priority_actions_appear_only_when_relevant`
+- [x] Faculty Student Intervention Monitor refinement tests - passed through `python manage.py test apps.faculty_portal.tests_assignment_acceptance`, including missing-work priority, soft wording, banned default-monitor terms, status-label mapping, audit logging, and prediction-page coverage.
+- [x] Required Django check - passed: `python manage.py check`
+- [x] Required Faculty Portal assignment test suite - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance` (95 tests)
+- [x] Default monitor banned-term scan - passed: `rg -n "below passing|failing|likely to fail|possible final grade below passing|prediction confidence|coverage percentage|projected final grade|class ranking" templates\faculty_portal\student_at_risk_monitor.html templates\faculty_portal\dashboard.html apps\faculty_portal\services.py apps\faculty_portal\views.py` returned no matches.
+- [x] Admin Guide Grade Prediction enablement render check - passed: rendered `/admin-portal/guide/` with HTTP 200 and confirmed the Grade Prediction / At-Risk Monitor setup checklist is present.
+- [x] Email template render check - passed: rendered 9 touched HTML email templates and confirmed the green/yellow header pattern and no `Data Privacy Notice` text in those email templates.
+- [x] Admin Guide submission-route render check - passed: rendered `/admin-portal/guide/` and confirmed the submission route matrix and clean distinction wording are present.
+- [ ] Admin Portal browser smoke test - not run
+- [ ] Faculty Portal browser smoke test - not run
+- [x] Permissions/RBAC checked - syllabus redirect requires `faculty_portal.access` and an active assignment in the existing faculty assignment queryset
+- [x] Tenant/campus scope checked - syllabus redirect blocks course/offering tenant mismatch and non-assigned faculty
+
+## Exact Next Steps For Next Codex Session
+1. Read `AGENTS.md`, `EDUGRADESPRO_CONTEXT.md`, `CHANGE_LOG.md`, and this file.
+2. Continue with the next management/academic-head demo adjustment from the user.
+3. If preparing a release, decide whether to keep, park, or revert the paused DepEd working-tree changes.
+4. For UI-facing changes, run `python manage.py check`, focused tests, and browser smoke tests when feasible.
+
+## Files To Inspect First Next Session
+- AGENTS.md
+- EDUGRADESPRO_CONTEXT.md
+- CHANGE_LOG.md
+- HANDOFF.md
+- apps/academics/models.py
+- apps/admin_portal/forms.py
+- apps/faculty_portal/views.py
+- templates/faculty_portal/my_courses.html
+
+## Do Not Forget
+- Respect tenant/campus scope.
+- Enforce RBAC server-side and UI-side.
+- Avoid broad rewrites.
+- Preserve grading governance and auditability.
+- Update CHANGE_LOG.md and EDUGRADESPRO_CONTEXT.md when behavior changes.
+- Run validation before handoff.
+- Run `python manage.py check`.
+- Run `python manage.py migrate` if migrations exist.
+- Smoke-test impacted Admin and Faculty flows.

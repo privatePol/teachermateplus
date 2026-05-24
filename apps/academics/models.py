@@ -135,6 +135,12 @@ class Course(TimeStampedModel, ActivatableModel):
     units = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
     course_type = models.CharField(max_length=50, blank=True, null=True)
     default_base_value = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+    syllabus_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        null=True,
+        help_text="Optional Google Drive or external syllabus link for this course.",
+    )
 
     class Meta:
         db_table = "courses"

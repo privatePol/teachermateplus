@@ -38,6 +38,7 @@ from apps.grading.models import (
     TemplateHotfixRequest,
     TenantGradingProfile,
 )
+from apps.grading.services import FacultyGradingService
 from apps.navigation.models import MenuGroup, MenuItem
 from apps.rbac.models import Permission, Role, UserRole
 from apps.students.models import Student
@@ -887,6 +888,7 @@ class CourseForm(forms.ModelForm):
             "units",
             "course_type",
             "default_base_value",
+            "syllabus_url",
             "is_active",
         ]
 
@@ -926,6 +928,11 @@ class CourseForm(forms.ModelForm):
             department_field.queryset = department_queryset.none()
 
         self.fields["campus"].help_text = "Leave blank to share this course across all campuses of the tenant."
+        self.fields["syllabus_url"].label = "Syllabus Link"
+        self.fields["syllabus_url"].help_text = (
+            "Optional. Paste the Google Drive syllabus link for this course. Faculty can open it only from "
+            "their own assigned class card, and Google Workspace still enforces the document sharing rules."
+        )
         department_field.help_text = (
             "Optional. Select the campus first to load only that campus' departments. "
             "Leave both campus and department blank for tenant-wide shared course definitions."
@@ -1844,7 +1851,10 @@ class GradingPeriodLockForm(forms.ModelForm):
 class GradeSubmissionReopenRequestForm(forms.Form):
     justification = forms.CharField(
         widget=forms.Textarea(attrs={"rows": 4}),
-        help_text="Explain why this submitted grading period needs to be reopened.",
+        help_text=(
+            "Explain why this submitted grading period needs to be reopened before the deadline. "
+            "After the deadline, submitted gradebooks must use Correction of Grades."
+        ),
     )
 
 
@@ -1986,6 +1996,20 @@ class GradeCorrectionOnBehalfSetupForm(forms.Form):
 
 
 class TenantGradingProfileForm(forms.ModelForm):
+    deped_transmutation_table_text = forms.CharField(
+        required=False,
+        widget=forms.Textarea(
+            attrs={
+                "rows": 6,
+                "placeholder": "98.40-99.99=99\n96.80-98.39=98\n0.00-3.99=60",
+            }
+        ),
+        label="DepEd Transmutation Table",
+        help_text=(
+            "Required only when using DepEd Transmutation Table. Leave blank to use the standard DepEd K-12 table. "
+            "Enter one range per line using MIN-MAX=GRADE."
+        ),
+    )
     final_grade_period_weights_text = forms.CharField(
         required=False,
         widget=forms.Textarea(
@@ -2016,6 +2040,8 @@ class TenantGradingProfileForm(forms.ModelForm):
             "grading_template",
             "default_base_value",
             "passing_grade_threshold",
+            "period_grade_formula_mode",
+            "deped_transmutation_table_text",
             "final_grade_formula_mode",
             "final_grade_period_weights_text",
             "priority",
@@ -2097,6 +2123,10 @@ class TenantGradingProfileForm(forms.ModelForm):
             "Optional passing threshold for analytics and governance at this profile scope "
             "(example: 75.00). Leave blank to use tenant default."
         )
+        self.fields["period_grade_formula_mode"].help_text = (
+            "Choose how EduGrade+ computes each official period grade. Use weighted components for the existing "
+            "EduGrade+ behavior, or DepEd Transmutation Table for K-12 E-Class Record style grading."
+        )
         self.fields["final_grade_formula_mode"].help_text = (
             "Choose how EduGrade+ computes the official final grade for offerings matched by this profile. "
             "Use the default average mode for NCBA-style equal-period averaging, or choose weighted mode when a tenant uses specific period weights."
@@ -2151,6 +2181,13 @@ class TenantGradingProfileForm(forms.ModelForm):
             self.initial["final_grade_period_weights_text"] = "\n".join(
                 f"{item.get('period_code')}={item.get('weight')}" for item in weights if item.get("period_code")
             )
+        if not self.is_bound and getattr(self.instance, "period_grade_formula_json", None):
+            table = (self.instance.period_grade_formula_json or {}).get("transmutation_table") or []
+            self.initial["deped_transmutation_table_text"] = "\n".join(
+                f"{item.get('min')}-{item.get('max')}={item.get('grade')}"
+                for item in table
+                if item.get("min") is not None and item.get("max") is not None and item.get("grade") is not None
+            )
 
     def clean(self):
         cleaned = super().clean()
@@ -2192,6 +2229,66 @@ class TenantGradingProfileForm(forms.ModelForm):
                 "passing_grade_threshold",
                 "Passing threshold must be greater than 0 and not greater than 100.",
             )
+        period_formula_mode = (
+            cleaned.get("period_grade_formula_mode")
+            or TenantGradingProfile.PeriodGradeFormulaMode.WEIGHTED_COMPONENTS
+        )
+        deped_table_text = (cleaned.get("deped_transmutation_table_text") or "").strip()
+        period_formula_json = None
+        if period_formula_mode == TenantGradingProfile.PeriodGradeFormulaMode.DEPED_TRANSMUTATION:
+            parsed_table = []
+            if deped_table_text:
+                for line_no, raw_line in enumerate(deped_table_text.splitlines(), start=1):
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    if "=" not in line or "-" not in line.split("=", 1)[0]:
+                        self.add_error(
+                            "deped_transmutation_table_text",
+                            f"Line {line_no} must follow MIN-MAX=GRADE.",
+                        )
+                        continue
+                    range_raw, grade_raw = line.split("=", 1)
+                    min_raw, max_raw = range_raw.split("-", 1)
+                    try:
+                        minimum = Decimal(min_raw.strip())
+                        maximum = Decimal(max_raw.strip())
+                        grade = Decimal(grade_raw.strip())
+                    except (InvalidOperation, ValueError):
+                        self.add_error(
+                            "deped_transmutation_table_text",
+                            f"Line {line_no} has an invalid number.",
+                        )
+                        continue
+                    if minimum < 0 or maximum > 100 or minimum > maximum:
+                        self.add_error(
+                            "deped_transmutation_table_text",
+                            f"Line {line_no} must use a valid 0.00 to 100.00 range.",
+                        )
+                        continue
+                    if grade < 0 or grade > 100:
+                        self.add_error(
+                            "deped_transmutation_table_text",
+                            f"Line {line_no} grade must be between 0 and 100.",
+                        )
+                        continue
+                    parsed_table.append(
+                        {
+                            "min": f"{minimum.quantize(Decimal('0.01'))}",
+                            "max": f"{maximum.quantize(Decimal('0.01'))}",
+                            "grade": f"{grade.quantize(Decimal('1'))}",
+                        }
+                    )
+            else:
+                parsed_table = [
+                    {"min": item["min"], "max": item["max"], "grade": item["grade"]}
+                    for item in FacultyGradingService.DEFAULT_DEPED_TRANSMUTATION_TABLE
+                ]
+            if not self.errors.get("deped_transmutation_table_text"):
+                if not parsed_table:
+                    self.add_error("deped_transmutation_table_text", "Enter at least one transmutation-table row.")
+                else:
+                    period_formula_json = {"transmutation_table": parsed_table}
         formula_mode = cleaned.get("final_grade_formula_mode") or TenantGradingProfile.FinalGradeFormulaMode.AVERAGE_ACTIVE_PERIODS
         weights_text = (cleaned.get("final_grade_period_weights_text") or "").strip()
         final_formula_json = None
@@ -2267,11 +2364,13 @@ class TenantGradingProfileForm(forms.ModelForm):
                         self.add_error("final_grade_period_weights_text", "Enter at least one valid weighted period line.")
                     else:
                         final_formula_json = {"period_weights": parsed_weights}
+        cleaned["_period_grade_formula_json"] = period_formula_json
         cleaned["_final_grade_formula_json"] = final_formula_json
         return cleaned
 
     def save(self, commit=True):
         instance = super().save(commit=False)
+        instance.period_grade_formula_json = self.cleaned_data.get("_period_grade_formula_json")
         instance.final_grade_formula_json = self.cleaned_data.get("_final_grade_formula_json")
         if commit:
             instance.save()
@@ -2464,15 +2563,18 @@ class ConfigurableFeatureSettingForm(forms.Form):
         required=True,
         label="Grade deadline enforcement",
         choices=[
-            (FeatureSettingsService.GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY, "Option 1: Compliance checkpoint only"),
+            (
+                FeatureSettingsService.GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY,
+                "Option 1: Require reopen after deadline + monitor non-compliance",
+            ),
             (
                 FeatureSettingsService.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN,
-                "Option 2: Auto-close encoding and require reopen request",
+                "Option 2: Require reopen after deadline + reopen request workflow",
             ),
         ],
         help_text=(
-            "Compliance checkpoint keeps overdue unsubmitted gradebooks open for encoding. "
-            "Auto-close blocks activity, score, and attendance encoding after the deadline while still allowing submission if complete."
+            "After the deadline, faculty may still submit a complete gradebook, but additional encoding requires a reopen request. "
+            "Use this setting to keep the tenant's preferred monitoring/reopen workflow label."
         ),
     )
     student_portal_enabled = forms.BooleanField(
@@ -2736,6 +2838,11 @@ class ConfigurableFeatureSettingForm(forms.Form):
         min_value=1,
         label="Email OTP expiry (minutes)",
         help_text="How long a login verification code remains valid.",
+    )
+    single_device_session_enforcement_enabled = forms.BooleanField(
+        required=False,
+        label="Allow only one active login session per user",
+        help_text="When enabled, a new login signs out the same user from any other browser or device.",
     )
     session_timeout_minutes = forms.IntegerField(
         required=False,
@@ -3004,6 +3111,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
             cleaned["login_email_otp_enabled"] = False
         if cleaned.get("login_email_otp_expiry_minutes") is None:
             cleaned["login_email_otp_expiry_minutes"] = 10
+        if not cleaned.get("single_device_session_enforcement_enabled"):
+            cleaned["single_device_session_enforcement_enabled"] = False
         if cleaned.get("session_timeout_minutes") is None:
             cleaned["session_timeout_minutes"] = 60
 

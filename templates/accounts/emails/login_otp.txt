@@ -1,4 +1,4 @@
-NCBA EduGrade+ Login Verification
+Login Verification
 {{ portal_name }}
 
 Hello {{ user.full_name|default:user.username }},

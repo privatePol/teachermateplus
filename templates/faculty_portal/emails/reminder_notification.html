@@ -7,9 +7,9 @@
     body { margin: 0; padding: 0; background: #eef5ec; font-family: Arial, Helvetica, sans-serif; color: #183d28; }
     .wrap { width: 100%; padding: 24px 12px; }
     .card { max-width: 620px; margin: 0 auto; background: #ffffff; border: 1px solid #d9e6d7; border-radius: 18px; overflow: hidden; box-shadow: 0 12px 28px rgba(18, 56, 34, 0.12); }
-    .header { padding: 24px 26px 12px; text-align: center; background: linear-gradient(135deg, #f9fcf8 0%, #edf7ec 100%); border-bottom: 1px solid #e0e9de; }
-    .logo { max-width: 88px; height: auto; display: block; margin: 0 auto 10px; }
-    .school { font-size: 1.02rem; letter-spacing: .06em; font-weight: 800; color: #1a4d31; }
+    .header { padding: 20px 28px; background: linear-gradient(90deg,#1f6a3d 0%,#2f8a4f 45%,#bfa629 100%); }
+    .logo { max-height: 54px; width: auto; display: block; border: 0; }
+    .school { font-size: .76rem; letter-spacing: .1em; font-weight: 800; color: #f5f6e9; text-align: right; }
     .title { padding: 22px 26px 0; font-size: 1.4rem; font-weight: 800; color: #153d27; }
     .body { padding: 16px 26px 24px; }
     .pill { display:inline-block; padding: 6px 12px; border-radius: 999px; background: #e0f0e1; color: #17623a; font-size: .78rem; font-weight: 700; margin-bottom: 12px; }
@@ -24,10 +24,14 @@
   <div class="wrap">
     <div class="card">
       <div class="header">
-        {% if logo_url %}
-        <img class="logo" src="{{ logo_url }}" alt="NCBA">
-        {% endif %}
-        <div class="school">NATIONAL COLLEGE OF BUSINESS AND ARTS</div>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+          <tr>
+            <td style="vertical-align:middle;">
+              {% if logo_url %}<img class="logo" src="{{ logo_url }}" alt="NCBA">{% else %}<div style="font-size:20px;font-weight:800;color:#ffffff;">NCBA</div>{% endif %}
+            </td>
+            <td class="school" style="vertical-align:middle;">FACULTY PORTAL</td>
+          </tr>
+        </table>
       </div>
       <div class="title">Faculty Reminder Notification</div>
       <div class="body">

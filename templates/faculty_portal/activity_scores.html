@@ -98,6 +98,10 @@
     <a href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">View request</a>
   {% endif %}
 </div>
+{% elif active_approved_reopen_request %}
+<div class="alert alert-info">
+  Reopen request #{{ active_approved_reopen_request.id }} was approved. Score encoding is open for 24 hours{% if active_approved_reopen_expires_at %}, until {{ active_approved_reopen_expires_at|date:"M d, Y g:i A" }}{% endif %}. Submit this period before the window expires.
+</div>
 {% elif is_locked %}
 <div class="alert alert-danger">
   {% if is_auto_locked_reopened_after_deadline %}
@@ -108,7 +112,7 @@
 </div>
 {% elif is_auto_closed_after_deadline %}
 <div class="alert alert-danger">
-  Encoding closed automatically because the deadline already passed.
+  Submission deadline already passed. Encoding is closed because the deadline already passed.
   {% if pending_reopen_request %}
     Your reopen request is pending admin review.
   {% else %}

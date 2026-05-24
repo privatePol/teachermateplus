@@ -370,7 +370,7 @@ class FacultyReminderForm(forms.Form):
             ("ASSIGNMENT_ACCEPTANCE", "Assignment Acceptance"),
             ("GRADE_SUBMISSION", "Grade Submission"),
             ("CORRECTION_WINDOW", "Correction Window"),
-            ("AT_RISK_FOLLOWUP", "At-Risk Follow-up"),
+            ("AT_RISK_FOLLOWUP", "Student Follow-up"),
             ("CUSTOM", "Custom"),
         ],
         label="Reminder type",

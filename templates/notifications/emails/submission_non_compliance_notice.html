@@ -6,9 +6,9 @@
     body { margin: 0; padding: 0; background: #f2f5f1; font-family: Arial, Helvetica, sans-serif; color: #1a3324; }
     .wrap { width: 100%; padding: 24px 12px; }
     .card { max-width: 640px; margin: 0 auto; background: #ffffff; border: 1px solid #d9e2d7; border-radius: 18px; overflow: hidden; box-shadow: 0 10px 24px rgba(16, 37, 24, 0.12); }
-    .header { padding: 24px 28px 18px; text-align: center; background: linear-gradient(135deg, #fdfefd 0%, #edf5ec 100%); border-bottom: 1px solid #e1e9de; }
-    .logo { max-width: 88px; height: auto; display: block; margin: 0 auto 10px; }
-    .school { font-size: 1rem; letter-spacing: 0.05em; font-weight: 800; color: #184028; }
+    .header { padding: 20px 28px; background: linear-gradient(90deg,#1f6a3d 0%,#2f8a4f 45%,#bfa629 100%); }
+    .logo { max-height: 54px; width: auto; display: block; border: 0; }
+    .school { font-size: 0.76rem; letter-spacing: 0.1em; font-weight: 800; color: #f5f6e9; text-align: right; }
     .title { padding: 22px 28px 0; font-size: 1.35rem; font-weight: 800; color: #153822; }
     .body { padding: 16px 28px 26px; }
     .badge { display: inline-block; padding: 6px 12px; border-radius: 999px; font-size: 0.78rem; font-weight: 800; background: #f5dfb5; color: #6b4e0d; }
@@ -26,8 +26,14 @@
   <div class="wrap">
     <div class="card">
       <div class="header">
-        {% if logo_url %}<img class="logo" src="{{ logo_url }}" alt="NCBA">{% endif %}
-        <div class="school">NATIONAL COLLEGE OF BUSINESS AND ARTS</div>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+          <tr>
+            <td style="vertical-align:middle;">
+              {% if logo_url %}<img class="logo" src="{{ logo_url }}" alt="NCBA">{% else %}<div style="font-size:20px;font-weight:800;color:#ffffff;">NCBA</div>{% endif %}
+            </td>
+            <td class="school" style="vertical-align:middle;">SUBMISSION NOTICE</td>
+          </tr>
+        </table>
       </div>
       <div class="title">{{ notice.title }}</div>
       <div class="body">

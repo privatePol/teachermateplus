@@ -6,16 +6,23 @@
 </head>
 <body style="margin:0; padding:24px; background:#eef6f0; font-family:Arial, Helvetica, sans-serif; color:#163424;">
   <div style="max-width:640px; margin:0 auto;">
-    <div style="background:#ffffff; border:1px solid #cde3d3; border-radius:18px; padding:32px 28px; box-shadow:0 10px 24px rgba(15, 65, 40, 0.12);">
-      <div style="text-align:center; margin-bottom:20px;">
-        {% if logo_src %}
-        <img src="{{ logo_src }}" alt="NCBA Logo" style="width:88px; height:auto; display:inline-block; margin:0 auto 14px;">
-        {% endif %}
-        <div style="font-size:20px; line-height:1.4; font-weight:700; color:#1b5e3c; letter-spacing:0.04em;">
-          {{ school_name }}
-        </div>
+    <div style="background:#ffffff; border:1px solid #cde3d3; border-radius:18px; overflow:hidden; box-shadow:0 10px 24px rgba(15, 65, 40, 0.12);">
+      <div style="padding:20px 28px;background:linear-gradient(90deg,#1f6a3d 0%,#2f8a4f 45%,#bfa629 100%);">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+          <tr>
+            <td style="vertical-align:middle;">
+              {% if logo_src %}
+              <img src="{{ logo_src }}" alt="NCBA" style="display:block;max-height:54px;width:auto;border:0;">
+              {% else %}
+              <div style="font-size:20px;font-weight:800;color:#ffffff;">NCBA</div>
+              {% endif %}
+            </td>
+            <td align="right" style="vertical-align:middle;color:#f5f6e9;font-size:12px;letter-spacing:0.1em;font-weight:700;">CORRECTION APPROVAL</td>
+          </tr>
+        </table>
       </div>
 
+      <div style="padding:28px;">
       <div style="background:linear-gradient(135deg, #edf9f1 0%, #f7fff9 100%); border:1px solid #cde7d6; border-radius:14px; padding:18px 20px; margin-bottom:18px;">
         <div style="font-size:18px; font-weight:700; color:#1f6f46; margin-bottom:8px;">
           Approval Notification
@@ -54,6 +61,7 @@
 
       <div style="font-size:13px; line-height:1.7; color:#3a5f49;">
         Please sign in to EduGrade+ to review the petition in the correction approval queue.
+      </div>
       </div>
     </div>
   </div>

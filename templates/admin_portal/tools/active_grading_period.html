@@ -66,10 +66,31 @@
 <div class="agp-flow mb-3">
   <div class="fw-semibold mb-1">How this works</div>
   <div class="agp-note mb-0">
-    Step 1: choose the campus and term. Step 2: define the grading periods for that term. Step 3: select which one is active now.
-    When auto-advance is enabled, EduGrade+ moves forward to the next configured period after the current active period's deadline passes.
-    If you later edit that deadline, EduGrade+ does not move the active period backward; set it manually here when a rollback is needed.
+    The term period catalog is shared by the tenant and term. Load the standard 4-period set once for the term, then set the active period separately for each campus.
+    Example: load Prelim, Midterm, Pre-Final, and Final for AY 2025-2026 / 2nd Semester once. Then choose Fairview and save its active period. Next choose Cubao and save its active period. Repeat for Taytay.
+    Auto-advance can move forward after the current period deadline passes, but it does not move backward when a deadline is edited.
   </div>
+</div>
+
+<div class="alert alert-info border small">
+  <div class="fw-semibold mb-1">Recommended setup order</div>
+  <ol class="mb-0 ps-3">
+    <li>Select one campus and the term, then click <strong>Load Scope</strong>.</li>
+    <li>If the term period catalog is empty or inactive, click <strong>Load Standard 4-Period Set</strong>. You normally do this once per tenant and term, not once per campus.</li>
+    <li>Select the current period in <strong>Set Active Period</strong>, then click <strong>Save Active Period</strong>.</li>
+    <li>Change to the next campus, click <strong>Load Scope</strong>, select that campus's active period, and save again.</li>
+  </ol>
+</div>
+
+<div class="alert alert-light border small">
+  <div class="fw-semibold mb-1">How this connects to deadline locks</div>
+  <ol class="mb-0 ps-3">
+    <li><strong>Active Academic Scope</strong> chooses the current Academic Year and Term for day-to-day faculty work.</li>
+    <li><strong>Active Grading Period</strong> chooses the current working period for each campus in that term.</li>
+    <li><strong>Period Locks</strong> set the deadline and lock rule for each campus and period.</li>
+    <li><strong>Grade Deadline Enforcement</strong> decides what happens after the deadline: compliance-only monitoring or auto-close encoding with reopen request.</li>
+    <li><strong>Non-Compliance</strong> and <strong>Submission Reopen Requests</strong> are used after the deadline to monitor late faculty and approve reopen requests when needed.</li>
+  </ol>
 </div>
 
 <div class="card agp-card mb-3">
@@ -170,6 +191,15 @@
         <form method="post" novalidate>
           {% csrf_token %}
           <input type="hidden" name="form_action" value="save_active_period">
+          {% if selected_term and active_period_rows and active_period_count == 0 %}
+          <div class="alert alert-warning small">
+            This term has grading periods, but all of them are inactive. Reactivate a period in the catalog, or click <strong>Load Standard 4-Period Set</strong>, before setting the active grading period.
+          </div>
+          {% elif selected_term and not active_period_rows %}
+          <div class="alert alert-light border small">
+            No term periods exist yet. Add periods in the catalog or click <strong>Load Standard 4-Period Set</strong>.
+          </div>
+          {% endif %}
           {% for field in active_form %}
           <div class="mb-3">
             <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
@@ -192,7 +222,7 @@
         <div class="d-flex justify-content-between align-items-start gap-2 mb-3">
           <div>
             <h3 class="h6 mb-1">Term Period Catalog</h3>
-            <div class="agp-note">These are the canonical grading periods for the selected term. EduGrade+ uses them for active-period governance and deadline auto-advance.</div>
+            <div class="agp-note">These are the grading periods for the selected term. Active rows can be selected as the current active grading period.</div>
           </div>
           <form method="post" class="m-0">
             {% csrf_token %}
@@ -222,8 +252,10 @@
                 <td><strong>{{ row.code }}</strong></td>
                 <td>{{ row.name }}</td>
                 <td>
-                  {% if active_setting and row.id == active_setting.period_id %}
+                  {% if active_setting and row.id == active_setting.period_id and row.is_active %}
                   <span class="agp-period-chip active">Active Now</span>
+                  {% elif active_setting and row.id == active_setting.period_id %}
+                  <span class="badge text-bg-warning">Active setting, but inactive</span>
                   {% elif row.is_active %}
                   <span class="agp-period-chip">Available</span>
                   {% else %}

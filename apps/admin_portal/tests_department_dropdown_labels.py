@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
 from apps.accounts.models import User
-from apps.admin_portal.forms import CourseOfferingForm
+from apps.admin_portal.forms import CourseForm, CourseOfferingForm
 from apps.rbac.models import Permission
 from apps.tenants.models import Campus, Department, Program, Tenant
 
@@ -126,6 +126,29 @@ class DepartmentDropdownLabelTests(TestCase):
         content = response.content.decode("utf-8")
         self.assertIn("NCBA-01 / COLLEGE", content)
         self.assertIn("NCBA-02 / COLLEGE", content)
+
+    def test_course_form_saves_syllabus_link(self):
+        form = CourseForm(
+            data={
+                "tenant": self.tenant.id,
+                "campus": self.fairview.id,
+                "department": self.fairview_college.id,
+                "code": "SYL101",
+                "title": "Syllabus Course",
+                "units": "3.00",
+                "course_type": "",
+                "default_base_value": "",
+                "syllabus_url": "https://drive.google.com/file/d/example/view",
+                "is_active": "on",
+            },
+            tenant_queryset=Tenant.objects.all(),
+            campus_queryset=Campus.objects.all(),
+            department_queryset=Department.objects.all(),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        course = form.save()
+        self.assertEqual(course.syllabus_url, "https://drive.google.com/file/d/example/view")
 
     def test_offering_form_department_choices_follow_selected_campus(self):
         form = CourseOfferingForm(

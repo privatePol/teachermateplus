@@ -2,20 +2,29 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>NCBA EduGrade+ Login Verification</title>
+  <title>Login Verification</title>
 </head>
 <body style="margin:0; padding:0; background:#f5f8f4; font-family:Arial, Helvetica, sans-serif; color:#173d27;">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f8f4; padding:24px 0;">
     <tr>
       <td align="center">
-        <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:640px; max-width:94%; background:#ffffff; border-radius:14px; overflow:hidden; border:1px solid #dbe7d8;">
+        <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:640px; max-width:94%; background:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 12px 36px rgba(32,66,44,0.16);">
           <tr>
-            <td style="background:#0f472b; padding:22px 28px; color:#ffffff;">
-              {% if logo_url %}
-                <img src="{{ logo_url }}" alt="NCBA EduGrade+" style="height:72px; width:auto; display:block; margin-bottom:12px;">
-              {% endif %}
-              <div style="font-size:20px; font-weight:700;">NCBA EduGrade+ Login Verification</div>
-              <div style="font-size:13px; color:#dcebdd; margin-top:4px;">{{ portal_name }}</div>
+            <td style="padding:20px 28px;background:linear-gradient(90deg,#1f6a3d 0%,#2f8a4f 45%,#bfa629 100%);">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="vertical-align:middle;">
+                    {% if logo_url %}
+                    <img src="{{ logo_url }}" alt="NCBA" style="display:block;max-height:54px;width:auto;border:0;">
+                    {% else %}
+                    <div style="font-size:20px;font-weight:800;color:#ffffff;">NCBA</div>
+                    {% endif %}
+                  </td>
+                  <td align="right" style="vertical-align:middle;color:#f5f6e9;font-size:12px;letter-spacing:0.1em;font-weight:700;">
+                    {{ portal_name|upper }}
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
           <tr>
@@ -33,7 +42,7 @@
           </tr>
           <tr>
             <td style="padding:18px 28px; background:#f8fbf7; color:#607667; font-size:12px;">
-              This is a security notice from NCBA EduGrade+.
+              This is a security notice from EduGradePlus.
             </td>
           </tr>
         </table>

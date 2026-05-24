@@ -473,9 +473,67 @@
     color: #0f5132;
     text-decoration: underline;
   }
+  .faculty-dashboard-action-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.85rem;
+    margin-top: 1rem;
+  }
+  .faculty-dashboard-action-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    border: 1px solid #dbe7d8;
+    border-radius: 1rem;
+    background: #ffffff;
+    padding: 1rem;
+    color: #173d27;
+    text-decoration: none;
+    box-shadow: 0 12px 24px rgba(18, 52, 31, 0.06);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+  .faculty-dashboard-action-card:hover {
+    transform: translateY(-2px);
+    border-color: #f0d26c;
+    box-shadow: 0 18px 32px rgba(16, 82, 54, 0.12);
+    color: #0f5132;
+    text-decoration: none;
+  }
+  .faculty-dashboard-action-card .action-label {
+    color: #6b8273;
+    font-size: 0.74rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .faculty-dashboard-action-card .action-value {
+    margin-top: 0.45rem;
+    font-size: 2rem;
+    line-height: 1;
+    font-weight: 850;
+    color: #143c25;
+  }
+  .faculty-dashboard-action-card .action-title {
+    margin-top: 0.55rem;
+    font-weight: 800;
+    color: #1f432f;
+  }
+  .faculty-dashboard-action-card .action-note {
+    margin-top: 0.35rem;
+    color: #587061;
+    font-size: 0.9rem;
+    line-height: 1.35;
+  }
+  .faculty-dashboard-action-card .action-cta {
+    margin-top: auto;
+    padding-top: 0.85rem;
+    color: #1b6a40;
+    font-weight: 800;
+  }
   @media (max-width: 991.98px) {
     .faculty-dashboard-hero-grid,
-    .faculty-dashboard-nav {
+    .faculty-dashboard-nav,
+    .faculty-dashboard-action-metrics {
       grid-template-columns: 1fr;
     }
   }
@@ -505,7 +563,9 @@
       </div>
       <div class="faculty-dashboard-actions">
         <a class="primary" href="{% url 'faculty_portal:my_courses' %}">Open My Classes</a>
-        <a href="{% url 'faculty_portal:student_at_risk_monitor' %}">At-Risk Monitor</a>
+        {% if faculty_at_risk_monitor_enabled %}
+        <a href="{% url 'faculty_portal:student_at_risk_monitor' %}">Intervention Monitor</a>
+        {% endif %}
         <a href="{% url 'faculty_portal:reminder_center' %}">Reminders</a>
         {% if "faculty_analytics.read" in effective_permissions %}
         <a href="{% url 'faculty_portal:analytics' %}">Analytics</a>
@@ -534,10 +594,17 @@
     <strong>Priority Actions</strong>
     <span>Jump to urgent work before deadlines and submission review.</span>
   </a>
-  <a class="faculty-dashboard-nav-card" href="{% url 'faculty_portal:student_at_risk_monitor' %}">
-    <strong>Student Support</strong>
-    <span>Review students who may need intervention this period.</span>
-  </a>
+  {% if faculty_at_risk_monitor_enabled %}
+    <a class="faculty-dashboard-nav-card" href="{% url 'faculty_portal:student_at_risk_monitor' %}">
+      <strong>Student Support</strong>
+      <span>Review students who need follow-up this period.</span>
+    </a>
+  {% else %}
+    <a class="faculty-dashboard-nav-card" href="{% url 'faculty_portal:my_courses' %}">
+      <strong>Student Support</strong>
+      <span>Review class summaries for students who may need follow-up.</span>
+    </a>
+  {% endif %}
   <a class="faculty-dashboard-nav-card" href="{% url 'faculty_portal:memo_center' %}">
     <strong>Private Notes</strong>
     <span>Keep follow-up notes for classes and students.</span>
@@ -577,8 +644,8 @@
   <div class="col-xl-4">
     <section class="faculty-command-panel">
       <div class="panel-head">
-        <h3 class="panel-title">Students to Watch</h3>
-        <p class="panel-note">A quick preview from the at-risk monitor.</p>
+        <h3 class="panel-title">Students Needing Follow-up</h3>
+        <p class="panel-note">A quick preview from the intervention monitor.</p>
       </div>
       <div class="panel-body">
         {% if stats.at_risk_preview.enabled %}
@@ -588,27 +655,27 @@
                 <div class="faculty-risk-item">
                   <div class="faculty-risk-main">
                     <span class="faculty-risk-badge {{ row.status_variant }}">{{ row.status_label }}</span>
-                    <div class="faculty-risk-name">Student requires follow-up</div>
+                    <div class="faculty-risk-name">Student needs review</div>
                     <div class="faculty-risk-detail">{{ row.class_label }} - {{ row.period_name }}</div>
-                    <div class="faculty-risk-meta">{{ row.risk_reason }}{% if row.estimated_grade_display %} | Est. {{ row.estimated_grade_display }}{% endif %}</div>
+                    <div class="faculty-risk-meta">{{ row.risk_reason }}</div>
                   </div>
                   <a class="btn btn-sm btn-outline-success rounded-pill px-3 flex-shrink-0" href="{{ row.url }}">Open</a>
                 </div>
               {% endfor %}
             </div>
             <div class="mt-3">
-              <a class="faculty-dashboard-compact-link" href="{{ stats.at_risk_preview.view_all_url }}">View all {{ stats.at_risk_preview.total_count }} at-risk student{{ stats.at_risk_preview.total_count|pluralize }}</a>
+              <a class="faculty-dashboard-compact-link" href="{{ stats.at_risk_preview.view_all_url }}">View all {{ stats.at_risk_preview.total_count }} student{{ stats.at_risk_preview.total_count|pluralize }} needing review</a>
             </div>
           {% else %}
             <div class="faculty-command-empty">
-              <strong>No at-risk students shown.</strong>
+              <strong>No students need review right now.</strong>
               <div>Keep encoding current-period scores so the monitor stays accurate.</div>
             </div>
           {% endif %}
         {% else %}
           <div class="faculty-command-empty">
-            <strong>At-risk preview is disabled.</strong>
-            <div>Prediction and at-risk visibility depends on tenant feature settings.</div>
+            <strong>Intervention preview is disabled.</strong>
+            <div>Student intervention visibility depends on tenant feature settings.</div>
           </div>
         {% endif %}
       </div>
@@ -616,170 +683,49 @@
   </div>
 </div>
 
-<div class="row g-3">
-  <div class="col-lg-3 col-md-6">
-    <div class="card faculty-kpi-card kpi-gold">
-      <div class="card-body">
-        <div class="faculty-kpi-eyebrow">Submission Workload</div>
-        <div class="faculty-kpi-value">{{ stats.classes_not_submitted }}</div>
-        <div class="faculty-kpi-label">Classes Not Yet Submitted</div>
-        <div class="faculty-kpi-note">Active classes with at least one grading period still pending submission.</div>
-      </div>
-    </div>
+<section class="faculty-dashboard-section" aria-label="Main dashboard action cards">
+  <div class="section-title">Main Action Cards</div>
+  <div class="section-note">Each card opens the page where the faculty can act on the item.</div>
+  <div class="faculty-dashboard-action-metrics">
+    <a class="faculty-dashboard-action-card" href="{% url 'faculty_portal:my_courses' %}">
+      <span class="action-label">Grading Work</span>
+      <span class="action-value">{{ stats.classes_not_submitted }}</span>
+      <span class="action-title">Classes Not Yet Submitted</span>
+      <span class="action-note">Open your class cards and continue the period that still needs submission.</span>
+      <span class="action-cta">Open My Classes</span>
+    </a>
+    <a class="faculty-dashboard-action-card" href="#priority-actions">
+      <span class="action-label">Immediate Work</span>
+      <span class="action-value">{{ stats.priority_actions|length }}</span>
+      <span class="action-title">Priority Actions</span>
+      <span class="action-note">Review overdue periods, missing scores, and submission blockers first.</span>
+      <span class="action-cta">View Priority Actions</span>
+    </a>
+    {% if stats.at_risk_preview.enabled and faculty_at_risk_monitor_enabled %}
+      <a class="faculty-dashboard-action-card" href="{{ stats.at_risk_preview.view_all_url }}">
+        <span class="action-label">Student Support</span>
+        <span class="action-value">{{ stats.at_risk_preview.total_count }}</span>
+        <span class="action-title">Students Needing Follow-up</span>
+        <span class="action-note">Open the current-period intervention monitor for students who may need support.</span>
+        <span class="action-cta">Open Intervention Monitor</span>
+      </a>
+    {% else %}
+      <a class="faculty-dashboard-action-card" href="{% url 'faculty_portal:my_courses' %}">
+        <span class="action-label">Student Support</span>
+        <span class="action-value">{{ stats.failed_period_grade_count }}</span>
+        <span class="action-title">Students Needing Follow-up</span>
+        <span class="action-note">Review class summaries for students below the passing mark.</span>
+        <span class="action-cta">Open My Classes</span>
+      </a>
+    {% endif %}
+    <a class="faculty-dashboard-action-card" href="{% url 'faculty_portal:my_courses' %}">
+      <span class="action-label">Classlist Status</span>
+      <span class="action-value">{{ stats.incomplete_students }}</span>
+      <span class="action-title">Incomplete Students</span>
+      <span class="action-note">Students currently marked as DRP: {{ stats.dropped_students }} | W: {{ stats.withdrawn_students }} | INC: {{ stats.incomplete_students }}</span>
+      <span class="action-cta">Open Class Lists</span>
+    </a>
   </div>
-  <div class="col-lg-3 col-md-6">
-    <div class="card faculty-kpi-card kpi-red">
-      <div class="card-body">
-        <div class="faculty-kpi-eyebrow">Student Outcomes</div>
-        <div class="faculty-kpi-value">{{ stats.failed_period_grade_count }}</div>
-        <div class="faculty-kpi-label">Failed Students Per Periodic Grades</div>
-        <div class="faculty-kpi-note">Count of active student-period grades currently below 75.</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-3 col-md-6">
-    <div class="card faculty-kpi-card kpi-blue">
-      <div class="card-body">
-        <div class="faculty-kpi-eyebrow">Classlist Status</div>
-        <div class="faculty-kpi-value">{{ stats.dropped_students }}</div>
-        <div class="faculty-kpi-label">Dropped Students</div>
-        <div class="faculty-kpi-note">Students currently marked as DRP across your active classes.</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-3 col-md-6">
-    <div class="card faculty-kpi-card kpi-green">
-      <div class="card-body">
-        <div class="faculty-kpi-eyebrow">Missing Records</div>
-        <div class="faculty-kpi-value">{{ stats.active_students_without_grades }}</div>
-        <div class="faculty-kpi-label">Active Students Without Grades</div>
-        <div class="faculty-kpi-note">Active student-period rows that still have no computed periodic grade.</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="faculty-dashboard-section">
-  <div class="section-title">Deadline and Status Snapshot</div>
-  <div class="section-note">These cards help you spot submission urgency and student movement before they turn into end-of-term issues.</div>
-  <div class="row g-3">
-    <div class="col-lg-3 col-md-6">
-      <div class="card faculty-kpi-card kpi-gold">
-        <div class="card-body">
-          <div class="faculty-kpi-eyebrow">Deadline Watch</div>
-          <div class="faculty-kpi-value">{{ stats.periods_near_deadline }}</div>
-          <div class="faculty-kpi-label">Periods Near Deadline</div>
-          <div class="faculty-kpi-note">Unsubmitted grading periods with a submission deadline within the next 48 hours.</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-3 col-md-6">
-      <div class="card faculty-kpi-card kpi-green">
-        <div class="card-body">
-          <div class="faculty-kpi-eyebrow">Completion Progress</div>
-          <div class="faculty-kpi-value">{{ stats.submitted_periods }}</div>
-          <div class="faculty-kpi-label">Periods Already Submitted</div>
-          <div class="faculty-kpi-note">Submitted grading periods across your active classes in the current academic scope.</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-3 col-md-6">
-      <div class="card faculty-kpi-card kpi-blue">
-        <div class="card-body">
-          <div class="faculty-kpi-eyebrow">Classlist Movement</div>
-          <div class="faculty-kpi-value">{{ stats.withdrawn_students }}</div>
-          <div class="faculty-kpi-label">Withdrawn Students</div>
-          <div class="faculty-kpi-note">Students currently marked as <strong>W</strong> across your active classes.</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-3 col-md-6">
-      <div class="card faculty-kpi-card kpi-blue">
-        <div class="card-body">
-          <div class="faculty-kpi-eyebrow">Classlist Status</div>
-          <div class="faculty-kpi-value">{{ stats.incomplete_students }}</div>
-          <div class="faculty-kpi-label">Incomplete Students</div>
-          <div class="faculty-kpi-note">Students currently marked as <strong>INC</strong> across your active classes.</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="faculty-dashboard-section">
-  <div class="section-title">Additional Faculty Snapshot</div>
-  <div class="section-note">These supporting numbers help you gauge workload across the current active teaching scope.</div>
-  <div class="row g-3">
-    <div class="col-lg-3 col-md-6">
-      <div class="card faculty-mini-card">
-        <div class="card-body">
-          <div class="mini-label">Assigned Classes</div>
-          <div class="mini-value">{{ stats.assigned_courses }}</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-3 col-md-6">
-      <div class="card faculty-mini-card">
-        <div class="card-body">
-          <div class="mini-label">Active Classes</div>
-          <div class="mini-value">{{ stats.active_classes }}</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-3 col-md-6">
-      <div class="card faculty-mini-card">
-        <div class="card-body">
-          <div class="mini-label">Active Enrollments</div>
-          <div class="mini-value">{{ stats.active_enrollments }}</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-3 col-md-6">
-      <div class="card faculty-mini-card">
-        <div class="card-body">
-          <div class="mini-label">Activities Created</div>
-          <div class="mini-value">{{ stats.activities_encoded }}</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="faculty-dashboard-section">
-  <div class="section-title">Immediate Action Watchlist</div>
-  <div class="section-note">These are the fastest issues to act on before deadlines, submissions, and academic review meetings.</div>
-  <div class="row g-3">
-    <div class="col-lg-4 col-md-6">
-      <div class="card faculty-kpi-card kpi-neutral">
-        <div class="card-body">
-          <div class="faculty-kpi-eyebrow">Activity Readiness</div>
-          <div class="faculty-kpi-value">{{ stats.activities_without_scores }}</div>
-          <div class="faculty-kpi-label">Activities Without Scores Yet</div>
-          <div class="faculty-kpi-note">Created activities that still have no active saved score entries.</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-4 col-md-6">
-      <div class="card faculty-kpi-card kpi-red">
-        <div class="card-body">
-          <div class="faculty-kpi-eyebrow">Grade Completion</div>
-          <div class="faculty-kpi-value">{{ stats.classes_with_missing_grades }}</div>
-          <div class="faculty-kpi-label">Classes With Missing Grades</div>
-          <div class="faculty-kpi-note">Active classes where at least one active student-period record still has no periodic grade.</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-4 col-md-6">
-      <div class="card faculty-kpi-card kpi-blue">
-        <div class="card-body">
-          <div class="faculty-kpi-eyebrow">Governance Follow-up</div>
-          <div class="faculty-kpi-value">{{ stats.pending_correction_requests }}</div>
-          <div class="faculty-kpi-label">Pending Correction Requests</div>
-          <div class="faculty-kpi-note">Correction requests you filed that are still awaiting review or action.</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+</section>
 </div>
 {% endblock %}

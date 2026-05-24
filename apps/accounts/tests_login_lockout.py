@@ -1,7 +1,8 @@
 from datetime import timedelta
 
 from django.conf import settings
-from django.test import TestCase
+from django.contrib.sessions.models import Session
+from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -9,6 +10,7 @@ from apps.accounts.models import PortalLoginLockoutState, User
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission
+from apps.tenants.models import Tenant
 
 
 class LoginLockoutTests(TestCase):
@@ -38,16 +40,19 @@ class LoginLockoutTests(TestCase):
             is_active=True,
         )
         self.password = "LockoutPass123!"
+        self.tenant = Tenant.objects.create(code="NCBA", name="NCBA")
         self.user = User.objects.create_superuser(
             username="securityadmin",
             email="securityadmin@ncba.edu.ph",
             password=self.password,
         )
+        self.user.default_tenant = self.tenant
         self.user.must_change_password = False
         self.user.privacy_consent_version = getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03")
         self.user.privacy_consent_at = timezone.now()
         self.user.save(
             update_fields=[
+                "default_tenant",
                 "must_change_password",
                 "privacy_consent_version",
                 "privacy_consent_at",
@@ -115,6 +120,42 @@ class LoginLockoutTests(TestCase):
         state.refresh_from_db()
         self.assertEqual(state.failed_attempt_count, 0)
         self.assertIsNone(state.locked_until)
+
+    def test_single_device_session_enforcement_signs_out_previous_browser_by_default(self):
+        first_browser = Client()
+        second_browser = Client()
+        login_url = reverse("accounts:faculty_login")
+
+        first_response = first_browser.post(login_url, {"username": self.user.username, "password": self.password})
+        self.assertEqual(first_response.status_code, 302)
+        first_session_key = first_browser.session.session_key
+        self.assertTrue(Session.objects.filter(session_key=first_session_key).exists())
+
+        second_response = second_browser.post(login_url, {"username": self.user.username, "password": self.password})
+        self.assertEqual(second_response.status_code, 302)
+
+        self.assertFalse(Session.objects.filter(session_key=first_session_key).exists())
+
+    def test_single_device_session_enforcement_can_be_disabled_per_tenant(self):
+        SystemSettingService.set(
+            FeatureSettingsService.SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        first_browser = Client()
+        second_browser = Client()
+        login_url = reverse("accounts:faculty_login")
+
+        first_response = first_browser.post(login_url, {"username": self.user.username, "password": self.password})
+        self.assertEqual(first_response.status_code, 302)
+        first_session_key = first_browser.session.session_key
+
+        second_response = second_browser.post(login_url, {"username": self.user.username, "password": self.password})
+        self.assertEqual(second_response.status_code, 302)
+
+        self.assertTrue(Session.objects.filter(session_key=first_session_key).exists())
 
     def test_lockout_is_portal_specific_and_expires_cleanly(self):
         self._configure_lockout(max_attempts=1)

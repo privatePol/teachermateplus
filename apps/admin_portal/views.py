@@ -100,7 +100,7 @@ from apps.academics.models import (
 from apps.auditlog.models import AuditLog
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
-from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.scope import ScopeService
@@ -1369,10 +1369,10 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
     admin_login_url = request.build_absolute_uri(reverse("accounts:admin_login"))
     faculty_public_url = request.build_absolute_uri(reverse("faculty_portal:public_index"))
     logo_context = build_email_logo_context(
-        filename="egp_logo_official.png",
-        cid="EduGrade+-logo",
-        external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
-        configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+        filename="ncba-logo.png",
+        cid="ncba-logo",
+        external_url=getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
+        configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
     )
     context = {
         "user": user,
@@ -1380,12 +1380,11 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
         "admin_login_url": admin_login_url,
         "faculty_public_url": faculty_public_url,
         **logo_context,
-        "privacy_notice_url": "https://ncba.edu.ph/ncba-privacy-notice/",
     }
     text_body = render_to_string("admin_portal/emails/new_user_credentials.txt", context)
     html_body = render_to_string("admin_portal/emails/new_user_credentials.html", context)
     message = EmailMultiAlternatives(
-        subject="EduGrade+ Account Created",
+        subject=format_email_subject("Account Created"),
         body=text_body,
         from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local"),
         to=[user.email],
@@ -1393,9 +1392,9 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
     attach_logo_for_src(
         message,
         src=logo_context["email_logo_src"],
-        filename="egp_logo_official.png",
-        cid="EduGrade+-logo",
-        configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+        filename="ncba-logo.png",
+        cid="ncba-logo",
+        configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
     )
     message.attach_alternative(html_body, "text/html")
     return message.send(fail_silently=False)
@@ -1449,6 +1448,18 @@ def dashboard_view(request):
     has_grading_period_lock = PermissionService.has_permission(
         request.user,
         "grading_periods.lock",
+        tenant_id=current_tenant_id,
+        campus_id=current_campus_id,
+    )
+    has_reopen_requests_read = PermissionService.has_permission(
+        request.user,
+        "reopen_requests.read",
+        tenant_id=current_tenant_id,
+        campus_id=current_campus_id,
+    )
+    has_reopen_requests_review = PermissionService.has_permission(
+        request.user,
+        "reopen_requests.review",
         tenant_id=current_tenant_id,
         campus_id=current_campus_id,
     )
@@ -1535,6 +1546,22 @@ def dashboard_view(request):
             "recently_auto_locked": recently_auto_locked,
         }
 
+    reopen_request_monitor = None
+    if has_reopen_requests_read or has_reopen_requests_review:
+        reopen_qs = AdminScopeService.scoped_grade_submission_reopen_requests(request)
+        pending_reopen_requests = list(
+            reopen_qs.filter(status=GradeSubmissionReopenRequest.Status.PENDING)
+            .order_by("-created_at", "-id")[:5]
+        )
+        reopen_request_monitor = {
+            "pending_count": reopen_qs.filter(status=GradeSubmissionReopenRequest.Status.PENDING).count(),
+            "reviewed_today_count": reopen_qs.filter(
+                reviewed_at__date=timezone.localdate(now),
+            ).count(),
+            "latest_pending": pending_reopen_requests,
+            "can_review": has_reopen_requests_review,
+        }
+
     context = {
         "stats": {
             "tenants": AdminScopeService.active_scoped_tenants(request).count(),
@@ -1555,6 +1582,9 @@ def dashboard_view(request):
         "active_grading_period_auto_advance": active_grading_period_auto_advance,
         "has_grading_period_lock": has_grading_period_lock,
         "lock_monitor": lock_monitor,
+        "has_reopen_requests_read": has_reopen_requests_read,
+        "has_reopen_requests_review": has_reopen_requests_review,
+        "reopen_request_monitor": reopen_request_monitor,
         "has_governance_alerts": has_governance_alerts,
         "governance_alerts": _governance_alert_rows(request, limit=20) if has_governance_alerts else [],
     }
@@ -2803,8 +2833,13 @@ def active_grading_period_settings_view(request):
     selected_term = term_queryset.filter(id=selected_term_id).first()
 
     period_queryset = TenantTermGradingPeriod.objects.none()
+    period_catalog_queryset = TenantTermGradingPeriod.objects.none()
     if selected_term:
         period_queryset = AcademicGovernanceService.get_term_grading_periods(
+            tenant_id=tenant_id,
+            term_id=selected_term.id,
+        )
+        period_catalog_queryset = AcademicGovernanceService.get_term_grading_period_catalog(
             tenant_id=tenant_id,
             term_id=selected_term.id,
         )
@@ -3009,7 +3044,8 @@ def active_grading_period_settings_view(request):
                 redirect_params["campus_id"] = selected_campus_id
             return redirect(f"{reverse('admin_portal:active_grading_period_settings')}?{urlencode(redirect_params)}")
 
-    active_period_rows = list(period_queryset)
+    active_period_rows = list(period_catalog_queryset)
+    active_period_count = sum(1 for row in active_period_rows if row.is_active)
     next_period = None
     if active_setting:
         next_period = (
@@ -3033,6 +3069,7 @@ def active_grading_period_settings_view(request):
         "selected_term": selected_term,
         "active_setting": active_setting,
         "active_period_rows": active_period_rows,
+        "active_period_count": active_period_count,
         "next_period": next_period,
         "auto_advance_enabled": auto_advance_enabled,
     }
@@ -3464,6 +3501,12 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default=10,
     )
+    current_single_device_session_enforcement_enabled = (
+        FeatureSettingsService.is_single_device_session_enforcement_enabled(
+            tenant_id=tenant_id,
+            default=True,
+        )
+    )
     current_session_timeout_minutes = FeatureSettingsService.get_session_timeout_minutes(
         tenant_id=tenant_id,
         default=max((getattr(settings, "SESSION_COOKIE_AGE", 3600) or 3600) // 60, 1),
@@ -3622,6 +3665,7 @@ def configurable_features_settings_view(request):
             "login_lockout_duration_minutes": current_login_lockout_duration_minutes,
             "login_email_otp_enabled": current_login_email_otp_enabled,
             "login_email_otp_expiry_minutes": current_login_email_otp_expiry_minutes,
+            "single_device_session_enforcement_enabled": current_single_device_session_enforcement_enabled,
             "session_timeout_minutes": current_session_timeout_minutes,
             "faculty_assignment_response_window_days": current_response_window_days,
             "faculty_assignment_first_reminder_days": current_first_reminder_days,
@@ -3984,6 +4028,13 @@ def configurable_features_settings_view(request):
             is_active=True,
         )
         SystemSettingService.set(
+            FeatureSettingsService.SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY,
+            bool(form.cleaned_data["single_device_session_enforcement_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
             FeatureSettingsService.SESSION_TIMEOUT_MINUTES_KEY,
             int(form.cleaned_data["session_timeout_minutes"]),
             tenant_id=tenant_id,
@@ -4138,6 +4189,7 @@ def configurable_features_settings_view(request):
                 "login_lockout_duration_minutes": current_login_lockout_duration_minutes,
                 "login_email_otp_enabled": current_login_email_otp_enabled,
                 "login_email_otp_expiry_minutes": current_login_email_otp_expiry_minutes,
+                "single_device_session_enforcement_enabled": current_single_device_session_enforcement_enabled,
                 "session_timeout_minutes": current_session_timeout_minutes,
                 "faculty_assignment_response_window_days": current_response_window_days,
                 "faculty_assignment_first_reminder_days": current_first_reminder_days,
@@ -4241,6 +4293,9 @@ def configurable_features_settings_view(request):
                 "login_lockout_duration_minutes": int(form.cleaned_data["login_lockout_duration_minutes"]),
                 "login_email_otp_enabled": bool(form.cleaned_data["login_email_otp_enabled"]),
                 "login_email_otp_expiry_minutes": int(form.cleaned_data["login_email_otp_expiry_minutes"]),
+                "single_device_session_enforcement_enabled": bool(
+                    form.cleaned_data["single_device_session_enforcement_enabled"]
+                ),
                 "session_timeout_minutes": int(form.cleaned_data["session_timeout_minutes"]),
                 "faculty_assignment_response_window_days": int(form.cleaned_data["faculty_assignment_response_window_days"]),
                 "faculty_assignment_first_reminder_days": int(form.cleaned_data["faculty_assignment_first_reminder_days"]),
@@ -4303,6 +4358,7 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.LOGIN_LOCKOUT_DURATION_MINUTES_KEY,
                     FeatureSettingsService.LOGIN_EMAIL_OTP_ENABLED_KEY,
                     FeatureSettingsService.LOGIN_EMAIL_OTP_EXPIRY_MINUTES_KEY,
+                    FeatureSettingsService.SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY,
                     FeatureSettingsService.SESSION_TIMEOUT_MINUTES_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_RESPONSE_WINDOW_DAYS_KEY,
                     FeatureSettingsService.FACULTY_ASSIGNMENT_FIRST_REMINDER_DAYS_KEY,
@@ -5940,6 +5996,13 @@ def role_permissions_view(request, role_id: int):
     form = RolePermissionsForm(request.POST or None, role=role)
     _style_form(form)
     critical_permission_impact = None
+
+    def _module_dom_id(module):
+        return f"module_{str(module or '').replace('.', '_').replace('-', '_')}"
+
+    def _module_card_dom_id(module):
+        return f"card_{_module_dom_id(module)}"
+
     if request.method == "POST" and form.is_valid():
         module_to_save = (request.POST.get("save_module") or "").strip()
         before = list(role.role_permissions.values_list("permission_id", flat=True))
@@ -6006,12 +6069,182 @@ def role_permissions_view(request, role_id: int):
                     request,
                     f"{module_to_save.replace('_', ' ').replace('.', ' ').title()} permissions updated.",
                 )
-                return redirect("admin_portal:role_permissions", role_id=role.id)
+                query = urlencode({"saved_module": module_to_save})
+                return redirect(
+                    f"{reverse('admin_portal:role_permissions', args=[role.id])}?{query}#{_module_card_dom_id(module_to_save)}"
+                )
             messages.success(request, "Role permissions updated.")
-            return _redirect_back_or_default(request, "admin_portal:role_list")
+            query = urlencode({"saved": "all"})
+            return redirect(f"{reverse('admin_portal:role_permissions', args=[role.id])}?{query}")
 
     def _title(value):
         return str(value or "").replace("_", " ").replace(".", " ").title()
+
+    module_display_text = {
+        "academic_years": {
+            "label": "Academic Year Setup",
+            "description": "Controls who can view, create, or edit the official academic year records used by terms, offerings, enrollments, and reports.",
+        },
+        "actual_data_reset": {
+            "label": "Actual Data Reset",
+            "description": "Controls access to reset live demo or operational data. Grant only to trusted users because this can remove transactions.",
+        },
+        "admin_portal": {
+            "label": "Admin Portal Access",
+            "description": "Allows users to enter the Admin Portal. Other permissions still decide which admin pages and actions they can use.",
+        },
+        "audit_logs": {
+            "label": "Audit History",
+            "description": "Controls who can review system audit trails, critical actions, and recorded governance activity.",
+        },
+        "bulk_imports": {
+            "label": "Bulk Imports",
+            "description": "Controls importing master data and operational records from approved spreadsheet or CSV templates.",
+        },
+        "campuses": {
+            "label": "Campus Records",
+            "description": "Controls maintenance of campus or branch records used for scope, assignments, reports, and access filtering.",
+        },
+        "configurable_features": {
+            "label": "Configurable Features",
+            "description": "Controls tenant feature switches such as portal modules, deadline behavior, notifications, and release rules.",
+        },
+        "corrections": {
+            "label": "Grade Correction Petitions",
+            "description": "Controls filing, reviewing, and processing official grade correction requests.",
+        },
+        "course_offerings": {
+            "label": "Class / Course Offering Setup",
+            "description": "Controls class offerings that connect campus, term, course, section, schedule, and assigned faculty.",
+        },
+        "course_template_assignments": {
+            "label": "Course Grading Template Assignment",
+            "description": "Controls which grading template applies to a course or offering for a term.",
+        },
+        "courses": {
+            "label": "Course Master Records",
+            "description": "Controls course records, titles, units, base values, departments, and syllabus links.",
+        },
+        "dashboard": {
+            "label": "Dashboard",
+            "description": "Controls access to dashboard summaries, alerts, and quick operational indicators.",
+        },
+        "departments": {
+            "label": "Department / Area Records",
+            "description": "Controls academic and administrative department records used for ownership, workflow routing, and scope.",
+        },
+        "enrollments": {
+            "label": "Class Enrollment Records",
+            "description": "Controls student enrollment rows in class offerings, including class-list status and enrollment maintenance.",
+        },
+        "faculty_assignments": {
+            "label": "Faculty Load Assignments",
+            "description": "Controls assigning faculty to classes and managing acceptance, reminders, and teaching-load records.",
+        },
+        "faculty_final_clearance": {
+            "label": "Faculty Final Clearance",
+            "description": "Controls review and printing of faculty final clearance status after class grading requirements are completed.",
+        },
+        "faculty_portal": {
+            "label": "Faculty Portal Access",
+            "description": "Allows users to enter the Faculty Portal. Faculty class access still depends on accepted assignments and scope.",
+        },
+        "grade_distribution_monitor": {
+            "label": "Grade Distribution Monitor",
+            "description": "Controls access to grade distribution and performance-monitoring reports for authorized academic reviewers.",
+        },
+        "grade_submissions": {
+            "label": "Grade Submission Control",
+            "description": "Controls submitted gradebook actions such as reopen, revert-before-deadline, and submission governance.",
+        },
+        "gradebook": {
+            "label": "Gradebook Review Access",
+            "description": "Controls special gradebook review capabilities, including whether student identities are visible to reviewers.",
+        },
+        "grading_analytics": {
+            "label": "Grading Analytics",
+            "description": "Controls access to grading analytics, trends, and academic performance summaries.",
+        },
+        "grading_period_locks": {
+            "label": "Grading Period Deadlines and Locks",
+            "description": "Controls period deadline, lock, auto-close, and reopen governance settings.",
+        },
+        "grading_periods": {
+            "label": "Grading Period Governance",
+            "description": "Controls actions that lock or reopen grading periods under academic governance.",
+        },
+        "grading_templates": {
+            "label": "Grading Templates",
+            "description": "Controls grading template setup, structure, approval, publishing, duplication, and testing tools.",
+        },
+        "inactive_records": {
+            "label": "Inactive Record Cleanup",
+            "description": "Controls permanent deletion of inactive records that are no longer used by related data.",
+        },
+        "menus": {
+            "label": "Portal Menu Setup",
+            "description": "Controls portal navigation menu configuration and visibility.",
+        },
+        "period_locks": {
+            "label": "Period Lock Rules",
+            "description": "Controls deadline and lock rules that determine when faculty can encode, submit, or request reopen.",
+        },
+        "programs": {
+            "label": "Program Records",
+            "description": "Controls program records used for student sections, academic scope, and reporting.",
+        },
+        "reopen_requests": {
+            "label": "Gradebook Reopen Requests",
+            "description": "Controls who can view and decide faculty requests to reopen grade encoding after a deadline or governed closure.",
+        },
+        "roles": {
+            "label": "Security Roles",
+            "description": "Controls role maintenance, including which permission sets can be created, edited, or deactivated.",
+        },
+        "sections": {
+            "label": "Section Records",
+            "description": "Controls class section records used in offerings, enrollments, schedules, and reports.",
+        },
+        "students": {
+            "label": "Student Records",
+            "description": "Controls student master records, student status, official email details, and student maintenance pages.",
+        },
+        "student_account_links": {
+            "label": "Student Portal Account Links",
+            "description": "Controls linking student records to user accounts for Student Portal access.",
+        },
+        "system_settings": {
+            "label": "System Configuration",
+            "description": "Controls tenant and system-level settings. Grant carefully because settings affect portal behavior.",
+        },
+        "template_hotfixes": {
+            "label": "Template Hotfix Requests",
+            "description": "Controls urgent grading-template change requests and their review or application workflow.",
+        },
+        "tenant_grading_profiles": {
+            "label": "Tenant Grading Rules",
+            "description": "Controls grading formulas, passing rules, period-grade methods, and final-grade rules for a tenant.",
+        },
+        "tenants": {
+            "label": "Tenant / Institution Records",
+            "description": "Controls institution-level tenant records that separate data across organizations.",
+        },
+        "users": {
+            "label": "User Accounts",
+            "description": "Controls user account maintenance, default scope, staff flags, account status, and privacy-consent reset actions.",
+        },
+    }
+
+    def _module_display(module):
+        fallback_label = _title(module)
+        fallback_description = (
+            f"Controls access to {fallback_label} pages and actions. Grant only when this role needs that responsibility."
+        )
+        configured = module_display_text.get(module, {})
+        return {
+            "label": configured.get("label", fallback_label),
+            "description": configured.get("description", fallback_description),
+        }
 
     def _permission_label(permission):
         action_labels = {
@@ -6033,7 +6266,7 @@ def role_permissions_view(request, role_id: int):
         return action_labels.get(permission.action, _title(permission.action))
 
     def _permission_description(permission):
-        module_label = _title(permission.module)
+        module_label = _module_display(permission.module)["label"]
         specific = {
             "admin_portal.access": "Allows the user to sign in to the Admin Portal.",
             "faculty_portal.access": "Allows the user to sign in to the Faculty Portal.",
@@ -6088,16 +6321,20 @@ def role_permissions_view(request, role_id: int):
         "update": "text-bg-success",
         "revert_before_deadline": "text-bg-warning",
     }
+    current_role_permission_ids = set(role.role_permissions.values_list("permission_id", flat=True))
     if request.method == "POST":
         selected_permission_ids = {int(value) for value in request.POST.getlist("permissions") if str(value).isdigit()}
     else:
-        selected_permission_ids = set(role.role_permissions.values_list("permission_id", flat=True))
+        selected_permission_ids = set(current_role_permission_ids)
 
     permissions_by_module = []
     module_groups = {}
+    saved_module = (request.GET.get("saved_module") or "").strip()
     for perm in Permission.objects.filter(is_active=True).order_by("module", "action", "code"):
         module_groups.setdefault(perm.module, []).append(perm)
     for module, perms in module_groups.items():
+        module_display = _module_display(module)
+        dom_id = _module_dom_id(module)
         permission_rows = []
         for perm in perms:
             permission_rows.append(
@@ -6109,14 +6346,18 @@ def role_permissions_view(request, role_id: int):
                     "badge_class": action_badge_classes.get(perm.action, "text-bg-light"),
                     "description": _permission_description(perm),
                     "is_selected": perm.id in selected_permission_ids,
+                    "is_saved_selected": perm.id in current_role_permission_ids,
                     "is_critical": perm.code in CRITICAL_PERMISSION_CODES,
                 }
             )
         permissions_by_module.append(
             {
                 "key": module,
-                "dom_id": f"module_{module.replace('.', '_').replace('-', '_')}",
-                "label": _title(module),
+                "dom_id": dom_id,
+                "card_dom_id": _module_card_dom_id(module),
+                "label": module_display["label"],
+                "description": module_display["description"],
+                "is_saved": module == saved_module,
                 "permissions": permission_rows,
                 "selected_count": sum(1 for item in permission_rows if item["is_selected"]),
                 "total_count": len(permission_rows),
@@ -6132,6 +6373,7 @@ def role_permissions_view(request, role_id: int):
         "critical_role_confirmation": CRITICAL_ROLE_CONFIRMATION,
         "critical_permission_codes": sorted(CRITICAL_PERMISSION_CODES),
         "critical_permission_impact": critical_permission_impact,
+        "permissions_saved_all": request.GET.get("saved") == "all",
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/security/role_permissions.html", context)
@@ -11172,6 +11414,11 @@ def grade_submission_list_view(request):
             can_create_reopen_request
             and row.status == GradeSubmission.Status.SUBMITTED
             and row.pending_reopen_request is None
+            and GradingGovernanceService.can_request_submitted_reopen_before_deadline(submission=row)
+        )
+        row.requires_correction_after_deadline = (
+            row.status == GradeSubmission.Status.SUBMITTED
+            and bool(row.revert_deadline_at and row.revert_deadline_passed)
         )
         row.faculty_names = faculty_names_by_offering.get(row.offering_id, [])
 
@@ -11194,6 +11441,13 @@ def grade_submission_reopen_view(request, submission_id: int):
     submission = get_object_or_404(AdminScopeService.scoped_grade_submissions(request), id=submission_id)
     if submission.status != GradeSubmission.Status.SUBMITTED:
         messages.error(request, "Only submitted grading periods can be reopened by request.")
+        return _redirect_back_or_default(request, "admin_portal:grade_submission_list")
+    if not GradingGovernanceService.can_request_submitted_reopen_before_deadline(submission=submission):
+        messages.error(
+            request,
+            "Submitted gradebooks can be reopened by request only before the deadline. "
+            "After the deadline, use the Correction of Grades workflow.",
+        )
         return _redirect_back_or_default(request, "admin_portal:grade_submission_list")
     if GradeSubmissionReopenRequest.objects.filter(
         submission=submission,
@@ -11369,9 +11623,9 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
                     messages.success(
                         request,
                         (
-                            "Reopen request approved. Faculty encoding is available until the gradebook is submitted."
+                            "Reopen request approved. Faculty encoding is available for 24 hours and will lock again if not submitted."
                             if is_deadline_auto_close_request
-                            else "Reopen request approved and submission reopened."
+                            else "Reopen request approved and submission reopened for 24 hours."
                         )
                         if approved
                         else "Reopen request rejected.",

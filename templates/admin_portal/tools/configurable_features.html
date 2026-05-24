@@ -997,7 +997,7 @@
     </button>
     <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-login-security" aria-expanded="false" aria-controls="feature-card-login-security">
       <span class="settings-card-summary-title">Login Security</span>
-      <span class="settings-card-summary-text">Protect accounts with email OTP, temporary lockout, retry thresholds, lockout duration, and session timeout settings for both portals.</span>
+      <span class="settings-card-summary-text">Protect accounts with email OTP, one-session login control, temporary lockout, retry thresholds, lockout duration, and session timeout settings for both portals.</span>
     </button>
     <div id="feature-card-login-security" class="collapse">
     <div class="card-body">
@@ -1041,6 +1041,16 @@
         {% endif %}
         {% for error in form.login_email_otp_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.single_device_session_enforcement_enabled }}
+        <label class="form-check-label" for="{{ form.single_device_session_enforcement_enabled.id_for_label }}">
+          {{ form.single_device_session_enforcement_enabled.label }}
+        </label>
+        {% if form.single_device_session_enforcement_enabled.help_text %}
+        <div class="form-text">{{ form.single_device_session_enforcement_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.single_device_session_enforcement_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
       <div class="row g-3">
         <div class="col-md-4">
           <label class="form-label" for="{{ form.login_email_otp_expiry_minutes.id_for_label }}">{{ form.login_email_otp_expiry_minutes.label }}</label>
@@ -1056,7 +1066,7 @@
         </div>
       </div>
       <div class="alert alert-light border small mt-3 mb-0">
-        Password complexity validation, email OTP when enabled, forced password change, privacy consent, single-device session enforcement, session timeout, and temporary login lockout work together to protect both Admin Portal and Faculty Portal accounts.
+        Password complexity validation, email OTP when enabled, forced password change, privacy consent, one-session login control, session timeout, and temporary login lockout work together to protect both Admin Portal and Faculty Portal accounts.
       </div>
     </div>
     </div>

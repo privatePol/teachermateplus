@@ -200,6 +200,36 @@
     font-weight: 700;
     padding: 0.3rem 0.65rem;
   }
+  .course-card-tool {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.15rem;
+    height: 2.15rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    background: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+    text-decoration: none;
+    box-shadow: 0 8px 18px rgba(12, 46, 28, 0.18);
+  }
+  .course-card-tool:hover,
+  .course-card-tool:focus {
+    background: rgba(255, 255, 255, 0.3);
+    color: #ffffff;
+  }
+  .course-card-tool svg {
+    width: 1.05rem;
+    height: 1.05rem;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   .accepted-board {
     border: 1px solid #d8e5d5;
     border-radius: 1.05rem;
@@ -432,7 +462,7 @@
 {% if final_clearance_targets %}
 <section class="final-clearance-board">
   <div class="final-clearance-title">Final Clearance</div>
-  <div class="final-clearance-copy">Open the official end-of-term clearance page from here instead of from every class card. If you handle more than one campus or term scope, choose the matching clearance target below.</div>
+  <div class="final-clearance-copy">Final Clearance can be printed only when all accepted course assignments in the selected campus and term are COMPLETE. You may still open the clearance page to check what is missing.</div>
   <div class="final-clearance-actions">
     {% for target in final_clearance_targets %}
     <a
@@ -440,8 +470,11 @@
       href="{% url 'faculty_portal:period_final_clearance' target.offering_id target.period_id %}"
     >
       <span aria-hidden="true">&#128424;</span>
-      <span>Print Final Clearance</span>
-      <span class="meta">{{ target.campus.code }} / {{ target.academic_year.code }} / {{ target.term.code }}</span>
+      <span>{% if target.can_print %}Print Final Clearance{% else %}Check Final Clearance{% endif %}</span>
+      <span class="meta">
+        {{ target.campus.code }} / {{ target.academic_year.code }} / {{ target.term.code }}
+        {% if not target.can_print %} - {{ target.incomplete_courses }} incomplete course{{ target.incomplete_courses|pluralize }}{% endif %}
+      </span>
     </a>
     {% endfor %}
   </div>
@@ -511,14 +544,6 @@
           {% csrf_token %}
           <button type="submit" class="btn btn-success btn-sm rounded-pill px-3">Accept Assignment</button>
         </form>
-        <form method="post" action="{% url 'faculty_portal:faculty_assignment_response' assignment.id %}" class="mt-3">
-          {% csrf_token %}
-          <textarea class="form-control form-control-sm" name="faculty_response_note" placeholder="Add your note for admin if you need clarification or need to decline this load.">{{ assignment.faculty_response_note|default:"" }}</textarea>
-          <div class="d-flex gap-2 mt-2">
-            <button type="submit" name="response_action" value="clarification" class="btn btn-outline-primary btn-sm rounded-pill px-3">Request Clarification</button>
-            <button type="submit" name="response_action" value="decline" class="btn btn-outline-danger btn-sm rounded-pill px-3">Decline</button>
-          </div>
-        </form>
         {% endif %}
       </article>
     </div>
@@ -544,6 +569,23 @@
       <div class="col-md-6 col-xl-4">
         <article class="course-card">
           <header class="course-card-header {{ card_theme }}">
+            {% if offering.course.syllabus_url %}
+            <a
+              class="course-card-tool"
+              href="{% url 'faculty_portal:offering_syllabus' offering.id %}"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open syllabus"
+              aria-label="Open syllabus for {{ offering.course.code }}"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"></path>
+                <path d="M14 2v5h5"></path>
+                <path d="M9 13h6"></path>
+                <path d="M9 17h4"></path>
+              </svg>
+            </a>
+            {% endif %}
             <div class="course-card-code">{{ offering.course.code }}</div>
             <div class="course-card-title">{{ offering.course.title }}</div>
             <div class="course-card-meta">{{ offering.section.code }}</div>
@@ -585,10 +627,14 @@
             <a class="btn btn-outline-secondary" href="{% url 'faculty_portal:offering_enrollment' offering.id %}">
               Class List
             </a>
-            {% if offering.final_template_period %}
+            {% if offering.final_template_period and offering.final_clearance_can_print %}
             <a class="btn btn-outline-success" href="{% url 'faculty_portal:period_final_clearance' offering.id offering.final_template_period.id %}">
               Print Final Clearance
             </a>
+            {% elif offering.final_template_period %}
+            <span class="btn btn-outline-secondary disabled" title="Final Clearance can be printed only when all assigned courses in this campus-term scope are COMPLETE.">
+              Clearance Pending
+            </span>
             {% endif %}
             {% if offering.can_undo_acceptance %}
             <form method="post" action="{% url 'faculty_portal:faculty_assignment_undo_accept' offering.assignment.id %}" class="d-inline">

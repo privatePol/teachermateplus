@@ -8,7 +8,7 @@
   <div class="faculty-active-period-list">
     {% for row in rows %}
     <span class="faculty-active-period-chip">
-      {{ row.campus_code }} / {{ row.term_code }}: {{ row.period_name }} ({{ row.period_code }})
+      {{ row.campus_display }} / AY {{ row.academic_year_code }} / {{ row.term_code }}: {{ row.period_name }} ({{ row.period_code }})
       {% if row.auto_advanced_from_deadline %}
       <span class="faculty-active-period-chip-meta">Auto-advanced</span>
       {% endif %}

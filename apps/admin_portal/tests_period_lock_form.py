@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
+from apps.academics.models import AcademicYear, Course, CourseOffering, Section, TenantTermGradingPeriod, Term
 from apps.accounts.models import User
 from apps.admin_portal.forms import GradingPeriodLockForm
 from apps.auditlog.models import AuditLog
@@ -232,6 +232,43 @@ class GradingPeriodLockFormTests(TestCase):
         self.assertContains(response, str(active_lock.period_code))
         self.assertContains(response, "Ignored")
         self.assertContains(response, f"/period-locks/{inactive_lock.id}/edit/")
+
+    def test_active_grading_period_page_lists_inactive_catalog_rows_for_reactivation(self):
+        Permission.objects.bulk_create(
+            [
+                Permission(code="admin_portal.access", module="admin_portal", action="access"),
+                Permission(code="system_settings.update", module="system_settings", action="update"),
+            ]
+        )
+        admin_user = User.objects.create_superuser(
+            username="active_period_admin",
+            email="active-period-admin@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        TenantTermGradingPeriod.objects.create(
+            tenant=self.tenant,
+            term=self.term,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+            is_active=False,
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.get(
+            reverse("admin_portal:active_grading_period_settings"),
+            {"campus_id": self.campus.id, "term_id": self.term.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "PRELIM")
+        self.assertContains(response, "Inactive")
+        self.assertContains(response, "Activate")
+        self.assertContains(response, "all of them are inactive")
 
     def test_broad_period_reopen_requires_reason_and_confirmation(self):
         Permission.objects.bulk_create(

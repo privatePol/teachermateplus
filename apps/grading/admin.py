@@ -99,11 +99,12 @@ class TenantGradingProfileAdmin(admin.ModelAdmin):
         "grading_template",
         "priority",
         "passing_grade_threshold",
+        "period_grade_formula_mode",
         "is_default",
         "is_active",
     )
     search_fields = ("profile_code", "profile_name", "course__code", "course_type", "grading_template__code")
-    list_filter = ("tenant", "campus", "term_type", "is_default", "is_active")
+    list_filter = ("tenant", "campus", "term_type", "period_grade_formula_mode", "is_default", "is_active")
 
 
 @admin.register(CourseBaseValueOverride)

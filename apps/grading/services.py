@@ -1795,6 +1795,7 @@ class GradingGovernanceService:
     )
     CORRECTION_MODE_MANUAL_ONLY = "MANUAL_ONLY"
     CORRECTION_WINDOW_HOURS = 24
+    REOPEN_REQUEST_WINDOW_HOURS = 24
 
     @staticmethod
     def _round(value: Decimal) -> Decimal:
@@ -2108,8 +2109,6 @@ class GradingGovernanceService:
 
     @classmethod
     def resolve_encoding_close_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
-        if not FeatureSettingsService.is_grade_deadline_auto_close_enabled(tenant_id=offering.tenant_id):
-            return None
         return cls.resolve_submission_deadline(offering=offering, template_period=template_period)
 
     @classmethod
@@ -2498,6 +2497,7 @@ class GradingGovernanceService:
     @transaction.atomic
     def auto_lock_due_periods(cls, *, at=None, limit: int | None = None, dry_run: bool = False):
         now = at or timezone.now()
+        rows = []
         reopened_submissions = list(
             GradeSubmission.objects.select_related(
                 "tenant",
@@ -2510,12 +2510,37 @@ class GradingGovernanceService:
             .filter(status=GradeSubmission.Status.REOPENED)
             .order_by("updated_at", "id")
         )
-        rows = []
         for submission in reopened_submissions:
             if limit is not None and len(rows) >= limit:
                 break
             row = cls._auto_lock_expired_reopened_submission(
                 submission=submission,
+                now=now,
+                dry_run=dry_run,
+            )
+            if row is None:
+                continue
+            rows.append(row)
+
+        approved_requests = list(
+            GradeSubmissionReopenRequest.objects.select_related(
+                "tenant",
+                "campus",
+                "submission",
+                "offering",
+                "offering__academic_year",
+                "offering__term",
+                "template_period",
+            )
+            .filter(status=GradeSubmissionReopenRequest.Status.APPROVED)
+            .exclude(submission__status=GradeSubmission.Status.SUBMITTED)
+            .order_by("reviewed_at", "updated_at", "id")
+        )
+        for request_obj in approved_requests:
+            if limit is not None and len(rows) >= limit:
+                break
+            row = cls._auto_lock_expired_approved_reopen_request(
+                request_obj=request_obj,
                 now=now,
                 dry_run=dry_run,
             )
@@ -2556,6 +2581,43 @@ class GradingGovernanceService:
         )
         return cls._auto_lock_expired_reopened_submission(
             submission=submission,
+            now=at or timezone.now(),
+            dry_run=dry_run,
+        )
+
+    @classmethod
+    @transaction.atomic
+    def auto_lock_expired_approved_reopen_request_for_period(
+        cls,
+        *,
+        offering,
+        template_period: GradingTemplatePeriod,
+        at=None,
+        dry_run: bool = False,
+    ):
+        request_obj = (
+            GradeSubmissionReopenRequest.objects.select_related(
+                "tenant",
+                "campus",
+                "submission",
+                "offering",
+                "offering__academic_year",
+                "offering__term",
+                "template_period",
+            )
+            .filter(
+                offering_id=offering.id,
+                template_period_id=template_period.id,
+                status=GradeSubmissionReopenRequest.Status.APPROVED,
+            )
+            .exclude(submission__status=GradeSubmission.Status.SUBMITTED)
+            .order_by("-reviewed_at", "-updated_at", "-id")
+            .first()
+        )
+        if not request_obj:
+            return None
+        return cls._auto_lock_expired_approved_reopen_request(
+            request_obj=request_obj,
             now=at or timezone.now(),
             dry_run=dry_run,
         )
@@ -2613,6 +2675,90 @@ class GradingGovernanceService:
                 "template_period_id": submission.template_period_id,
                 "deadline_at": lock.deadline_at.isoformat() if lock.deadline_at else None,
                 "reason": "REOPENED_DEADLINE_EXPIRED",
+            },
+        )
+        row["id"] = course_lock.id
+        return row
+
+    @classmethod
+    def reopen_request_expires_at(cls, request_obj: GradeSubmissionReopenRequest):
+        if not request_obj or request_obj.status != GradeSubmissionReopenRequest.Status.APPROVED:
+            return None
+        anchor = request_obj.reviewed_at or request_obj.updated_at or request_obj.created_at
+        if not anchor:
+            return None
+        return anchor + timedelta(hours=cls.REOPEN_REQUEST_WINDOW_HOURS)
+
+    @classmethod
+    def is_reopen_request_window_active(cls, request_obj: GradeSubmissionReopenRequest, *, at=None):
+        expires_at = cls.reopen_request_expires_at(request_obj)
+        return bool(expires_at and (at or timezone.now()) <= expires_at)
+
+    @classmethod
+    def _auto_lock_expired_approved_reopen_request(
+        cls,
+        *,
+        request_obj: GradeSubmissionReopenRequest,
+        now,
+        dry_run: bool = False,
+    ):
+        if request_obj.status != GradeSubmissionReopenRequest.Status.APPROVED:
+            return None
+        if request_obj.submission.status == GradeSubmission.Status.SUBMITTED:
+            return None
+        expires_at = cls.reopen_request_expires_at(request_obj)
+        if not expires_at or expires_at > now:
+            return None
+
+        lock = cls.resolve_lock(offering=request_obj.offering, template_period=request_obj.template_period)
+        row = {
+            "id": getattr(lock, "id", None),
+            "submission_id": request_obj.submission_id,
+            "reopen_request_id": request_obj.id,
+            "tenant_code": request_obj.tenant.code,
+            "campus_code": request_obj.campus.code,
+            "academic_year_code": request_obj.offering.academic_year.code,
+            "term_code": request_obj.offering.term.code,
+            "period_code": request_obj.template_period.code,
+            "scope_type": GradingPeriodLock.ScopeType.COURSE,
+            "course_offering_id": request_obj.offering_id,
+            "deadline_at": expires_at,
+        }
+        if dry_run:
+            return row
+
+        course_lock, _created = GradingPeriodLock.objects.update_or_create(
+            tenant_id=request_obj.tenant_id,
+            campus_id=request_obj.campus_id,
+            academic_year_id=request_obj.offering.academic_year_id,
+            term_id=request_obj.offering.term_id,
+            period_code=request_obj.template_period.code,
+            scope_type=GradingPeriodLock.ScopeType.COURSE,
+            course_offering_id=request_obj.offering_id,
+            defaults={
+                "is_locked": True,
+                "deadline_at": expires_at,
+                "locked_at": now,
+                "locked_by_user": None,
+                "remarks": "Auto-locked because an approved reopen request expired after 24 hours without submission.",
+                "is_active": True,
+            },
+        )
+        AuditService.log_event(
+            action="LOCK",
+            portal="SYSTEM",
+            entity_type="GradingPeriodLock",
+            entity_id=course_lock.id,
+            actor=None,
+            tenant=request_obj.tenant,
+            campus=request_obj.campus,
+            after_data={
+                "submission_id": request_obj.submission_id,
+                "reopen_request_id": request_obj.id,
+                "offering_id": request_obj.offering_id,
+                "template_period_id": request_obj.template_period_id,
+                "deadline_at": expires_at.isoformat(),
+                "reason": "APPROVED_REOPEN_WINDOW_EXPIRED",
             },
         )
         row["id"] = course_lock.id
@@ -2704,14 +2850,32 @@ class GradingGovernanceService:
         submission = cls.get_submission(offering=offering, template_period=template_period)
         if not submission or submission.status == GradeSubmission.Status.SUBMITTED:
             return None
-        return (
+        for request_obj in (
             GradeSubmissionReopenRequest.objects.filter(
                 submission=submission,
                 status=GradeSubmissionReopenRequest.Status.APPROVED,
             )
             .order_by("-reviewed_at", "-updated_at", "-id")
-            .first()
-        )
+        ):
+            if cls.is_reopen_request_window_active(request_obj):
+                return request_obj
+        return None
+
+    @classmethod
+    def get_latest_expired_approved_reopen_request(cls, *, offering, template_period: GradingTemplatePeriod):
+        submission = cls.get_submission(offering=offering, template_period=template_period)
+        if not submission or submission.status == GradeSubmission.Status.SUBMITTED:
+            return None
+        for request_obj in (
+            GradeSubmissionReopenRequest.objects.filter(
+                submission=submission,
+                status=GradeSubmissionReopenRequest.Status.APPROVED,
+            )
+            .order_by("-reviewed_at", "-updated_at", "-id")
+        ):
+            if not cls.is_reopen_request_window_active(request_obj):
+                return request_obj
+        return None
 
     @classmethod
     def get_pending_reopen_request(cls, *, offering, template_period: GradingTemplatePeriod):
@@ -2729,8 +2893,6 @@ class GradingGovernanceService:
 
     @classmethod
     def is_auto_closed_after_deadline(cls, *, offering, template_period: GradingTemplatePeriod, now=None):
-        if not FeatureSettingsService.is_grade_deadline_auto_close_enabled(tenant_id=offering.tenant_id):
-            return False
         submission = cls.get_submission(offering=offering, template_period=template_period)
         if submission and submission.status == GradeSubmission.Status.SUBMITTED:
             return False
@@ -2741,11 +2903,28 @@ class GradingGovernanceService:
 
     @classmethod
     def can_request_reopen_after_auto_close(cls, *, offering, template_period: GradingTemplatePeriod, user=None):
-        if not cls.is_auto_closed_after_deadline(offering=offering, template_period=template_period):
+        submission = cls.get_submission(offering=offering, template_period=template_period)
+        if submission and submission.status == GradeSubmission.Status.SUBMITTED:
+            return False
+        if cls.get_active_approved_reopen_request(offering=offering, template_period=template_period):
+            return False
+        is_after_deadline = cls.is_auto_closed_after_deadline(offering=offering, template_period=template_period)
+        is_locked = cls.is_locked(offering=offering, template_period=template_period)
+        if not is_after_deadline and not is_locked:
             return False
         if cls.get_pending_reopen_request(offering=offering, template_period=template_period):
             return False
         return True
+
+    @classmethod
+    def can_request_submitted_reopen_before_deadline(cls, *, submission: GradeSubmission):
+        if not submission or submission.status != GradeSubmission.Status.SUBMITTED:
+            return False
+        deadline = cls.resolve_submission_deadline(
+            offering=submission.offering,
+            template_period=submission.template_period,
+        )
+        return bool(deadline and timezone.now() <= deadline)
 
     @classmethod
     def is_auto_locked_reopened_after_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
@@ -2833,6 +3012,8 @@ class GradingGovernanceService:
         if cls.is_locked(offering=offering, template_period=template_period) or cls.is_submitted(
             offering=offering, template_period=template_period
         ):
+            if cls.get_active_approved_reopen_request(offering=offering, template_period=template_period):
+                return True
             if cls.is_auto_locked_reopened_after_deadline(offering=offering, template_period=template_period):
                 return True
             if not cls.has_active_unlock_window(offering=offering, template_period=template_period):
@@ -2852,10 +3033,15 @@ class GradingGovernanceService:
         is_locked = cls.is_locked(offering=offering, template_period=template_period)
         is_submitted = cls.is_submitted(offering=offering, template_period=template_period)
         is_auto_closed = cls.is_auto_closed_after_deadline(offering=offering, template_period=template_period)
+        has_approved_deadline_reopen = bool(
+            cls.get_active_approved_reopen_request(offering=offering, template_period=template_period)
+        )
+        if has_approved_deadline_reopen and not is_submitted:
+            return True
         if not is_locked and not is_submitted:
             if is_auto_closed:
                 raise ValidationError(
-                    f"{template_period.code} encoding closed after the configured deadline. Request gradebook reopen."
+                    f"{template_period.code} encoding is closed after the configured deadline. Request gradebook reopen."
                 )
             return True
 
@@ -2879,6 +3065,8 @@ class GradingGovernanceService:
     @classmethod
     @transaction.atomic
     def submit_period(cls, *, user, offering, template_period: GradingTemplatePeriod, remarks: str | None = None):
+        if cls.get_latest_expired_approved_reopen_request(offering=offering, template_period=template_period):
+            raise ValidationError("The approved reopen window expired after 24 hours. Submit a new reopen request.")
         can_resubmit_auto_locked_reopen = cls.is_auto_locked_reopened_after_deadline(
             offering=offering,
             template_period=template_period,
@@ -2887,7 +3075,8 @@ class GradingGovernanceService:
             offering=offering,
             template_period=template_period,
         )
-        if not can_resubmit_auto_locked_reopen and not can_submit_auto_closed:
+        can_submit_locked = cls.is_locked(offering=offering, template_period=template_period)
+        if not can_resubmit_auto_locked_reopen and not can_submit_auto_closed and not can_submit_locked:
             cls.assert_encoding_allowed(offering=offering, template_period=template_period)
         readiness = cls.evaluate_submission_readiness(offering=offering, template_period=template_period)
         if readiness["eligible_student_count"] <= 0:
@@ -3004,6 +3193,14 @@ class GradingGovernanceService:
             GradeSubmission.Status.REOPENED,
         }:
             raise ValidationError("Only active grade periods can be reopened by request.")
+
+        if submission.status == GradeSubmission.Status.SUBMITTED and not cls.can_request_submitted_reopen_before_deadline(
+            submission=submission
+        ):
+            raise ValidationError(
+                "Submitted gradebooks can be reopened by request only before the deadline. "
+                "After the deadline, use the Correction of Grades workflow."
+            )
 
         if GradeSubmissionReopenRequest.objects.filter(
             submission=submission,
@@ -3548,6 +3745,49 @@ class FacultyGradingService:
         AttendanceRecord.Status.LATE: Decimal("90"),
         AttendanceRecord.Status.ABSENT: Decimal("0"),
     }
+    DEFAULT_DEPED_TRANSMUTATION_TABLE = [
+        {"min": "100.00", "max": "100.00", "grade": "100"},
+        {"min": "98.40", "max": "99.99", "grade": "99"},
+        {"min": "96.80", "max": "98.39", "grade": "98"},
+        {"min": "95.20", "max": "96.79", "grade": "97"},
+        {"min": "93.60", "max": "95.19", "grade": "96"},
+        {"min": "92.00", "max": "93.59", "grade": "95"},
+        {"min": "90.40", "max": "91.99", "grade": "94"},
+        {"min": "88.80", "max": "90.39", "grade": "93"},
+        {"min": "87.20", "max": "88.79", "grade": "92"},
+        {"min": "85.60", "max": "87.19", "grade": "91"},
+        {"min": "84.00", "max": "85.59", "grade": "90"},
+        {"min": "82.40", "max": "83.99", "grade": "89"},
+        {"min": "80.80", "max": "82.39", "grade": "88"},
+        {"min": "79.20", "max": "80.79", "grade": "87"},
+        {"min": "77.60", "max": "79.19", "grade": "86"},
+        {"min": "76.00", "max": "77.59", "grade": "85"},
+        {"min": "74.40", "max": "75.99", "grade": "84"},
+        {"min": "72.80", "max": "74.39", "grade": "83"},
+        {"min": "71.20", "max": "72.79", "grade": "82"},
+        {"min": "69.60", "max": "71.19", "grade": "81"},
+        {"min": "68.00", "max": "69.59", "grade": "80"},
+        {"min": "66.40", "max": "67.99", "grade": "79"},
+        {"min": "64.80", "max": "66.39", "grade": "78"},
+        {"min": "63.20", "max": "64.79", "grade": "77"},
+        {"min": "61.60", "max": "63.19", "grade": "76"},
+        {"min": "60.00", "max": "61.59", "grade": "75"},
+        {"min": "56.00", "max": "59.99", "grade": "74"},
+        {"min": "52.00", "max": "55.99", "grade": "73"},
+        {"min": "48.00", "max": "51.99", "grade": "72"},
+        {"min": "44.00", "max": "47.99", "grade": "71"},
+        {"min": "40.00", "max": "43.99", "grade": "70"},
+        {"min": "36.00", "max": "39.99", "grade": "69"},
+        {"min": "32.00", "max": "35.99", "grade": "68"},
+        {"min": "28.00", "max": "31.99", "grade": "67"},
+        {"min": "24.00", "max": "27.99", "grade": "66"},
+        {"min": "20.00", "max": "23.99", "grade": "65"},
+        {"min": "16.00", "max": "19.99", "grade": "64"},
+        {"min": "12.00", "max": "15.99", "grade": "63"},
+        {"min": "8.00", "max": "11.99", "grade": "62"},
+        {"min": "4.00", "max": "7.99", "grade": "61"},
+        {"min": "0.00", "max": "3.99", "grade": "60"},
+    ]
 
     @staticmethod
     def _round(value: Decimal) -> Decimal:
@@ -3773,6 +4013,78 @@ class FacultyGradingService:
     @classmethod
     def resolve_base_value(cls, offering, template):
         return cls.resolve_base_value_trace(offering, template)["value"]
+
+    @classmethod
+    def normalized_deped_transmutation_table(cls, table_rows=None):
+        rows = table_rows or cls.DEFAULT_DEPED_TRANSMUTATION_TABLE
+        normalized = []
+        for row in rows:
+            try:
+                minimum = Decimal(str(row.get("min")))
+                maximum = Decimal(str(row.get("max")))
+                grade = Decimal(str(row.get("grade")))
+            except (InvalidOperation, TypeError, ValueError, AttributeError):
+                continue
+            normalized.append(
+                {
+                    "min": cls._round(minimum),
+                    "max": cls._round(maximum),
+                    "grade": cls._round_official_grade(grade),
+                }
+            )
+        normalized.sort(key=lambda item: item["min"], reverse=True)
+        return normalized
+
+    @classmethod
+    def resolve_period_grade_strategy(cls, offering, template=None):
+        profile = cls.resolve_grading_profile_for_offering(offering)
+        default_mode = TenantGradingProfile.PeriodGradeFormulaMode.WEIGHTED_COMPONENTS
+        if not profile:
+            return {
+                "mode": default_mode,
+                "mode_label": default_mode.label,
+                "source_label": "Template weighted components",
+                "profile_id": None,
+                "transmutation_table": None,
+            }
+
+        mode = profile.period_grade_formula_mode or default_mode
+        mode_label = TenantGradingProfile.PeriodGradeFormulaMode(mode).label
+        formula_json = profile.period_grade_formula_json or {}
+        table = None
+        if mode == TenantGradingProfile.PeriodGradeFormulaMode.DEPED_TRANSMUTATION:
+            table = cls.normalized_deped_transmutation_table(formula_json.get("transmutation_table"))
+        return {
+            "mode": mode,
+            "mode_label": mode_label,
+            "source_label": "Tenant grading profile period-grade formula",
+            "profile_id": profile.id,
+            "transmutation_table": table,
+        }
+
+    @classmethod
+    def transmute_deped_initial_grade(cls, initial_grade: Decimal, table_rows=None) -> Decimal:
+        table = cls.normalized_deped_transmutation_table(table_rows)
+        initial = cls._round(initial_grade)
+        for row in table:
+            if row["min"] <= initial <= row["max"]:
+                return row["grade"]
+        if initial > Decimal("100"):
+            return Decimal("100")
+        return table[-1]["grade"] if table else cls._round_official_grade(initial)
+
+    @classmethod
+    def _deped_component_percentage(cls, raw_entries):
+        total_raw = Decimal("0")
+        total_possible = Decimal("0")
+        for raw_score, total_score in raw_entries or []:
+            if raw_score is None or total_score is None:
+                continue
+            total_raw += Decimal(raw_score)
+            total_possible += Decimal(total_score)
+        if total_possible <= 0:
+            return None
+        return cls._round((total_raw / total_possible) * Decimal("100"))
 
     @classmethod
     def resolve_passing_threshold_trace(cls, offering):
@@ -4033,10 +4345,15 @@ class FacultyGradingService:
         base_value: Decimal | None = None,
         components=None,
         score_lookup=None,
+        raw_score_lookup=None,
         include_details: bool = False,
     ):
         template = template or cls.resolve_template_for_offering(offering)
         base_value = base_value if base_value is not None else cls.resolve_base_value(offering, template)
+        period_grade_strategy = cls.resolve_period_grade_strategy(offering, template=template)
+        uses_deped_transmutation = (
+            period_grade_strategy["mode"] == TenantGradingProfile.PeriodGradeFormulaMode.DEPED_TRANSMUTATION
+        )
         if components is None:
             components = list(
                 template_period.components.filter(is_active=True)
@@ -4060,6 +4377,23 @@ class FacultyGradingService:
                     score.activity.template_detail_id,
                 )
                 score_lookup[key].append(Decimal(score.computed_score or 0))
+                if raw_score_lookup is not None:
+                    raw_score_lookup[(score.student_id, score.activity.template_component_id)].append(
+                        (Decimal(score.raw_score or 0), Decimal(score.activity.total_score or 0))
+                    )
+        if raw_score_lookup is None:
+            raw_score_lookup = defaultdict(list)
+            raw_score_rows = StudentActivityScore.objects.filter(
+                activity__offering_id=offering.id,
+                activity__template_period_id=template_period.id,
+                activity__is_active=True,
+                student_id=student_id,
+                is_active=True,
+            ).select_related("activity")
+            for score in raw_score_rows:
+                raw_score_lookup[(score.student_id, score.activity.template_component_id)].append(
+                    (Decimal(score.raw_score or 0), Decimal(score.activity.total_score or 0))
+                )
 
         score_by_activity_id = {}
         active_activities = []
@@ -4180,7 +4514,11 @@ class FacultyGradingService:
             subcomponents = list(component.subcomponents.filter(is_active=True).order_by("sort_order", "id"))
             component_has_data = False
             subcomponent_breakdown = []
-            if subcomponents:
+            if uses_deped_transmutation:
+                component_score = cls._deped_component_percentage(raw_score_lookup.get((student_id, component.id)))
+                component_has_data = component_score is not None
+                component_raw_value = component_score
+            elif subcomponents:
                 sub_total = sum(Decimal(sub.weight_percentage or 0) for sub in subcomponents)
                 sub_denominator = sub_total if sub_total > 0 else Decimal("100")
                 component_raw = Decimal("0")
@@ -4288,6 +4626,11 @@ class FacultyGradingService:
         period_grade = None
         if not has_exam_component or has_exam_data:
             period_grade = cls._round_official_grade(weighted_period_grade)
+            if uses_deped_transmutation:
+                period_grade = cls.transmute_deped_initial_grade(
+                    weighted_period_grade,
+                    period_grade_strategy.get("transmutation_table"),
+                )
         elif has_exam_component and not has_exam_data:
             warnings.append("This period has an exam component, but no exam data is available yet.")
 
@@ -4297,6 +4640,7 @@ class FacultyGradingService:
             "class_standing_raw": class_standing_raw,
             "exam_grade_raw": exam_grade_raw,
             "period_grade_raw": weighted_period_grade if period_grade is not None else None,
+            "period_grade_strategy": period_grade_strategy,
             "class_standing": class_standing,
             "exam_grade": exam_grade,
             "period_grade": period_grade,
@@ -4930,6 +5274,7 @@ class FacultyGradingService:
         ).select_related("activity")
 
         score_lookup = defaultdict(list)
+        raw_score_lookup = defaultdict(list)
         for score in activity_scores:
             key = (
                 score.student_id,
@@ -4938,6 +5283,9 @@ class FacultyGradingService:
                 score.activity.template_detail_id,
             )
             score_lookup[key].append(Decimal(score.computed_score or 0))
+            raw_score_lookup[(score.student_id, score.activity.template_component_id)].append(
+                (Decimal(score.raw_score or 0), Decimal(score.activity.total_score or 0))
+            )
 
         rows = []
         before_period_map = {
@@ -4997,6 +5345,7 @@ class FacultyGradingService:
                         "component_scores": {},
                         "class_standing": None,
                         "exam_grade": None,
+                        "period_grade_raw": None,
                         "period_grade": None,
                     }
                 )
@@ -5010,6 +5359,7 @@ class FacultyGradingService:
                 base_value=base_value,
                 components=components,
                 score_lookup=score_lookup,
+                raw_score_lookup=raw_score_lookup,
             )
             component_scores = detail["component_scores"]
             class_standing = detail["class_standing"]
@@ -5058,6 +5408,7 @@ class FacultyGradingService:
                     "component_scores": component_scores,
                     "class_standing": class_standing,
                     "exam_grade": exam_grade,
+                    "period_grade_raw": detail.get("period_grade_raw"),
                     "period_grade": period_grade,
                 }
             )

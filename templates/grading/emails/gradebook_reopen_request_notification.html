@@ -4,11 +4,17 @@
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7f5;padding:24px 0;">
       <tr>
         <td align="center">
-          <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #dce7df;border-radius:8px;overflow:hidden;">
+          <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #dce7df;border-radius:16px;overflow:hidden;box-shadow:0 12px 36px rgba(32,66,44,0.16);">
             <tr>
-              <td style="background:#0f5f3c;color:#ffffff;padding:18px 22px;">
-                {% if email_logo_src %}<img src="{{ email_logo_src }}" alt="" width="52" height="52" style="vertical-align:middle;margin-right:12px;">{% endif %}
-                <span style="font-size:18px;font-weight:700;vertical-align:middle;">{{ school_name }}</span>
+              <td style="padding:20px 28px;background:linear-gradient(90deg,#1f6a3d 0%,#2f8a4f 45%,#bfa629 100%);">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td style="vertical-align:middle;">
+                      {% if email_logo_src %}<img src="{{ email_logo_src }}" alt="NCBA" style="display:block;max-height:54px;width:auto;border:0;">{% else %}<div style="font-size:20px;font-weight:800;color:#ffffff;">NCBA</div>{% endif %}
+                    </td>
+                    <td align="right" style="vertical-align:middle;color:#f5f6e9;font-size:12px;letter-spacing:0.1em;font-weight:700;">REOPEN REQUEST</td>
+                  </tr>
+                </table>
               </td>
             </tr>
             <tr>

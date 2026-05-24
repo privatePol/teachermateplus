@@ -11,6 +11,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.core.decorators import portal_required
 from apps.core.services.audit import AuditService
+from apps.core.services.email_assets import format_email_subject
 from apps.core.services.permissions import PermissionService
 from apps.imports.forms import ImportUploadForm
 from apps.imports.models import ImportBatch, ImportBatchRow
@@ -30,7 +31,7 @@ class EmailDiagnosticsForm(forms.Form):
     subject = forms.CharField(
         required=True,
         max_length=160,
-        initial="EduGrade+ SMTP Diagnostic",
+        initial="SMTP Diagnostic",
     )
     message = forms.CharField(
         required=True,
@@ -397,7 +398,7 @@ def email_diagnostics_view(request):
         else:
             try:
                 sent_count = send_mail(
-                    subject=form.cleaned_data["subject"],
+                    subject=format_email_subject(form.cleaned_data["subject"]),
                     message=form.cleaned_data["message"],
                     from_email=settings.DEFAULT_FROM_EMAIL,
                     recipient_list=[recipient],

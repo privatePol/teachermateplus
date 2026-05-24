@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering, FacultyAssignment
-from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.scope import ScopeService
 from apps.grading.models import GradeSubmission, GradingPeriodLock
@@ -144,7 +144,7 @@ class FacultyReminderService:
     @classmethod
     def _build_email_payload(cls, reminder: FacultyReminder):
         portal_url = cls._portal_url("faculty_portal:reminder_center")
-        subject = f"NCBA-EduGrade+: {reminder.title}"
+        subject = format_email_subject(reminder.title)
         logo_context = build_email_logo_context(
             filename="ncba-logo.png",
             cid="ncba-logo",
@@ -370,7 +370,7 @@ class FacultyReminderService:
             try:
                 from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
                 message = EmailMultiAlternatives(
-                    subject=entry.subject,
+                    subject=format_email_subject(entry.subject),
                     body=entry.text_body,
                     from_email=from_email,
                     to=[entry.recipient_email],
@@ -705,7 +705,7 @@ class SubmissionNonComplianceNoticeService:
         }
         text_body = render_to_string("notifications/emails/submission_non_compliance_notice.txt", context)
         html_body = render_to_string("notifications/emails/submission_non_compliance_notice.html", context)
-        subject = f"NCBA-EduGrade+: {notice.title} - {notice.template_period.name}"
+        subject = format_email_subject(f"{notice.title} - {notice.template_period.name}")
         return subject, text_body, html_body
 
     @classmethod

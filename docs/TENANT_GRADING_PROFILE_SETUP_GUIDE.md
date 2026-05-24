@@ -193,12 +193,16 @@ Key fields:
 | Grading Template | Template used when the profile is responsible for template selection |
 | Default Base Value | Optional raw-score base/transmutation default |
 | Passing Grade Threshold | Optional passing threshold, usually 75.00 |
+| Period Grade Formula Mode | Weighted Components for the normal EduGrade+ path, or DepEd Transmutation Table for K-12 E-Class Record style quarterly grades |
+| DepEd Transmutation Table | Optional custom MIN-MAX=GRADE rows; blank uses the standard DepEd table |
 | Final Grade Formula Mode | Average all active periods, or weighted selected periods |
 | Final Grade Period Weights | Required only for weighted selected periods |
 | Effective From Term | Keep blank unless a rule is only for one exact term |
 | Priority | Lower number wins when specificity is tied |
 | Is Default | Marks normal fallback profile |
 | Is Active | Only active profiles are used |
+
+DepEd mode is different from setting a base value to 60. It sums raw scores by component, computes each component percentage score, applies the template component weights to get the initial grade, then transmutates that initial grade. Use it only for profiles intended to match DepEd K-12 E-Class Record computation.
 
 ## Recommended Regular-Term Profiles
 

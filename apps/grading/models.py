@@ -369,6 +369,10 @@ class GradingTemplateDetail(TimeStampedModel, ActivatableModel):
 
 
 class TenantGradingProfile(TimeStampedModel, ActivatableModel):
+    class PeriodGradeFormulaMode(models.TextChoices):
+        WEIGHTED_COMPONENTS = "WEIGHTED_COMPONENTS", "Weighted Components"
+        DEPED_TRANSMUTATION = "DEPED_TRANSMUTATION", "DepEd Transmutation Table"
+
     class FinalGradeFormulaMode(models.TextChoices):
         AVERAGE_ACTIVE_PERIODS = "AVERAGE_ACTIVE_PERIODS", "Average All Active Template Periods"
         WEIGHTED_PERIODS = "WEIGHTED_PERIODS", "Weighted Selected Periods"
@@ -418,6 +422,12 @@ class TenantGradingProfile(TimeStampedModel, ActivatableModel):
     )
     default_base_value = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
     passing_grade_threshold = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+    period_grade_formula_mode = models.CharField(
+        max_length=40,
+        choices=PeriodGradeFormulaMode.choices,
+        default=PeriodGradeFormulaMode.WEIGHTED_COMPONENTS,
+    )
+    period_grade_formula_json = models.JSONField(blank=True, null=True)
     final_grade_formula_mode = models.CharField(
         max_length=40,
         choices=FinalGradeFormulaMode.choices,

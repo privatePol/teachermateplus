@@ -24,6 +24,7 @@ from .views import (
     offering_enrollment_view,
     offering_class_tabulation_sheet_view,
     offering_periods_view,
+    offering_syllabus_redirect_view,
     period_final_clearance_view,
     period_view_history_view,
     period_activity_delete_view,
@@ -79,6 +80,7 @@ urlpatterns = [
         name="faculty_assignment_response",
     ),
     path("faculty/my-courses/<int:offering_id>/periods/", offering_periods_view, name="offering_periods"),
+    path("faculty/my-courses/<int:offering_id>/syllabus/", offering_syllabus_redirect_view, name="offering_syllabus"),
     path(
         "faculty/my-courses/<int:offering_id>/class-tabulation/",
         offering_class_tabulation_sheet_view,

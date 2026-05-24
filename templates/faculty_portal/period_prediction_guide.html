@@ -4,25 +4,21 @@
 {% block faculty_content %}
 <style>
   .prediction-guide-shell {
-    max-width: 1180px;
+    max-width: 1120px;
     margin: 0 auto;
   }
   .prediction-guide-hero {
     border: 0;
-    border-radius: 1.35rem;
-    background:
-      radial-gradient(circle at top right, rgba(235, 194, 70, 0.18), transparent 32%),
-      linear-gradient(135deg, #f6fbf6 0%, #edf8ef 56%, #fbf5de 100%);
-    box-shadow: 0 18px 32px rgba(18, 58, 34, 0.08);
+    border-radius: 1rem;
+    background: linear-gradient(135deg, #f6fbf6 0%, #edf8ef 56%, #fbf5de 100%);
+    box-shadow: 0 14px 28px rgba(18, 58, 34, 0.08);
   }
   .prediction-guide-hero .card-body {
-    padding: 1.35rem;
+    padding: 1.25rem;
   }
   .prediction-guide-chip {
     display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.42rem 0.8rem;
+    padding: 0.38rem 0.75rem;
     border-radius: 999px;
     background: #ffffff;
     border: 1px solid #d8e5da;
@@ -31,7 +27,7 @@
     font-size: 0.85rem;
   }
   .prediction-guide-title {
-    font-size: 1.95rem;
+    font-size: 1.75rem;
     font-weight: 800;
     color: #143d26;
     margin: 0.65rem 0 0.45rem;
@@ -43,39 +39,23 @@
   }
   .prediction-guide-grid {
     display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem;
   }
   .prediction-guide-card {
     border: 0;
-    border-radius: 1.1rem;
-    box-shadow: 0 12px 24px rgba(17, 52, 30, 0.06);
+    border-radius: 0.9rem;
+    box-shadow: 0 10px 22px rgba(17, 52, 30, 0.06);
     height: 100%;
   }
   .prediction-guide-card .card-body {
-    padding: 1.15rem;
-  }
-  .prediction-guide-image-wrap {
-    border-radius: 1.1rem;
-    overflow: hidden;
-    box-shadow: 0 12px 24px rgba(17, 52, 30, 0.08);
-    background: #ffffff;
-  }
-  .prediction-guide-image-wrap img {
-    width: 100%;
-    height: auto;
-    display: block;
-  }
-  .prediction-guide-image-note {
-    padding: 0.85rem 1rem 1rem;
-    color: #566d5d;
-    font-size: 0.95rem;
+    padding: 1.05rem;
   }
   .prediction-guide-section-title {
-    font-size: 1.05rem;
+    font-size: 1.03rem;
     font-weight: 800;
     color: #173e28;
-    margin-bottom: 0.85rem;
+    margin-bottom: 0.75rem;
   }
   .prediction-guide-list {
     margin: 0;
@@ -86,39 +66,20 @@
     margin-top: 0.45rem;
   }
   .prediction-guide-note {
-    margin-top: 0.85rem;
-    padding: 0.9rem 1rem;
-    border-radius: 1rem;
+    margin-top: 0.8rem;
+    padding: 0.85rem 0.95rem;
+    border-radius: 0.8rem;
     background: #f6faf6;
     color: #546b5c;
   }
-  .prediction-guide-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  .prediction-guide-table th,
-  .prediction-guide-table td {
-    border: 1px solid #dbe7de;
-    padding: 0.72rem 0.8rem;
-    vertical-align: top;
-  }
-  .prediction-guide-table th {
-    background: #f3f8f4;
-    color: #1c452d;
-    font-weight: 800;
-  }
-  .prediction-guide-table td {
-    color: #556d5d;
-  }
-  .prediction-guide-walkthrough {
-    display: grid;
-    gap: 0.8rem;
-  }
   .prediction-guide-step {
-    padding: 0.95rem 1rem;
-    border-radius: 1rem;
+    padding: 0.9rem 0.95rem;
+    border-radius: 0.8rem;
     background: linear-gradient(180deg, #ffffff 0%, #f8fbf8 100%);
     border: 1px solid #e2ece4;
+  }
+  .prediction-guide-step + .prediction-guide-step {
+    margin-top: 0.75rem;
   }
   .prediction-guide-step strong {
     display: block;
@@ -129,24 +90,23 @@
     margin: 0;
     color: #5b7262;
   }
-  .prediction-guide-method-table {
+  .prediction-guide-table {
     width: 100%;
     border-collapse: collapse;
   }
-  .prediction-guide-method-table th,
-  .prediction-guide-method-table td {
+  .prediction-guide-table th,
+  .prediction-guide-table td {
     border: 1px solid #dbe7de;
-    padding: 0.72rem 0.8rem;
+    padding: 0.7rem 0.75rem;
     vertical-align: top;
   }
-  .prediction-guide-method-table th {
+  .prediction-guide-table th {
     background: #f3f8f4;
     color: #1c452d;
     font-weight: 800;
   }
-  .prediction-guide-factor-title {
-    font-weight: 800;
-    color: #183f28;
+  .prediction-guide-table td {
+    color: #556d5d;
   }
   @media (max-width: 991.98px) {
     .prediction-guide-grid {
@@ -160,12 +120,11 @@
     <div class="card-body">
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
         <div>
-          <span class="prediction-guide-chip">Prediction Interpretation Guide</span>
+          <span class="prediction-guide-chip">Prediction Guide</span>
           <div class="prediction-guide-title">{{ offering.course.title }} | {{ period.name }}</div>
           <p class="prediction-guide-copy">
-            This page explains the prediction screen in simple words. Think of prediction as:
-            <strong>"Based on the grades encoded right now, what may happen if the class continues this way?"</strong>
-            It is only a guide for checking possibilities. It is not yet the official grade.
+            This page is mainly for <strong>{{ period.name }}</strong>. It estimates what may happen based on the
+            scores encoded right now. It is only a guide and it does not change the gradebook.
           </p>
         </div>
         <div class="d-flex gap-2">
@@ -179,13 +138,14 @@
   <div class="prediction-guide-grid mb-4">
     <div class="card prediction-guide-card">
       <div class="card-body">
-        <div class="prediction-guide-section-title">Simple Explanation</div>
-        <ul class="prediction-guide-list">
-          <li>EduGrade+ looks at the scores already encoded in this class.</li>
-          <li>It follows the same grading template and grade formula used by the actual gradebook.</li>
-          <li>It then gives an estimate of what grade may happen.</li>
-          <li>It does not save, post, or overwrite any score in the gradebook.</li>
-        </ul>
+        <div class="prediction-guide-section-title">How to Read the Page</div>
+        <ol class="prediction-guide-list">
+          <li>Read <strong>Estimated {{ period.name }} Grade</strong> first.</li>
+          <li>Check <strong>Encoded Work</strong> to see how complete the records are.</li>
+          <li>Check <strong>Still Missing</strong> to see what can still change the estimate.</li>
+          <li>Use <strong>Period Alert</strong> as an early warning, not as an official grade decision.</li>
+          <li>Use <strong>Possible Final Grade</strong> only as extra guidance for student follow-up.</li>
+        </ol>
         <div class="prediction-guide-note">
           <strong>Current system assumption:</strong> {{ default_assumption_info.label }}<br>
           {{ default_assumption_info.meaning }}
@@ -194,97 +154,12 @@
     </div>
     <div class="card prediction-guide-card">
       <div class="card-body">
-        <div class="prediction-guide-section-title">Screenshot Guide</div>
-        <div class="prediction-guide-image-wrap">
-          <img src="{% get_media_prefix %}portal-img/grades_prediction.png" alt="Grades prediction screen guide">
-          <div class="prediction-guide-image-note">
-            Use this screenshot as your visual guide. Read the table together with the explanations below,
-            especially <strong>Current Projection</strong>, <strong>Average Needed to Pass Final</strong>,
-            <strong>Coverage</strong>, and <strong>Remaining</strong>.
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="prediction-guide-grid mb-4">
-    <div class="card prediction-guide-card">
-      <div class="card-body">
-        <div class="prediction-guide-section-title">Very Important Reminder</div>
+        <div class="prediction-guide-section-title">What Faculty Should Remember</div>
         <ul class="prediction-guide-list">
-          {% for rule in interpretation_rules %}
-          <li>{{ rule }}</li>
-          {% endfor %}
-        </ul>
-        <div class="prediction-guide-note">
-          <strong>Best habit:</strong> look at <em>Coverage</em> and <em>Remaining</em> first.
-          If coverage is low and remaining items are still many, the prediction can still change a lot.
-        </div>
-      </div>
-    </div>
-    <div class="card prediction-guide-card">
-      <div class="card-body">
-        <div class="prediction-guide-section-title">Quick Reading Order</div>
-        <ol class="prediction-guide-list">
-          <li>Read <strong>Current Projection</strong>.</li>
-          <li>Check <strong>Coverage</strong>.</li>
-          <li>Check <strong>Remaining</strong>.</li>
-          <li>If the student is at risk, read <strong>Average Needed to Pass Final</strong>.</li>
-          <li>Use <strong>Best Case</strong> and <strong>Worst Case</strong> only as range guides.</li>
-        </ol>
-      </div>
-    </div>
-  </div>
-
-  <div class="card prediction-guide-card mb-4">
-    <div class="card-body">
-      <div class="prediction-guide-section-title">Prediction Methodology</div>
-      <div class="prediction-guide-walkthrough">
-        {% for item in methodology_steps %}
-        <div class="prediction-guide-step">
-          <strong>{{ item.title }}</strong>
-          <p>{{ item.body }}</p>
-        </div>
-        {% endfor %}
-      </div>
-      <div class="prediction-guide-note">
-        <strong>Transparency note:</strong> EduGrade+ does not guess outside the assigned template. It only works from
-        active class records, active grading setup, the current assumption mode, and the official passing threshold used by the class.
-      </div>
-    </div>
-  </div>
-
-  <div class="prediction-guide-grid mb-4">
-    <div class="card prediction-guide-card">
-      <div class="card-body">
-        <div class="prediction-guide-section-title">Main Factors Used by the Prediction Engine</div>
-        <div class="table-responsive">
-          <table class="prediction-guide-method-table">
-            <thead>
-              <tr>
-                <th style="width: 32%;">Factor</th>
-                <th>How It Affects the Values</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for item in methodology_factors %}
-              <tr>
-                <td><span class="prediction-guide-factor-title">{{ item.factor }}</span></td>
-                <td>{{ item.impact }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-    <div class="card prediction-guide-card">
-      <div class="card-body">
-        <div class="prediction-guide-section-title">When a Value Can Change or Show as Unavailable</div>
-        <ul class="prediction-guide-list">
-          {% for item in methodology_notes %}
-          <li>{{ item }}</li>
-          {% endfor %}
+          <li>Prediction is unofficial.</li>
+          <li>It follows the class grading template in the background.</li>
+          <li>It does not save scores, submit grades, or correct grades.</li>
+          <li>If many items are still missing, the estimate can still move a lot.</li>
         </ul>
       </div>
     </div>
@@ -292,80 +167,41 @@
 
   <div class="card prediction-guide-card mb-4">
     <div class="card-body">
-      <div class="prediction-guide-section-title">How EduGrade+ Transmutes Scores with Base 50</div>
-      <div class="prediction-guide-walkthrough">
-        {% for item in transmutation_guides %}
-        <div class="prediction-guide-step">
-          <strong>{{ item.title }}</strong>
-          <p>{{ item.body }}</p>
-        </div>
-        {% endfor %}
+      <div class="prediction-guide-section-title">Sample Student Record</div>
+      <div class="prediction-guide-step">
+        <strong>Example: Ana Santos in {{ period.name }}</strong>
+        <p>
+          Ana has 3 encoded activities out of 5 expected activities. Her encoded scores are currently averaging
+          <strong>82</strong>. Two activities are still missing.
+        </p>
       </div>
-      <div class="prediction-guide-note mt-3">
-        <strong>Base 50 formula:</strong>
-        <code>Computed Score = ((Raw Score / Total Score) × Base Value) + (100 − Base Value)</code>
+      <div class="prediction-guide-step">
+        <strong>What the prediction page may show</strong>
+        <p>
+          Estimated {{ period.name }} Grade: <strong>82</strong>. Encoded Work: <strong>60%</strong>.
+          Still Missing: <strong>2</strong>. Period Alert: <strong>On Track</strong>.
+        </p>
       </div>
-      <div class="table-responsive mt-3">
-        <table class="prediction-guide-method-table">
-          <thead>
-            <tr>
-              <th style="width: 42%;">Example</th>
-              <th>Result</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in transmutation_examples %}
-            <tr>
-              <td><span class="prediction-guide-factor-title">{{ item.example }}</span></td>
-              <td>{{ item.result }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div class="prediction-guide-grid mb-4">
-    <div class="card prediction-guide-card">
-      <div class="card-body">
-        <div class="prediction-guide-section-title">How Periodic Grades Are Computed</div>
-        <div class="prediction-guide-note mb-3">
-          <strong>Period formula:</strong> {{ period_grade_formula }}
-        </div>
-        <ol class="prediction-guide-list">
-          {% for item in period_grade_steps %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ol>
-      </div>
-    </div>
-    <div class="card prediction-guide-card">
-      <div class="card-body">
-        <div class="prediction-guide-section-title">How Final Grades Are Computed</div>
-        <div class="prediction-guide-note mb-3">
-          <strong>Final-grade formula:</strong> {{ final_grade_formula }}
-        </div>
-        <ol class="prediction-guide-list">
-          {% for item in final_grade_steps %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ol>
+      <div class="prediction-guide-step">
+        <strong>Simple explanation</strong>
+        <p>
+          Based on the scores encoded right now, Ana is estimated at 82 for {{ period.name }}.
+          Because two items are still missing, the estimate can still go up or down.
+        </p>
       </div>
     </div>
   </div>
 
   <div class="card prediction-guide-card mb-4">
     <div class="card-body">
-      <div class="prediction-guide-section-title">What Each Column Means</div>
+      <div class="prediction-guide-section-title">Column Guide</div>
       <div class="table-responsive">
         <table class="prediction-guide-table">
           <thead>
             <tr>
-              <th style="width: 18%;">Column</th>
-              <th style="width: 30%;">Simple Meaning</th>
-              <th style="width: 27%;">Computed From / Factors</th>
-              <th>How You Should Read It</th>
+              <th style="width: 24%;">Column</th>
+              <th>Plain Meaning</th>
+              <th style="width: 34%;">How to Use It</th>
             </tr>
           </thead>
           <tbody>
@@ -373,7 +209,6 @@
             <tr>
               <td><strong>{{ item.column }}</strong></td>
               <td>{{ item.meaning }}</td>
-              <td>{{ item.factors }}</td>
               <td>{{ item.note }}</td>
             </tr>
             {% endfor %}
@@ -386,40 +221,28 @@
   <div class="prediction-guide-grid mb-4">
     <div class="card prediction-guide-card">
       <div class="card-body">
-        <div class="prediction-guide-section-title">Easy Examples</div>
-        <div class="prediction-guide-walkthrough">
-          <div class="prediction-guide-step">
-            <strong>Very simple sample</strong>
-            <p>
-              Example: only <strong>Q1 = 80</strong> is encoded and one item is still missing.
-              The page may show <strong>Current Projection = 80</strong>, <strong>Coverage = 50%</strong>, and <strong>Remaining = 1</strong>.
-              This means the grade is still not final and may still move.
-            </p>
-          </div>
-          {% for item in sample_walkthrough %}
-          <div class="prediction-guide-step">
-            <strong>{{ item.title }}</strong>
-            <p>{{ item.body }}</p>
-          </div>
-          {% endfor %}
+        <div class="prediction-guide-section-title">When the Estimate Is Still Weak</div>
+        <div class="prediction-guide-step">
+          <strong>Low Encoded Work</strong>
+          <p>If only 1 out of 5 activities has a score, the estimate is still very early. Encode more records first.</p>
+        </div>
+        <div class="prediction-guide-step">
+          <strong>High Still Missing Count</strong>
+          <p>If many items are still missing, the student's estimate can still change a lot.</p>
         </div>
       </div>
     </div>
     <div class="card prediction-guide-card">
       <div class="card-body">
-        <div class="prediction-guide-section-title">How to Understand the What-If Simulator</div>
+        <div class="prediction-guide-section-title">What-If Simulator</div>
         <ul class="prediction-guide-list">
           <li>Choose one student.</li>
-          <li>Type an estimated performance for the still-missing work.</li>
-          <li>The system will answer: <strong>"If the student performs around this level, what may happen?"</strong></li>
-          <li>The result is for planning only. It is not an encoded grade and not an approved correction.</li>
-          <li>If a scenario is saved, it is only a private draft note for reference.</li>
+          <li>Type a possible average for the missing work.</li>
+          <li>Click <strong>Predict</strong>.</li>
+          <li>The result is only for planning. It is not saved to the gradebook.</li>
         </ul>
         <div class="prediction-guide-note">
-          <strong>Simple example:</strong> If you type <strong>80%</strong> in Remaining Performance,
-          EduGrade+ is only checking:
-          <em>"If this student gets around 80% on the remaining items, what may the period grade become?"</em>
-          It does <strong>not</strong> save 80% in the gradebook.
+          Example: typing <strong>80%</strong> only asks, "What may happen if the student gets around 80% on the missing work?"
         </div>
       </div>
     </div>

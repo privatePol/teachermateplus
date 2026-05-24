@@ -6,10 +6,20 @@ from tempfile import TemporaryDirectory
 from django.core.mail import EmailMultiAlternatives
 from django.test import SimpleTestCase, override_settings
 
-from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 
 
 class EmailAssetTests(SimpleTestCase):
+    def test_format_email_subject_applies_standard_ncba_prefix(self):
+        self.assertEqual(
+            format_email_subject("Login Verification"),
+            "NCBA | EduGradePlus: Login Verification",
+        )
+        self.assertEqual(
+            format_email_subject("NCBA-EduGrade+: Legacy Subject"),
+            "NCBA | EduGradePlus: Legacy Subject",
+        )
+
     def test_local_logo_uses_cid_and_attaches_inline_image(self):
         with TemporaryDirectory() as tmpdir:
             logo_dir = Path(tmpdir) / "logos"

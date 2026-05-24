@@ -62,11 +62,25 @@ def portal_menu(request):
         effective_codes=permissions,
     )
     faculty_quick_tour_enabled = False
+    faculty_grade_prediction_enabled = False
+    faculty_at_risk_monitor_enabled = False
     faculty_portal_identity_warning = None
     if portal == "FACULTY":
+        faculty_tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
         faculty_quick_tour_enabled = FeatureSettingsService.is_faculty_quick_tour_enabled(
-            tenant_id=scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None),
+            tenant_id=faculty_tenant_id,
             default=True,
+        )
+        faculty_grade_prediction_enabled = FeatureSettingsService.can_user_access_grade_prediction(
+            user=request.user,
+            tenant_id=faculty_tenant_id,
+        )
+        faculty_at_risk_monitor_enabled = (
+            faculty_grade_prediction_enabled
+            and FeatureSettingsService.is_grade_prediction_at_risk_enabled(
+                tenant_id=faculty_tenant_id,
+                default=True,
+            )
         )
         has_faculty_role = UserRole.objects.filter(
             user=request.user,
@@ -108,6 +122,8 @@ def portal_menu(request):
         "portal_menu": menu,
         "effective_permissions": permissions,
         "faculty_quick_tour_enabled": faculty_quick_tour_enabled,
+        "faculty_grade_prediction_enabled": faculty_grade_prediction_enabled,
+        "faculty_at_risk_monitor_enabled": faculty_at_risk_monitor_enabled,
         "faculty_portal_identity_warning": faculty_portal_identity_warning,
         "admin_active_academic_year": admin_active_academic_year,
         "admin_active_term": admin_active_term,

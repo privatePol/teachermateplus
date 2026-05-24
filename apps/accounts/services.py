@@ -28,7 +28,7 @@ from apps.accounts.models import (
     UserSignatureUsageLog,
 )
 from apps.core.services.audit import AuditService
-from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 from apps.core.services.features import FeatureSettingsService
 
 User = get_user_model()
@@ -504,13 +504,13 @@ class LoginOtpService:
 
     @classmethod
     def _send_email(cls, *, request, user, challenge: LoginOtpChallenge, code: str) -> int:
-        subject = "NCBA EduGrade+ Login Verification"
+        subject = format_email_subject("Login Verification")
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
         logo_context = build_email_logo_context(
-            filename="egp_logo_official.png",
-            cid="EduGrade+-logo",
-            external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
-            configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            external_url=getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
         )
         context = {
             "user": user,
@@ -526,9 +526,9 @@ class LoginOtpService:
         attach_logo_for_src(
             message,
             src=logo_context["email_logo_src"],
-            filename="egp_logo_official.png",
-            cid="EduGrade+-logo",
-            configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
         )
         message.attach_alternative(html_body, "text/html")
         return message.send(fail_silently=True)
@@ -634,13 +634,13 @@ class AdminPasswordResetOtpService:
 
     @classmethod
     def _send_email(cls, *, request, user, challenge: LoginOtpChallenge, code: str) -> int:
-        subject = "EduGrade+ Admin Password Reset Code"
+        subject = format_email_subject("Admin Password Reset Code")
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
         logo_context = build_email_logo_context(
-            filename="egp_logo_official.png",
-            cid="EduGrade+-logo",
-            external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
-            configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            external_url=getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
         )
         context = {
             "user": user,
@@ -656,9 +656,9 @@ class AdminPasswordResetOtpService:
         attach_logo_for_src(
             message,
             src=logo_context["email_logo_src"],
-            filename="egp_logo_official.png",
-            cid="EduGrade+-logo",
-            configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
         )
         message.attach_alternative(html_body, "text/html")
         return message.send(fail_silently=True)

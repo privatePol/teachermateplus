@@ -83,6 +83,28 @@ class RoleManagementTests(TestCase):
         self.assertContains(response, "Save Section")
         self.assertContains(response, 'name="save_module" value="alpha"', html=False)
 
+    def test_role_permissions_page_shows_plain_language_module_descriptions(self):
+        role = Role.objects.create(code="DESCRIBED_ROLE", name="Described Role", is_active=True)
+        Permission.objects.create(code="academic_years.read", module="academic_years", action="read")
+        Permission.objects.create(code="actual_data_reset.run", module="actual_data_reset", action="run")
+        Permission.objects.create(code="custom_module.read", module="custom_module", action="read")
+
+        response = self.client.get(reverse("admin_portal:role_permissions", args=[role.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Academic Year Setup")
+        self.assertContains(response, "Controls who can view, create, or edit the official academic year records")
+        self.assertContains(response, "Actual Data Reset")
+        self.assertContains(response, "Grant only to trusted users because this can remove transactions")
+        self.assertContains(response, "Custom Module")
+        self.assertContains(response, "Controls access to Custom Module pages and actions")
+        self.assertContains(response, "academic_years.read")
+        self.assertContains(
+            response,
+            'id="critical-access-safeguard" class="alert alert-warning border small mb-0 mt-3 d-none"',
+            html=False,
+        )
+
     def test_role_permissions_section_save_updates_only_selected_module(self):
         role = Role.objects.create(code="PARTIAL_SAVE", name="Partial Save", is_active=True)
         alpha_read = Permission.objects.create(code="alpha.read", module="alpha", action="read")
@@ -101,11 +123,19 @@ class RoleManagementTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
+        self.assertIn("saved_module=alpha", response["Location"])
+        self.assertIn("#card_module_alpha", response["Location"])
         role_permission_ids = set(role.role_permissions.values_list("permission_id", flat=True))
         self.assertNotIn(alpha_read.id, role_permission_ids)
         self.assertIn(alpha_update.id, role_permission_ids)
         self.assertIn(beta_read.id, role_permission_ids)
         self.assertNotIn(beta_update.id, role_permission_ids)
+
+        response = self.client.get(response["Location"])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="card_module_alpha"', html=False)
+        self.assertContains(response, "Changes saved")
 
     def test_critical_role_permission_change_requires_reason_and_confirmation(self):
         role = Role.objects.create(code="CRITICAL_ROLE", name="Critical Role", is_active=True)
@@ -120,6 +150,11 @@ class RoleManagementTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(RolePermission.objects.filter(role=role, permission=admin_access).exists())
         self.assertContains(response, "Enter the reason for changing critical role access.")
+        self.assertContains(
+            response,
+            'id="critical-access-safeguard" class="alert alert-warning border small mb-0 mt-3 "',
+            html=False,
+        )
 
         response = self.client.post(
             reverse("admin_portal:role_permissions", args=[role.id]),

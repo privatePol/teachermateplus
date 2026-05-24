@@ -298,11 +298,14 @@ Encode:
 | Units | Used for academic reference and reports. |
 | Course type | Useful for lecture/lab profile rules if the institution uses it. |
 | Default base value | Optional raw-score transmutation default. |
+| Syllabus link | Optional Google Drive or approved external syllabus URL shown only to faculty assigned to that course offering. |
 | Active flag | Inactive courses are not offered in normal operations. |
 
 Important:
 
 In the current model, course code is unique per tenant. This is safe when the institution uses one official course catalog across all campuses. If different campuses reuse the same course code with different academic meaning, review the data first before import.
+
+Syllabus links should normally point to school-managed Google Drive files or folders. Keep Google sharing restricted to the institution/domain; EduGrade+ only controls which assigned faculty can open the link from inside the portal and audits each successful faculty syllabus-link open.
 
 ### 4.9 Sections
 

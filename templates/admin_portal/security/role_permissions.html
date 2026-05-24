@@ -66,7 +66,10 @@
         </div>
         <div class="col-lg-3">
           <div class="text-muted small mb-1">Selected</div>
-          <div class="fw-semibold"><span id="selected-count">{{ selected_permission_count }}</span> of {{ total_permission_count }} permissions</div>
+          <div class="fw-semibold">
+            <span id="selected-count">{{ selected_permission_count }}</span> of {{ total_permission_count }} permissions
+            {% if permissions_saved_all %}<span class="badge text-bg-success ms-2">Changes saved</span>{% endif %}
+          </div>
         </div>
         <div class="col-lg-4 d-flex flex-wrap gap-2 justify-content-lg-end">
           <button class="btn btn-outline-secondary" type="button" id="show-selected-toggle" data-active="0">Show Selected Only</button>
@@ -76,9 +79,9 @@
       <div class="alert alert-light border small mb-0 mt-3">
         Tip: use module buttons to select or clear a whole area, then fine-tune individual permissions. Use <strong>Save Section</strong> to save only one section, or <strong>Save Permissions</strong> to save the whole page.
       </div>
-      <div class="alert alert-warning border small mb-0 mt-3">
+      <div id="critical-access-safeguard" class="alert alert-warning border small mb-0 mt-3 {% if not form.change_reason.errors and not form.confirmation_phrase.errors and not critical_permission_impact.has_critical_change %}d-none{% endif %}">
         <div class="fw-semibold mb-1">Critical Access Safeguard</div>
-        <div class="mb-2">Required only when adding or removing high-impact permissions. Type <code>{{ critical_role_confirmation }}</code> and record a reason when critical access changes.</div>
+        <div class="mb-2">Shown only when adding or removing high-impact permissions. Type <code>{{ critical_role_confirmation }}</code> and record a reason when critical access changes.</div>
         {% if critical_permission_impact and critical_permission_impact.has_critical_change %}
           <div class="mb-2">
             Impact preview:
@@ -103,11 +106,15 @@
   </div>
 
   {% for module in permissions_by_module %}
-  <section class="permission-card mb-3" data-module-card data-module="{{ module.label|lower }}">
+  <section id="{{ module.card_dom_id }}" class="permission-card mb-3" data-module-card data-module="{{ module.label|lower }}">
     <div class="permission-card-header p-3">
       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
         <div>
-          <div class="fw-semibold">{{ module.label }}</div>
+          <div class="fw-semibold">
+            {{ module.label }}
+            {% if module.is_saved %}<span class="badge text-bg-success ms-2">Changes saved</span>{% endif %}
+          </div>
+          <div class="small text-muted mt-1">{{ module.description }}</div>
           <div class="small text-muted"><span data-module-selected>{{ module.selected_count }}</span> of {{ module.total_count }} selected</div>
         </div>
         <div class="d-flex flex-wrap gap-2">
@@ -124,7 +131,7 @@
              data-permission-item
              data-search="{{ module.label|lower }} {{ perm.code|lower }} {{ perm.action_label|lower }} {{ perm.description|lower }}">
           <label class="permission-row d-flex align-items-start gap-2 p-3 h-100 {% if perm.is_selected %}is-selected{% endif %}" for="perm_{{ perm.id }}">
-            <input class="form-check-input mt-1 permission-checkbox" type="checkbox" name="permissions" value="{{ perm.id }}" id="perm_{{ perm.id }}" {% if perm.is_selected %}checked{% endif %}>
+            <input class="form-check-input mt-1 permission-checkbox" type="checkbox" name="permissions" value="{{ perm.id }}" id="perm_{{ perm.id }}" data-critical="{% if perm.is_critical %}1{% else %}0{% endif %}" data-initial-checked="{% if perm.is_saved_selected %}1{% else %}0{% endif %}" {% if perm.is_selected %}checked{% endif %}>
             <span class="flex-grow-1">
               <span class="d-flex flex-wrap align-items-center gap-2 mb-1">
                 <span class="badge {{ perm.badge_class }}">{{ perm.action_label }}</span>
@@ -159,7 +166,18 @@
     const selectedCount = document.getElementById("selected-count");
     const selectedCountBottom = document.getElementById("selected-count-bottom");
     const showSelectedToggle = document.getElementById("show-selected-toggle");
+    const criticalSafeguard = document.getElementById("critical-access-safeguard");
     const checkboxes = Array.from(document.querySelectorAll(".permission-checkbox"));
+    const scrollStorageKey = "EduGrade+_role_permissions_scroll_{{ role.id }}";
+
+    function syncCriticalSafeguard() {
+      if (!criticalSafeguard) return;
+      const hasCriticalChange = checkboxes.some((checkbox) => (
+        checkbox.dataset.critical === "1"
+        && ((checkbox.checked ? "1" : "0") !== checkbox.dataset.initialChecked)
+      ));
+      criticalSafeguard.classList.toggle("d-none", !hasCriticalChange);
+    }
 
     function updateCounts() {
       const selected = checkboxes.filter((checkbox) => checkbox.checked).length;
@@ -199,6 +217,7 @@
       checkbox.addEventListener("change", function () {
         syncRowState();
         updateCounts();
+        syncCriticalSafeguard();
         applyFilter();
       });
     });
@@ -212,6 +231,7 @@
         });
         syncRowState();
         updateCounts();
+        syncCriticalSafeguard();
         applyFilter();
       });
     });
@@ -225,6 +245,7 @@
         });
         syncRowState();
         updateCounts();
+        syncCriticalSafeguard();
         applyFilter();
       });
     });
@@ -239,17 +260,33 @@
       applyFilter();
     });
 
+    form.addEventListener("submit", function (event) {
+      const submitter = event.submitter;
+      if (!submitter || submitter.name !== "save_module") {
+        sessionStorage.setItem(scrollStorageKey, String(window.scrollY || 0));
+      }
+    });
+
     form.addEventListener("reset", function () {
       window.setTimeout(function () {
         syncRowState();
         updateCounts();
+        syncCriticalSafeguard();
         applyFilter();
       }, 0);
     });
 
     syncRowState();
     updateCounts();
+    syncCriticalSafeguard();
     applyFilter();
+    if (!window.location.hash) {
+      const savedScroll = sessionStorage.getItem(scrollStorageKey);
+      if (savedScroll) {
+        sessionStorage.removeItem(scrollStorageKey);
+        window.scrollTo(0, Number(savedScroll) || 0);
+      }
+    }
   });
 </script>
 {% endblock %}

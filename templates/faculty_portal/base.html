@@ -85,6 +85,20 @@
   .faculty-layout.sidebar-collapsed .sidebar-icon {
     margin-right: 0;
   }
+  .faculty-layout.privacy-consent-lock .faculty-sidebar {
+    pointer-events: none;
+  }
+  .faculty-layout.privacy-consent-lock .sidebar-link,
+  .faculty-layout.privacy-consent-lock .faculty-nav-group-title {
+    pointer-events: none;
+  }
+  .faculty-consent-nav-lock {
+    color: #4d6658;
+    font-size: 0.78rem;
+    line-height: 1.25;
+    padding: 0.85rem 0.45rem;
+    text-align: center;
+  }
   .faculty-nav-group-title {
     font-size: 0.72rem;
     text-transform: uppercase;
@@ -344,7 +358,7 @@
   <nav class="navbar faculty-topbar px-2 px-md-3" data-tour-id="faculty-header">
     <div class="container-fluid">
       <div class="d-flex align-items-center gap-2">
-        <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar" data-tour-id="sidebar-toggle">&#9776;</button>
+        <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar" data-tour-id="sidebar-toggle"{% if privacy_consent_pending %} disabled aria-disabled="true"{% endif %}>&#9776;</button>
         <span class="d-inline-flex align-items-center">
           <img src="{% get_media_prefix %}logos/egp_logo_official.png" alt="EduGrade+" class="faculty-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/edp_logo.png';">
         </span>
@@ -366,16 +380,23 @@
       <div class="d-flex flex-column gap-1 align-items-end">
         <div class="small faculty-user">{{ request.user.full_name|default:request.user.username }}</div>
         <div class="d-flex flex-wrap justify-content-end gap-2">
-          <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_signature' %}">My Signature</a>
-          <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_change_password' %}">Change Password</a>
+          {% if not privacy_consent_pending %}
+            <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_signature' %}">My Signature</a>
+            <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_change_password' %}">Change Password</a>
+          {% endif %}
           <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_logout' %}">Logout</a>
         </div>
       </div>
     </div>
   </nav>
-  <div class="faculty-layout" id="faculty-layout">
-    <aside class="faculty-sidebar">
+  <div class="faculty-layout{% if privacy_consent_pending %} sidebar-collapsed privacy-consent-lock{% endif %}" id="faculty-layout"{% if privacy_consent_pending %} data-privacy-consent-lock="1"{% endif %}>
+    <aside class="faculty-sidebar"{% if privacy_consent_pending %} aria-label="Navigation unavailable until privacy consent is accepted"{% endif %}>
       <div class="faculty-sidebar-inner">
+        {% if privacy_consent_pending %}
+          <div class="faculty-consent-nav-lock" aria-live="polite">
+            Navigation is locked until privacy consent is accepted.
+          </div>
+        {% else %}
         {% for group in portal_menu %}
           <div class="faculty-nav-group-title sidebar-label">{{ group.group.label }}</div>
           {% for node in group.items %}
@@ -399,15 +420,17 @@
           <span class="sidebar-icon">&#127891;</span>
           <span class="sidebar-label">My Classes</span>
         </a>
-        <a
-          href="{% url 'faculty_portal:student_at_risk_monitor' %}"
-          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:student_at_risk_monitor' %}active{% endif %}"
-          title="Students At-Risk Monitor"
-          data-tour-id="at-risk-monitor"
-        >
-          <span class="sidebar-icon">&#9888;</span>
-          <span class="sidebar-label">Students At-Risk Monitor</span>
-        </a>
+        {% if faculty_at_risk_monitor_enabled %}
+          <a
+            href="{% url 'faculty_portal:student_at_risk_monitor' %}"
+            class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:student_at_risk_monitor' %}active{% endif %}"
+            title="Student Intervention Monitor"
+            data-tour-id="at-risk-monitor"
+          >
+            <span class="sidebar-icon">&#9888;</span>
+            <span class="sidebar-label">Student Intervention Monitor</span>
+          </a>
+        {% endif %}
         <a
           href="{% url 'faculty_portal:my_courses' %}?archived=1"
           class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:my_courses' and request.GET.archived == '1' %}active{% endif %}"
@@ -435,6 +458,7 @@
           <span class="sidebar-icon">&#128221;</span>
           <span class="sidebar-label">Notes</span>
         </a>
+        {% endif %}
       </div>
     </aside>
     <main class="faculty-main">
@@ -447,7 +471,9 @@
     </main>
   </div>
 
-  <a class="help-fab" href="{% url 'faculty_portal:guide' %}" aria-label="Open Faculty User Guide" title="Open Faculty User Guide" data-tour-id="user-guide">?</a>
+  {% if not privacy_consent_pending %}
+    <a class="help-fab" href="{% url 'faculty_portal:guide' %}" aria-label="Open Faculty User Guide" title="Open Faculty User Guide" data-tour-id="user-guide">?</a>
+  {% endif %}
   <a
     class="privacy-chip"
     aria-label="Open NCBA Data Privacy Notice"
@@ -507,12 +533,16 @@
     const layout = document.getElementById("faculty-layout");
     const toggleBtn = document.getElementById("faculty-sidebar-toggle");
     const storageKey = "EduGrade+_faculty_sidebar_collapsed";
+    const privacyConsentLocked = layout && layout.dataset.privacyConsentLock === "1";
     if (layout && toggleBtn) {
-      const savedCollapsed = localStorage.getItem(storageKey) === "1";
+      const savedCollapsed = privacyConsentLocked || localStorage.getItem(storageKey) === "1";
       if (savedCollapsed) {
         layout.classList.add("sidebar-collapsed");
       }
       toggleBtn.addEventListener("click", function () {
+        if (privacyConsentLocked) {
+          return;
+        }
         layout.classList.toggle("sidebar-collapsed");
         localStorage.setItem(storageKey, layout.classList.contains("sidebar-collapsed") ? "1" : "0");
       });
@@ -526,7 +556,7 @@
         { id: "sidebar-toggle", title: "Navigation Menu", text: "Collapse or expand the sidebar when you need more space while encoding grades." },
         { id: "priority-actions", title: "Priority Actions", text: "Start here to see the most urgent grading, submission, and deadline items." },
         { id: "my-classes", title: "My Classes", text: "Open your assigned classes, grading periods, activities, score sheets, summaries, and submissions." },
-        { id: "at-risk-monitor", title: "At-Risk Monitor", text: "Open the full monitor when you need a broader view of students who may need intervention." },
+        { id: "at-risk-monitor", title: "Student Intervention Monitor", text: "Open the monitor when you need a broader view of students who may need follow-up." },
         { id: "reminders", title: "Reminders", text: "Check portal reminders and notices related to deadlines and grading tasks." },
         { id: "user-guide", title: "Faculty Guide", text: "Open the guide when you need a step-by-step reference for faculty workflows." },
         { id: "privacy-notice", title: "Data Privacy Notice", text: "The privacy notice is always available for faculty reference." }

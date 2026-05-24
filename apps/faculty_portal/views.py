@@ -35,7 +35,7 @@ from apps.faculty_portal.forms import (
     GradeActivityForm,
     GradeCorrectionRequestForm,
 )
-from apps.faculty_portal.services import FacultyDashboardService
+from apps.faculty_portal.services import StudentInterventionService
 from apps.grading.models import (
     CourseTemplateAssignment,
     FacultyFinalClearanceReport,
@@ -166,6 +166,18 @@ def _faculty_final_clearance_report_filename(report_obj: FacultyFinalClearanceRe
     return f"faculty-final-clearance-{campus_code}-{term_code}-{faculty_code}-{report_obj.id}.pdf"
 
 
+def _faculty_final_clearance_preview_for_scope(*, faculty_user, term, campus):
+    preview = FacultyFinalClearanceReportService.evaluate_faculty_clearance(
+        faculty_user=faculty_user,
+        term=term,
+        campus=campus,
+    )
+    preview["can_print"] = (
+        preview.get("clearance_status") == FacultyFinalClearanceReport.ClearanceStatus.CLEARED
+    )
+    return preview
+
+
 @ensure_csrf_cookie
 def public_index_view(request):
     return render(request, "faculty_portal/public_index.html")
@@ -259,7 +271,7 @@ def _faculty_offering_queryset(user):
         section__program__department__is_active=True,
     ).filter(
         Q(course__department__isnull=True) | Q(course__department__is_active=True)
-    ).select_related("tenant", "campus", "department", "term", "course", "section")
+    ).select_related("tenant", "campus", "department", "academic_year", "term", "course", "section")
 
 
 def _style_form(form):
@@ -532,8 +544,13 @@ def _resolve_faculty_period_governance_state(
     if state["is_past_period"] and (submission is None or submission.status != GradeSubmission.Status.SUBMITTED):
         state["is_reopened_override"] = True
         state["is_closed_by_active_period"] = False
-        if completion_window_state["is_non_compliant"]:
-            state["message"] = "This earlier period remains open until submitted even though the deadline already passed."
+        if GradingGovernanceService.get_active_approved_reopen_request(
+            offering=offering,
+            template_period=period,
+        ):
+            state["message"] = "This earlier period is open because a reopen request was approved."
+        elif completion_window_state["is_non_compliant"]:
+            state["message"] = "This earlier period can still be submitted if complete, but additional encoding requires a reopen request."
         else:
             state["message"] = "This earlier period remains open until submitted."
     return state
@@ -564,6 +581,10 @@ def _resolve_offering_period(request, offering_id: int, period_id: int, *, allow
 def _period_edit_state(offering, period):
     scope_state = getattr(offering, "faculty_scope_state", None) or _faculty_offering_scope_state(offering)
     GradingGovernanceService.auto_lock_expired_reopened_gradebook(offering=offering, template_period=period)
+    GradingGovernanceService.auto_lock_expired_approved_reopen_request_for_period(
+        offering=offering,
+        template_period=period,
+    )
     is_locked = GradingGovernanceService.is_locked(offering=offering, template_period=period)
     submission = GradingGovernanceService.get_submission(offering=offering, template_period=period)
     is_submitted = bool(submission and submission.status == GradeSubmission.Status.SUBMITTED)
@@ -589,15 +610,23 @@ def _period_edit_state(offering, period):
         submission=submission,
         completion_window_state=completion_window_state,
     )
+    active_approved_reopen_request = GradingGovernanceService.get_active_approved_reopen_request(
+        offering=offering,
+        template_period=period,
+    )
+    active_approved_reopen_expires_at = GradingGovernanceService.reopen_request_expires_at(
+        active_approved_reopen_request
+    )
+    effective_is_locked = is_locked and not active_approved_reopen_request
     is_editable = (
-        ((not is_locked and not is_submitted) or is_correction_active)
+        ((not effective_is_locked and not is_submitted) or is_correction_active or active_approved_reopen_request)
         and not is_auto_closed_after_deadline
         and not governance_state["is_closed_by_active_period"]
     )
     can_submit_period = (
         not is_submitted
         and not governance_state["is_closed_by_active_period"]
-        and (not is_locked or is_auto_locked_reopened_after_deadline)
+        and (not effective_is_locked or is_auto_locked_reopened_after_deadline or active_approved_reopen_request)
     )
     pending_reopen_request = GradingGovernanceService.get_pending_reopen_request(
         offering=offering,
@@ -612,7 +641,8 @@ def _period_edit_state(offering, period):
     return {
         "faculty_scope_state": scope_state,
         "is_read_only_class": scope_state["read_only"],
-        "is_locked": is_locked,
+        "is_locked": effective_is_locked,
+        "raw_is_locked": is_locked,
         "is_submitted": is_submitted,
         "submission_status": submission.status if submission else None,
         "submission": submission,
@@ -630,6 +660,8 @@ def _period_edit_state(offering, period):
         "active_late_completion_request": None,
         "pending_late_completion_request": None,
         "pending_reopen_request": pending_reopen_request,
+        "active_approved_reopen_request": active_approved_reopen_request,
+        "active_approved_reopen_expires_at": active_approved_reopen_expires_at,
         "can_request_deadline_reopen": (
             GradingGovernanceService.can_request_reopen_after_auto_close(
                 offering=offering,
@@ -1433,13 +1465,13 @@ def dashboard_view(request):
         now=dashboard_now,
     )
     active_grading_period_rows = _build_active_grading_period_rows(active_offerings, now=dashboard_now)
-    at_risk_preview = FacultyDashboardService.build_at_risk_students_preview(
+    at_risk_preview = StudentInterventionService.build_at_risk_students_preview(
         user=request.user,
         active_offerings=active_offerings,
         tenant_id=tenant_id,
         limit=5,
     )
-    priority_actions = FacultyDashboardService.build_priority_actions(
+    priority_actions = StudentInterventionService.build_priority_actions(
         user=request.user,
         active_offerings=active_offerings,
         now=dashboard_now,
@@ -1823,7 +1855,7 @@ def _build_deadline_reminder_for_offerings(offerings, *, now=None):
             "note": (
                 "This reopened gradebook was not resubmitted before the deadline. Score editing is disabled, but the faculty can still resubmit the gradebook from Summary."
                 if is_locked_reopened
-                else "This deadline already passed. You may continue encoding and submit as soon as possible. Late submission is recorded in the non-compliance monitor."
+                else "This deadline already passed. Submit from Summary if the gradebook is complete, or request reopen if more encoding is needed."
                 if is_overdue
                 else "Keep this deadline in view while encoding, checking summaries, and preparing final period submission."
             ),
@@ -2040,10 +2072,14 @@ def _build_active_grading_period_rows(offerings, *, now=None):
         )
         if not active_setting:
             continue
+        campus_display = _campus_display_name(offering.tenant, offering.campus)
         rows.append(
             {
                 "campus_code": offering.campus.code,
                 "campus_name": offering.campus.name,
+                "campus_display": campus_display,
+                "academic_year_code": offering.academic_year.code,
+                "academic_year_name": offering.academic_year.name,
                 "term_code": offering.term.code,
                 "term_name": offering.term.name,
                 "period_code": active_setting.period.code,
@@ -2051,8 +2087,101 @@ def _build_active_grading_period_rows(offerings, *, now=None):
                 "auto_advanced_from_deadline": active_setting.auto_advanced_from_deadline,
             }
         )
-    rows.sort(key=lambda row: (row["campus_code"], row["term_code"], row["period_code"]))
+    rows.sort(key=lambda row: (row["campus_display"], row["academic_year_code"], row["term_code"], row["period_code"]))
     return rows
+
+
+def _campus_display_name(tenant, campus):
+    tenant_code = (getattr(tenant, "code", "") or "").strip()
+    campus_name = (getattr(campus, "name", "") or "").strip()
+    if not campus_name:
+        return (getattr(campus, "code", "") or "").strip()
+    if tenant_code and campus_name.upper().startswith(tenant_code.upper()):
+        return campus_name.replace(" ", "-")
+    if tenant_code:
+        return f"{tenant_code}-{campus_name}".replace(" ", "-")
+    return campus_name
+
+
+def _period_activity_metric_cards(*, offering, template_period):
+    activity_counts = {
+        (
+            row["template_component_id"],
+            row["template_subcomponent_id"],
+            row["template_detail_id"],
+        ): row["activity_count"]
+        for row in GradeActivity.objects.filter(
+            offering_id=offering.id,
+            template_period_id=template_period.id,
+            is_active=True,
+        )
+        .values("template_component_id", "template_subcomponent_id", "template_detail_id")
+        .annotate(activity_count=Count("id"))
+    }
+    attendance_session_count = AttendanceSession.objects.filter(
+        offering_id=offering.id,
+        template_period_id=template_period.id,
+        is_active=True,
+    ).count()
+    detail_queryset = GradingTemplateDetail.objects.filter(is_active=True).order_by("sort_order", "name", "id")
+    subcomponent_queryset = (
+        GradingTemplateSubcomponent.objects.filter(is_active=True)
+        .order_by("sort_order", "name", "id")
+        .prefetch_related(Prefetch("details", queryset=detail_queryset))
+    )
+    components = (
+        GradingTemplateComponent.objects.filter(template_period_id=template_period.id, is_active=True)
+        .order_by("sort_order", "name", "id")
+        .prefetch_related(Prefetch("subcomponents", queryset=subcomponent_queryset))
+    )
+    cards = []
+    for component in components:
+        subcomponents = list(component.subcomponents.all())
+        if not subcomponents:
+            activity_count = activity_counts.get((component.id, None, None), 0)
+            cards.append(
+                {
+                    "label": component.name or component.code,
+                    "value": activity_count,
+                    "note": "Activity" if activity_count == 1 else "Activities",
+                    "is_missing": activity_count == 0,
+                }
+            )
+            continue
+        for subcomponent in subcomponents:
+            if subcomponent.is_attendance_component:
+                cards.append(
+                    {
+                        "label": subcomponent.name or subcomponent.code,
+                        "value": attendance_session_count,
+                        "note": "Session" if attendance_session_count == 1 else "Sessions",
+                        "is_missing": attendance_session_count == 0,
+                    }
+                )
+                continue
+            details = list(subcomponent.details.all())
+            if not details:
+                activity_count = activity_counts.get((component.id, subcomponent.id, None), 0)
+                cards.append(
+                    {
+                        "label": subcomponent.name or subcomponent.code,
+                        "value": activity_count,
+                        "note": "Activity" if activity_count == 1 else "Activities",
+                        "is_missing": activity_count == 0,
+                    }
+                )
+                continue
+            for detail in details:
+                activity_count = activity_counts.get((component.id, subcomponent.id, detail.id), 0)
+                cards.append(
+                    {
+                        "label": detail.name or detail.code,
+                        "value": activity_count,
+                        "note": "Activity" if activity_count == 1 else "Activities",
+                        "is_missing": activity_count == 0,
+                    }
+                )
+    return cards
 
 
 @portal_required("FACULTY")
@@ -2514,7 +2643,7 @@ def student_at_risk_monitor_view(request):
         messages.error(request, "Grade prediction is currently disabled for your role.")
         return redirect("faculty_portal:my_courses")
     if not FeatureSettingsService.is_grade_prediction_at_risk_enabled(tenant_id=tenant_id, default=True):
-        messages.error(request, "Student at-risk monitoring is currently disabled by configuration.")
+        messages.error(request, "Student Intervention Monitor is currently disabled by configuration.")
         return redirect("faculty_portal:my_courses")
 
     show_archived = request.GET.get("archived") == "1"
@@ -2554,149 +2683,14 @@ def student_at_risk_monitor_view(request):
         offering.assignment = assignment
         monitored_offerings.append(offering)
 
-    monitor_groups = []
-    at_risk_student_count = 0
-    at_risk_group_count = 0
-    coverage_values = []
-    projection_values = []
-    active_period_setting_cache = {}
-    using_active_period_filter = False
-
-    for offering in monitored_offerings:
-        try:
-            template = FacultyGradingService.resolve_template_for_offering(offering)
-        except ValidationError:
-            continue
-        passing_threshold = FacultyGradingService.resolve_passing_threshold(offering)
-        active_cache_key = (offering.tenant_id, offering.campus_id, offering.term_id)
-        if active_cache_key not in active_period_setting_cache:
-            active_period_setting_cache[active_cache_key] = AcademicGovernanceService.resolve_active_grading_period(
-                tenant_id=offering.tenant_id,
-                campus_id=offering.campus_id,
-                term_id=offering.term_id,
-            )
-        active_period_setting = active_period_setting_cache[active_cache_key]
-        periods = list(template.periods.filter(is_active=True).order_by("sequence_no", "id"))
-        if active_period_setting:
-            using_active_period_filter = True
-            periods = [
-                period
-                for period in periods
-                if AcademicGovernanceService.template_period_matches_active_period(
-                    template_period=period,
-                    active_period_setting=active_period_setting,
-                )
-            ]
-        for period in periods:
-            prediction_data = PredictionSnapshotService.get_period_predictions(
-                offering=offering,
-                template_period=period,
-                user=request.user,
-            )
-            group_rows = []
-            for row in prediction_data["rows"]:
-                if not getattr(row, "at_risk_flag", False):
-                    continue
-                if q:
-                    student_no = getattr(row.student, "student_no", "") or ""
-                    student_name = " ".join(
-                        part
-                        for part in [
-                            getattr(row.student, "last_name", ""),
-                            getattr(row.student, "first_name", ""),
-                            getattr(row.student, "middle_name", ""),
-                        ]
-                        if part
-                    ).strip()
-                    if (
-                        q.lower() not in student_no.lower()
-                        and q.lower() not in student_name.lower()
-                        and q.lower() not in offering.course.code.lower()
-                        and q.lower() not in offering.course.title.lower()
-                        and q.lower() not in offering.section.code.lower()
-                        and q.lower() not in period.name.lower()
-                    ):
-                        continue
-
-                period_gap = None
-                if row.current_projected_period_grade is not None:
-                    period_gap = max(
-                        Decimal(passing_threshold) - Decimal(row.current_projected_period_grade),
-                        Decimal("0"),
-                    )
-                final_gap = None
-                if row.current_projected_final_grade is not None:
-                    final_gap = max(
-                        Decimal(passing_threshold) - Decimal(row.current_projected_final_grade),
-                        Decimal("0"),
-                    )
-                if period_gap is None:
-                    risk_reason = "Not enough encoded scores yet"
-                    suggested_action = "Open the period prediction page and check missing score coverage."
-                    risk_variant = "warning"
-                elif final_gap and final_gap > Decimal("0"):
-                    risk_reason = "Possible final grade is below passing"
-                    suggested_action = "Review earlier period grades and use the prediction page for final-grade recovery planning."
-                    risk_variant = "danger"
-                elif period_gap >= Decimal("5"):
-                    risk_reason = "Current period projection is far below passing"
-                    suggested_action = "Prioritize follow-up, missing work, and remediation for this period."
-                    risk_variant = "danger"
-                elif int(row.remaining_item_count or 0) > 0:
-                    risk_reason = "Current period projection is below passing"
-                    suggested_action = "Review remaining activities and guide the student before period submission."
-                    risk_variant = "warning"
-                else:
-                    risk_reason = "Current period grade is below passing"
-                    suggested_action = "Review the official period summary and determine the appropriate intervention."
-                    risk_variant = "danger"
-                group_rows.append(
-                    {
-                        "student": row.student,
-                        "current_projected_period_grade": row.current_projected_period_grade,
-                        "current_projected_period_grade_display": _format_decimal_display(
-                            row.current_projected_period_grade
-                        ),
-                        "best_case_period_grade": row.best_case_period_grade,
-                        "best_case_period_grade_display": _format_decimal_display(row.best_case_period_grade),
-                        "worst_case_period_grade": row.worst_case_period_grade,
-                        "worst_case_period_grade_display": _format_decimal_display(row.worst_case_period_grade),
-                        "coverage_percent": row.coverage_percent,
-                        "coverage_percent_display": _format_decimal_display(row.coverage_percent),
-                        "remaining_item_count": row.remaining_item_count,
-                        "period_gap_display": _format_decimal_display(period_gap),
-                        "risk_reason": risk_reason,
-                        "suggested_action": suggested_action,
-                        "risk_variant": risk_variant,
-                    }
-                )
-                at_risk_student_count += 1
-                coverage_values.append(Decimal(row.coverage_percent))
-                if row.current_projected_period_grade is not None:
-                    projection_values.append(Decimal(row.current_projected_period_grade))
-
-            if group_rows:
-                at_risk_group_count += 1
-                monitor_groups.append(
-                    {
-                        "offering": offering,
-                        "period": period,
-                        "rows": group_rows,
-                        "at_risk_count": len(group_rows),
-                        "avg_coverage": _format_decimal_display(
-                            sum(coverage_values[-len(group_rows) :]) / Decimal(len(group_rows))
-                            if len(group_rows) else None
-                        ),
-                        "current_template_name": template.name,
-                    }
-                )
-
-    class_count = len(monitored_offerings)
-    avg_coverage = _format_decimal_display(
-        sum(coverage_values) / Decimal(len(coverage_values)) if coverage_values else None
-    )
-    avg_projection = _format_decimal_display(
-        sum(projection_values) / Decimal(len(projection_values)) if projection_values else None
+    status_filter = (request.GET.get("status") or "").strip().upper()
+    include_on_track = request.GET.get("show_on_track") == "1" or status_filter == StudentInterventionService.STATUS_ON_TRACK
+    intervention_result = StudentInterventionService.build_monitor_groups(
+        user=request.user,
+        monitored_offerings=monitored_offerings,
+        q=q,
+        status_filter=status_filter,
+        include_on_track=include_on_track,
     )
 
     offering_choices = [
@@ -2710,21 +2704,54 @@ def student_at_risk_monitor_view(request):
     if not selected_offering_id:
         offering_choices.insert(0, {"id": "", "label": "All Classes", "selected": True})
 
+    can_view_advanced_analytics = PermissionService.has_permission(
+        request.user,
+        "faculty_analytics.read",
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    )
+    AuditService.log_event(
+        action="VIEW_STUDENT_INTERVENTION_MONITOR",
+        portal="FACULTY",
+        entity_type="StudentInterventionMonitor",
+        entity_id=None,
+        actor=request.user,
+        tenant=tenant_id,
+        campus=campus_id,
+        metadata={
+            "status_filter": status_filter or "DEFAULT",
+            "offering_id": selected_offering_id,
+            "show_archived": show_archived,
+            "include_on_track": include_on_track,
+            "result_count": intervention_result["total_rows"],
+        },
+        request=request,
+    )
+    status_options = [
+        {"code": "", "label": "Needs Action"},
+        {"code": StudentInterventionService.STATUS_CRITICAL, "label": StudentInterventionService.STATUS_LABELS[StudentInterventionService.STATUS_CRITICAL]},
+        {"code": StudentInterventionService.STATUS_WARNING, "label": StudentInterventionService.STATUS_LABELS[StudentInterventionService.STATUS_WARNING]},
+        {"code": StudentInterventionService.STATUS_MISSING_WORK, "label": StudentInterventionService.STATUS_LABELS[StudentInterventionService.STATUS_MISSING_WORK]},
+        {"code": StudentInterventionService.STATUS_ON_TRACK, "label": StudentInterventionService.STATUS_LABELS[StudentInterventionService.STATUS_ON_TRACK]},
+    ]
+
     context = {
-        "monitor_groups": monitor_groups,
+        "monitor_groups": intervention_result["groups"],
         "offering_choices": offering_choices,
         "selected_offering_id": selected_offering_id,
         "show_archived": show_archived,
         "q": q,
+        "status_filter": status_filter,
+        "status_options": status_options,
+        "include_on_track": include_on_track,
         "summary_cards": [
-            {"label": "Classes Monitored", "value": class_count, "meta": "Accepted classes in the current scope."},
-            {"label": "At-Risk Groups", "value": at_risk_group_count, "meta": "Current-period class groups with risk."},
-            {"label": "At-Risk Students", "value": at_risk_student_count, "meta": "Students flagged below the pass line."},
-            {"label": "Average Coverage", "value": avg_coverage, "meta": "Average score coverage across at-risk rows."},
-            {"label": "Average Projection", "value": avg_projection, "meta": "Average projected period grade."},
+            {"label": "Missing Work", "value": intervention_result["counts"][StudentInterventionService.STATUS_MISSING_WORK], "meta": "Encoding needs review."},
+            {"label": "Needs Attention", "value": intervention_result["counts"][StudentInterventionService.STATUS_CRITICAL], "meta": "Review soon."},
+            {"label": "Monitor", "value": intervention_result["counts"][StudentInterventionService.STATUS_WARNING], "meta": "Watch closely."},
+            {"label": "On Track", "value": intervention_result["counts"][StudentInterventionService.STATUS_ON_TRACK], "meta": "No immediate concern."},
         ],
-        "at_risk_enabled": True,
-        "using_active_period_filter": using_active_period_filter,
+        "can_view_advanced_analytics": can_view_advanced_analytics,
+        "using_active_period_filter": intervention_result["using_active_period_filter"],
     }
     return render(request, "faculty_portal/student_at_risk_monitor.html", context)
 
@@ -2819,7 +2846,21 @@ def my_courses_view(request):
     grouped_offerings = []
     final_clearance_targets = []
     final_clearance_seen = set()
+    final_clearance_preview_cache = {}
     for offering in selected_offerings:
+        offering.final_clearance_can_print = False
+        offering.final_clearance_incomplete_courses = 0
+        if not show_archived and offering.final_template_period:
+            key = (offering.tenant_id, offering.campus_id, offering.term_id)
+            if key not in final_clearance_preview_cache:
+                final_clearance_preview_cache[key] = _faculty_final_clearance_preview_for_scope(
+                    faculty_user=request.user,
+                    term=offering.term,
+                    campus=offering.campus,
+                )
+            scope_preview = final_clearance_preview_cache[key]
+            offering.final_clearance_can_print = bool(scope_preview["can_print"])
+            offering.final_clearance_incomplete_courses = scope_preview.get("incomplete_courses", 0)
         if (
             not grouped_offerings
             or grouped_offerings[-1]["tenant_id"] != offering.tenant_id
@@ -2839,6 +2880,7 @@ def my_courses_view(request):
             key = (offering.tenant_id, offering.campus_id, offering.term_id)
             if key not in final_clearance_seen:
                 final_clearance_seen.add(key)
+                scope_preview = final_clearance_preview_cache[key]
                 final_clearance_targets.append(
                     {
                         "tenant": offering.tenant,
@@ -2847,6 +2889,10 @@ def my_courses_view(request):
                         "academic_year": offering.academic_year,
                         "offering_id": offering.id,
                         "period_id": offering.final_template_period.id,
+                        "can_print": bool(scope_preview["can_print"]),
+                        "incomplete_courses": scope_preview.get("incomplete_courses", 0),
+                        "complete_courses": scope_preview.get("complete_courses", 0),
+                        "total_assigned_courses": scope_preview.get("total_assigned_courses", 0),
                     }
                 )
 
@@ -2871,6 +2917,44 @@ def my_courses_view(request):
         ),
     }
     return render(request, "faculty_portal/my_courses.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def offering_syllabus_redirect_view(request, offering_id: int):
+    assignment = (
+        _faculty_assignment_queryset(request.user)
+        .filter(offering_id=offering_id)
+        .select_related("offering__course")
+        .first()
+    )
+    if not assignment:
+        raise Http404("Syllabus link not found.")
+    offering = assignment.offering
+    course = offering.course
+    syllabus_url = (course.syllabus_url or "").strip()
+    if not syllabus_url or course.tenant_id != offering.tenant_id:
+        raise Http404("Syllabus link not found.")
+    AuditService.log_event(
+        action="VIEW_SYLLABUS_LINK",
+        portal="FACULTY",
+        entity_type="Course",
+        entity_id=course.id,
+        actor=request.user,
+        tenant=offering.tenant,
+        campus=offering.campus,
+        metadata={
+            "offering_id": offering.id,
+            "course_id": course.id,
+            "course_code": course.code,
+            "section_id": offering.section_id,
+            "term_id": offering.term_id,
+            "assignment_id": assignment.id,
+            "syllabus_link_present": True,
+        },
+        request=request,
+    )
+    return redirect(syllabus_url)
 
 
 @portal_required("FACULTY")
@@ -3014,6 +3098,12 @@ def offering_periods_view(request, offering_id: int):
         term_id=offering.term_id,
         now=timezone.now(),
     )
+    final_clearance_preview = _faculty_final_clearance_preview_for_scope(
+        faculty_user=request.user,
+        term=offering.term,
+        campus=offering.campus,
+    )
+    can_print_final_clearance = bool(final_clearance_preview["can_print"])
     period_cards = []
     for p in periods:
         period_display_name = (p.name or p.code or "Period").strip()
@@ -3027,8 +3117,16 @@ def offering_periods_view(request, offering_id: int):
         else:
             period_kind = "prelim"
         GradingGovernanceService.auto_lock_expired_reopened_gradebook(offering=offering, template_period=p)
+        GradingGovernanceService.auto_lock_expired_approved_reopen_request_for_period(
+            offering=offering,
+            template_period=p,
+        )
         lock = GradingGovernanceService.resolve_lock(offering=offering, template_period=p)
         submission = GradingGovernanceService.get_submission(offering=offering, template_period=p)
+        pending_reopen_request = GradingGovernanceService.get_pending_reopen_request(
+            offering=offering,
+            template_period=p,
+        )
         completion_window_state = GradingGovernanceService.get_completion_window_state(
             offering=offering,
             template_period=p,
@@ -3044,13 +3142,27 @@ def offering_periods_view(request, offering_id: int):
             submission
             and submission.status in {GradeSubmission.Status.SUBMITTED, GradeSubmission.Status.REOPENED}
         )
+        active_approved_reopen_request = GradingGovernanceService.get_active_approved_reopen_request(
+            offering=offering,
+            template_period=p,
+        )
+        active_approved_reopen_expires_at = GradingGovernanceService.reopen_request_expires_at(
+            active_approved_reopen_request
+        )
+        effective_is_locked = bool(lock and lock.is_locked) and not active_approved_reopen_request
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=offering,
+            template_period=p,
+        )
+        activity_metric_cards = _period_activity_metric_cards(offering=offering, template_period=p)
         period_cards.append(
             {
                 "period": p,
                 "display_name": period_display_name,
                 "kind": period_kind,
                 "is_read_only_class": offering.faculty_is_read_only,
-                "is_locked": bool(lock and lock.is_locked),
+                "is_locked": effective_is_locked,
+                "raw_is_locked": bool(lock and lock.is_locked),
                 "is_submitted": GradingGovernanceService.is_submitted(offering=offering, template_period=p),
                 "submission_status": submission.status if submission else None,
                 "is_correction_active": GradingGovernanceService.has_active_unlock_window(
@@ -3060,10 +3172,23 @@ def offering_periods_view(request, offering_id: int):
                 "deadline_at": lock.deadline_at if lock else None,
                 "completion_grace_until": completion_window_state["completion_grace_until"],
                 "is_within_completion_grace": completion_window_state["is_within_completion_grace"],
+                "is_auto_closed_after_deadline": completion_window_state["is_auto_closed_after_deadline"],
                 "is_non_compliant": completion_window_state["is_non_compliant"],
                 "pending_late_completion_request": completion_window_state["pending_late_completion_request"],
                 "active_late_completion_request": completion_window_state["active_late_completion_request"],
                 "can_request_late_completion": completion_window_state["can_request_late_completion"],
+                "pending_reopen_request": pending_reopen_request,
+                "active_approved_reopen_request": active_approved_reopen_request,
+                "active_approved_reopen_expires_at": active_approved_reopen_expires_at,
+                "readiness": readiness,
+                "activity_metric_cards": activity_metric_cards,
+                "can_request_deadline_reopen": (
+                    GradingGovernanceService.can_request_reopen_after_auto_close(
+                        offering=offering,
+                        template_period=p,
+                    )
+                    and not offering.faculty_is_read_only
+                ),
                 "is_active_period": AcademicGovernanceService.template_period_matches_active_period(
                     template_period=p,
                     active_period_setting=active_grading_period,
@@ -3074,6 +3199,8 @@ def offering_periods_view(request, offering_id: int):
                   "closed_message": governance_state["message"],
                   "can_access_corrections": can_access_corrections,
                   "is_final_period": bool(periods) and p.id == periods[-1].id,
+                  "can_print_final_clearance": can_print_final_clearance,
+                  "final_clearance_incomplete_courses": final_clearance_preview.get("incomplete_courses", 0),
               }
           )
 
@@ -3481,13 +3608,23 @@ def period_final_clearance_view(request, offering_id: int, period_id: int):
         messages.error(request, "Final clearance is available only from the final grading period card.")
         return redirect("faculty_portal:offering_periods", offering_id=offering.id)
 
-    preview = FacultyFinalClearanceReportService.evaluate_faculty_clearance(
+    preview = _faculty_final_clearance_preview_for_scope(
         faculty_user=request.user,
         term=offering.term,
         campus=offering.campus,
     )
 
     if request.method == "POST":
+        if not preview["can_print"]:
+            messages.error(
+                request,
+                "Final Clearance can be printed only when all assigned courses in this campus-term scope are COMPLETE.",
+            )
+            return redirect(
+                "faculty_portal:period_final_clearance",
+                offering_id=offering.id,
+                period_id=period.id,
+            )
         report_obj = FacultyFinalClearanceReportService.generate_report_record(
             faculty_user=request.user,
             term=offering.term,
@@ -3767,6 +3904,8 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         "is_non_compliant": state["is_non_compliant"],
         "is_auto_closed_after_deadline": state["is_auto_closed_after_deadline"],
         "pending_reopen_request": state["pending_reopen_request"],
+        "active_approved_reopen_request": state["active_approved_reopen_request"],
+        "active_approved_reopen_expires_at": state["active_approved_reopen_expires_at"],
         "can_request_deadline_reopen": state["can_request_deadline_reopen"],
         "pending_late_completion_request": state["pending_late_completion_request"],
         "active_late_completion_request": state["active_late_completion_request"],
@@ -3975,6 +4114,8 @@ def activity_scores_view(request, offering_id: int, period_id: int, activity_id:
         "active_late_completion_request": state["active_late_completion_request"],
         "can_request_late_completion": state["can_request_late_completion"],
         "pending_reopen_request": state["pending_reopen_request"],
+        "active_approved_reopen_request": state["active_approved_reopen_request"],
+        "active_approved_reopen_expires_at": state["active_approved_reopen_expires_at"],
         "can_request_deadline_reopen": state["can_request_deadline_reopen"],
     }
     return render(request, "faculty_portal/activity_scores.html", context)
@@ -4122,6 +4263,8 @@ def period_attendance_view(request, offering_id: int, period_id: int):
         "active_late_completion_request": state["active_late_completion_request"],
         "can_request_late_completion": state["can_request_late_completion"],
         "pending_reopen_request": state["pending_reopen_request"],
+        "active_approved_reopen_request": state["active_approved_reopen_request"],
+        "active_approved_reopen_expires_at": state["active_approved_reopen_expires_at"],
         "can_request_deadline_reopen": state["can_request_deadline_reopen"],
         "can_manage_sessions": (
             not state["is_locked"]
@@ -4263,6 +4406,31 @@ def period_summary_view(request, offering_id: int, period_id: int):
         offering=offering,
         template_period=period,
     )
+    summary_lock = GradingGovernanceService.resolve_lock(offering=offering, template_period=period)
+    submission_deadline = summary_lock.deadline_at if summary_lock else None
+    deadline_countdown_label = None
+    if submission_deadline:
+        now = timezone.now()
+        delta = submission_deadline - now
+        total_seconds = int(abs(delta.total_seconds()))
+        days = total_seconds // 86400
+        hours = (total_seconds % 86400) // 3600
+        if delta.total_seconds() >= 0:
+            if days > 0:
+                deadline_countdown_label = f"Due in {days} day{'s' if days != 1 else ''}"
+                if hours:
+                    deadline_countdown_label += f", {hours} hour{'s' if hours != 1 else ''}"
+            elif hours > 0:
+                deadline_countdown_label = f"Due in {hours} hour{'s' if hours != 1 else ''}"
+            else:
+                deadline_countdown_label = "Due today"
+        else:
+            if days > 0:
+                deadline_countdown_label = f"Past due by {days} day{'s' if days != 1 else ''}"
+            elif hours > 0:
+                deadline_countdown_label = f"Past due by {hours} hour{'s' if hours != 1 else ''}"
+            else:
+                deadline_countdown_label = "Past due today"
     if official_grade_release["is_final_period_view"] or official_grade_release["show_final_grade"]:
         FacultyGradingService.recompute_final_grades_from_stored_periods(
             user=request.user,
@@ -4343,11 +4511,11 @@ def period_summary_view(request, offering_id: int, period_id: int):
                 "period_explain_url": period_explain_url,
                 "final_explain_url": final_explain_url,
                 "print_grade_status": (
-                    "PASSED"
+                    "Passed"
                     if official_grade_release["show_period_grade"]
                     and row["period_grade"] is not None
                     and Decimal(row["period_grade"]) >= passing_threshold
-                    else "FAILED"
+                    else "Failed"
                     if official_grade_release["show_period_grade"] and row["period_grade"] is not None
                     else ""
                 ),
@@ -4376,7 +4544,6 @@ def period_summary_view(request, offering_id: int, period_id: int):
         else:
             failed_count += 1
 
-    summary_lock = GradingGovernanceService.resolve_lock(offering=offering, template_period=period)
     print_header_name = SystemSettingService.get(
         "PRINT_HEADER_SCHOOL_NAME",
         tenant_id=offering.tenant_id,
@@ -4422,7 +4589,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "base_value": summary["base_value"],
         "prior_period_headers": prior_period_headers,
         "submit_readiness": submit_readiness,
-        "submission_deadline": summary_lock.deadline_at if summary_lock else None,
+        "submission_deadline": submission_deadline,
+        "deadline_countdown_label": deadline_countdown_label,
         "completion_grace_until": state["completion_grace_until"],
         "is_locked": state["is_locked"],
         "is_submitted": state["is_submitted"],
@@ -4455,6 +4623,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "active_late_completion_request": state["active_late_completion_request"],
         "can_request_late_completion": state["can_request_late_completion"],
         "pending_reopen_request": state["pending_reopen_request"],
+        "active_approved_reopen_request": state["active_approved_reopen_request"],
+        "active_approved_reopen_expires_at": state["active_approved_reopen_expires_at"],
         "can_request_deadline_reopen": state["can_request_deadline_reopen"],
         "summary_status_counts": status_counts,
         "summary_passed_count": passed_count,
@@ -4465,70 +4635,29 @@ def period_summary_view(request, offering_id: int, period_id: int):
             "label": "ACTIVE Students",
             "value": submit_readiness["eligible_student_count"],
             "tone": "success",
-            "description": "Students still expected to have complete visible period records before submission.",
-        },
-        {
-            "label": "Complete Records",
-            "value": submit_readiness["students_with_complete_records"],
-            "tone": "primary",
-            "description": "ACTIVE students whose visible activity and attendance records are already complete.",
-        },
-        {
-            "label": "Missing Records",
-            "value": submit_readiness["students_missing_any_grade"],
-            "tone": "danger" if submit_readiness["students_missing_any_grade"] > 0 else "success",
-            "description": "ACTIVE students who still have blank required grade or attendance cells in this period.",
+            "description": "Students included in this submission.",
         },
         {
             "label": "Template Gaps",
             "value": submit_readiness.get("missing_template_bucket_count", 0),
             "tone": "danger" if submit_readiness.get("missing_template_bucket_count", 0) > 0 else "success",
-            "description": "Required template components, subcomponents, or details with no activity setup.",
-        },
-        {
-            "label": "Coverage",
-            "value": f'{submit_readiness["coverage_percent"]}%',
-            "tone": (
-                "warning"
-                if submit_readiness["students_missing_any_grade"] > 0
-                or submit_readiness.get("missing_template_bucket_count", 0) > 0
-                else "info"
-            ),
-            "description": "Percentage of ACTIVE students whose visible period records are complete.",
+            "description": "Required parts with no activity yet.",
         },
         {
             "label": "DRP",
             "value": status_counts.get(Enrollment.Status.DRP, 0),
             "tone": "danger",
-            "description": "Students marked dropped from this class and excluded from grading completion checks.",
-        },
-        {
-            "label": "W",
-            "value": status_counts.get(Enrollment.Status.W, 0),
-            "tone": "warning",
-            "description": "Students withdrawn from the term and excluded from grading completion checks.",
-        },
-        {
-            "label": "INC",
-            "value": status_counts.get(Enrollment.Status.INC, 0),
-            "tone": "secondary",
-            "description": "Students tagged incomplete and excluded from active submission-readiness blocking.",
+            "description": "Dropped students excluded from checks.",
         },
     ]
     if official_grade_release["show_period_grade"]:
         context["readiness_cards"].extend(
             [
                 {
-                    "label": "Passed",
-                    "value": passed_count,
-                    "tone": "success",
-                    "description": f"ACTIVE students at or above the current passing threshold of {passing_threshold}.",
-                },
-                {
                     "label": "Failed",
                     "value": failed_count,
                     "tone": "danger",
-                    "description": f"ACTIVE students below the current passing threshold of {passing_threshold}.",
+                    "description": f"Below {passing_threshold}.",
                 },
             ]
         )
@@ -4690,16 +4819,16 @@ def period_prediction_view(request, offering_id: int, period_id: int):
         else:
             row.can_still_pass_label = "Yes"
         if row.current_projected_period_grade is None:
-            row.status_label = "Needs Attention"
+            row.status_label = "Needs Scores"
             row.status_variant = "at-risk"
         elif row.at_risk_flag:
             if (
-                row.current_projected_final_grade is not None
-                and Decimal(row.current_projected_final_grade) < Decimal(passing_threshold)
+                row.current_projected_period_grade is not None
+                and Decimal(row.current_projected_period_grade) < Decimal(passing_threshold)
             ):
-                row.status_label = "Final At Risk"
+                row.status_label = "At Risk This Period"
             else:
-                row.status_label = "At Risk"
+                row.status_label = "Needs Follow-up"
             row.status_variant = "at-risk"
         else:
             row.status_label = "On Track"
@@ -4709,23 +4838,23 @@ def period_prediction_view(request, offering_id: int, period_id: int):
     metric_cards = [
         {"label": "Students", "value": summary.student_count, "meta": "Active students in this class."},
         {
-            "label": "With Estimate",
+            "label": "With Period Estimate",
             "value": summary.students_with_projection,
             "meta": f"{summary.avg_coverage_percent}% average progress",
         },
-        {"label": "At Risk", "value": summary.at_risk_count, "meta": "Projected below passing threshold."},
+        {"label": "Need Follow-up", "value": summary.at_risk_count, "meta": "Students with a warning flag."},
         {
-            "label": "Average Estimated Grade",
+            "label": "Average Period Estimate",
             "value": _format_decimal_display(summary.avg_projected_grade),
             "meta": f"Unofficial estimate for {period.name}.",
         },
         {
-            "label": "Highest Possible",
+            "label": "If Missing Perfect",
             "value": _format_decimal_display(summary.avg_best_case_grade),
             "meta": "If remaining items are completed at full score.",
         },
         {
-            "label": "Lowest Possible",
+            "label": "If Missing Zero",
             "value": _format_decimal_display(summary.avg_worst_case_grade),
             "meta": "If remaining items get zero raw score.",
         },
@@ -4847,67 +4976,67 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
             "note": "Use this together with the student number to avoid checking the wrong learner.",
         },
         {
-            "column": "Current Projection",
-            "meaning": "The unofficial projected grade for the selected period based on the assigned grading template and the records already encoded.",
+            "column": f"Estimated {period.name} Grade",
+            "meaning": f"The student's estimated grade for {period.name} using the scores encoded right now.",
             "factors": (
                 "Encoded activity scores, attendance records, template component/subcomponent/detail weights, "
                 "the tenant default assumption mode, and the current period scoring structure."
             ),
-            "note": "This is the main estimate faculty should read first, but it can still change when more scores are encoded.",
+            "note": "Read this first. This is the main number on the page.",
         },
         {
-            "column": "Best Case",
-            "meaning": "The possible outcome if the remaining unencoded items are completed at full score.",
+            "column": "If Remaining Scores Are Perfect",
+            "meaning": "The possible period grade if all still-missing work gets full score.",
             "factors": "Same template weights as the official gradebook, but all still-missing items are treated as full score.",
-            "note": "This shows the upper bound of the likely period result, not a guaranteed final outcome.",
+            "note": "This is the highest possible direction, not a promise.",
         },
         {
-            "column": "Worst Case",
-            "meaning": "The possible outcome if the remaining unencoded items receive zero raw score.",
+            "column": "If Remaining Scores Are Zero",
+            "meaning": "The possible period grade if all still-missing work gets zero.",
             "factors": "Same template weights as the official gradebook, but all still-missing items are treated as zero.",
-            "note": "This helps identify the downside risk if missing work is never completed.",
+            "note": "This shows the low side if missing work is not completed.",
         },
         {
-            "column": "Projected Final",
-            "meaning": "The unofficial projected final grade using the same final-grade rule configured by the system, including the official formula path for the course.",
+            "column": "Possible Final Grade",
+            "meaning": "A rough guide showing how the current period estimate may affect the final grade later.",
             "factors": (
                 "Already available official period grades from other periods in the same class plus the current projected "
                 "grade of the selected period."
             ),
-            "note": "This is a forward-looking estimate only. It is not yet an official final grade.",
+            "note": f"The page is still mainly for {period.name}. Treat this column as extra guidance only.",
         },
         {
-            "column": "Target Needed",
-            "meaning": "The approximate remaining performance needed to reach the target threshold used by the prediction engine.",
+            "column": "Score Needed to Pass",
+            "meaning": "The approximate score needed in the remaining work to reach passing.",
             "factors": "Passing threshold, current worst-case grade, current best-case grade, and the remaining score span available in this period.",
             "note": "If the page says 'Already met', the current projection is already at or above the target. If it says 'Not reachable', the remaining items are not enough to hit the target even with perfect performance.",
         },
         {
-            "column": "Average Needed to Pass Final",
-            "meaning": "The average grade still needed across the remaining future periods to finish with a passing final grade.",
+            "column": "Final Grade Outlook",
+            "meaning": "A simple yes/no guide on whether the student can still finish with a passing final grade based on available records.",
             "factors": (
                 "Passing threshold, total active periods in the grading template, official earlier period grades, "
                 "the current projected period grade, and the number of remaining future periods."
             ),
-            "note": "Example: if the page says '54.39% average needed across PRE-FINAL, FX', the student needs around that average on the remaining final periods to end with a passing final grade.",
+            "note": "Use this only for early advising. It is not an official final-grade decision.",
         },
         {
-            "column": "Coverage",
-            "meaning": "How much of the expected graded work is already encoded for the student.",
+            "column": "Encoded Work",
+            "meaning": "How much of the expected work already has scores or attendance records.",
             "factors": "Encoded item count divided by expected item count for active activities plus attendance sessions in the selected period.",
-            "note": "Low coverage means the projection is still early and should be interpreted carefully.",
+            "note": "Low encoded work means the estimate can still change a lot.",
         },
         {
-            "column": "Remaining",
-            "meaning": "The count of still-unencoded activities or expected records that can still affect the prediction.",
+            "column": "Still Missing",
+            "meaning": "How many expected items still have no saved record.",
             "factors": "Expected active items minus currently encoded items for the student in the selected period.",
-            "note": "The higher this number is, the more the current projection may still move.",
+            "note": "The higher this number is, the less final the estimate is.",
         },
         {
-            "column": "Risk",
-            "meaning": "At-risk status is shown when the projected grade is below the passing threshold currently used by the system.",
+            "column": "Period Alert",
+            "meaning": "A quick warning label for the faculty.",
             "factors": "Current Projection compared against the class passing threshold.",
-            "note": "At-risk is an early warning tool, not an official failure decision.",
+            "note": "This is only an early warning. The official grade still comes from the Summary and submission process.",
         },
     ]
 
@@ -4977,7 +5106,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         },
         {
             "factor": "Passing threshold",
-            "impact": "Used to mark at-risk students and to compute the target-needed and average-needed advisory values.",
+            "impact": "Used to mark students who need follow-up and to compute the target-needed and average-needed advisory values.",
         },
         {
             "factor": "Coverage and remaining items",

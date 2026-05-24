@@ -107,6 +107,8 @@ class TenantGradingProfileFormTests(TestCase):
                 "grading_template": self.template.id,
                 "default_base_value": "",
                 "passing_grade_threshold": "75.00",
+                "period_grade_formula_mode": TenantGradingProfile.PeriodGradeFormulaMode.WEIGHTED_COMPONENTS,
+                "deped_transmutation_table_text": "",
                 "final_grade_formula_mode": TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
                 "final_grade_period_weights_text": "PRELIM=25\nMIDTERM=25\nPREFINAL=25\nFINAL=25",
                 "priority": "100",
@@ -132,6 +134,49 @@ class TenantGradingProfileFormTests(TestCase):
                     {"period_code": "MIDTERM", "weight": "25.00"},
                     {"period_code": "PREFINAL", "weight": "25.00"},
                     {"period_code": "FINAL", "weight": "25.00"},
+                ]
+            },
+        )
+
+    def test_form_saves_deped_period_transmutation_configuration(self):
+        form = TenantGradingProfileForm(
+            data={
+                "tenant": self.tenant.id,
+                "campus": self.campus.id,
+                "department": self.department.id,
+                "program": self.program.id,
+                "course": "",
+                "course_type": "",
+                "term_type": "",
+                "profile_code": "DEPED-G1",
+                "profile_name": "DepEd Grade 1",
+                "grading_template": self.template.id,
+                "default_base_value": "",
+                "passing_grade_threshold": "75.00",
+                "period_grade_formula_mode": TenantGradingProfile.PeriodGradeFormulaMode.DEPED_TRANSMUTATION,
+                "deped_transmutation_table_text": "87.20-88.79=92\n0.00-3.99=60",
+                "final_grade_formula_mode": TenantGradingProfile.FinalGradeFormulaMode.AVERAGE_ACTIVE_PERIODS,
+                "final_grade_period_weights_text": "",
+                "priority": "100",
+                "effective_from_term": self.term.id,
+                "is_default": "on",
+                "is_active": "on",
+            }
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        profile = form.save()
+
+        self.assertEqual(
+            profile.period_grade_formula_mode,
+            TenantGradingProfile.PeriodGradeFormulaMode.DEPED_TRANSMUTATION,
+        )
+        self.assertEqual(
+            profile.period_grade_formula_json,
+            {
+                "transmutation_table": [
+                    {"min": "87.20", "max": "88.79", "grade": "92"},
+                    {"min": "0.00", "max": "3.99", "grade": "60"},
                 ]
             },
         )
@@ -250,6 +295,13 @@ class TenantGradingProfileFormTests(TestCase):
             grading_template=self.template,
             default_base_value="50.00",
             passing_grade_threshold="75.00",
+            period_grade_formula_mode=TenantGradingProfile.PeriodGradeFormulaMode.DEPED_TRANSMUTATION,
+            period_grade_formula_json={
+                "transmutation_table": [
+                    {"min": "87.20", "max": "88.79", "grade": "92"},
+                    {"min": "0.00", "max": "3.99", "grade": "60"},
+                ]
+            },
             final_grade_formula_mode=TenantGradingProfile.FinalGradeFormulaMode.WEIGHTED_PERIODS,
             final_grade_formula_json={
                 "period_weights": [
@@ -270,6 +322,8 @@ class TenantGradingProfileFormTests(TestCase):
         self.assertEqual(duplicate.profile_name, "Copy of Summer Lab")
         self.assertEqual(duplicate.final_grade_formula_json, profile.final_grade_formula_json)
         self.assertEqual(duplicate.final_grade_formula_mode, profile.final_grade_formula_mode)
+        self.assertEqual(duplicate.period_grade_formula_json, profile.period_grade_formula_json)
+        self.assertEqual(duplicate.period_grade_formula_mode, profile.period_grade_formula_mode)
         self.assertEqual(duplicate.grading_template, profile.grading_template)
         self.assertFalse(duplicate.is_active)
         self.assertFalse(duplicate.is_default)

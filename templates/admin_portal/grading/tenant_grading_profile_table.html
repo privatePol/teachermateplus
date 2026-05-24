@@ -10,6 +10,7 @@
         <th>Template</th>
         <th>Base Override</th>
         <th>Passing Threshold</th>
+        <th>Period Grade Formula</th>
         <th>Final Grade Formula</th>
         <th>Priority</th>
         <th>Status</th>
@@ -46,6 +47,14 @@
         <td>{{ row.grading_template.code }} - {{ row.grading_template.name }}</td>
         <td>{{ row.default_base_value|default:"-" }}</td>
         <td>{{ row.passing_grade_threshold|default:"Tenant Default" }}</td>
+        <td>
+          {{ row.get_period_grade_formula_mode_display }}<br>
+          {% if row.period_grade_formula_mode == "DEPED_TRANSMUTATION" %}
+            <small class="text-muted">Transmutation table after weighted initial grade.</small>
+          {% else %}
+            <small class="text-muted">Template component weights.</small>
+          {% endif %}
+        </td>
         <td>
           {{ row.get_final_grade_formula_mode_display }}<br>
           {% if row.final_grade_formula_json and row.final_grade_formula_json.period_weights %}
@@ -108,7 +117,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="{% if show_inactive_tools %}13{% else %}12{% endif %}" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
+      <tr><td colspan="{% if show_inactive_tools %}14{% else %}13{% endif %}" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

@@ -170,6 +170,13 @@ class AcademicGovernanceService:
         return queryset.order_by("sequence_no", "name", "id")
 
     @classmethod
+    def get_term_grading_period_catalog(cls, *, tenant_id: int, term_id: int | None):
+        queryset = TenantTermGradingPeriod.objects.filter(tenant_id=tenant_id)
+        if term_id:
+            queryset = queryset.filter(term_id=term_id)
+        return queryset.order_by("sequence_no", "name", "id")
+
+    @classmethod
     def seed_standard_term_periods(cls, *, tenant_id: int, term: Term):
         created = []
         for code, name, sequence_no in cls.STANDARD_PERIODS:
@@ -183,10 +190,12 @@ class AcademicGovernanceService:
                     "is_active": True,
                 },
             )
+            was_reactivated = False
             if not was_created and not row.is_active:
                 row.is_active = True
                 row.save(update_fields=["is_active", "updated_at"])
-            if was_created:
+                was_reactivated = True
+            if was_created or was_reactivated:
                 created.append(row)
         return created
 

@@ -354,16 +354,39 @@
     background: #e6f0e8;
     color: #103d25;
   }
+  .admin-shell.privacy-consent-lock .admin-sidebar {
+    pointer-events: none;
+  }
+  .admin-shell.privacy-consent-lock .admin-sidebar-toggle,
+  .admin-shell.privacy-consent-lock .group-toggle,
+  .admin-shell.privacy-consent-lock .sidebar-link {
+    pointer-events: none;
+  }
+  .admin-consent-nav-lock {
+    position: relative;
+    z-index: 1;
+    margin-top: 1rem;
+    padding: 0.75rem 0.5rem;
+    color: rgba(246, 255, 248, 0.86);
+    text-align: center;
+    font-size: 0.8rem;
+    line-height: 1.25;
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid admin-shell">
+<div class="container-fluid admin-shell{% if privacy_consent_pending %} sidebar-collapsed privacy-consent-lock{% endif %}"{% if privacy_consent_pending %} data-privacy-consent-lock="1"{% endif %}>
   <div class="row min-vh-100">
-    <aside class="col-12 col-md-3 col-lg-2 admin-sidebar p-3">
+    <aside class="col-12 col-md-3 col-lg-2 admin-sidebar p-3"{% if privacy_consent_pending %} aria-label="Navigation unavailable until privacy consent is accepted"{% endif %}>
       <div class="mb-4 admin-logo-wrap">
         <img src="{% get_media_prefix %}logos/edugradeplus_logo.png" alt="EduGradePlus" class="img-fluid" style="max-width: 230px;">
       </div>
+      {% if privacy_consent_pending %}
+        <div class="admin-consent-nav-lock" aria-live="polite">
+          Navigation is locked until privacy consent is accepted.
+        </div>
+      {% else %}
       {% for group in portal_menu %}
         <div class="mt-3 mb-2">
           <button
@@ -403,6 +426,7 @@
       {% empty %}
         <p class="small" style="color: #4b7c5e; position:relative; z-index:1;">No menu available.</p>
       {% endfor %}
+      {% endif %}
     </aside>
     <main class="col-12 col-md-9 col-lg-10 p-0">
       <nav class="navbar navbar-expand-lg navbar-light admin-topbar px-3">
@@ -449,8 +473,10 @@
             {% endif %}
           </div>
           <div class="d-flex flex-wrap justify-content-end gap-2">
-            <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_signature' %}">My Signature</a>
-            <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_change_password' %}">Change Password</a>
+            {% if not privacy_consent_pending %}
+              <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_signature' %}">My Signature</a>
+              <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_change_password' %}">Change Password</a>
+            {% endif %}
             <a class="btn btn-sm admin-logout" href="{% url 'accounts:admin_logout' %}">Logout</a>
           </div>
         </div>
@@ -460,7 +486,9 @@
       </section>
     </main>
   </div>
-  <a class="admin-help-fab" href="{% url 'admin_portal:guide' %}" aria-label="Open Admin User Guide" title="Open Admin User Guide">?</a>
+  {% if not privacy_consent_pending %}
+    <a class="admin-help-fab" href="{% url 'admin_portal:guide' %}" aria-label="Open Admin User Guide" title="Open Admin User Guide">?</a>
+  {% endif %}
 </div>
 {% endblock %}
 {% block extra_js %}
@@ -596,17 +624,20 @@
     }
 
     const shell = document.querySelector(".admin-shell");
+    const privacyConsentLocked = shell && shell.dataset.privacyConsentLock === "1";
     const sidebar = document.querySelector(".admin-sidebar");
     const main = document.querySelector("main");
     if (main) {
       main.classList.add("admin-main");
     }
 
-    let sidebarCollapsed = false;
-    try {
-      sidebarCollapsed = localStorage.getItem(sidebarCollapsedKey) === "1";
-    } catch (e) {
-      sidebarCollapsed = false;
+    let sidebarCollapsed = Boolean(privacyConsentLocked);
+    if (!privacyConsentLocked) {
+      try {
+        sidebarCollapsed = localStorage.getItem(sidebarCollapsedKey) === "1";
+      } catch (e) {
+        sidebarCollapsed = false;
+      }
     }
     if (shell && sidebarCollapsed) {
       shell.classList.add("sidebar-collapsed");
@@ -618,6 +649,10 @@
       toggle.type = "button";
       toggle.className = "admin-sidebar-toggle mt-3";
       toggle.setAttribute("data-sidebar-toggle", "");
+      if (privacyConsentLocked) {
+        toggle.disabled = true;
+        toggle.setAttribute("aria-disabled", "true");
+      }
       toggle.setAttribute("aria-pressed", sidebarCollapsed ? "true" : "false");
       toggle.setAttribute("aria-label", sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
       toggle.setAttribute("title", sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
@@ -685,6 +720,9 @@
       const collapseToggle = document.querySelector("[data-sidebar-toggle]");
       if (collapseToggle) {
         collapseToggle.addEventListener("click", function () {
+        if (privacyConsentLocked) {
+          return;
+        }
         sidebarCollapsed = !shell.classList.contains("sidebar-collapsed");
         shell.classList.toggle("sidebar-collapsed", sidebarCollapsed);
         collapseToggle.setAttribute("aria-pressed", sidebarCollapsed ? "true" : "false");

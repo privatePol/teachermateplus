@@ -63,10 +63,17 @@
     <div class="text-muted">
       A class becomes <strong>COMPLETE</strong> only when required ACTIVE-student grades are encoded with positive official values, required submissions are already submitted, and final grades are already computed.
     </div>
+    {% if preview.can_print %}
     <form method="post">
       {% csrf_token %}
       <button class="btn btn-success" type="submit">Generate Official Clearance PDF</button>
     </form>
+    {% else %}
+    <div class="alert alert-warning mb-0">
+      Printing is locked until all assigned courses in this campus-term scope are <strong>COMPLETE</strong>.
+      {{ preview.incomplete_courses }} course{{ preview.incomplete_courses|pluralize }} still need completion.
+    </div>
+    {% endif %}
   </div>
 </div>
 

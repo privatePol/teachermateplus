@@ -488,6 +488,81 @@
   </div>
   {% endif %}
 
+  {% if reopen_request_monitor %}
+  <div class="dashboard-section">
+    <div class="section-card">
+      <div class="section-header d-flex justify-content-between align-items-center gap-2 flex-wrap">
+        <div>
+          <h3 class="section-title">Gradebook Reopen Requests</h3>
+          <p class="section-subtitle">Faculty requests to reopen encoding after a deadline or period lock.</p>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          {% if reopen_request_monitor.pending_count %}
+          <span class="badge text-bg-warning">{{ reopen_request_monitor.pending_count }} pending</span>
+          {% endif %}
+          <a class="btn btn-sm btn-outline-warning" href="{% url 'admin_portal:grade_submission_reopen_request_list' %}">Open Reopen Requests</a>
+        </div>
+      </div>
+      <div class="p-3">
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="mini-metric">
+              <div class="label">Pending Review</div>
+              <div class="value">{{ reopen_request_monitor.pending_count }}</div>
+              <p class="hint">Requests waiting for an authorized reviewer in your scope.</p>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="mini-metric">
+              <div class="label">Reviewed Today</div>
+              <div class="value">{{ reopen_request_monitor.reviewed_today_count }}</div>
+              <p class="hint">Approved or rejected reopen requests reviewed today.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-shell">
+          <div class="table-shell-title">Latest Pending Requests</div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+              <tr>
+                <th>Campus</th>
+                <th>Class</th>
+                <th>Period</th>
+                <th>Requested By</th>
+                <th>Requested At</th>
+                <th class="text-end">Action</th>
+              </tr>
+              </thead>
+              <tbody>
+              {% for row in reopen_request_monitor.latest_pending %}
+              <tr>
+                <td>{{ row.campus.code }}</td>
+                <td>{{ row.offering.course.code }} / {{ row.offering.section.code }}</td>
+                <td>{{ row.template_period.name|default:row.template_period.code }}</td>
+                <td>{{ row.requested_by_user.full_name|default:row.requested_by_user.username }}</td>
+                <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
+                <td class="text-end">
+                  {% if reopen_request_monitor.can_review %}
+                  <a class="btn btn-sm btn-outline-warning" href="{% url 'admin_portal:grade_submission_reopen_request_review' row.id %}">Review</a>
+                  {% else %}
+                  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grade_submission_reopen_request_list' %}?status=PENDING">View</a>
+                  {% endif %}
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="6" class="text-center text-muted py-4">No pending reopen requests in current scope.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   {% if has_import_read and import_stats %}
   <div class="dashboard-section">
     <div class="row g-3">

@@ -37,7 +37,7 @@ from apps.accounts.forms import (
 from apps.accounts.services import AdminPasswordResetOtpService, LoginLockoutService, LoginOtpService, UserSignatureService
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
-from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context
+from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 
@@ -45,21 +45,20 @@ User = get_user_model()
 
 
 def _send_faculty_password_reset_email(request, user, reset_url: str) -> int:
-    subject = "EduGrade+ Faculty Password Reset"
+    subject = format_email_subject("Faculty Password Reset")
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
     recipient = [user.email]
     logo_context = build_email_logo_context(
-        filename="egp_logo_official.png",
-        cid="EduGrade+-logo",
-        external_url=getattr(settings, "EMAIL_LOGO_URL", ""),
-        configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+        filename="ncba-logo.png",
+        cid="ncba-logo",
+        external_url=getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
+        configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
     )
 
     context = {
         "user": user,
         "reset_url": reset_url,
         **logo_context,
-        "privacy_notice_url": "https://ncba.edu.ph/ncba-privacy-notice/",
     }
     text_body = render_to_string("faculty_portal/emails/password_reset.txt", context)
     html_body = render_to_string("faculty_portal/emails/password_reset.html", context)
@@ -73,9 +72,9 @@ def _send_faculty_password_reset_email(request, user, reset_url: str) -> int:
     attach_logo_for_src(
         message,
         src=logo_context["email_logo_src"],
-        filename="egp_logo_official.png",
-        cid="EduGrade+-logo",
-        configured_path=getattr(settings, "EMAIL_LOGO_PATH", ""),
+        filename="ncba-logo.png",
+        cid="ncba-logo",
+        configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
     )
     message.attach_alternative(html_body, "text/html")
     return message.send(fail_silently=True)
@@ -100,6 +99,12 @@ def _resolve_security_redirect(user, portal_code: str) -> str | None:
 
 def _enforce_single_device_session(request, user, portal_code: str):
     if not getattr(settings, "ENFORCE_SINGLE_DEVICE_SESSION", True):
+        return
+    tenant_id = getattr(user, "default_tenant_id", None)
+    if not FeatureSettingsService.is_single_device_session_enforcement_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    ):
         return
     if not request.session.session_key:
         request.session.save()
@@ -665,7 +670,11 @@ def admin_privacy_consent_view(request):
     return render(
         request,
         "admin_portal/security/privacy_consent.html",
-        {"form": form, "consent_version": getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03")},
+        {
+            "form": form,
+            "consent_version": getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            "privacy_consent_pending": True,
+        },
     )
 
 
@@ -700,7 +709,11 @@ def faculty_privacy_consent_view(request):
     return render(
         request,
         "faculty_portal/privacy_consent.html",
-        {"form": form, "consent_version": getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03")},
+        {
+            "form": form,
+            "consent_version": getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            "privacy_consent_pending": True,
+        },
     )
 
 

@@ -95,3 +95,16 @@ class ActiveGradingPeriodServiceTests(TestCase):
                 active_period_setting=setting,
             )
         )
+
+    def test_seed_standard_periods_reactivates_existing_inactive_rows(self):
+        self.prelim.is_active = False
+        self.prelim.save(update_fields=["is_active"])
+
+        changed_rows = AcademicGovernanceService.seed_standard_term_periods(
+            tenant_id=self.tenant.id,
+            term=self.term,
+        )
+
+        self.prelim.refresh_from_db()
+        self.assertTrue(self.prelim.is_active)
+        self.assertIn(self.prelim.id, {row.id for row in changed_rows})

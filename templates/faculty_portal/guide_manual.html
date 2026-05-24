@@ -313,10 +313,10 @@
         </div>
         <div class="manual-topic-item">
           <strong>Prediction and Support</strong>
-          <p>Use these for prediction, at-risk monitoring, reminders, and private notes.</p>
+          <p>Use these for prediction, student intervention monitoring, reminders, and private notes.</p>
           <div class="manual-topic-links">
             <a href="#manual-prediction">Prediction</a>
-            <a href="#manual-at-risk">At-Risk</a>
+            <a href="#manual-at-risk">Intervention</a>
             <a href="#manual-reminders">Reminders</a>
             <a href="#manual-notes">Memos</a>
           </div>
@@ -445,7 +445,7 @@
           </div>
           <div class="manual-rule">
             <strong>Your Response Options</strong>
-            <p>You may accept, ask for clarification, or decline the assignment. Add a note so the academic office knows your concern.</p>
+            <p>The pending-assignment card shows only Accept Assignment. If the load looks wrong or needs discussion, contact your campus admin or academic head before accepting.</p>
           </div>
           <div class="manual-rule">
             <strong>Response Deadline</strong>
@@ -459,13 +459,13 @@
         <div class="manual-section-title">5. Assignment Monitoring</div>
         <ul class="manual-policy-list">
           <li>Accepted assignments mean the faculty member can begin normal class work.</li>
-          <li>Clarification and decline notes should be reviewed before changing or reissuing a load.</li>
+          <li>Questions or wrong-load concerns should be handled directly with admin before the faculty member accepts the load.</li>
           <li>Expired assignments must be renewed or reissued by admin before the faculty member can respond again.</li>
           <li>Admin users can monitor pending, due soon, accepted, and expired loads.</li>
           <li>The Faculty Portal class card shows the assigned grading template. Faculty can open it in read-only mode to review formulas before grading.</li>
-          <li>The class grading-template page includes a read-only <strong>Grade Calculator</strong> for sample raw-score conversion, period-grade computation, and final-grade formula preview. It does not save grades, activities, or student records.</li>
           <li>If governance allows template issue reporting, the class grading-template page shows <strong>Report Template Issue</strong>. The report is reviewed through template hotfix governance and does not immediately change grades.</li>
           <li>If a class has no active published course-template assignment, My Classes warns the faculty member that the grading template is not assigned yet and directs them to coordinate with the MIS Department.</li>
+          <li>If admin attached a syllabus link to the course, the accepted class card shows a syllabus icon. The link opens through EduGrade+ assignment checks, the click is recorded for audit, then Google Drive applies the school's sharing rules.</li>
           <li>Scheduled operations should run <code>manage.py process_faculty_assignment_reminders</code> so reminders and expirations are processed regularly.</li>
         </ul>
       </div>
@@ -479,15 +479,15 @@
         <div class="manual-rule-grid">
           <div class="manual-rule">
             <strong>Before You Submit</strong>
-            <p>Check the active students, missing records, and summary results first. EduGrade+ shows readiness cards and blocks submission if ACTIVE students still have required blank grade or attendance records.</p>
+            <p>Check the active students, template gaps, missing saved rows, and summary results first. EduGrade+ blocks submission if ACTIVE students still lack required score or attendance records.</p>
           </div>
           <div class="manual-rule">
-            <strong>Readiness Cards</strong>
-            <p>The Summary page shows cards for ACTIVE, complete records, missing records, coverage, DRP, WITHDRAWN, and INC. Depending on Configuration Management, computed periodic grades may be visible before submission for review. The official Summary of Grades printout appears only after submission, so unsubmitted records are not treated as the official AIMS source. Pass/Fail counts use the configured passing grade, usually 75 unless another rule is set.</p>
+            <strong>Period Snapshot</strong>
+            <p>The Summary page keeps Period Snapshot collapsed by default. Expand it when you need the short readiness check. The official Summary of Grades printout appears only after submission, so unsubmitted records are not treated as the official AIMS source.</p>
           </div>
           <div class="manual-rule">
             <strong>Reopen Before the Deadline</strong>
-            <p>If you submitted before the deadline, you may reopen the gradebook before the deadline, make changes, and resubmit. While reopened, Summary/Print is hidden. If the reopened gradebook reaches the deadline without resubmission, score, activity, and attendance editing are locked, but you can still finalize and resubmit the existing records from Summary.</p>
+            <p>If you submitted before the deadline, you may reopen the gradebook before the deadline, make changes, and resubmit. While reopened, Summary/Print is hidden. If the reopened gradebook reaches the deadline without resubmission, score, activity, and attendance editing are locked.</p>
           </div>
           <div class="manual-rule">
             <strong>Final Page Grade Trail</strong>
@@ -506,8 +506,16 @@
               <p>When a period is closed for normal encoding, Attendance and Summary may still be opened for review. Editing stays blocked unless the period is active again, reopened, or covered by an approved correction window.</p>
             </div>
             <div class="manual-rule">
+              <strong>Approved Reopen Request</strong>
+              <p>When admin approves a reopen request after a deadline or lock, the reopen window is only 24 hours. Submit or resubmit within that window. If the window expires, the gradebook locks again and a new request is required.</p>
+            </div>
+            <div class="manual-rule">
+              <strong>Submitted After Deadline</strong>
+              <p>If the gradebook is already submitted and the deadline has passed, changes must use Correction of Grades. Gradebook Reopen Request is for unsubmitted overdue or locked gradebooks only.</p>
+            </div>
+            <div class="manual-rule">
               <strong>Final Clearance</strong>
-              <p>My Classes includes a Final Clearance area, and accepted course cards also include a Print Final Clearance action. Faculty can check completion status and generate the official final clearance PDF once all requirements are met. Clearance includes only officially accepted course assignments.</p>
+              <p>My Classes includes a Final Clearance area. Faculty can check completion status there, but the official final clearance PDF can be printed only when all accepted course assignments in the campus-term scope are COMPLETE. Clearance includes only officially accepted course assignments.</p>
             </div>
             <div class="manual-rule">
               <strong>Class Tabulation Sheet</strong>
@@ -534,8 +542,8 @@
               <p>After all active grading periods in a class are submitted, the class period page shows Print Class Tabulation. The printed sheet includes all period activities, averages, exams, official period grades, final grades, school header, and the faculty prepared/submitted-by footer.</p>
             </div>
             <div class="manual-rule">
-              <strong>Overdue but Still Open</strong>
-              <p>If the deadline passes and the period is still unfinished, the gradebook stays open so faculty can complete encoding and submit. The period is marked overdue and appears in the non-compliance monitor for authorized users.</p>
+              <strong>After Deadline</strong>
+              <p>If the deadline passes and the gradebook is complete, faculty can still submit it from Summary. If more encoding is needed, faculty must send a reopen request and wait for admin approval.</p>
             </div>
           <div class="manual-rule">
             <strong>Printed Copy</strong>
@@ -759,7 +767,7 @@
         </div>
         <div class="manual-rule">
           <strong>Passing-Final Requirement</strong>
-          <p>For at-risk students, the page may show what average is still needed in the remaining periods to reach a passing final grade.</p>
+          <p>For advanced review, the page may show what average is still needed in the remaining periods to reach a passing final grade.</p>
         </div>
         <div class="manual-rule">
           <strong>Period-Specific Estimate</strong>
@@ -775,19 +783,19 @@
 
   <div class="card manual-section-card mb-4" id="manual-at-risk">
     <div class="card-body">
-      <div class="manual-section-title">8.1 Student At-Risk Monitor</div>
+      <div class="manual-section-title">8.1 Student Intervention Monitor</div>
       <div class="manual-rule-grid">
         <div class="manual-rule">
           <strong>Purpose</strong>
-          <p>The at-risk monitor lists students who may need help in the current period.</p>
+          <p>The monitor lists students who may need help in the current period.</p>
         </div>
         <div class="manual-rule">
           <strong>How to Use</strong>
-          <p>Open it from the Faculty Portal sidebar and check students projected below the passing line.</p>
+          <p>Open it from the Faculty Portal sidebar. Start with students marked Needs Immediate Follow-up, then check Missing Requirements and Needs Monitoring.</p>
         </div>
         <div class="manual-rule">
-          <strong>Risk Rule</strong>
-          <p>A student appears here if the current-period estimate or the possible final grade is below the passing threshold.</p>
+          <strong>Status Rule</strong>
+          <p>The monitor uses simple statuses based on current standing, missing work, and attendance concerns.</p>
         </div>
         <div class="manual-rule">
           <strong>Best Periods</strong>
@@ -795,7 +803,7 @@
         </div>
         <div class="manual-rule">
           <strong>Next Step</strong>
-          <p>Open the class prediction or summary page to check coverage, missing items, and possible follow-up work.</p>
+          <p>Open the class summary page to review the record and decide the next faculty follow-up.</p>
         </div>
         <div class="manual-rule">
           <strong>Governance Note</strong>
@@ -864,7 +872,7 @@
         <div class="manual-section-title">10. Privacy, Security, and Audit</div>
         <ul class="manual-policy-list">
           <li>Faculty can access only assigned classes and allowed portal functions.</li>
-          <li>Password rules, OTP, forced password change, privacy consent, single-device login, session timeout, and lockout are controlled by system settings.</li>
+          <li>Password rules, OTP, forced password change, privacy consent, one-session login control, session timeout, and lockout are controlled by system settings.</li>
           <li>The Faculty Portal quick tour is only a guide. Faculty may turn it off for their next login.</li>
           <li>Important actions may be audited, including submission, reopen, correction, and gradebook changes.</li>
           <li>Printed or exported records must be handled according to school data privacy rules.</li>
