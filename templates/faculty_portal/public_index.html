@@ -209,7 +209,7 @@
     <nav class="navbar navbar-expand-lg fp-navbar">
       <div class="container-fluid fp-fluid px-3 px-xl-4">
         <a class="navbar-brand fp-brand" href="#top">
-          <span class="fp-brand-main">EduGrade+</span>
+          <span class="fp-brand-main">NCBA | EduGrade+</span>
           <span class="fp-brand-sub">Faculty Portal</span>
         </a>
 
@@ -220,7 +220,7 @@
         <div class="collapse navbar-collapse" id="facultyPublicNav">
           <ul class="navbar-nav mx-auto mb-3 mb-lg-0 fp-links">
             <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
-            <li class="nav-item"><a class="nav-link" href="#entry-experience">Entry Experience</a></li>
+            <li class="nav-item"><a class="nav-link" href="#entry-experience">Experience</a></li>
             <li class="nav-item"><a class="nav-link" href="#workflow">Workflow</a></li>
             <li class="nav-item"><a class="nav-link" href="#features">Features</a></li>
             <li class="nav-item"><a class="nav-link" href="#period-governance">Governance</a></li>
@@ -247,6 +247,14 @@
             <button type="submit" class="btn fp-login-btn">Login</button>
           </form>
           <a href="{% url 'accounts:faculty_forgot_password' %}" class="fp-forgot-link d-none d-lg-inline-flex ms-2">Forgot password?</a>
+          <span class="fp-npc-seal-nav d-none d-lg-inline-flex" aria-label="NCBA National Privacy Commission seal">
+            <img
+              src="{% get_media_prefix %}logos/ncba_npc_seal.png"
+              alt="NCBA National Privacy Commission seal"
+              height="75"
+              style="height: 75px; max-height: 75px; width: auto;"
+            >
+          </span>
 
           <form method="post" action="{% url 'faculty_portal:public_index' %}" class="fp-login-form-mobile d-lg-none mt-2" novalidate>
             {% csrf_token %}
@@ -630,7 +638,7 @@
   <section
     class="fp-npc-seal-section"
     aria-label="NCBA National Privacy Commission seal"
-    style="background: radial-gradient(circle at 50% 18%, rgba(210, 191, 43, 0.42), transparent 34%), linear-gradient(135deg, #dcebd4 0%, #f8fbf3 45%, #d5e7c8 100%);"
+    style="padding: 6rem 0 6.5rem; background: radial-gradient(circle at 50% 18%, rgba(210, 191, 43, 0.42), transparent 34%), linear-gradient(135deg, #dcebd4 0%, #f8fbf3 45%, #d5e7c8 100%);"
   >
     <div class="fp-final-npc-seal" aria-label="NCBA National Privacy Commission seal" style="display: flex; justify-content: center; width: 100%;">
       <img

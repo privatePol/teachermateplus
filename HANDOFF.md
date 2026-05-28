@@ -27,8 +27,11 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Faculty Portal public homepage branding:
   - Removed the final `Proceed to Login` call-to-action section from `/faculty/`.
   - Added the NCBA NPC seal from `media/logos/ncba_npc_seal.png` centered in its own soft-gradient section on `/faculty/`.
+  - Added a second proportion-preserving 75px-high NCBA NPC seal in the desktop navbar beside the login controls on `/faculty/`.
+  - Renamed the public navbar brand from `EduGrade+` to `NCBA | EduGrade+` and changed the nav label `Entry Experience` to `Experience`.
   - Seal sizing is capped at 150px with explicit image width/inline sizing as a cache-resistant safeguard.
   - Seal section now centers the seal across the full page width with inline flex centering and a stronger green/gold background gradient; the background gradient is also applied inline on the section as a cache-resistant safeguard.
+  - Increased the lower seal section padding to `6rem` top and `6.5rem` bottom, with inline padding as a cache-resistant safeguard, to improve headroom and tail room around the NPC seal.
 - Paused DepEd E-Class Record work per user direction; no additional DepEd work was performed after the pause.
 - Privacy Consent adjustment:
   - Added `privacy_consent_pending` layout context for Admin and Faculty Privacy Consent views.
@@ -342,7 +345,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - [x] Admin Portal login logo render check - passed: rendered `/admin-portal/login/` with HTTP 200 and confirmed `logos/edugradeplus_logo.png` is present while `logos/edugradepro_logo.png` is absent.
 - [x] Admin Portal login copy render check - passed: rendered `/admin-portal/login/` with HTTP 200 and confirmed the authorized-user line plus MIS Department credential reminder are present.
 - [x] Admin Portal login NPC seal render check - passed: rendered `/admin-portal/login/` with HTTP 200 and confirmed the right-side `seal-panel`, `col-lg-3` column, and `logos/ncba_npc_seal.png` are present.
-- [x] Faculty Portal public homepage seal section render check - passed: rendered `/faculty/` with HTTP 200 and confirmed the final CTA section is absent while `fp-npc-seal-section`, full-width `fp-final-npc-seal`, and `logos/ncba_npc_seal.png` are present, with CSS and inline width capped at 150px.
+- [x] Faculty Portal public homepage render check - passed: rendered `/faculty/` with HTTP 200 and confirmed the final CTA section is absent, the navbar shows `NCBA | EduGrade+` and `Experience`, and `fp-npc-seal-nav`, `fp-npc-seal-section`, full-width `fp-final-npc-seal`, and `logos/ncba_npc_seal.png` are present; navbar seal is capped at 75px high with natural width and section seal at 150px wide.
 - [x] Faculty Portal public-login, password-recovery link, and password-recovery logo focused tests - passed: `python manage.py test apps.faculty_portal.tests_public_login`
 - [x] Faculty Portal public-login plus account login-lockout regression tests - passed: `python manage.py test apps.faculty_portal.tests_public_login apps.accounts.tests_login_lockout`
 - [x] Privacy Consent focused tests - passed: `python manage.py test apps.accounts.tests_privacy_consent`

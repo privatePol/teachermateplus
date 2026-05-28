@@ -37,6 +37,8 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 - Admin Portal login copy identifies access as authorized NCBA EduGradePlus use and reminds users without credentials to coordinate with the MIS Department.
 - Admin Portal login page also displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` in a dedicated right-side seal column.
 - Faculty Portal public homepage removes the final `Proceed to Login` call-to-action section and displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` centered in its own soft-gradient section, capped at 150px.
+- Faculty Portal public homepage also shows a 75px-high NCBA NPC seal in the desktop navbar beside the login controls.
+- Faculty Portal public navbar labels the brand as `NCBA | EduGrade+`, uses `Experience` as the shorter entry-experience nav label, and gives the lower NPC seal section more vertical breathing room.
 - Deployment and local workspace directory/config identifiers now use `edugradeplus`, including `D:\edugradeplus`, `/opt/edugradeplus`, `/etc/edugradeplus`, `/run/edugradeplus`, `/var/log/edugradeplus`, and the matching ops config filenames.
 - User account security now includes:
   - password complexity validation

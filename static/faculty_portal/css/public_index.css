@@ -148,6 +148,22 @@ body {
   color: var(--fp-green-800);
 }
 
+.fp-npc-seal-nav {
+  align-items: center;
+  justify-content: center;
+  margin-left: 1.4rem;
+  min-width: 96px;
+}
+
+.fp-npc-seal-nav img {
+  height: 75px;
+  max-height: 75px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 6px 10px rgba(17, 50, 28, 0.08));
+}
+
 .fp-toggler {
   border: 1px solid rgba(58, 92, 66, 0.25);
 }
@@ -560,7 +576,7 @@ body {
 }
 
 .fp-npc-seal-section {
-  padding: 2.2rem 0 3.2rem;
+  padding: 6rem 0 6.5rem;
   background:
     radial-gradient(circle at 50% 18%, rgba(210, 191, 43, 0.42), transparent 34%),
     linear-gradient(135deg, #dcebd4 0%, #f8fbf3 45%, #d5e7c8 100%);

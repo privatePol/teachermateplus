@@ -2908,3 +2908,12 @@
 2026-05-28 11:56:27,959 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27873
 2026-05-28 11:56:27,997 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 304 0
 2026-05-28 11:57:55,458 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27520
+2026-05-28 11:58:30,646 INFO [django.server] "GET /media/logos/edugradeplus_logo.png HTTP/1.1" 200 2244225
+2026-05-28 12:02:00,852 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27887
+2026-05-28 12:02:00,898 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 304 0
+2026-05-28 12:04:17,652 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27929
+2026-05-28 12:04:17,684 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 304 0
+2026-05-28 12:07:22,998 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27887
+2026-05-28 12:07:23,025 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 304 0
+2026-05-28 12:13:34,833 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27888
+2026-05-28 12:13:34,865 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 304 0

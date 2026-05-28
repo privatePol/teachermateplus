@@ -31,6 +31,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin Portal login copy now identifies access as authorized NCBA EduGradePlus use and directs users without credentials to coordinate with the MIS Department.
 - Admin Portal login page now displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` in a dedicated right-side seal column.
 - Faculty Portal public homepage now removes the final `Proceed to Login` call-to-action section and displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` centered in its own soft-gradient section, capped at 150px.
+- Faculty Portal public homepage now also shows a 75px-high NCBA NPC seal in the desktop navbar beside the login controls.
+- Faculty Portal public navbar now labels the brand as `NCBA | EduGrade+`, shortens `Entry Experience` to `Experience`, and gives the lower NPC seal section more vertical breathing room.
 - Faculty Portal Summary of Periodic Grades now places visible period/final grade columns immediately after Status and leaves ACTIVE student status cells blank while still showing non-active statuses such as DRP, W, and INC.
 - Faculty Portal Current Active Grading Period cards now place Campus / AY / Term in the first row as an H4-styled scope line with separate colors, followed by the active-period explanation and the grading-period chip. Campus labels still show friendly names such as `NCBA-Cubao`, `NCBA-Fairview`, or `NCBA-Taytay` instead of numeric campus codes.
 - Privacy Consent pages now lock and collapse the left navigation and hide Change Password while consent is pending, keeping first-login focus on the consent form until the user accepts the current version.
