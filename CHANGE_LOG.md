@@ -28,8 +28,11 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Admin Portal login copy now identifies access as authorized NCBA EduGradePlus use and directs users without credentials to coordinate with the MIS Department.
+- Admin Portal login page now displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` in a dedicated right-side seal column.
+- Faculty Portal public homepage now removes the final `Proceed to Login` call-to-action section and displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` centered in its own soft-gradient section, capped at 150px.
 - Faculty Portal Summary of Periodic Grades now places visible period/final grade columns immediately after Status and leaves ACTIVE student status cells blank while still showing non-active statuses such as DRP, W, and INC.
-- Faculty Portal Current Active Grading Period chips now show the active AY and display campuses as `NCBA-Cubao`, `NCBA-Fairview`, or `NCBA-Taytay` style labels instead of numeric campus codes such as `NCBA-01`, `NCBA-02`, or `NCBA-03`.
+- Faculty Portal Current Active Grading Period cards now place Campus / AY / Term in the first row as an H4-styled scope line with separate colors, followed by the active-period explanation and the grading-period chip. Campus labels still show friendly names such as `NCBA-Cubao`, `NCBA-Fairview`, or `NCBA-Taytay` instead of numeric campus codes.
 - Privacy Consent pages now lock and collapse the left navigation and hide Change Password while consent is pending, keeping first-login focus on the consent form until the user accepts the current version.
 - Gradebook reopen request email recipients now follow effective `reopen_requests.review` authorization for the request tenant/campus, including direct user permission grants and active superusers, instead of relying only on role-row lookup.
 - Admin Portal role-permission sections now use clearer display labels and plain-English header descriptions so admins can understand what each permission group controls before granting access.
@@ -49,6 +52,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Login Security in Configuration Management now includes a tenant-level one-session login control. When enabled, a new login signs out the same user from other browsers/devices; when disabled, simultaneous sessions are allowed.
 - Faculty My Classes pending assignments now show only the Accept Assignment action; clarification or wrong-load concerns should be handled with admin before acceptance.
 - Faculty Portal activity score encoding now ignores the Enter key inside score input fields to prevent accidental form submission while faculty are encoding grades.
+- Faculty Portal Grade Submission Deadline reminders now emphasize Period and Deadline in a colored H4-style first row. Faculty Dashboard shortcut cards and Main Action Cards now use distinct color treatments for Continue Grading, Priority Actions, Student Support, Private Notes, and related action cards; the top shortcut cards now include centered icons.
+- Faculty Dashboard shortcut cards, Main Action Cards, Grade Submission Deadline reminders, and My Classes boards now include small `Guide` tags that jump directly to the related Faculty User Guide article.
 - Faculty period cards now use one shared sticky guidance note, show lightweight subcomponent/detail activity metric cards per period, keep action icons at the bottom, and display submission deadlines as month-day-year dates.
 - Faculty Summary Period Snapshot is collapsed by default and simplified to fewer cards. Submission deadlines now show month-day-year dates plus a countdown, and the gradebook header shows the campus name instead of the campus code.
 - Faculty Portal Student Intervention Monitor sidebar visibility now follows the same Grade Prediction tenant feature and role-access checks as the prediction pages, so the link is hidden when prediction is disabled or the user role is not allowed.
@@ -85,6 +90,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin Portal grading-template Builder now keeps the softer rotating period color scheme and makes the small weight, metadata, and detail cards more prominent with accent borders, shadows, and subtle gradients.
 
 ### Fixed
+- Admin Portal login page branding now uses `/media/logos/edugradeplus_logo.png` instead of the older EduGradesPro logo asset.
+- Faculty Portal public-page login now keeps invalid credential attempts on `/faculty/` and shows the error beside the inline login form instead of falling through to the separate `/faculty/login/` page. Faculty password-recovery pages now show the EduGradePlus logo from `media/logos/edugradeplus_logo.png` and return users to `/faculty/` from their `Back to Faculty Login` / `Go to Faculty Login` links.
 - Admin Portal Faculty Grade Book Monitor now lists and opens only accepted faculty assignments, so AC/Dean/CAO reviewers do not see pending, declined, clarification, or expired loads in the gradebook class dropdown.
 - Admin Portal Faculty Assignments now waits for the explicit `Filter` button before applying the unassigned course-offering course/section filters, preventing the page from refreshing on every typed character.
 - Faculty Portal course period cards now display the configured grading-template period name, so `FX` periods named `Final Exam` no longer fall back to a `PRELIM` heading or prelim guidance.
@@ -133,7 +140,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Grading maintenance lists now separate active and inactive records into distinct cards for grading templates, template periods/components/subcomponents/details, tenant grading profiles, course-template assignments, course base value overrides, and period lock rules. The course-template assignment “courses with no grading template” report remains a missing-active-assignment view.
 - Grading maintenance pages now use maintenance-scoped querysets so permitted admin users can review inactive grading setup rows on those pages without widening operational active-only reads.
 - Inactive maintenance sections now show a `Used In` dependency column and expose guarded permanent deletion for inactive records that are not referenced by related tables. Permanent deletion is controlled by the dedicated `inactive_records.delete` permission, is always available to superusers, requires typing the record's confirmation code, and is blocked server-side when related usage exists.
-- EduGrade+_CONTEXT now records NCBA's Academic/Administrative branch distinction, Academic department/area structure, CAO/Dean/Academic Chairman/Principal/Coordinator governance model, and the recommended setup rule that academic records be mapped to the most specific owning department or area.
+- EDUGRADEPLUS_CONTEXT now records NCBA's Academic/Administrative branch distinction, Academic department/area structure, CAO/Dean/Academic Chairman/Principal/Coordinator governance model, and the recommended setup rule that academic records be mapped to the most specific owning department or area.
 - Admin Portal Tools now includes an `Actual Data Reset` page governed by the assignable `actual_data_reset.run` permission; it previews and hard-deletes actual setup/transaction data while preserving users, roles, permissions, menu configuration, migrations, Django auth metadata, and global settings.
 - Admin Portal user-role management now separates active `Current Assignments` from `Inactive Assignments`, making dormant scoped roles easier to identify during account setup.
 - Admin Portal campus scope now ignores faculty-only role assignments when a user already has an active non-faculty admin role, preventing faculty roles from exposing governance monitors for campuses where the admin/AC role is inactive.
@@ -251,8 +258,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
   - the admin non-compliance monitor now shows the latest notice stage and issue date for each overdue unsubmitted class
   - `Configuration Management` now includes a dedicated `Submission Non-Compliance Notices` card for enablement, interval, academic-head roles, and HR escalation recipients
 - Documentation refinement:
-  - `EduGrade+_CONTEXT.md` now explicitly documents how attendance participates in grading: it is template-driven through `is_attendance_component`, inherits normal weight roll-up, contributes to class standing only when placed under a non-exam component, and uses the internal status-to-score mapping for attendance records
-  - `EduGrade+_CONTEXT.md` now also includes a worked attendance computation example showing status conversion, averaging, and weighted roll-up into class standing / period grade
+  - `EDUGRADEPLUS_CONTEXT.md` now explicitly documents how attendance participates in grading: it is template-driven through `is_attendance_component`, inherits normal weight roll-up, contributes to class standing only when placed under a non-exam component, and uses the internal status-to-score mapping for attendance records
+  - `EDUGRADEPLUS_CONTEXT.md` now also includes a worked attendance computation example showing status conversion, averaging, and weighted roll-up into class standing / period grade
 - Tenant grading profile formula governance:
   - `Tenant Grading Profile` now supports a configurable final-grade formula mode per scope
   - default mode keeps the current NCBA-style behavior by averaging all active grading periods of the matched template

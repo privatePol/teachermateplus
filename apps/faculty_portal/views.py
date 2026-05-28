@@ -14,6 +14,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
+from apps.accounts.forms import FacultyLoginForm
+from apps.accounts.views import process_valid_portal_login_form
 from apps.academics.models import CourseOffering, FacultyAssignment
 from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
 from apps.attendance.models import AttendanceRecord, AttendanceSession
@@ -180,7 +182,22 @@ def _faculty_final_clearance_preview_for_scope(*, faculty_user, term, campus):
 
 @ensure_csrf_cookie
 def public_index_view(request):
-    return render(request, "faculty_portal/public_index.html")
+    login_form = FacultyLoginForm(request=request, data=request.POST or None)
+    if request.method == "POST":
+        if login_form.is_valid():
+            response = process_valid_portal_login_form(
+                request,
+                form=login_form,
+                portal_code="FACULTY",
+                portal_permission="faculty_portal.access",
+                dashboard_url_name="faculty_portal:dashboard",
+            )
+            if response is not None:
+                return response
+        username = request.POST.get("username", "")
+        if username:
+            AuditService.log_login_failure(request, username=username, portal="FACULTY")
+    return render(request, "faculty_portal/public_index.html", {"login_form": login_form})
 
 
 @portal_required("FACULTY")

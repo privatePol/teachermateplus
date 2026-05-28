@@ -228,22 +228,32 @@
             <li class="nav-item"><a class="nav-link" href="#support">Support</a></li>
           </ul>
 
-          <form method="post" action="{% url 'accounts:faculty_login' %}" class="fp-login-form d-none d-lg-flex" novalidate>
+          {% if login_form.errors %}
+            <div class="alert alert-danger py-2 px-3 mb-2 mb-lg-0 me-lg-2 small fp-login-error" role="alert">
+              {% for error in login_form.non_field_errors %}
+                <div>{{ error }}</div>
+              {% empty %}
+                <div>Please enter your faculty username and password.</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <form method="post" action="{% url 'faculty_portal:public_index' %}" class="fp-login-form d-none d-lg-flex" novalidate>
             {% csrf_token %}
             <label for="id_nav_username" class="visually-hidden">Username</label>
-            <input id="id_nav_username" type="text" name="username" class="form-control fp-nav-input" placeholder="Username" autocomplete="username" required>
+            <input id="id_nav_username" type="text" name="username" class="form-control fp-nav-input" placeholder="Username" autocomplete="username" value="{{ login_form.username.value|default_if_none:'' }}" required>
             <label for="id_nav_password" class="visually-hidden">Password</label>
             <input id="id_nav_password" type="password" name="password" class="form-control fp-nav-input" placeholder="Password" autocomplete="current-password" required>
             <button type="submit" class="btn fp-login-btn">Login</button>
           </form>
           <a href="{% url 'accounts:faculty_forgot_password' %}" class="fp-forgot-link d-none d-lg-inline-flex ms-2">Forgot password?</a>
 
-          <form method="post" action="{% url 'accounts:faculty_login' %}" class="fp-login-form-mobile d-lg-none mt-2" novalidate>
+          <form method="post" action="{% url 'faculty_portal:public_index' %}" class="fp-login-form-mobile d-lg-none mt-2" novalidate>
             {% csrf_token %}
             <div class="row g-2">
               <div class="col-12">
                 <label for="id_nav_username_mobile" class="visually-hidden">Username</label>
-                <input id="id_nav_username_mobile" type="text" name="username" class="form-control fp-nav-input" placeholder="Username" autocomplete="username" required>
+                <input id="id_nav_username_mobile" type="text" name="username" class="form-control fp-nav-input" placeholder="Username" autocomplete="username" value="{{ login_form.username.value|default_if_none:'' }}" required>
               </div>
               <div class="col-12">
                 <label for="id_nav_password_mobile" class="visually-hidden">Password</label>
@@ -617,12 +627,18 @@
     </div>
   </section>
 
-  <!-- Final CTA -->
-  <section class="fp-final-cta">
-    <div class="container-fluid fp-fluid px-3 px-xl-4 text-center">
-      <h2>Proceed to Login</h2>
-      <p>Use your assigned faculty credentials to access your EduGrade+ Faculty Portal.</p>
-      <a href="#top" class="btn fp-cta-primary fp-cta-final">Proceed to Login</a>
+  <section
+    class="fp-npc-seal-section"
+    aria-label="NCBA National Privacy Commission seal"
+    style="background: radial-gradient(circle at 50% 18%, rgba(210, 191, 43, 0.42), transparent 34%), linear-gradient(135deg, #dcebd4 0%, #f8fbf3 45%, #d5e7c8 100%);"
+  >
+    <div class="fp-final-npc-seal" aria-label="NCBA National Privacy Commission seal" style="display: flex; justify-content: center; width: 100%;">
+      <img
+        src="{% get_media_prefix %}logos/ncba_npc_seal.png"
+        alt="NCBA National Privacy Commission seal"
+        width="150"
+        style="width: 150px; max-width: 150px; height: auto;"
+      >
     </div>
   </section>
 </div>

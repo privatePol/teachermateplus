@@ -1,4 +1,4 @@
-# EduGrade+_CONTEXT.md
+# EDUGRADEPLUS_CONTEXT.md
 
 ## 1. What EduGrade+ Is
 EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance platform designed to centralize class grading workflows and reduce operational risk from disconnected grade files.
@@ -33,7 +33,10 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 
 ### Admin Portal
 - Security: users, roles, scoped permissions
-- Admin Portal sidebar branding uses the EduGradePlus logo from `/media/logos/edugradeplus_logo.png`.
+- Admin Portal sidebar and login-page branding use the EduGradePlus logo from `/media/logos/edugradeplus_logo.png`.
+- Admin Portal login copy identifies access as authorized NCBA EduGradePlus use and reminds users without credentials to coordinate with the MIS Department.
+- Admin Portal login page also displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` in a dedicated right-side seal column.
+- Faculty Portal public homepage removes the final `Proceed to Login` call-to-action section and displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` centered in its own soft-gradient section, capped at 150px.
 - Deployment and local workspace directory/config identifiers now use `edugradeplus`, including `D:\edugradeplus`, `/opt/edugradeplus`, `/etc/edugradeplus`, `/run/edugradeplus`, `/var/log/edugradeplus`, and the matching ops config filenames.
 - User account security now includes:
   - password complexity validation
@@ -62,6 +65,7 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 - Admin Dashboard now includes a scoped `Gradebook Reopen Requests` panel for users with `reopen_requests.read` or `reopen_requests.review`, showing pending/reviewed counts, latest pending faculty requests, and direct review links for authorized reviewers.
 - Admin Guide monitoring instructions include a simple enablement checklist for Grade Prediction and the Faculty Student Intervention Monitor: enable Grade Prediction, include the FACULTY role, enable the intervention monitor flag, save, then ask faculty to refresh or log in again.
 - System email notifications use the standard subject format `NCBA | EduGradePlus: <Message>`. Email cards use the NCBA logo from `media/logos/ncba-logo.png`, the green-to-yellow header style, and no embedded Data Privacy Notice footer/block.
+- Faculty Dashboard shortcut cards, Main Action Cards, Grade Submission Deadline reminders, and My Classes boards include compact `Guide` tags that open the related Faculty User Guide section directly, such as daily workflow, assignments, submission, intervention monitoring, notes, or class-list rules.
 - `Admin Portal -> Students -> Student Enrollment Query` is a read-only consolidated student lookup governed by `student_enrollment_query.read`. It lets authorized admins search one scoped student, select Academic Year and Term, and review that student's enrollment rows, period grades, submission status, final grade, and encoded activity-score details without changing grade records.
 - User role management separates active `Current Assignments` from `Inactive Assignments` so scoped roles that no longer grant access are easier to distinguish.
 - User role assignment uses a campus-dependent Department dropdown; select the campus first so only that campus's departments are assignable.
@@ -126,11 +130,12 @@ EduGrade+ V1 is a multi-tenant, multi-campus academic grading and governance pla
 - The Assigned Offerings card explains that `Primary` is the lead faculty assignment for class accountability, reports, reminders, and monitoring, while `Secondary` is for supporting or shared-load faculty; the table labels this as `Load Role`.
 - Faculty Portal class access follows the Admin-configured active Academic Year/Term. Current-scope classes remain editable under normal grading governance, while archived or outside-scope classes are treated as read-only history on direct class pages; edits, submission, self-reopen, and class-list updates are blocked there, with corrections handled through the governed correction workflow.
 - Faculty Portal topbar displays the active Academic Year/Term resolved from the faculty user's current/default tenant scope so faculty can confirm the operating academic scope while navigating.
-- Faculty Portal Current Active Grading Period banners display friendly campus labels derived from tenant plus campus name, such as `NCBA-Fairview`, and include the active AY before the term/period label.
+- Faculty Portal Current Active Grading Period banners display friendly campus labels derived from tenant plus campus name, such as `NCBA-Fairview`. The banner first shows Campus / AY / Term as an H4-styled scope row with separate colors, then shows the active-period explanation and the grading-period chip.
 - Faculty Portal My Classes groups accepted classes under `Accepted Course Assignments`, treats them as the official accepted classes ready for grading workflows, uses campus names with campus codes as supporting text, applies larger section/card heading typography for easier scanning, and renders missing grading-template warnings in a danger/red style because those classes cannot proceed into normal grading setup.
 - Faculty Portal My Classes pending assignment cards expose only `Accept Assignment`. Faculty should contact admin or the academic head before accepting if a load is unclear or appears incorrect.
 - Faculty Portal class period pages use one shared sticky `What to do` / `Why set this` note above the period cards. Individual period cards show lightweight activity metric cards for each required subcomponent/detail bucket, bottom-aligned action icons, and month-day-year submission deadline dates.
 - Faculty Portal activity score encoding disables Enter-key form submission inside score inputs. Faculty must click `Save Scores`, reducing accidental saves while entering grades row by row.
+- Faculty Portal Grade Submission Deadline reminder banners show Period and Deadline first as a colored H4-style focus row, then the reminder message and helper text. Faculty Dashboard shortcut cards and Main Action Cards use distinct color treatments for faster scanning; the top shortcut cards are centered and include icons.
 - Faculty Portal Summary of Periodic Grades shows visible period/final grade columns immediately after the Status column. ACTIVE enrollment statuses are intentionally blank in the summary table; only non-active statuses such as DRP, W, and INC are printed in the Status column.
 - Faculty Portal Summary Period Snapshot is collapsed by default and simplified to fewer readiness cards. The summary deadline uses Month day, year formatting with a countdown label, and the gradebook caption shows the campus name instead of the campus code.
 - Faculty Portal Grade Prediction and Student Intervention Monitor access both follow the Grade Prediction tenant configuration and allowed role list. If `FEATURE_GRADE_PREDICTION_ENABLED` is off, the user role is not included, or the intervention monitor flag is off, the related faculty links/pages are hidden or blocked.
@@ -647,6 +652,7 @@ All business operations should respect these dimensions and permissions.
 - Admin Portal guide has been redesigned as a polished workstream hub with a stronger hero, an operating-path card, grouped navigation for start/scope, grading setup, faculty operations, and security/monitoring, target highlighting, and a fixed Back to top link.
 - Admin Portal guide now explicitly documents that Admin/CAO users initiate official `Template Hotfix Request` records from `Grading -> Grading Templates -> Hotfix`, while Faculty Portal uses the faculty-facing `Report Template Issue` wording. CAO initiation requires both `template_hotfixes.create` and inclusion in the Template Governance `Hotfix Request` role set.
 - Admin Portal Security now includes a Faculty Deactivation page for scheduling or cancelling future faculty account deactivations. Due schedules are applied by running `python manage.py apply_scheduled_user_deactivations` from cron or a task scheduler, which deactivates the account, clears active sessions, and writes audit logs.
+- Faculty Portal public-page login now posts back to `/faculty/`; invalid username/password attempts render the same welcome page with an inline error beside the login form instead of navigating faculty users to `/faculty/login/`. Faculty password-recovery pages show the EduGradePlus logo from `media/logos/edugradeplus_logo.png` and return users to `/faculty/` from their login links.
 - Faculty deadline reminder banners now distinguish between `no deadline configured` and `deadline configured for a different campus/term scope`, so faculty users get a clearer explanation when admin settings do not apply to their accepted classes.
 - The `Period Lock` admin form now uses actual grading-template period choices and validation, reducing deadline mismatches caused by manually typed term codes instead of real period codes.
 - EduGrade+ now has an `Active Grading Period` governance model separate from grading-template period codes:

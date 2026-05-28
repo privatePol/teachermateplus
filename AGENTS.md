@@ -66,7 +66,7 @@ This handoff update is REQUIRED before ending the session.
 ## Documentation Update Rule
 When changing behavior, also update:
 1. `CHANGE_LOG.md`
-2. `EduGrade+_CONTEXT.md`
+2. `EDUGRADEPLUS_CONTEXT.md`
 3. Faculty/Admin guide pages if user-facing behavior changed
 
 ## Commit Message Pattern (Recommended)

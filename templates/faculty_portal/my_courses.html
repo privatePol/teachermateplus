@@ -37,6 +37,32 @@
     padding: 1rem;
     margin-bottom: 1.2rem;
   }
+  .my-courses-board-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+  .my-courses-guide-tag {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    padding: 0.28rem 0.7rem;
+    border: 1px solid #b9d8bc;
+    background: #ffffff;
+    color: #315a3e;
+    font-size: 0.78rem;
+    font-weight: 850;
+    text-decoration: none;
+    box-shadow: 0 6px 12px rgba(18, 52, 31, 0.08);
+  }
+  .my-courses-guide-tag:hover,
+  .my-courses-guide-tag:focus {
+    background: #fff7d6;
+    color: #0f5132;
+    text-decoration: none;
+  }
   .pending-title {
     font-size: 1.25rem;
     color: #5d4d12;
@@ -298,6 +324,27 @@
     color: #173d27;
     margin-bottom: 0.25rem;
   }
+  .faculty-deadline-banner-focus {
+    font-size: 1.28rem;
+    font-weight: 850;
+    line-height: 1.25;
+    margin: 0 0 0.35rem;
+  }
+  .faculty-deadline-banner-focus .deadline-period {
+    color: #8a251d;
+  }
+  .faculty-deadline-banner-focus .deadline-date {
+    color: #0f6b46;
+  }
+  .faculty-deadline-banner-focus .deadline-time {
+    color: #1f5f8b;
+    margin-left: 0.35rem;
+  }
+  .faculty-deadline-banner-focus .deadline-divider {
+    color: #9aab9e;
+    font-weight: 650;
+    margin: 0 0.25rem;
+  }
   .faculty-deadline-banner-meta {
     display: flex;
     flex-wrap: wrap;
@@ -315,6 +362,30 @@
     color: #466050;
     font-weight: 600;
   }
+  .faculty-deadline-banner-action {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    justify-content: flex-end;
+  }
+  .faculty-deadline-guide-tag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.28rem 0.7rem;
+    border: 1px solid #b9d8bc;
+    background: #ffffff;
+    color: #315a3e;
+    font-size: 0.78rem;
+    font-weight: 850;
+    text-decoration: none;
+  }
+  .faculty-deadline-guide-tag:hover,
+  .faculty-deadline-guide-tag:focus {
+    background: #fff7d6;
+    color: #0f5132;
+    text-decoration: none;
+  }
   .faculty-active-period-banner {
     border-radius: 1.1rem;
     padding: 1rem 1.1rem;
@@ -329,6 +400,31 @@
     letter-spacing: 0.08em;
     color: #6d8374;
     margin-bottom: 0.25rem;
+  }
+  .faculty-active-period-entry + .faculty-active-period-entry {
+    margin-top: 0.95rem;
+    padding-top: 0.95rem;
+    border-top: 1px solid rgba(96, 126, 99, 0.22);
+  }
+  .faculty-active-period-scope {
+    font-size: 1.28rem;
+    font-weight: 850;
+    line-height: 1.25;
+    margin: 0 0 0.4rem;
+  }
+  .faculty-active-period-scope .scope-campus {
+    color: #0f6b46;
+  }
+  .faculty-active-period-scope .scope-ay {
+    color: #8a6400;
+  }
+  .faculty-active-period-scope .scope-term {
+    color: #1f5f8b;
+  }
+  .faculty-active-period-scope .scope-divider {
+    color: #9aab9e;
+    font-weight: 650;
+    margin: 0 0.25rem;
   }
   .faculty-active-period-title {
     font-size: 1.1rem;
@@ -411,9 +507,16 @@
     font-weight: 700;
   }
   @media (max-width: 767.98px) {
+    .my-courses-board-head {
+      flex-direction: column;
+      align-items: flex-start;
+    }
     .faculty-deadline-banner {
       flex-direction: column;
       align-items: flex-start;
+    }
+    .faculty-deadline-banner-action {
+      justify-content: flex-start;
     }
   }
 </style>
@@ -461,7 +564,12 @@
 {% endif %}
 {% if final_clearance_targets %}
 <section class="final-clearance-board">
-  <div class="final-clearance-title">Final Clearance</div>
+  <div class="my-courses-board-head">
+    <div>
+      <div class="final-clearance-title">Final Clearance</div>
+    </div>
+    <a class="my-courses-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-submission">Guide</a>
+  </div>
   <div class="final-clearance-copy">Final Clearance can be printed only when all accepted course assignments in the selected campus and term are COMPLETE. You may still open the clearance page to check what is missing.</div>
   <div class="final-clearance-actions">
     {% for target in final_clearance_targets %}
@@ -483,7 +591,12 @@
 
 {% if pending_assignments %}
 <section class="pending-board">
-  <div class="pending-title">Pending Faculty Assignments</div>
+  <div class="my-courses-board-head">
+    <div>
+      <div class="pending-title">Pending Faculty Assignments</div>
+    </div>
+    <a class="my-courses-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-assignments">Guide</a>
+  </div>
   <div class="pending-copy">Please accept your assigned classes first. Only accepted assignments can be opened for grading and class-list work.</div>
   <div class="row g-3">
     {% for assignment in pending_assignments %}
@@ -554,7 +667,12 @@
 
 {% if grouped_offerings %}
 <section class="accepted-board">
-  <h3 class="accepted-board-title">Accepted Course Assignments</h3>
+  <div class="my-courses-board-head">
+    <div>
+      <h3 class="accepted-board-title">Accepted Course Assignments</h3>
+    </div>
+    <a class="my-courses-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-workflow">Guide</a>
+  </div>
   <div class="accepted-board-copy">These are your official accepted classes and are ready for grading, attendance, class-list review, and submissions.</div>
 {% endif %}
 

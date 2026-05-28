@@ -187,6 +187,40 @@ def _complete_portal_login(request, *, user, portal_code: str, dashboard_url_nam
     return redirect(reverse(dashboard_url_name))
 
 
+def process_valid_portal_login_form(
+    request,
+    form,
+    *,
+    portal_code: str,
+    portal_permission: str,
+    dashboard_url_name: str,
+):
+    user = form.get_user()
+    if not PermissionService.has_permission(user, portal_permission):
+        AuditService.log_login_failure(
+            request, username=form.cleaned_data.get("username", ""), portal=portal_code
+        )
+        form.add_error(None, "You do not have access to this portal.")
+        return None
+
+    if LoginOtpService.is_enabled_for_user(user):
+        otp_result = LoginOtpService.create_and_send(request=request, user=user, portal_code=portal_code)
+        if not otp_result.success:
+            form.add_error(None, otp_result.message)
+            return None
+        _store_pending_otp_login(request, user=user, portal_code=portal_code)
+        messages.info(request, "A verification code was sent to your registered email address.")
+        return redirect(reverse(_otp_verify_url_name(portal_code)))
+
+    return _complete_portal_login(
+        request,
+        user=user,
+        portal_code=portal_code,
+        dashboard_url_name=dashboard_url_name,
+        backend=getattr(user, "backend", None),
+    )
+
+
 class _BasePortalLoginView(FormView):
     template_name = ""
     form_class = None
@@ -208,30 +242,16 @@ class _BasePortalLoginView(FormView):
         return kwargs
 
     def form_valid(self, form):
-        user = form.get_user()
-        if not PermissionService.has_permission(user, self.portal_permission):
-            AuditService.log_login_failure(
-                self.request, username=form.cleaned_data.get("username", ""), portal=self.portal_code
-            )
-            form.add_error(None, "You do not have access to this portal.")
-            return self.form_invalid(form)
-
-        if LoginOtpService.is_enabled_for_user(user):
-            otp_result = LoginOtpService.create_and_send(request=self.request, user=user, portal_code=self.portal_code)
-            if not otp_result.success:
-                form.add_error(None, otp_result.message)
-                return self.form_invalid(form)
-            _store_pending_otp_login(self.request, user=user, portal_code=self.portal_code)
-            messages.info(self.request, "A verification code was sent to your registered email address.")
-            return redirect(reverse(_otp_verify_url_name(self.portal_code)))
-
-        return _complete_portal_login(
+        response = process_valid_portal_login_form(
             self.request,
-            user=user,
             portal_code=self.portal_code,
+            portal_permission=self.portal_permission,
             dashboard_url_name=self.dashboard_url_name,
-            backend=getattr(user, "backend", None),
+            form=form,
         )
+        if response is not None:
+            return response
+        return self.form_invalid(form)
 
     def form_invalid(self, form):
         username = self.request.POST.get("username", "")

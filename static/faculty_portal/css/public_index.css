@@ -559,29 +559,26 @@ body {
   font-weight: 600;
 }
 
-/* Final CTA */
-.fp-final-cta {
-  padding: 4.2rem 0 5rem;
+.fp-npc-seal-section {
+  padding: 2.2rem 0 3.2rem;
   background:
-    radial-gradient(circle at 50% 5%, rgba(207, 186, 58, 0.23), transparent 36%),
-    linear-gradient(180deg, #f4f8f1 0%, #eaf2e5 100%);
+    radial-gradient(circle at 50% 18%, rgba(210, 191, 43, 0.42), transparent 34%),
+    linear-gradient(135deg, #dcebd4 0%, #f8fbf3 45%, #d5e7c8 100%);
 }
 
-.fp-final-cta h2 {
-  color: #163823;
-  font-size: clamp(1.65rem, 2.4vw, 2.4rem);
-  font-weight: 800;
+.fp-final-npc-seal {
+  display: flex;
+  justify-content: center;
+  width: 100%;
 }
 
-.fp-final-cta p {
-  color: #355847;
-  font-size: 1.05rem;
-  margin: 0.75rem auto 1.45rem;
-  max-width: 760px;
-}
-
-.fp-cta-final {
-  min-width: 220px;
+.fp-final-npc-seal img {
+  width: 150px;
+  max-width: min(150px, 46vw);
+  height: auto;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 14px 24px rgba(17, 50, 28, 0.12));
 }
 
 /* Focus states */

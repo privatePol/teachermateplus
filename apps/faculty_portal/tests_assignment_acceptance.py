@@ -517,6 +517,9 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertNotContains(response, "Decline")
         self.assertContains(response, "College Template")
         self.assertContains(response, "Campus: Fairview (NCBA-FAIRVIEW)")
+        guide_url = reverse("faculty_portal:guide")
+        self.assertContains(response, "my-courses-guide-tag")
+        self.assertContains(response, f'href="{guide_url}#guide-assignments"', html=False)
 
     def test_my_courses_labels_accepted_assignments_with_campus_name(self):
         self._accept_assignment()
@@ -529,6 +532,9 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "These are your official accepted classes")
         self.assertContains(response, "NCBA / Fairview")
         self.assertContains(response, "(NCBA-FAIRVIEW)")
+        guide_url = reverse("faculty_portal:guide")
+        self.assertContains(response, "my-courses-guide-tag")
+        self.assertContains(response, f'href="{guide_url}#guide-workflow"', html=False)
 
     def test_my_courses_shows_syllabus_icon_only_when_course_has_link(self):
         self._accept_assignment()
@@ -2875,6 +2881,16 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             term=self.term,
             period=canonical_period,
         )
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.prelim.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() + timezone.timedelta(days=2),
+            is_locked=False,
+        )
         self._accept_assignment()
 
         self.client.force_login(self.faculty_user)
@@ -2882,8 +2898,33 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["stats"]["active_grading_period_rows"][0]["campus_display"], "NCBA-Fairview")
-        self.assertContains(response, "NCBA-Fairview / AY 2025-2026 / 1ST: Prelim (PRELIM)")
+        self.assertContains(response, '<h4 class="faculty-active-period-scope">', html=False)
+        self.assertContains(response, '<span class="scope-campus">NCBA-Fairview</span>', html=False)
+        self.assertContains(response, '<span class="scope-ay">AY 2025-2026</span>', html=False)
+        self.assertContains(response, '<span class="scope-term">1ST</span>', html=False)
+        self.assertContains(response, "EduGrade+ is currently focused on the period(s) below.")
+        self.assertContains(response, "Prelim (PRELIM)")
         self.assertNotContains(response, "NCBA-02 / 1ST")
+        self.assertContains(response, '<h4 class="faculty-deadline-banner-focus">', html=False)
+        self.assertContains(response, 'class="deadline-period"', html=False)
+        self.assertContains(response, '<span class="deadline-date">', html=False)
+        self.assertContains(response, '<a class="faculty-dashboard-nav-card nav-grading"', html=False)
+        self.assertContains(response, '<a class="faculty-dashboard-nav-card nav-priority"', html=False)
+        self.assertContains(response, '<a class="faculty-dashboard-nav-card nav-support"', html=False)
+        self.assertContains(response, '<a class="faculty-dashboard-nav-card nav-notes"', html=False)
+        self.assertContains(response, "faculty-dashboard-nav-icon")
+        self.assertContains(response, '<a class="faculty-dashboard-action-card action-grading"', html=False)
+        self.assertContains(response, '<a class="faculty-dashboard-action-card action-priority"', html=False)
+        self.assertContains(response, '<a class="faculty-dashboard-action-card action-support"', html=False)
+        self.assertContains(response, '<a class="faculty-dashboard-action-card action-classlist"', html=False)
+        self.assertContains(response, "faculty-dashboard-guide-tag")
+        self.assertContains(response, "faculty-deadline-guide-tag")
+        guide_url = reverse("faculty_portal:guide")
+        self.assertContains(response, f'href="{guide_url}#guide-workflow"', html=False)
+        self.assertContains(response, f'href="{guide_url}#guide-submission"', html=False)
+        self.assertContains(response, f'href="{guide_url}#guide-prediction"', html=False)
+        self.assertContains(response, f'href="{guide_url}#guide-notes"', html=False)
+        self.assertContains(response, f'href="{guide_url}#guide-classlist"', html=False)
 
     def test_offering_periods_uses_configured_period_name_for_fx_card(self):
         self.final.code = "FX"
@@ -2923,6 +2964,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             ),
         )
         self.assertContains(response, "Print Final Clearance")
+        self.assertContains(response, f'href="{reverse("faculty_portal:guide")}#guide-submission"', html=False)
 
     def test_my_courses_blocks_final_clearance_print_when_courses_incomplete(self):
         self.assignment.accepted_at = timezone.now()

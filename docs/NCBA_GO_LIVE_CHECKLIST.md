@@ -7,7 +7,7 @@ This checklist is the practical go-live guide for NCBA before opening EduGrade+ 
 Read these in this exact order:
 
 1. [AGENTS.md](/d:/edugradeplus/AGENTS.md)
-2. [EduGrade+_CONTEXT.md](/d:/edugradeplus/EduGrade+_CONTEXT.md)
+2. [EDUGRADEPLUS_CONTEXT.md](/d:/edugradeplus/EDUGRADEPLUS_CONTEXT.md)
 3. [CHANGE_LOG.md](/d:/edugradeplus/CHANGE_LOG.md)
 4. [DEPLOYMENT_UBUNTU.md](/d:/edugradeplus/docs/DEPLOYMENT_UBUNTU.md)
 5. [STAGING_WORKFLOW.md](/d:/edugradeplus/docs/STAGING_WORKFLOW.md)

@@ -11,7 +11,7 @@ Build the initial Student Portal foundation for EduGrade+ as a local-only develo
 Before making code changes, read and follow these files:
 
 1. AGENTS.md
-2. EduGrade+_CONTEXT.md
+2. EDUGRADEPLUS_CONTEXT.md
 3. docs/STUDENT_PORTAL_PLAN.md
 4. docs/DB_SCHEMA.md
 5. docs/ROLE_PERMISSION_MATRIX.md
@@ -30,7 +30,7 @@ Important repository rules:
 - User-manageable feature toggles/settings should live in the configurable-features area when appropriate.
 - Run `python manage.py check` after edits.
 - Add migrations for model changes.
-- Update `CHANGE_LOG.md`, `EduGrade+_CONTEXT.md`, and relevant docs when behavior changes.
+- Update `CHANGE_LOG.md`, `EDUGRADEPLUS_CONTEXT.md`, and relevant docs when behavior changes.
 - Do not revert unrelated existing worktree changes.
 
 Local-only instruction:
@@ -282,7 +282,7 @@ Documentation updates:
 Update:
 
 1. CHANGE_LOG.md
-2. EduGrade+_CONTEXT.md
+2. EDUGRADEPLUS_CONTEXT.md
 3. docs/STUDENT_PORTAL_PLAN.md if implementation decisions differ from the plan
 4. Any Admin/Student guide page created or changed
 

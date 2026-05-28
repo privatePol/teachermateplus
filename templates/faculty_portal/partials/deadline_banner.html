@@ -1,11 +1,17 @@
 <div class="faculty-deadline-banner faculty-deadline-banner-{{ reminder.variant }}">
   <div class="faculty-deadline-banner-copy">
     <div class="faculty-deadline-banner-eyebrow">Grade Submission Deadline</div>
-    <div class="faculty-deadline-banner-title">{{ reminder.title }}</div>
     {% if reminder.has_deadline %}
+    <h4 class="faculty-deadline-banner-focus">
+      <span class="deadline-period">{{ reminder.period_name }}</span>
+      <span class="deadline-divider">/</span>
+      <span class="deadline-date">{{ reminder.deadline_at|date:"F j, Y" }}</span>
+      <span class="deadline-time">{{ reminder.deadline_at|date:"g:i A" }}</span>
+    </h4>
+    {% endif %}
+    <div class="faculty-deadline-banner-title">{{ reminder.title }}</div>
+    {% if reminder.has_deadline and reminder.affected_classes %}
     <div class="faculty-deadline-banner-meta">
-      <span>Period: {{ reminder.period_name }}</span>
-      <span>Deadline: {{ reminder.deadline_at|date:"F j, Y g:i A" }}</span>
       {% if reminder.affected_classes %}
       <span>Classes Affected: {{ reminder.affected_classes }}</span>
       {% endif %}
@@ -16,9 +22,10 @@
     <div class="faculty-deadline-banner-helper">{{ reminder.helper }}</div>
     {% endif %}
   </div>
-  {% if reminder.next_url %}
   <div class="faculty-deadline-banner-action">
+    <a class="faculty-deadline-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-submission">Guide</a>
+    {% if reminder.next_url %}
     <a class="btn btn-sm btn-outline-dark" href="{{ reminder.next_url }}">Open Related Class</a>
+    {% endif %}
   </div>
-  {% endif %}
 </div>

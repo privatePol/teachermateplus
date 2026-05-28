@@ -52,34 +52,57 @@
     background: #245826;
     border-color: #245826;
   }
+  .seal-panel {
+    background: #fbfdf9;
+    border-left: 1px solid #dfe7dc;
+    min-height: 100%;
+  }
+  .seal-panel img {
+    width: min(78%, 250px);
+    max-height: 72%;
+    height: auto;
+    object-fit: contain;
+    display: block;
+  }
+  @media (max-width: 991.98px) {
+    .seal-panel {
+      border-left: 0;
+      border-top: 1px solid #dfe7dc;
+      min-height: 220px;
+    }
+    .seal-panel img {
+      width: min(210px, 52vw);
+      max-height: 180px;
+    }
+  }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container py-4 py-lg-5">
   <div class="row justify-content-center">
-    <div class="col-12 col-xl-10">
+    <div class="col-12 col-xxl-11">
       <div class="login-shell">
         <div class="row g-0">
-          <div class="col-lg-5">
+          <div class="col-lg-4">
             <div class="brand-panel p-4 p-lg-5 h-100">
               <h1 class="h3 fw-bold mb-3">Admin Portal Login</h1>
               <p class="mb-4">
-                Sign in as registrar, campus admin, dean, or authorized governance personnel.
+                Sign in as an authorized NCBA EduGradePlus user.
               </p>
               <div class="image-holder mb-3">
                 <img
-                  src="{% get_media_prefix %}logos/edugradepro_logo.png"
+                  src="{% get_media_prefix %}logos/edugradeplus_logo.png"
                   alt="EduGrade+ logo"
                 >
               </div>
               <p class="small mb-0">
-                Protected portal with role-based access, audit trail, and tenant scoping.
+                For users with no login credentials, please coordinate with the MIS Department. Use only your assigned account and keep your credentials confidential.
               </p>
             </div>
           </div>
-          <div class="col-lg-7">
-            <div class="p-4 p-lg-5">
+          <div class="col-lg-5">
+            <div class="p-4 p-lg-5 h-100">
               <h2 class="h4 fw-bold mb-2">Welcome Back</h2>
               <p class="text-secondary mb-4">Enter your admin credentials to continue.</p>
               <form method="post" novalidate>
@@ -100,6 +123,14 @@
               <div class="text-center mt-3">
                 <a href="{% url 'accounts:admin_forgot_password' %}" class="small">Forgot password?</a>
               </div>
+            </div>
+          </div>
+          <div class="col-lg-3">
+            <div class="seal-panel d-flex align-items-center justify-content-center p-4 h-100">
+              <img
+                src="{% get_media_prefix %}logos/ncba_npc_seal.png"
+                alt="NCBA National Privacy Commission seal"
+              >
             </div>
           </div>
         </div>

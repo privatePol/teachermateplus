@@ -12,7 +12,7 @@ This repository contains **EduGrade+ V1**, a multi-tenant, multi-campus academic
 When starting work in this repo, align in this order:
 
 1. Read [`AGENTS.md`](AGENTS.md) first (working contract and guardrails).
-2. Read [`EduGrade+_CONTEXT.md`](EduGrade+_CONTEXT.md) for current system context.
+2. Read [`EDUGRADEPLUS_CONTEXT.md`](EDUGRADEPLUS_CONTEXT.md) for current system context.
 3. Read [`CHANGE_LOG.md`](CHANGE_LOG.md) for recent changes.
 4. Read only the relevant docs under [`docs/`](docs/) for the task at hand.
 
@@ -75,7 +75,7 @@ For targeted smoke tests, cover:
 If behavior changes, update:
 
 1. [`CHANGE_LOG.md`](CHANGE_LOG.md)
-2. [`EduGrade+_CONTEXT.md`](EduGrade+_CONTEXT.md)
+2. [`EDUGRADEPLUS_CONTEXT.md`](EDUGRADEPLUS_CONTEXT.md)
 3. Relevant Faculty/Admin guide pages
 
 ---

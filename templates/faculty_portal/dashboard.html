@@ -98,17 +98,49 @@
     gap: 0.75rem;
     margin: 1rem 0 1.2rem;
   }
+  .faculty-dashboard-nav-tile,
+  .faculty-dashboard-action-tile {
+    position: relative;
+    min-height: 100%;
+  }
   .faculty-dashboard-nav-card {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     height: 100%;
     border: 1px solid #dbe7d8;
     border-radius: 1rem;
     background: #ffffff;
-    padding: 0.95rem 1rem;
+    padding: 1.35rem 1rem 0.95rem;
     color: #183e27;
+    text-align: center;
     text-decoration: none;
     box-shadow: 0 12px 24px rgba(18, 52, 31, 0.06);
     transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+  .faculty-dashboard-guide-tag {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.55rem;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.18rem 0.5rem;
+    border: 1px solid rgba(18, 52, 31, 0.16);
+    background: rgba(255, 255, 255, 0.86);
+    color: #315a3e;
+    font-size: 0.68rem;
+    font-weight: 850;
+    text-decoration: none;
+    box-shadow: 0 6px 12px rgba(18, 52, 31, 0.08);
+  }
+  .faculty-dashboard-guide-tag:hover,
+  .faculty-dashboard-guide-tag:focus {
+    background: #fff7d6;
+    color: #0f5132;
+    text-decoration: none;
   }
   .faculty-dashboard-nav-card:hover {
     transform: translateY(-3px);
@@ -127,6 +159,70 @@
     color: #607667;
     font-size: 0.86rem;
     line-height: 1.35;
+  }
+  .faculty-dashboard-nav-icon {
+    width: 2.35rem;
+    height: 2.35rem;
+    border-radius: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.65rem;
+    background: rgba(255, 255, 255, 0.75);
+    box-shadow: inset 0 0 0 1px rgba(23, 61, 39, 0.08);
+  }
+  .faculty-dashboard-nav-icon svg {
+    width: 1.25rem;
+    height: 1.25rem;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .faculty-dashboard-nav-card.nav-grading {
+    border-color: #b9dfc0;
+    background: linear-gradient(135deg, #ffffff 0%, #eef9f0 100%);
+  }
+  .faculty-dashboard-nav-card.nav-grading .faculty-dashboard-nav-icon {
+    color: #0f6b46;
+  }
+  .faculty-dashboard-nav-card.nav-priority {
+    border-color: #efd590;
+    background: linear-gradient(135deg, #ffffff 0%, #fff4cf 100%);
+  }
+  .faculty-dashboard-nav-card.nav-priority .faculty-dashboard-nav-icon {
+    color: #8a6400;
+  }
+  .faculty-dashboard-nav-card.nav-support {
+    border-color: #b8d9ee;
+    background: linear-gradient(135deg, #ffffff 0%, #edf7fd 100%);
+  }
+  .faculty-dashboard-nav-card.nav-support .faculty-dashboard-nav-icon {
+    color: #1f5f8b;
+  }
+  .faculty-dashboard-nav-card.nav-notes {
+    border-color: #d2c4ec;
+    background: linear-gradient(135deg, #ffffff 0%, #f4effc 100%);
+  }
+  .faculty-dashboard-nav-card.nav-notes .faculty-dashboard-nav-icon {
+    color: #60409a;
+  }
+  .faculty-dashboard-nav-card.nav-grading strong,
+  .faculty-dashboard-nav-card.nav-grading:hover {
+    color: #0f6b46;
+  }
+  .faculty-dashboard-nav-card.nav-priority strong,
+  .faculty-dashboard-nav-card.nav-priority:hover {
+    color: #8a6400;
+  }
+  .faculty-dashboard-nav-card.nav-support strong,
+  .faculty-dashboard-nav-card.nav-support:hover {
+    color: #1f5f8b;
+  }
+  .faculty-dashboard-nav-card.nav-notes strong,
+  .faculty-dashboard-nav-card.nav-notes:hover {
+    color: #60409a;
   }
   .faculty-kpi-card {
     border: 0;
@@ -293,6 +389,27 @@
     color: #173d27;
     margin-bottom: 0.25rem;
   }
+  .faculty-deadline-banner-focus {
+    font-size: 1.28rem;
+    font-weight: 850;
+    line-height: 1.25;
+    margin: 0 0 0.35rem;
+  }
+  .faculty-deadline-banner-focus .deadline-period {
+    color: #8a251d;
+  }
+  .faculty-deadline-banner-focus .deadline-date {
+    color: #0f6b46;
+  }
+  .faculty-deadline-banner-focus .deadline-time {
+    color: #1f5f8b;
+    margin-left: 0.35rem;
+  }
+  .faculty-deadline-banner-focus .deadline-divider {
+    color: #9aab9e;
+    font-weight: 650;
+    margin: 0 0.25rem;
+  }
   .faculty-deadline-banner-meta {
     display: flex;
     flex-wrap: wrap;
@@ -324,6 +441,31 @@
     letter-spacing: 0.08em;
     color: #6d8374;
     margin-bottom: 0.25rem;
+  }
+  .faculty-active-period-entry + .faculty-active-period-entry {
+    margin-top: 0.95rem;
+    padding-top: 0.95rem;
+    border-top: 1px solid rgba(96, 126, 99, 0.22);
+  }
+  .faculty-active-period-scope {
+    font-size: 1.28rem;
+    font-weight: 850;
+    line-height: 1.25;
+    margin: 0 0 0.4rem;
+  }
+  .faculty-active-period-scope .scope-campus {
+    color: #0f6b46;
+  }
+  .faculty-active-period-scope .scope-ay {
+    color: #8a6400;
+  }
+  .faculty-active-period-scope .scope-term {
+    color: #1f5f8b;
+  }
+  .faculty-active-period-scope .scope-divider {
+    color: #9aab9e;
+    font-weight: 650;
+    margin: 0 0.25rem;
   }
   .faculty-active-period-title {
     font-size: 1.12rem;
@@ -482,15 +624,48 @@
   .faculty-dashboard-action-card {
     display: flex;
     flex-direction: column;
+    height: 100%;
     min-height: 100%;
     border: 1px solid #dbe7d8;
     border-radius: 1rem;
     background: #ffffff;
-    padding: 1rem;
+    padding: 1.45rem 1rem 1rem;
     color: #173d27;
     text-decoration: none;
     box-shadow: 0 12px 24px rgba(18, 52, 31, 0.06);
     transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+  .faculty-dashboard-action-card.action-grading {
+    border-color: #b9dfc0;
+    background: linear-gradient(180deg, #ffffff 0%, #eff9f1 100%);
+  }
+  .faculty-dashboard-action-card.action-priority {
+    border-color: #efd590;
+    background: linear-gradient(180deg, #ffffff 0%, #fff4cf 100%);
+  }
+  .faculty-dashboard-action-card.action-support {
+    border-color: #b8d9ee;
+    background: linear-gradient(180deg, #ffffff 0%, #edf7fd 100%);
+  }
+  .faculty-dashboard-action-card.action-classlist {
+    border-color: #d2c4ec;
+    background: linear-gradient(180deg, #ffffff 0%, #f4effc 100%);
+  }
+  .faculty-dashboard-action-card.action-grading .action-value,
+  .faculty-dashboard-action-card.action-grading .action-cta {
+    color: #0f6b46;
+  }
+  .faculty-dashboard-action-card.action-priority .action-value,
+  .faculty-dashboard-action-card.action-priority .action-cta {
+    color: #8a6400;
+  }
+  .faculty-dashboard-action-card.action-support .action-value,
+  .faculty-dashboard-action-card.action-support .action-cta {
+    color: #1f5f8b;
+  }
+  .faculty-dashboard-action-card.action-classlist .action-value,
+  .faculty-dashboard-action-card.action-classlist .action-cta {
+    color: #60409a;
   }
   .faculty-dashboard-action-card:hover {
     transform: translateY(-2px);
@@ -530,6 +705,30 @@
     color: #1b6a40;
     font-weight: 800;
   }
+  .faculty-deadline-banner-action {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    justify-content: flex-end;
+  }
+  .faculty-deadline-guide-tag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.28rem 0.7rem;
+    border: 1px solid #b9d8bc;
+    background: #ffffff;
+    color: #315a3e;
+    font-size: 0.78rem;
+    font-weight: 850;
+    text-decoration: none;
+  }
+  .faculty-deadline-guide-tag:hover,
+  .faculty-deadline-guide-tag:focus {
+    background: #fff7d6;
+    color: #0f5132;
+    text-decoration: none;
+  }
   @media (max-width: 991.98px) {
     .faculty-dashboard-hero-grid,
     .faculty-dashboard-nav,
@@ -541,6 +740,9 @@
     .faculty-deadline-banner {
       flex-direction: column;
       align-items: flex-start;
+    }
+    .faculty-deadline-banner-action {
+      justify-content: flex-start;
     }
     .faculty-action-item,
     .faculty-risk-item {
@@ -586,29 +788,59 @@
 {% include "faculty_portal/partials/deadline_banner.html" with reminder=stats.deadline_reminder %}
 
 <div class="faculty-dashboard-nav" aria-label="Faculty dashboard shortcuts">
-  <a class="faculty-dashboard-nav-card" href="{% url 'faculty_portal:my_courses' %}">
-    <strong>Continue Grading</strong>
-    <span>Open classes, periods, activities, attendance, and summaries.</span>
-  </a>
-  <a class="faculty-dashboard-nav-card" href="#priority-actions">
-    <strong>Priority Actions</strong>
-    <span>Jump to urgent work before deadlines and submission review.</span>
-  </a>
+  <div class="faculty-dashboard-nav-tile">
+    <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-workflow">Guide</a>
+    <a class="faculty-dashboard-nav-card nav-grading" href="{% url 'faculty_portal:my_courses' %}">
+      <span class="faculty-dashboard-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M6 4h12v16H6z"></path><path d="M9 8h6"></path><path d="M9 12h6"></path><path d="M9 16h4"></path></svg>
+      </span>
+      <strong>Continue Grading</strong>
+      <span>Open classes, periods, activities, attendance, and summaries.</span>
+    </a>
+  </div>
+  <div class="faculty-dashboard-nav-tile">
+    <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-submission">Guide</a>
+    <a class="faculty-dashboard-nav-card nav-priority" href="#priority-actions">
+      <span class="faculty-dashboard-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3v4"></path><path d="M12 12v1"></path><path d="M7 7h10"></path><path d="M5 20h14"></path><path d="M8 16h8"></path></svg>
+      </span>
+      <strong>Priority Actions</strong>
+      <span>Jump to urgent work before deadlines and submission review.</span>
+    </a>
+  </div>
   {% if faculty_at_risk_monitor_enabled %}
-    <a class="faculty-dashboard-nav-card" href="{% url 'faculty_portal:student_at_risk_monitor' %}">
-      <strong>Student Support</strong>
-      <span>Review students who need follow-up this period.</span>
-    </a>
+    <div class="faculty-dashboard-nav-tile">
+      <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-prediction">Guide</a>
+      <a class="faculty-dashboard-nav-card nav-support" href="{% url 'faculty_portal:student_at_risk_monitor' %}">
+        <span class="faculty-dashboard-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path><path d="M15 13a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"></path><path d="M4.5 20c.4-3.3 2.7-5 4.5-5s4.1 1.7 4.5 5"></path><path d="M13.5 20c.2-2 1.5-3.4 3-3.4 1.4 0 2.7 1 3 3.4"></path></svg>
+        </span>
+        <strong>Student Support</strong>
+        <span>Review students who need follow-up this period.</span>
+      </a>
+    </div>
   {% else %}
-    <a class="faculty-dashboard-nav-card" href="{% url 'faculty_portal:my_courses' %}">
-      <strong>Student Support</strong>
-      <span>Review class summaries for students who may need follow-up.</span>
-    </a>
+    <div class="faculty-dashboard-nav-tile">
+      <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-prediction">Guide</a>
+      <a class="faculty-dashboard-nav-card nav-support" href="{% url 'faculty_portal:my_courses' %}">
+        <span class="faculty-dashboard-nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"></path><path d="M15 13a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"></path><path d="M4.5 20c.4-3.3 2.7-5 4.5-5s4.1 1.7 4.5 5"></path><path d="M13.5 20c.2-2 1.5-3.4 3-3.4 1.4 0 2.7 1 3 3.4"></path></svg>
+        </span>
+        <strong>Student Support</strong>
+        <span>Review class summaries for students who may need follow-up.</span>
+      </a>
+    </div>
   {% endif %}
-  <a class="faculty-dashboard-nav-card" href="{% url 'faculty_portal:memo_center' %}">
-    <strong>Private Notes</strong>
-    <span>Keep follow-up notes for classes and students.</span>
-  </a>
+  <div class="faculty-dashboard-nav-tile">
+    <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-notes">Guide</a>
+    <a class="faculty-dashboard-nav-card nav-notes" href="{% url 'faculty_portal:memo_center' %}">
+      <span class="faculty-dashboard-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z"></path><path d="M8 9h8"></path><path d="M8 13h5"></path><path d="M8 17h6"></path></svg>
+      </span>
+      <strong>Private Notes</strong>
+      <span>Keep follow-up notes for classes and students.</span>
+    </a>
+  </div>
 </div>
 
 <div class="row g-3 faculty-command-grid">
@@ -687,44 +919,59 @@
   <div class="section-title">Main Action Cards</div>
   <div class="section-note">Each card opens the page where the faculty can act on the item.</div>
   <div class="faculty-dashboard-action-metrics">
-    <a class="faculty-dashboard-action-card" href="{% url 'faculty_portal:my_courses' %}">
-      <span class="action-label">Grading Work</span>
-      <span class="action-value">{{ stats.classes_not_submitted }}</span>
-      <span class="action-title">Classes Not Yet Submitted</span>
-      <span class="action-note">Open your class cards and continue the period that still needs submission.</span>
-      <span class="action-cta">Open My Classes</span>
-    </a>
-    <a class="faculty-dashboard-action-card" href="#priority-actions">
-      <span class="action-label">Immediate Work</span>
-      <span class="action-value">{{ stats.priority_actions|length }}</span>
-      <span class="action-title">Priority Actions</span>
-      <span class="action-note">Review overdue periods, missing scores, and submission blockers first.</span>
-      <span class="action-cta">View Priority Actions</span>
-    </a>
-    {% if stats.at_risk_preview.enabled and faculty_at_risk_monitor_enabled %}
-      <a class="faculty-dashboard-action-card" href="{{ stats.at_risk_preview.view_all_url }}">
-        <span class="action-label">Student Support</span>
-        <span class="action-value">{{ stats.at_risk_preview.total_count }}</span>
-        <span class="action-title">Students Needing Follow-up</span>
-        <span class="action-note">Open the current-period intervention monitor for students who may need support.</span>
-        <span class="action-cta">Open Intervention Monitor</span>
-      </a>
-    {% else %}
-      <a class="faculty-dashboard-action-card" href="{% url 'faculty_portal:my_courses' %}">
-        <span class="action-label">Student Support</span>
-        <span class="action-value">{{ stats.failed_period_grade_count }}</span>
-        <span class="action-title">Students Needing Follow-up</span>
-        <span class="action-note">Review class summaries for students below the passing mark.</span>
+    <div class="faculty-dashboard-action-tile">
+      <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-submission">Guide</a>
+      <a class="faculty-dashboard-action-card action-grading" href="{% url 'faculty_portal:my_courses' %}">
+        <span class="action-label">Grading Work</span>
+        <span class="action-value">{{ stats.classes_not_submitted }}</span>
+        <span class="action-title">Classes Not Yet Submitted</span>
+        <span class="action-note">Open your class cards and continue the period that still needs submission.</span>
         <span class="action-cta">Open My Classes</span>
       </a>
+    </div>
+    <div class="faculty-dashboard-action-tile">
+      <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-submission">Guide</a>
+      <a class="faculty-dashboard-action-card action-priority" href="#priority-actions">
+        <span class="action-label">Immediate Work</span>
+        <span class="action-value">{{ stats.priority_actions|length }}</span>
+        <span class="action-title">Priority Actions</span>
+        <span class="action-note">Review overdue periods, missing scores, and submission blockers first.</span>
+        <span class="action-cta">View Priority Actions</span>
+      </a>
+    </div>
+    {% if stats.at_risk_preview.enabled and faculty_at_risk_monitor_enabled %}
+      <div class="faculty-dashboard-action-tile">
+        <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-prediction">Guide</a>
+        <a class="faculty-dashboard-action-card action-support" href="{{ stats.at_risk_preview.view_all_url }}">
+          <span class="action-label">Student Support</span>
+          <span class="action-value">{{ stats.at_risk_preview.total_count }}</span>
+          <span class="action-title">Students Needing Follow-up</span>
+          <span class="action-note">Open the current-period intervention monitor for students who may need support.</span>
+          <span class="action-cta">Open Intervention Monitor</span>
+        </a>
+      </div>
+    {% else %}
+      <div class="faculty-dashboard-action-tile">
+        <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-prediction">Guide</a>
+        <a class="faculty-dashboard-action-card action-support" href="{% url 'faculty_portal:my_courses' %}">
+          <span class="action-label">Student Support</span>
+          <span class="action-value">{{ stats.failed_period_grade_count }}</span>
+          <span class="action-title">Students Needing Follow-up</span>
+          <span class="action-note">Review class summaries for students below the passing mark.</span>
+          <span class="action-cta">Open My Classes</span>
+        </a>
+      </div>
     {% endif %}
-    <a class="faculty-dashboard-action-card" href="{% url 'faculty_portal:my_courses' %}">
-      <span class="action-label">Classlist Status</span>
-      <span class="action-value">{{ stats.incomplete_students }}</span>
-      <span class="action-title">Incomplete Students</span>
-      <span class="action-note">Students currently marked as DRP: {{ stats.dropped_students }} | W: {{ stats.withdrawn_students }} | INC: {{ stats.incomplete_students }}</span>
-      <span class="action-cta">Open Class Lists</span>
-    </a>
+    <div class="faculty-dashboard-action-tile">
+      <a class="faculty-dashboard-guide-tag" href="{% url 'faculty_portal:guide' %}#guide-classlist">Guide</a>
+      <a class="faculty-dashboard-action-card action-classlist" href="{% url 'faculty_portal:my_courses' %}">
+        <span class="action-label">Classlist Status</span>
+        <span class="action-value">{{ stats.incomplete_students }}</span>
+        <span class="action-title">Incomplete Students</span>
+        <span class="action-note">Students currently marked as DRP: {{ stats.dropped_students }} | W: {{ stats.withdrawn_students }} | INC: {{ stats.incomplete_students }}</span>
+        <span class="action-cta">Open Class Lists</span>
+      </a>
+    </div>
   </div>
 </section>
 </div>

@@ -314,6 +314,27 @@
     color: #173d27;
     margin-bottom: 0.25rem;
   }
+  .faculty-deadline-banner-focus {
+    font-size: 1.28rem;
+    font-weight: 850;
+    line-height: 1.25;
+    margin: 0 0 0.35rem;
+  }
+  .faculty-deadline-banner-focus .deadline-period {
+    color: #8a251d;
+  }
+  .faculty-deadline-banner-focus .deadline-date {
+    color: #0f6b46;
+  }
+  .faculty-deadline-banner-focus .deadline-time {
+    color: #1f5f8b;
+    margin-left: 0.35rem;
+  }
+  .faculty-deadline-banner-focus .deadline-divider {
+    color: #9aab9e;
+    font-weight: 650;
+    margin: 0 0.25rem;
+  }
   .faculty-deadline-banner-meta {
     display: flex;
     flex-wrap: wrap;
@@ -331,10 +352,37 @@
     color: #466050;
     font-weight: 600;
   }
+  .faculty-deadline-banner-action {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    justify-content: flex-end;
+  }
+  .faculty-deadline-guide-tag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.28rem 0.7rem;
+    border: 1px solid #b9d8bc;
+    background: #ffffff;
+    color: #315a3e;
+    font-size: 0.78rem;
+    font-weight: 850;
+    text-decoration: none;
+  }
+  .faculty-deadline-guide-tag:hover,
+  .faculty-deadline-guide-tag:focus {
+    background: #fff7d6;
+    color: #0f5132;
+    text-decoration: none;
+  }
   @media (max-width: 767.98px) {
     .faculty-deadline-banner {
       flex-direction: column;
       align-items: flex-start;
+    }
+    .faculty-deadline-banner-action {
+      justify-content: flex-start;
     }
   }
 </style>
