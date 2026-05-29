@@ -1,6 +1,6 @@
 # SIS Integration: Periodic Grades API
 
-EduGrade+ exposes a pull API so the School Information System (SIS) can fetch periodic grades directly.
+TeacherMate+ exposes a pull API so the School Information System (SIS) can fetch periodic grades directly.
 
 ## Feature toggle
 

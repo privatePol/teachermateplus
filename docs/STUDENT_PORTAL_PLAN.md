@@ -1,6 +1,6 @@
 # Student Portal Plan
 
-This plan defines the next-stage Student Portal for EduGrade+. The Student Portal should let students securely view their own enrollment, grades, attendance, and profile information while preserving the existing multi-tenant and multi-campus governance model.
+This plan defines the next-stage Student Portal for TeacherMate+. The Student Portal should let students securely view their own enrollment, grades, attendance, and profile information while preserving the existing multi-tenant and multi-campus governance model.
 
 ## Terminology
 
@@ -80,10 +80,10 @@ Recommended V1 flow:
 2. Admin verifies that the student record has the correct registered email address.
 3. Admin opens Student Account Links or Student Portal Account Provisioning.
 4. Admin selects the student record.
-5. EduGrade+ shows the email destination that will receive the activation/invitation.
+5. TeacherMate+ shows the email destination that will receive the activation/invitation.
 6. Admin confirms account provisioning.
-7. EduGrade+ creates or links the `User` account and creates an active `StudentAccountLink`.
-8. EduGrade+ sends an activation link or temporary credential to the registered student email.
+7. TeacherMate+ creates or links the `User` account and creates an active `StudentAccountLink`.
+8. TeacherMate+ sends an activation link or temporary credential to the registered student email.
 9. Student logs in, sets a password, and accepts privacy consent.
 10. Student Portal access starts only after the active `StudentAccountLink` is in place.
 
@@ -103,7 +103,7 @@ If the `Student` model supports multiple emails, use this priority:
 2. verified school email
 3. validated imported student contact email
 
-If no trusted student email exists, EduGrade+ should not send a portal invitation automatically. Admin must correct the student record first or issue credentials through an approved manual process.
+If no trusted student email exists, TeacherMate+ should not send a portal invitation automatically. Admin must correct the student record first or issue credentials through an approved manual process.
 
 Students should not be allowed to enter an arbitrary email address during registration and immediately receive access.
 

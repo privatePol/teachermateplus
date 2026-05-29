@@ -103,7 +103,7 @@ else:
     DATABASES = {
         "default": {
             "ENGINE": DB_ENGINE,
-            "NAME": os.getenv("DB_NAME", "edugradeplus"),
+            "NAME": os.getenv("DB_NAME", "teachermateplus"),
             "USER": os.getenv("DB_USER", "root"),
             "PASSWORD": os.getenv("DB_PASSWORD", ""),
             "HOST": os.getenv("DB_HOST", "127.0.0.1"),
@@ -135,7 +135,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 CACHES = {
     "default": {
         "BACKEND": os.getenv("DJANGO_CACHE_BACKEND", "django.core.cache.backends.locmem.LocMemCache"),
-        "LOCATION": os.getenv("DJANGO_CACHE_LOCATION", "edugradeplus-local"),
+        "LOCATION": os.getenv("DJANGO_CACHE_LOCATION", "teachermateplus-local"),
     }
 }
 
@@ -147,7 +147,7 @@ LOGIN_REDIRECT_URL = "admin_portal:dashboard"
 LOGOUT_REDIRECT_URL = "accounts:admin_login"
 
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@edugradeplus.local")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
@@ -221,7 +221,7 @@ LOGGING = {
         "django": {"handlers": ["console", "system_file"], "level": "INFO", "propagate": True},
         "django.request": {"handlers": ["console", "error_file"], "level": "ERROR", "propagate": False},
         "django.security": {"handlers": ["console", "security_file"], "level": "WARNING", "propagate": False},
-        "edugradeplus.api": {"handlers": ["console", "security_file"], "level": "INFO", "propagate": False},
-        "edugradeplus.system": {"handlers": ["console", "system_file"], "level": "INFO", "propagate": False},
+        "teachermateplus.api": {"handlers": ["console", "security_file"], "level": "INFO", "propagate": False},
+        "teachermateplus.system": {"handlers": ["console", "system_file"], "level": "INFO", "propagate": False},
     },
 }

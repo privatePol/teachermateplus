@@ -1,16 +1,16 @@
-# EduGrade+ Academic Presentation Guide
+# TeacherMate+ Academic Presentation Guide
 
 Prepared for academic leadership presentation
 
 Presentation page available at:
 
-- `docs/EduGrade+_ACADEMIC_PRESENTATION.html`
+- `docs/TeacherMate+_ACADEMIC_PRESENTATION.html`
 
 ---
 
 ## Presentation Goal
 
-This presentation introduces **EduGrade+** as a **template-driven, governance-aware academic grading platform** that helps the institution:
+This presentation introduces **TeacherMate+** as a **template-driven, governance-aware academic grading platform** that helps the institution:
 
 - standardize grade computation
 - reduce spreadsheet dependency
@@ -29,17 +29,17 @@ Use this as a short 10-12 slide presentation.
 ## Slide 1. Title Slide
 
 **Title:**  
-EduGrade+: Template-Driven Academic Grading and Governance Platform
+TeacherMate+: Template-Driven Academic Grading and Governance Platform
 
 **Subtitle:**  
 NCBA Academic Presentation
 
 **Presenter message:**  
-EduGrade+ is designed not only as a grade encoding system, but as a governed academic platform that standardizes grading, supports faculty, and protects institutional processes.
+TeacherMate+ is designed not only as a grade encoding system, but as a governed academic platform that standardizes grading, supports faculty, and protects institutional processes.
 
 ---
 
-## Slide 2. What EduGrade+ Is
+## Slide 2. What TeacherMate+ Is
 
 **Slide content**
 
@@ -50,7 +50,7 @@ EduGrade+ is designed not only as a grade encoding system, but as a governed aca
 
 **Presenter note**
 
-The key idea is that EduGrade+ is not just for encoding grades. It is a structured academic workflow system that combines computation, policy, and accountability.
+The key idea is that TeacherMate+ is not just for encoding grades. It is a structured academic workflow system that combines computation, policy, and accountability.
 
 ---
 
@@ -65,11 +65,11 @@ The key idea is that EduGrade+ is not just for encoding grades. It is a structur
 
 **Main message**
 
-EduGrade+ is **template-driven**, which means computation is not improvised per faculty member.
+TeacherMate+ is **template-driven**, which means computation is not improvised per faculty member.
 
 **Presenter note**
 
-Instead of each faculty member computing grades differently in separate spreadsheets, EduGrade+ allows the institution to define the grading logic once, assign it to the course, and let the system process it consistently.
+Instead of each faculty member computing grades differently in separate spreadsheets, TeacherMate+ allows the institution to define the grading logic once, assign it to the course, and let the system process it consistently.
 
 ---
 
@@ -88,7 +88,7 @@ Faculty can work within the template structure using:
 
 **Main message**
 
-EduGrade+ supports the real academic breakdown used in institutional grading practice.
+TeacherMate+ supports the real academic breakdown used in institutional grading practice.
 
 **Presenter note**
 
@@ -111,7 +111,7 @@ The system is flexible enough to represent actual grading structures used by fac
 
 **Main message**
 
-EduGrade+ treats grade correction as a **governed academic process**, not an informal adjustment.
+TeacherMate+ treats grade correction as a **governed academic process**, not an informal adjustment.
 
 **Presenter note**
 
@@ -123,7 +123,7 @@ This is very important for institutional trust. Corrections are not hidden edits
 
 **Slide content**
 
-EduGrade+ supports the full template lifecycle:
+TeacherMate+ supports the full template lifecycle:
 
 1. **Draft**
 2. **Review**
@@ -145,7 +145,7 @@ This is one of the strongest governance features of the platform. A grading temp
 
 **Slide content**
 
-EduGrade+ includes configurable governance settings for:
+TeacherMate+ includes configurable governance settings for:
 
 - active academic year and term
 - active grading period
@@ -180,7 +180,7 @@ This means the institution can decide who drafts, who reviews, who approves, who
 
 **Main message**
 
-EduGrade+ combines academic workflow, operational support, and security controls in one platform.
+TeacherMate+ combines academic workflow, operational support, and security controls in one platform.
 
 **Presenter note**
 
@@ -234,7 +234,7 @@ Academic leadership benefits because the system provides both operational visibi
 
 **Presenter note**
 
-The real value of EduGrade+ is not only automation. It is institutional discipline with flexibility.
+The real value of TeacherMate+ is not only automation. It is institutional discipline with flexibility.
 
 ---
 
@@ -242,7 +242,7 @@ The real value of EduGrade+ is not only automation. It is institutional discipli
 
 **Slide content**
 
-EduGrade+ is designed to help NCBA move toward:
+TeacherMate+ is designed to help NCBA move toward:
 
 - template-driven grading
 - governed corrections
@@ -276,7 +276,7 @@ If you want to show a short live demo after the presentation, use this order:
 
 ### 1. Template-Driven Grade Processing
 
-EduGrade+ computes grades based on approved grading templates assigned to courses. This standardizes how the system processes periodic and final grades.
+TeacherMate+ computes grades based on approved grading templates assigned to courses. This standardizes how the system processes periodic and final grades.
 
 ### 2. Faculty Can Create Components, Sub-components, and Details
 
@@ -302,7 +302,7 @@ The system allows governance settings for template roles, corrections, deadlines
 
 ## Suggested Final Message to Academics
 
-EduGrade+ is not just a digital grade sheet. It is a governed academic platform intended to standardize grade computation, strengthen correction accountability, support faculty operations, and protect institutional academic processes.
+TeacherMate+ is not just a digital grade sheet. It is a governed academic platform intended to standardize grade computation, strengthen correction accountability, support faculty operations, and protect institutional academic processes.
 
 ---
 
@@ -316,7 +316,7 @@ These slides are added without changing the original presentation flow. Use them
 
 **Slide content**
 
-EduGrade+ also supports faculty through:
+TeacherMate+ also supports faculty through:
 
 - deadline reminder banners
 - reminder center for future activities
@@ -332,7 +332,7 @@ The platform is not only governance-focused. It also supports the daily teaching
 
 **Presenter note**
 
-This is important to emphasize because academic systems are often seen only as control tools. EduGrade+ also includes practical features that help faculty manage classes, deadlines, and student concerns more clearly.
+This is important to emphasize because academic systems are often seen only as control tools. TeacherMate+ also includes practical features that help faculty manage classes, deadlines, and student concerns more clearly.
 
 ---
 
@@ -354,7 +354,7 @@ This is important to emphasize because academic systems are often seen only as c
 
 **Main message**
 
-EduGrade+ helps enforce period discipline so faculty work is aligned with institutional grading timelines.
+TeacherMate+ helps enforce period discipline so faculty work is aligned with institutional grading timelines.
 
 **Presenter note**
 
@@ -366,8 +366,8 @@ This feature reduces confusion and prevents premature or unauthorized work in no
 
 ### Faculty Support Features
 
-EduGrade+ includes support tools for faculty such as reminders, notes, at-risk monitoring, deadline visibility, template visibility, and help guidance so the portal is more than a simple grade encoder.
+TeacherMate+ includes support tools for faculty such as reminders, notes, at-risk monitoring, deadline visibility, template visibility, and help guidance so the portal is more than a simple grade encoder.
 
 ### Active Grading Period Governance
 
-EduGrade+ allows the institution to define which grading period is currently active, and this active period can govern which period remains open for normal faculty work while still allowing approved exceptions.
+TeacherMate+ allows the institution to define which grading period is currently active, and this active period can govern which period remains open for normal faculty work while still allowing approved exceptions.

@@ -1,19 +1,19 @@
-2026-05-05 12:59:05,404 WARNING [EduGrade+.api] SIS API DENY status=403 auth_mode=TENANT_API_KEY tenant=NCBA campus=OTHER-MAIN key_prefix=e49a08b8e390
-2026-05-05 12:59:06,430 INFO [EduGrade+.api] SIS API READ status=200 auth_mode=LEGACY_TOKEN tenant=NCBA campus=NCBA-FAIRV key_prefix=
-2026-05-05 12:59:07,531 INFO [EduGrade+.api] SIS API READ status=200 auth_mode=LEGACY_TOKEN tenant=NCBA campus=NCBA-FAIRV key_prefix=
-2026-05-05 12:59:08,643 WARNING [EduGrade+.api] SIS API DENY status=401 auth_mode=INVALID tenant=NCBA campus= key_prefix=
-2026-05-05 12:59:11,968 INFO [EduGrade+.api] SIS API READ status=200 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=2d57c4f75702
-2026-05-05 12:59:12,824 WARNING [EduGrade+.api] SIS API DENY status=403 auth_mode=TENANT_API_KEY tenant=OTHER campus= key_prefix=6e78830db09d
-2026-05-05 12:59:13,839 INFO [EduGrade+.api] SIS API READ status=200 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=991d89a47562
-2026-05-05 12:59:13,843 WARNING [EduGrade+.api] SIS API RATE_LIMIT status=429 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=991d89a47562
-2026-05-05 13:00:26,544 WARNING [EduGrade+.api] SIS API DENY status=403 auth_mode=TENANT_API_KEY tenant=NCBA campus=OTHER-MAIN key_prefix=09c1eb3a7aec
-2026-05-05 13:00:27,370 INFO [EduGrade+.api] SIS API READ status=200 auth_mode=LEGACY_TOKEN tenant=NCBA campus=NCBA-FAIRV key_prefix=
-2026-05-05 13:00:28,331 INFO [EduGrade+.api] SIS API READ status=200 auth_mode=LEGACY_TOKEN tenant=NCBA campus=NCBA-FAIRV key_prefix=
-2026-05-05 13:00:29,147 WARNING [EduGrade+.api] SIS API DENY status=401 auth_mode=INVALID tenant=NCBA campus= key_prefix=
-2026-05-05 13:00:31,588 INFO [EduGrade+.api] SIS API READ status=200 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=e1c493404939
-2026-05-05 13:00:32,371 WARNING [EduGrade+.api] SIS API DENY status=403 auth_mode=TENANT_API_KEY tenant=OTHER campus= key_prefix=b4dd49c28463
-2026-05-05 13:00:33,196 INFO [EduGrade+.api] SIS API READ status=200 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=e51f5e8e9131
-2026-05-05 13:00:33,199 WARNING [EduGrade+.api] SIS API RATE_LIMIT status=429 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=e51f5e8e9131
+2026-05-05 12:59:05,404 WARNING [TeacherMate+.api] SIS API DENY status=403 auth_mode=TENANT_API_KEY tenant=NCBA campus=OTHER-MAIN key_prefix=e49a08b8e390
+2026-05-05 12:59:06,430 INFO [TeacherMate+.api] SIS API READ status=200 auth_mode=LEGACY_TOKEN tenant=NCBA campus=NCBA-FAIRV key_prefix=
+2026-05-05 12:59:07,531 INFO [TeacherMate+.api] SIS API READ status=200 auth_mode=LEGACY_TOKEN tenant=NCBA campus=NCBA-FAIRV key_prefix=
+2026-05-05 12:59:08,643 WARNING [TeacherMate+.api] SIS API DENY status=401 auth_mode=INVALID tenant=NCBA campus= key_prefix=
+2026-05-05 12:59:11,968 INFO [TeacherMate+.api] SIS API READ status=200 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=2d57c4f75702
+2026-05-05 12:59:12,824 WARNING [TeacherMate+.api] SIS API DENY status=403 auth_mode=TENANT_API_KEY tenant=OTHER campus= key_prefix=6e78830db09d
+2026-05-05 12:59:13,839 INFO [TeacherMate+.api] SIS API READ status=200 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=991d89a47562
+2026-05-05 12:59:13,843 WARNING [TeacherMate+.api] SIS API RATE_LIMIT status=429 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=991d89a47562
+2026-05-05 13:00:26,544 WARNING [TeacherMate+.api] SIS API DENY status=403 auth_mode=TENANT_API_KEY tenant=NCBA campus=OTHER-MAIN key_prefix=09c1eb3a7aec
+2026-05-05 13:00:27,370 INFO [TeacherMate+.api] SIS API READ status=200 auth_mode=LEGACY_TOKEN tenant=NCBA campus=NCBA-FAIRV key_prefix=
+2026-05-05 13:00:28,331 INFO [TeacherMate+.api] SIS API READ status=200 auth_mode=LEGACY_TOKEN tenant=NCBA campus=NCBA-FAIRV key_prefix=
+2026-05-05 13:00:29,147 WARNING [TeacherMate+.api] SIS API DENY status=401 auth_mode=INVALID tenant=NCBA campus= key_prefix=
+2026-05-05 13:00:31,588 INFO [TeacherMate+.api] SIS API READ status=200 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=e1c493404939
+2026-05-05 13:00:32,371 WARNING [TeacherMate+.api] SIS API DENY status=403 auth_mode=TENANT_API_KEY tenant=OTHER campus= key_prefix=b4dd49c28463
+2026-05-05 13:00:33,196 INFO [TeacherMate+.api] SIS API READ status=200 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=e51f5e8e9131
+2026-05-05 13:00:33,199 WARNING [TeacherMate+.api] SIS API RATE_LIMIT status=429 auth_mode=TENANT_API_KEY tenant=NCBA campus=NCBA-FAIRV key_prefix=e51f5e8e9131
 2026-05-28 09:24:24,538 ERROR [django.security.DisallowedHost] Invalid HTTP_HOST header: 'testserver'. You may need to add 'testserver' to ALLOWED_HOSTS.
 Traceback (most recent call last):
   File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner

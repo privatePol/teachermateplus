@@ -1,10 +1,10 @@
 # Production Testing-Phase Update Instructions
 
-These instructions apply to the current EduGrade+ production server while it is **not yet live** and is being used only by limited testing users.
+These instructions apply to the current TeacherMate+ production server while it is **not yet live** and is being used only by limited testing users.
 
 ## Current Situation
 
-- The production server already has EduGrade+ running.
+- The production server already has TeacherMate+ running.
 - The production database was initially copied from development before the latest cleanup/reset work.
 - Production already pulled code from the repository before the most recent updates.
 - The local development `.env` is ignored by Git, so it will not be copied by `git pull`.

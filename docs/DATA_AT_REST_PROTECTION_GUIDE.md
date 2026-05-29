@@ -1,6 +1,6 @@
-# EduGrade+ Data-at-Rest Protection Guide
+# TeacherMate+ Data-at-Rest Protection Guide
 
-This guide separates what EduGrade+ now protects inside the Django codebase from what IT must still configure on the production server.
+This guide separates what TeacherMate+ now protects inside the Django codebase from what IT must still configure on the production server.
 
 ## Implemented in the Application
 
@@ -35,7 +35,7 @@ This guide separates what EduGrade+ now protects inside the Django codebase from
 
 ## Environment-Variable Secrets
 
-EduGrade+ should load production secrets from environment variables, not committed files.
+TeacherMate+ should load production secrets from environment variables, not committed files.
 
 Required production values include:
 
@@ -78,7 +78,7 @@ These items must be performed by the production IT/server administrator. They ar
    - copy encrypted backups off-server
    - test restore regularly
 7. Operating-system permissions:
-   - restrict `/etc/edugradeplus/edugradeplus.env`
+   - restrict `/etc/teachermateplus/teachermateplus.env`
    - restrict media and backup folders to the application user and backup operator
    - ensure logs do not expose secrets
 

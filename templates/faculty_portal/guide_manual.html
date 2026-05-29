@@ -276,7 +276,7 @@
   <div class="card manual-hero mb-4">
     <div class="card-body">
       <div class="manual-eyebrow">Faculty Manual</div>
-      <div class="manual-title">EduGrade+ Faculty Portal Guide</div>
+      <div class="manual-title">TeacherMate+ Faculty Portal Guide</div>
       <p class="manual-subtitle">
         This guide explains the Faculty Portal in simple terms: what each feature is for, when to use it, and what rules
         affect grading, submission, corrections, and student status.
@@ -401,7 +401,7 @@
           </tr>
           <tr>
             <td>Score Encoding</td>
-            <td>Encode scores, then save. If you try to leave with unsaved scores, EduGrade+ warns you first.</td>
+            <td>Encode scores, then save. If you try to leave with unsaved scores, TeacherMate+ warns you first.</td>
             <td>Saved scores are used in grade computation. Unsaved work is not.</td>
           </tr>
           <tr>
@@ -465,7 +465,7 @@
           <li>The Faculty Portal class card shows the assigned grading template. Faculty can open it in read-only mode to review formulas before grading.</li>
           <li>If governance allows template issue reporting, the class grading-template page shows <strong>Report Template Issue</strong>. The report is reviewed through template hotfix governance and does not immediately change grades.</li>
           <li>If a class has no active published course-template assignment, My Classes warns the faculty member that the grading template is not assigned yet and directs them to coordinate with the MIS Department.</li>
-          <li>If admin attached a syllabus link to the course, the accepted class card shows a syllabus icon. The link opens through EduGrade+ assignment checks, the click is recorded for audit, then Google Drive applies the school's sharing rules.</li>
+          <li>If admin attached a syllabus link to the course, the accepted class card shows a syllabus icon. The link opens through TeacherMate+ assignment checks, the click is recorded for audit, then Google Drive applies the school's sharing rules.</li>
           <li>Scheduled operations should run <code>manage.py process_faculty_assignment_reminders</code> so reminders and expirations are processed regularly.</li>
         </ul>
       </div>
@@ -479,7 +479,7 @@
         <div class="manual-rule-grid">
           <div class="manual-rule">
             <strong>Before You Submit</strong>
-            <p>Check the active students, template gaps, missing saved rows, and summary results first. EduGrade+ blocks submission if ACTIVE students still lack required score or attendance records.</p>
+            <p>Check the active students, template gaps, missing saved rows, and summary results first. TeacherMate+ blocks submission if ACTIVE students still lack required score or attendance records.</p>
           </div>
           <div class="manual-rule">
             <strong>Period Snapshot</strong>
@@ -495,7 +495,7 @@
           </div>
           <div class="manual-rule">
             <strong>Final Grade Formula</strong>
-            <p>EduGrade+ computes the <strong>FINAL GRADE</strong> using the grading profile matched to the class. If there is no special formula, it uses all configured grading periods. Missing later periods still count in the divisor.</p>
+            <p>TeacherMate+ computes the <strong>FINAL GRADE</strong> using the grading profile matched to the class. If there is no special formula, it uses all configured grading periods. Missing later periods still count in the divisor.</p>
           </div>
             <div class="manual-rule">
               <strong>Deadlines</strong>
@@ -591,7 +591,7 @@
     <div class="card-body">
       <div class="manual-section-title">7.1 Sample Grade Computation</div>
       <p class="manual-copy">
-        This example shows how EduGrade+ can compute one student's grade using Base-50 scoring, component weights,
+        This example shows how TeacherMate+ can compute one student's grade using Base-50 scoring, component weights,
         and a final-grade formula. Actual classes still follow the grading template assigned to the course.
       </p>
 

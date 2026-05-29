@@ -505,7 +505,7 @@ class CorrectionOfficialReportService:
                 Spacer(1, 12),
                 Paragraph("C. OFFICIAL GRADE SUMMARY", styles["SectionTitle"]),
                 Paragraph(
-                    "Detailed correction scope remains available inside EduGrade+. This printable report shows only the official grade value to be posted in AIMS.",
+                    "Detailed correction scope remains available inside TeacherMate+. This printable report shows only the official grade value to be posted in AIMS.",
                     styles["SmallBody"],
                 ),
                 Spacer(1, 4),
@@ -609,7 +609,7 @@ class CorrectionOfficialReportService:
             [
                 Paragraph("F. REGISTRAR REFERENCE" if signatures_enabled else "E. REGISTRAR REFERENCE", styles["SectionTitle"]),
                 Paragraph(
-                    "This correction completed academic approval in EduGrade+ and is issued as the official reference document for registrar posting in AIMS.",
+                    "This correction completed academic approval in TeacherMate+ and is issued as the official reference document for registrar posting in AIMS.",
                     styles["BodyText"],
                 ),
                 Spacer(1, 4),

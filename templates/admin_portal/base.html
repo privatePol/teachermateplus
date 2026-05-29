@@ -1,7 +1,7 @@
 {% extends "shared/base_public.html" %}
 {% load static %}
 
-{% block title %}Admin Portal | EduGrade+{% endblock %}
+{% block title %}Admin Portal | TeacherMate+{% endblock %}
 {% block extra_head %}
 <style>
   :root {
@@ -20,7 +20,7 @@
   .admin-sidebar {
     background:
       radial-gradient(circle at 88% 5%, rgba(243, 209, 85, 0.08) 0%, rgba(243, 209, 85, 0.03) 24%, rgba(243, 209, 85, 0) 56%),
-      linear-gradient(180deg, #5b9a37 0%, #4d8c33 32%, #39742d 68%, #214f25 100%);
+      linear-gradient(180deg, #214f25 0%, #39742d 32%, #4d8c33 68%, #5b9a37 100%);
     box-shadow: inset -1px 0 0 #35603a;
     position: relative;
     overflow: hidden;
@@ -290,6 +290,13 @@
   }
   .admin-scope-form {
     margin-left: 1rem;
+    flex-wrap: nowrap !important;
+    align-items: center;
+  }
+  .admin-scope-form .form-select {
+    flex: 0 0 13.5rem;
+    width: 13.5rem;
+    max-width: min(13.5rem, 42vw);
   }
   .admin-academic-scope {
     margin-left: 1rem;
@@ -318,6 +325,14 @@
     color: #5a715f;
   }
   @media (max-width: 767.98px) {
+    .admin-scope-form {
+      flex-wrap: wrap !important;
+    }
+    .admin-scope-form .form-select {
+      flex: 1 1 100%;
+      width: 100%;
+      max-width: 100%;
+    }
     .admin-scope-form,
     .admin-academic-scope {
       margin-left: 0;
@@ -380,7 +395,7 @@
   <div class="row min-vh-100">
     <aside class="col-12 col-md-3 col-lg-2 admin-sidebar p-3"{% if privacy_consent_pending %} aria-label="Navigation unavailable until privacy consent is accepted"{% endif %}>
       <div class="mb-4 admin-logo-wrap">
-        <img src="{% get_media_prefix %}logos/edugradeplus_logo.png" alt="EduGradePlus" class="img-fluid" style="max-width: 230px;">
+        <img src="{% get_media_prefix %}logos/teachermate_logo_text_official.png" alt="TeacherMatePlus" class="img-fluid" style="max-width: 230px;">
       </div>
       {% if privacy_consent_pending %}
         <div class="admin-consent-nav-lock" aria-live="polite">
@@ -494,8 +509,8 @@
 {% block extra_js %}
 <script>
   document.addEventListener("DOMContentLoaded", function () {
-    const storageKey = "EduGrade+_admin_sidebar_groups";
-    const sidebarCollapsedKey = "EduGrade+_admin_sidebar_collapsed";
+    const storageKey = "TeacherMate+_admin_sidebar_groups";
+    const sidebarCollapsedKey = "TeacherMate+_admin_sidebar_collapsed";
     const groupIconMarkup = {
       DASHBOARD:
         '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5"></path><path d="M6.5 10.5V19h11v-8.5"></path><path d="M10 19v-5h4v5"></path></svg>',

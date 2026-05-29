@@ -1,6 +1,6 @@
-# EduGrade+ Staging Workflow Guide
+# TeacherMate+ Staging Workflow Guide
 
-This guide explains a simple staging workflow for EduGrade+ before production deployment.
+This guide explains a simple staging workflow for TeacherMate+ before production deployment.
 
 ## 1. What Staging Is
 
@@ -37,10 +37,10 @@ That is much safer.
 
 If you only have one Ubuntu VPS, use:
 
-- production app at `/opt/edugradeplus`
-- staging app at `/opt/edugradeplus-staging`
-- production DB `EduGrade+`
-- staging DB `EduGrade+_staging`
+- production app at `/opt/teachermateplus`
+- staging app at `/opt/teachermateplus-staging`
+- production DB `teachermateplus`
+- staging DB `teachermateplus_staging`
 - production domain `grades.yourdomain.com`
 - staging domain `staging-grades.yourdomain.com`
 

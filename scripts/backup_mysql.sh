@@ -9,7 +9,7 @@ DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-3306}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-OUTPUT="${BACKUP_DIR}/${DB_NAME:-edugradeplus}-${TIMESTAMP}.sql.gz"
+OUTPUT="${BACKUP_DIR}/${DB_NAME:-teachermateplus}-${TIMESTAMP}.sql.gz"
 
 if [[ -z "${DB_NAME:-}" || -z "${DB_USER:-}" || -z "${DB_PASSWORD:-}" ]]; then
   echo "Missing DB_NAME, DB_USER, or DB_PASSWORD." >&2

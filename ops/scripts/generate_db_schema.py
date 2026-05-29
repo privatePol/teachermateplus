@@ -151,7 +151,7 @@ def explain_field(field: models.Field) -> str:
         return "Boolean flag used by the workflow or record."
     if field.get_internal_type() in {"DecimalField", "FloatField", "IntegerField", "PositiveIntegerField", "PositiveSmallIntegerField"}:
         return "Numeric value used by the workflow or computation."
-    return "Application field used by edugradeplus."
+    return "Application field used by teachermateplus."
 
 
 def field_relationship(field: models.Field) -> str:
@@ -176,7 +176,7 @@ def unique_summary(opts) -> list[str]:
 def model_section(model: type[models.Model]) -> str:
     opts = model._meta
     label = model_label(model)
-    purpose = MODEL_PURPOSES.get(label, "edugradeplus application table.")
+    purpose = MODEL_PURPOSES.get(label, "teachermateplus application table.")
     outgoing = []
     for field in opts.concrete_fields:
         if field.is_relation and getattr(field, "related_model", None):
@@ -265,16 +265,16 @@ def main() -> None:
     ]
 
     sections = [
-        "# edugradeplus Database Schema Dictionary",
+        "# teachermateplus Database Schema Dictionary",
         "",
-        "This document is generated from the current Django model registry so it reflects the actual edugradeplus schema at generation time.",
+        "This document is generated from the current Django model registry so it reflects the actual teachermateplus schema at generation time.",
         "",
         "## Notes",
         "",
         "- **Django Type** shows the Django field class used by the model.",
         "- Production MySQL/MariaDB column types may differ slightly at the storage level from Django field names.",
         "- Relationship targets are shown using both the database table name and the Django model label.",
-        "- This dictionary includes both edugradeplus application tables and the small number of built-in Django framework tables used by the project.",
+        "- This dictionary includes both teachermateplus application tables and the small number of built-in Django framework tables used by the project.",
         "",
         "## Application Areas",
         "",

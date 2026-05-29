@@ -1,6 +1,6 @@
 # Multi-Campus Identity and Compliance Reference
 
-This note captures recurring architectural and operational findings already verified in the EduGrade+ codebase, so the same concerns do not need to be rediscovered repeatedly.
+This note captures recurring architectural and operational findings already verified in the TeacherMate+ codebase, so the same concerns do not need to be rediscovered repeatedly.
 
 It is written as a product-and-operations reference, not as a final design spec.
 
@@ -22,7 +22,7 @@ Operational meaning:
 
 Current verified behavior:
 
-- EduGrade+ now supports a staged communication workflow for overdue unsubmitted periodic grades:
+- TeacherMate+ now supports a staged communication workflow for overdue unsubmitted periodic grades:
   1. `Notice for Non-Compliance`
   2. `Warning for Continued Non-Compliance`
   3. `Escalation for Unresolved Non-Compliance`
@@ -55,7 +55,7 @@ Important note:
 
 Verified scoping model:
 
-- EduGrade+ scope is designed around:
+- TeacherMate+ scope is designed around:
   - tenant
   - campus
   - department
@@ -130,7 +130,7 @@ Current status: **not fully addressed**
 
 Important finding:
 
-- EduGrade+ currently uses global `User.username` and global `User.email`
+- TeacherMate+ currently uses global `User.username` and global `User.email`
 - both are unique across the whole system database
 - there is no separate campus-scoped `faculty_no` identity field yet
 
@@ -204,7 +204,7 @@ Suggested purpose:
 
 ### Why this is better than a simple campus-only uniqueness change
 
-If EduGrade+ only changes course uniqueness from:
+If TeacherMate+ only changes course uniqueness from:
 
 - `tenant + code`
 

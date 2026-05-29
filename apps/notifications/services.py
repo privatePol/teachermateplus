@@ -368,7 +368,7 @@ class FacultyReminderService:
             entry.attempt_count += 1
             entry.save(update_fields=["status", "last_attempt_at", "attempt_count", "updated_at"])
             try:
-                from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+                from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
                 message = EmailMultiAlternatives(
                     subject=format_email_subject(entry.subject),
                     body=entry.text_body,
@@ -721,7 +721,7 @@ class SubmissionNonComplianceNoticeService:
             return False
         subject, text_body, html_body = cls._build_email_payload(notice=notice)
         try:
-            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
             message = EmailMultiAlternatives(
                 subject=subject,
                 body=text_body,

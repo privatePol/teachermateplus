@@ -922,7 +922,7 @@ class GradingTemplateTestingCalculatorService:
                 {
                     "label": "Base Value",
                     "value": f"{base_value:.2f}",
-                    "meta": "Used when EduGrade+ converts raw score to computed percentage for Base-50 items.",
+                    "meta": "Used when TeacherMate+ converts raw score to computed percentage for Base-50 items.",
                 },
                 {
                     "label": "Final Grade",

@@ -97,7 +97,7 @@ if ($IncludeNaturalKeys) {
 }
 
 Write-Host ""
-Write-Host "edugradeplus data export"
+Write-Host "teachermateplus data export"
 Write-Host "Mode      : $Mode"
 Write-Host "Output    : $resolvedOutputPath"
 Write-Host "Model count: $($modelList.Count)"

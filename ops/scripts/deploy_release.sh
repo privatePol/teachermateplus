@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/edugradeplus}"
-VENV_BIN="${VENV_BIN:-/opt/edugradeplus/.venv/bin}"
-ENV_FILE="${ENV_FILE:-/etc/edugradeplus/edugradeplus.env}"
-SERVICE_NAME="${SERVICE_NAME:-edugradeplus-gunicorn}"
+APP_DIR="${APP_DIR:-/opt/teachermateplus}"
+VENV_BIN="${VENV_BIN:-/opt/teachermateplus/.venv/bin}"
+ENV_FILE="${ENV_FILE:-/etc/teachermateplus/teachermateplus.env}"
+SERVICE_NAME="${SERVICE_NAME:-teachermateplus-gunicorn}"
 BRANCH="${BRANCH:-main}"
 
 echo "[1/7] Loading environment from ${ENV_FILE}"

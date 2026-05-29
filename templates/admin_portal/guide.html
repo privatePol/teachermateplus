@@ -1,7 +1,7 @@
 {% extends "admin_portal/base.html" %}
 {% load static %}
 
-{% block title %}Admin Portal User Guide | EduGrade+{% endblock %}
+{% block title %}Admin Portal User Guide | TeacherMate+{% endblock %}
 
 {% block extra_head %}
 {{ block.super }}
@@ -666,14 +666,14 @@
             <li>Inactivate old records instead of deleting them.</li>
             <li>Keep codes consistent across imports and operations.</li>
             <li>Check related records before making large changes.</li>
-            <li>Use <strong>Students -> Student Enrollment Query</strong> when an authorized admin needs to check one student's consolidated enrollment and grade records for a selected Academic Year and Term.</li>
+            <li>Use <strong>Enrollment -> Student Enrollment Query</strong> when an authorized admin needs to check one student's consolidated enrollment and grade records for a selected Academic Year and Term.</li>
           </ul>
           <div class="guide-subhead">How To</div>
           <ol class="guide-steps">
             <li>Filter -> Edit exact record -> Save -> Re-verify in list.</li>
             <li>Inactivate records instead of deleting when operations already depend on them.</li>
             <li>In <strong>Admin Portal -> Enrollment</strong>, use the status summary cards to quickly review how many rows are currently <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>W</strong>, or <strong>INC</strong> inside the current filtered scope.</li>
-            <li>For one-student checking, open <strong>Admin Portal -> Students -> Student Enrollment Query</strong>, search the student, select the Academic Year and Term, then review the enrollment and grade details shown on the page.</li>
+            <li>For one-student checking, open <strong>Admin Portal -> Enrollment -> Student Enrollment Query</strong>, search the student, select the Academic Year and Term, then review the enrollment and grade details shown on the page.</li>
           </ol>
           <div class="guide-note">
             Clean records help prevent grading problems.
@@ -875,7 +875,7 @@
               <tr>
                 <td>Courses</td>
                 <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
-                <td>Load course masters in bulk using the required EduGrade+ template structure.</td>
+                <td>Load course masters in bulk using the required TeacherMate+ template structure.</td>
               </tr>
               <tr>
                 <td>Students</td>
@@ -915,7 +915,7 @@
             <li>After confirmation, open the target list page and check the imported records.</li>
           </ol>
           <div class="guide-note">
-            Use the exact CSV headers from EduGrade+. Custom formats are rejected.
+            Use the exact CSV headers from TeacherMate+. Custom formats are rejected.
           </div>
           <div class="guide-note">
             Use the <strong>Students</strong> template before enrollment when student records are missing or need updates.
@@ -1012,7 +1012,7 @@
             <li>Review faculty reopen requests in <strong>Submission Reopen Requests</strong>. Once approved, the reopen window lasts 24 hours only.</li>
           </ol>
           <div class="guide-note">
-            Simple rule: Active Grading Period tells faculty which period is the current focus. Period Locks tell EduGrade+ the deadline for each campus and period.
+            Simple rule: Active Grading Period tells faculty which period is the current focus. Period Locks tell TeacherMate+ the deadline for each campus and period.
           </div>
           <div class="guide-subhead">Submission, Reopen, and Correction Route</div>
           <table class="guide-table">
@@ -1131,7 +1131,7 @@
           <ol class="guide-steps">
             <li>Faculty files the paper correction form.</li>
             <li>Manual approvals are completed outside the system.</li>
-            <li>After final paper approval, authorized admin reopens the class-period in EduGrade+.</li>
+            <li>After final paper approval, authorized admin reopens the class-period in TeacherMate+.</li>
             <li>Faculty applies the approved correction and re-submits grades.</li>
           </ol>
 
@@ -1389,7 +1389,7 @@
             <li>Remember the cadence: first communication is <strong>Notice for Non-Compliance</strong>, second is <strong>Warning for Continued Non-Compliance</strong>, and third onward is <strong>Escalation for Unresolved Non-Compliance</strong> until the affected grading period is submitted.</li>
           </ol>
           <div class="guide-note">
-            Best practice is to run the notice scheduler daily, not every three days. EduGrade+ checks the configured repeat interval and only issues a new communication when the next stage is actually due.
+            Best practice is to run the notice scheduler daily, not every three days. TeacherMate+ checks the configured repeat interval and only issues a new communication when the next stage is actually due.
           </div>
           <div class="guide-note mt-3">
             Scheduled job command: <code>manage.py issue_submission_non_compliance_notices</code><br>
@@ -1425,7 +1425,7 @@
               <li>Open <strong>Faculty Final Clearance</strong> after final submissions are complete.</li>
               <li>Verify printed clearance using the QR code or the Reference No. and Verification Code.</li>
               <li>Use <strong>Configuration Management -> User Signatures</strong> to control where stored signatures may appear.</li>
-              <li>Correction attachments and official reports open only through authenticated EduGrade+ views and are audited.</li>
+              <li>Correction attachments and official reports open only through authenticated TeacherMate+ views and are audited.</li>
               <li>Review audit logs and analytics before final release/export.</li>
             </ul>
         </div>

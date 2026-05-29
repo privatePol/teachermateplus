@@ -1,10 +1,10 @@
 # Tenant Grading Profile Setup Guide
 
-This guide explains how to configure EduGrade+ grading templates, course-template assignments, tenant grading profiles, and term-type rules for NCBA-style regular and summer grading.
+This guide explains how to configure TeacherMate+ grading templates, course-template assignments, tenant grading profiles, and term-type rules for NCBA-style regular and summer grading.
 
 ## Purpose
 
-EduGrade+ separates grading setup into two related layers:
+TeacherMate+ separates grading setup into two related layers:
 
 1. **Grading Templates**
    - define the grading structure
@@ -114,7 +114,7 @@ Example:
 
 Important behavior:
 
-EduGrade+ checks course-template assignments before using a grading profile to choose a template.
+TeacherMate+ checks course-template assignments before using a grading profile to choose a template.
 
 Resolution order for template selection:
 
@@ -163,7 +163,7 @@ Instead, use Tenant Grading Profiles:
 | Regular CS Laboratory - General | blank / all campuses | default laboratory template |
 | Regular CS Laboratory - Taytay | Taytay | Computer Science Laboratory template |
 
-This allows EduGrade+ to choose the Taytay-specific template only for Taytay offerings.
+This allows TeacherMate+ to choose the Taytay-specific template only for Taytay offerings.
 
 ## Tenant Grading Profile Setup
 
@@ -193,7 +193,7 @@ Key fields:
 | Grading Template | Template used when the profile is responsible for template selection |
 | Default Base Value | Optional raw-score base/transmutation default |
 | Passing Grade Threshold | Optional passing threshold, usually 75.00 |
-| Period Grade Formula Mode | Weighted Components for the normal EduGrade+ path, or DepEd Transmutation Table for K-12 E-Class Record style quarterly grades |
+| Period Grade Formula Mode | Weighted Components for the normal TeacherMate+ path, or DepEd Transmutation Table for K-12 E-Class Record style quarterly grades |
 | DepEd Transmutation Table | Optional custom MIN-MAX=GRADE rows; blank uses the standard DepEd table |
 | Final Grade Formula Mode | Average all active periods, or weighted selected periods |
 | Final Grade Period Weights | Required only for weighted selected periods |
@@ -262,7 +262,7 @@ then use:
 Final Grade Formula Mode = Average All Active Template Periods
 ```
 
-This is the cleanest Summer setup because EduGrade+ will average only the active periods in the Summer template:
+This is the cleanest Summer setup because TeacherMate+ will average only the active periods in the Summer template:
 
 ```text
 Final Grade = (Midterm + Pre-Final + Final Exam) / 3
@@ -433,9 +433,9 @@ FINAL=33.33
 
 because the weighted profile form expects the total to be exactly `100.00`, and those three values total only `99.99`.
 
-## How EduGrade+ Resolves The Profile
+## How TeacherMate+ Resolves The Profile
 
-When computing grades for a course offering, EduGrade+ resolves the matching grading profile using this priority:
+When computing grades for a course offering, TeacherMate+ resolves the matching grading profile using this priority:
 
 1. Course match
 2. Course type match
@@ -460,7 +460,7 @@ Course-template assignment controls the template selected for a course.
 
 Tenant grading profile controls final-grade formula, base value, and passing threshold for the matching scope.
 
-Even when a course-template assignment supplies the template, EduGrade+ can still use the matching grading profile to determine the final-grade formula.
+Even when a course-template assignment supplies the template, TeacherMate+ can still use the matching grading profile to determine the final-grade formula.
 
 Recommended pattern:
 

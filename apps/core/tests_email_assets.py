@@ -13,11 +13,11 @@ class EmailAssetTests(SimpleTestCase):
     def test_format_email_subject_applies_standard_ncba_prefix(self):
         self.assertEqual(
             format_email_subject("Login Verification"),
-            "NCBA | EduGradePlus: Login Verification",
+            "NCBA | TeacherMatePlus: Login Verification",
         )
         self.assertEqual(
-            format_email_subject("NCBA-EduGrade+: Legacy Subject"),
-            "NCBA | EduGradePlus: Legacy Subject",
+            format_email_subject("NCBA-TeacherMate+: Legacy Subject"),
+            "NCBA | TeacherMatePlus: Legacy Subject",
         )
 
     def test_local_logo_uses_cid_and_attaches_inline_image(self):
@@ -35,25 +35,25 @@ class EmailAssetTests(SimpleTestCase):
             with override_settings(MEDIA_ROOT=Path(tmpdir), EMAIL_LOGO_URL=""):
                 context = build_email_logo_context(
                     filename="egp_logo_official.png",
-                    cid="EduGrade+-logo",
+                    cid="TeacherMate+-logo",
                 )
                 message = EmailMultiAlternatives(subject="Test", body="Text", to=["user@example.test"])
 
-                self.assertEqual(context["logo_url"], "cid:EduGrade+-logo")
+                self.assertEqual(context["logo_url"], "cid:TeacherMate+-logo")
                 self.assertTrue(
                     attach_logo_for_src(
                         message,
                         src=context["email_logo_src"],
                         filename="egp_logo_official.png",
-                        cid="EduGrade+-logo",
+                        cid="TeacherMate+-logo",
                     )
                 )
-                self.assertEqual(message.attachments[0]["Content-ID"], "<EduGrade+-logo>")
+                self.assertEqual(message.attachments[0]["Content-ID"], "<TeacherMate+-logo>")
 
     def test_external_logo_url_does_not_attach_inline_image(self):
         context = build_email_logo_context(
             filename="egp_logo_official.png",
-            cid="EduGrade+-logo",
+            cid="TeacherMate+-logo",
             external_url="https://cdn.example.test/logo.png",
         )
         message = EmailMultiAlternatives(subject="Test", body="Text", to=["user@example.test"])
@@ -64,7 +64,7 @@ class EmailAssetTests(SimpleTestCase):
                 message,
                 src=context["email_logo_src"],
                 filename="egp_logo_official.png",
-                cid="EduGrade+-logo",
+                cid="TeacherMate+-logo",
             )
         )
         self.assertEqual(message.attachments, [])

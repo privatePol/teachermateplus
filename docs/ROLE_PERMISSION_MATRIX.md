@@ -1,6 +1,6 @@
 # Role Permission Matrix
 
-Generated from the current EduGrade+ development database.
+Generated from the current TeacherMate+ development database.
 
 Legend: `X` means the permission is directly assigned to the role. Blank means it is not assigned.
 

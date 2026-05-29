@@ -497,7 +497,7 @@ class LoginOtpService:
         if sent_count <= 0:
             return LoginOtpResult(
                 success=False,
-                message="EduGrade+ could not send the verification code. Please try again or contact your administrator.",
+                message="TeacherMate+ could not send the verification code. Please try again or contact your administrator.",
                 challenge=challenge,
             )
         return LoginOtpResult(success=True, challenge=challenge)
@@ -505,7 +505,7 @@ class LoginOtpService:
     @classmethod
     def _send_email(cls, *, request, user, challenge: LoginOtpChallenge, code: str) -> int:
         subject = format_email_subject("Login Verification")
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
         logo_context = build_email_logo_context(
             filename="ncba-logo.png",
             cid="ncba-logo",
@@ -627,7 +627,7 @@ class AdminPasswordResetOtpService:
         if sent_count <= 0:
             return LoginOtpResult(
                 success=False,
-                message="EduGrade+ could not send the reset verification code. Please try again or contact your administrator.",
+                message="TeacherMate+ could not send the reset verification code. Please try again or contact your administrator.",
                 challenge=challenge,
             )
         return LoginOtpResult(success=True, challenge=challenge)
@@ -635,7 +635,7 @@ class AdminPasswordResetOtpService:
     @classmethod
     def _send_email(cls, *, request, user, challenge: LoginOtpChallenge, code: str) -> int:
         subject = format_email_subject("Admin Password Reset Code")
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
         logo_context = build_email_logo_context(
             filename="ncba-logo.png",
             cid="ncba-logo",
@@ -744,7 +744,7 @@ class UserSignatureService:
             if len(decoded) != 32:
                 raise ValidationError("SIGNATURE_ENCRYPTION_KEY must decode to exactly 32 bytes.")
             return decoded
-        return hashlib.sha256((getattr(settings, "SECRET_KEY", "") or "EduGrade+-signature-key").encode("utf-8")).digest()
+        return hashlib.sha256((getattr(settings, "SECRET_KEY", "") or "TeacherMate+-signature-key").encode("utf-8")).digest()
 
     @classmethod
     def _normalize_image(cls, uploaded_file) -> SignatureImagePayload:

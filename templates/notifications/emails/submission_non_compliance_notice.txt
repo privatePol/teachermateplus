@@ -1,4 +1,4 @@
-EduGradePlus Notice
+TeacherMatePlus Notice
 
 {{ notice.title }}
 Faculty: {{ notice.faculty_user.full_name }}

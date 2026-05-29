@@ -1,4 +1,4 @@
-EduGradePlus Reminder
+TeacherMatePlus Reminder
 
 {{ reminder.title }}
 Type: {{ reminder.get_reminder_type_display }}

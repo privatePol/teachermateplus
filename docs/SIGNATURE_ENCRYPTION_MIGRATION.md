@@ -1,10 +1,10 @@
 # Signature Encryption and Server Migration Runbook
 
-This runbook explains how EduGrade+ encrypts uploaded user signatures and what to do when moving from a testing live server to the final production server.
+This runbook explains how TeacherMate+ encrypts uploaded user signatures and what to do when moving from a testing live server to the final production server.
 
 ## Why This Matters
 
-EduGrade+ stores uploaded signature images encrypted in the database. These signatures are used by optional report features such as:
+TeacherMate+ stores uploaded signature images encrypted in the database. These signatures are used by optional report features such as:
 
 - Faculty Final Clearance PDF signatures
 - Correction Official Report PDF signatures
@@ -17,12 +17,12 @@ cryptography.exceptions.InvalidTag
 
 That error means the stored encrypted signature cannot be decrypted with the key currently loaded by the app.
 
-## How EduGrade+ Chooses the Signature Key
+## How TeacherMate+ Chooses the Signature Key
 
 The signature service uses this key order:
 
-1. If `SIGNATURE_ENCRYPTION_KEY` is set, EduGrade+ uses it.
-2. If `SIGNATURE_ENCRYPTION_KEY` is missing, EduGrade+ falls back to a key derived from `DJANGO_SECRET_KEY`.
+1. If `SIGNATURE_ENCRYPTION_KEY` is set, TeacherMate+ uses it.
+2. If `SIGNATURE_ENCRYPTION_KEY` is missing, TeacherMate+ falls back to a key derived from `DJANGO_SECRET_KEY`.
 
 Because of that fallback, changing `DJANGO_SECRET_KEY` can break old signatures when `SIGNATURE_ENCRYPTION_KEY` was not set at upload time.
 
@@ -51,7 +51,7 @@ Do not use normal words, short random text, or a value copied from another unrel
 Use this path for the production environment file unless the systemd service points somewhere else:
 
 ```bash
-/etc/edugradeplus/edugradeplus.env
+/etc/teachermateplus/teachermateplus.env
 ```
 
 Before users upload signatures on the final production server:
@@ -65,7 +65,7 @@ Before users upload signatures on the final production server:
 2. Edit the production env file:
 
    ```bash
-   sudo nano /etc/edugradeplus/edugradeplus.env
+   sudo nano /etc/teachermateplus/teachermateplus.env
    ```
 
 3. Add the key:
@@ -77,19 +77,19 @@ Before users upload signatures on the final production server:
 4. Restart the app:
 
    ```bash
-   sudo systemctl restart edugradeplus-gunicorn
+   sudo systemctl restart teachermateplus-gunicorn
    sudo systemctl reload nginx
    ```
 
 5. Verify Django can load the key without printing the secret:
 
    ```bash
-   sudo -u EduGrade+ bash -lc '
-   cd /opt/edugradeplus
+   sudo -u teachermateplus bash -lc '
+   cd /opt/teachermateplus
    set -a
-   source /etc/edugradeplus/edugradeplus.env
+   source /etc/teachermateplus/teachermateplus.env
    set +a
-   /opt/edugradeplus/.venv/bin/python manage.py shell -c "
+   /opt/teachermateplus/.venv/bin/python manage.py shell -c "
    import base64, os
    raw = os.environ.get(\"SIGNATURE_ENCRYPTION_KEY\", \"\").strip()
    print(\"SIGNATURE_ENCRYPTION_KEY configured:\", bool(raw))
@@ -176,7 +176,7 @@ Back up these together:
 
 - Database
 - Media files
-- `/etc/edugradeplus/edugradeplus.env`
+- `/etc/teachermateplus/teachermateplus.env`
 - `SIGNATURE_ENCRYPTION_KEY`
 - `DJANGO_SECRET_KEY`
 
@@ -187,12 +187,12 @@ Store secrets in the approved secure password/secrets vault. Do not paste produc
 If a signature PDF fails with HTTP 500, reproduce from the server:
 
 ```bash
-sudo -u EduGrade+ bash -lc '
-cd /opt/edugradeplus
+sudo -u teachermateplus bash -lc '
+cd /opt/teachermateplus
 set -a
-source /etc/edugradeplus/edugradeplus.env
+source /etc/teachermateplus/teachermateplus.env
 set +a
-/opt/edugradeplus/.venv/bin/python manage.py shell -c "
+/opt/teachermateplus/.venv/bin/python manage.py shell -c "
 from apps.grading.models import GradeCorrectionRequest
 from apps.grading.reporting import CorrectionOfficialReportService
 r = GradeCorrectionRequest.objects.get(id=5)

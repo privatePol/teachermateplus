@@ -3,15 +3,15 @@
 Copy and paste the prompt below into a new Codex chat session when ready to begin Student Portal development.
 
 ````text
-You are Codex working in the EduGrade+ V1 repository.
+You are Codex working in the TeacherMate+ V1 repository.
 
 Goal:
-Build the initial Student Portal foundation for EduGrade+ as a local-only development stage. The portal should let students securely log in and view only their own tenant-owned records. The first implementation should be conservative, read-only, tenant-scoped, and easy to review.
+Build the initial Student Portal foundation for TeacherMate+ as a local-only development stage. The portal should let students securely log in and view only their own tenant-owned records. The first implementation should be conservative, read-only, tenant-scoped, and easy to review.
 
 Before making code changes, read and follow these files:
 
 1. AGENTS.md
-2. EDUGRADEPLUS_CONTEXT.md
+2. TEACHERMATEPLUS_CONTEXT.md
 3. docs/STUDENT_PORTAL_PLAN.md
 4. docs/DB_SCHEMA.md
 5. docs/ROLE_PERMISSION_MATRIX.md
@@ -30,7 +30,7 @@ Important repository rules:
 - User-manageable feature toggles/settings should live in the configurable-features area when appropriate.
 - Run `python manage.py check` after edits.
 - Add migrations for model changes.
-- Update `CHANGE_LOG.md`, `EDUGRADEPLUS_CONTEXT.md`, and relevant docs when behavior changes.
+- Update `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, and relevant docs when behavior changes.
 - Do not revert unrelated existing worktree changes.
 
 Local-only instruction:
@@ -123,11 +123,11 @@ V1 account provisioning should be admin-driven:
 2. Admin verifies the registered student email address.
 3. Admin opens Student Account Links or Student Portal Account Provisioning.
 4. Admin selects the student.
-5. EduGrade+ shows the email destination for invitation/activation.
+5. TeacherMate+ shows the email destination for invitation/activation.
 6. Admin confirms provisioning.
-7. EduGrade+ creates or links the `User` account.
-8. EduGrade+ creates an active `StudentAccountLink`.
-9. EduGrade+ sends an activation link or temporary credential to the registered student email if email sending is enabled.
+7. TeacherMate+ creates or links the `User` account.
+8. TeacherMate+ creates an active `StudentAccountLink`.
+9. TeacherMate+ sends an activation link or temporary credential to the registered student email if email sending is enabled.
 10. Student logs in, sets a password, and accepts privacy consent.
 
 Email destination policy:
@@ -282,7 +282,7 @@ Documentation updates:
 Update:
 
 1. CHANGE_LOG.md
-2. EDUGRADEPLUS_CONTEXT.md
+2. TEACHERMATEPLUS_CONTEXT.md
 3. docs/STUDENT_PORTAL_PLAN.md if implementation decisions differ from the plan
 4. Any Admin/Student guide page created or changed
 

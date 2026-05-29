@@ -1,10 +1,10 @@
-# EduGrade+ Performance Optimization Notes
+# TeacherMate+ Performance Optimization Notes
 
 This document tracks application-level performance work that can be done inside the Django codebase without assuming direct production-server access.
 
 ## Current Status
 
-EduGrade+ already has several production-friendly patterns in place:
+TeacherMate+ already has several production-friendly patterns in place:
 
 - Admin and Faculty list pages generally use server-side pagination through `_get_page(...)`.
 - The SIS periodic-grades API already supports `page` and `page_size` and caps `page_size` at 2000.
@@ -30,7 +30,7 @@ The Faculty Summary page no longer recomputes every student in the selected peri
 Current behavior:
 
 - If stored period summary rows exist, the page reads the stored rows.
-- If rows are missing for enrolled students, EduGrade+ recomputes only the missing student rows for that offering and period.
+- If rows are missing for enrolled students, TeacherMate+ recomputes only the missing student rows for that offering and period.
 - Grade formulas are unchanged.
 - Audit logging is preserved when a recompute is performed.
 
@@ -62,7 +62,7 @@ Django cache configuration is now environment-driven:
 
 ```env
 DJANGO_CACHE_BACKEND=django.core.cache.backends.locmem.LocMemCache
-DJANGO_CACHE_LOCATION=EduGrade+-local
+DJANGO_CACHE_LOCATION=TeacherMate+-local
 ```
 
 Development defaults to local memory cache. Production may use Redis by setting a Redis cache backend after IT installs and configures the required package/service.
@@ -108,7 +108,7 @@ Already implemented in `apps/admin_portal/api_views.py` for periodic grade expor
 
 ### Static Assets
 
-EduGrade+ uses Django static files. Production should serve static files through nginx or equivalent, and `collectstatic` remains part of deployment.
+TeacherMate+ uses Django static files. Production should serve static files through nginx or equivalent, and `collectstatic` remains part of deployment.
 
 ## Deferred Production Enhancements
 

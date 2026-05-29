@@ -1,7 +1,7 @@
 {% extends "shared/base_public.html" %}
 {% load static %}
 
-{% block title %}Faculty Portal | EduGrade+{% endblock %}
+{% block title %}Faculty Portal | TeacherMate+{% endblock %}
 {% block extra_head %}
 <style>
   :root {
@@ -42,11 +42,12 @@
     filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.16));
   }
   .faculty-brand-subtitle {
-    font-size: 0.72rem;
+    font-size: 0.84rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: rgba(243, 255, 248, 0.85);
-    line-height: 1;
+    line-height: 1.35;
+    margin-top: 0.18rem;
   }
   .faculty-brand-title {
     color: #ffffff;
@@ -360,10 +361,10 @@
       <div class="d-flex align-items-center gap-2">
         <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar" data-tour-id="sidebar-toggle"{% if privacy_consent_pending %} disabled aria-disabled="true"{% endif %}>&#9776;</button>
         <span class="d-inline-flex align-items-center">
-          <img src="{% get_media_prefix %}logos/egp_logo_official.png" alt="EduGrade+" class="faculty-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/edp_logo.png';">
+          <img src="{% get_media_prefix %}logos/teachermate_logo_official.png" alt="TeacherMate+" class="faculty-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/edp_logo.png';">
         </span>
         <div class="d-none d-sm-block">
-          <div class="faculty-brand-title">NCBA | EduGrade+</div>
+          <div class="faculty-brand-title">NCBA | TeacherMate+</div>
           <div class="faculty-brand-subtitle">
             Faculty Portal
             <span class="faculty-academic-scope">
@@ -532,7 +533,7 @@
 
     const layout = document.getElementById("faculty-layout");
     const toggleBtn = document.getElementById("faculty-sidebar-toggle");
-    const storageKey = "EduGrade+_faculty_sidebar_collapsed";
+    const storageKey = "TeacherMate+_faculty_sidebar_collapsed";
     const privacyConsentLocked = layout && layout.dataset.privacyConsentLock === "1";
     if (layout && toggleBtn) {
       const savedCollapsed = privacyConsentLocked || localStorage.getItem(storageKey) === "1";
@@ -550,7 +551,7 @@
 
     const tourCard = document.getElementById("faculty-tour-card");
     const tourBackdrop = document.getElementById("faculty-tour-backdrop");
-    if (tourCard && tourBackdrop && sessionStorage.getItem("EduGrade+_faculty_tour_seen") !== "1") {
+    if (tourCard && tourBackdrop && sessionStorage.getItem("TeacherMate+_faculty_tour_seen") !== "1") {
       const allSteps = [
         { id: "faculty-header", title: "Faculty Portal Header", text: "Use this area to confirm you are in the Faculty Portal, manage your signature, change your password, or log out." },
         { id: "sidebar-toggle", title: "Navigation Menu", text: "Collapse or expand the sidebar when you need more space while encoding grades." },
@@ -594,7 +595,7 @@
         if (activeTarget) activeTarget.classList.remove("faculty-tour-highlight");
         tourBackdrop.classList.remove("is-visible");
         tourCard.classList.remove("is-visible");
-        sessionStorage.setItem("EduGrade+_faculty_tour_seen", "1");
+        sessionStorage.setItem("TeacherMate+_faculty_tour_seen", "1");
       }
 
       function positionCard(target) {

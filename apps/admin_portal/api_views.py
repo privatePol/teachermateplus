@@ -19,7 +19,7 @@ from apps.enrollment.models import Enrollment
 from apps.grading.models import GradeSubmission, StudentPeriodGrade
 from apps.tenants.models import Campus, Tenant
 
-logger = logging.getLogger("edugradeplus.api")
+logger = logging.getLogger("teachermateplus.api")
 
 
 def _configured_sis_api_token() -> str:

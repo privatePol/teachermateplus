@@ -308,7 +308,7 @@ class ImportTemplateService:
     def generate_csv_response(cls, import_type: str, include_sample: bool = True) -> HttpResponse:
         headers = cls.get_headers(import_type)
         response = HttpResponse(content_type="text/csv")
-        filename = f"EduGrade+_{import_type}_template.csv"
+        filename = f"TeacherMate+_{import_type}_template.csv"
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         writer = csv.writer(response)
         writer.writerow(headers)

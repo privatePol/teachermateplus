@@ -1,22 +1,22 @@
-# NCBA EduGrade+ Go-Live Checklist
+# NCBA TeacherMate+ Go-Live Checklist
 
-This checklist is the practical go-live guide for NCBA before opening EduGrade+ to real Admin and Faculty users.
+This checklist is the practical go-live guide for NCBA before opening TeacherMate+ to real Admin and Faculty users.
 
 ## 1. Read These `.md` Files First
 
 Read these in this exact order:
 
-1. [AGENTS.md](/d:/edugradeplus/AGENTS.md)
-2. [EDUGRADEPLUS_CONTEXT.md](/d:/edugradeplus/EDUGRADEPLUS_CONTEXT.md)
-3. [CHANGE_LOG.md](/d:/edugradeplus/CHANGE_LOG.md)
-4. [DEPLOYMENT_UBUNTU.md](/d:/edugradeplus/docs/DEPLOYMENT_UBUNTU.md)
-5. [STAGING_WORKFLOW.md](/d:/edugradeplus/docs/STAGING_WORKFLOW.md)
-6. [PRODUCTION_DATA_PROMOTION.md](/d:/edugradeplus/docs/PRODUCTION_DATA_PROMOTION.md)
-7. [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradeplus/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
-8. [DB_SCHEMA.md](/d:/edugradeplus/docs/DB_SCHEMA.md)
-9. [guide.html](/d:/edugradeplus/templates/admin_portal/guide.html)
-10. [guide.html](/d:/edugradeplus/templates/faculty_portal/guide.html)
-11. [guide_manual.html](/d:/edugradeplus/templates/faculty_portal/guide_manual.html)
+1. [AGENTS.md](/d:/teachermateplus/AGENTS.md)
+2. [TEACHERMATEPLUS_CONTEXT.md](/d:/teachermateplus/TEACHERMATEPLUS_CONTEXT.md)
+3. [CHANGE_LOG.md](/d:/teachermateplus/CHANGE_LOG.md)
+4. [DEPLOYMENT_UBUNTU.md](/d:/teachermateplus/docs/DEPLOYMENT_UBUNTU.md)
+5. [STAGING_WORKFLOW.md](/d:/teachermateplus/docs/STAGING_WORKFLOW.md)
+6. [PRODUCTION_DATA_PROMOTION.md](/d:/teachermateplus/docs/PRODUCTION_DATA_PROMOTION.md)
+7. [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/teachermateplus/docs/PRODUCTION_INCIDENT_RUNBOOK.md)
+8. [DB_SCHEMA.md](/d:/teachermateplus/docs/DB_SCHEMA.md)
+9. [guide.html](/d:/teachermateplus/templates/admin_portal/guide.html)
+10. [guide.html](/d:/teachermateplus/templates/faculty_portal/guide.html)
+11. [guide_manual.html](/d:/teachermateplus/templates/faculty_portal/guide_manual.html)
 
 ## 2. Infrastructure Readiness
 
@@ -35,12 +35,12 @@ Confirm:
 
 Confirm the server layout:
 
-1. production app path: `/opt/edugradeplus`
-2. staging app path: `/opt/edugradeplus-staging`
-3. production env path: `/etc/edugradeplus/edugradeplus.env`
-4. staging env path: `/etc/edugradeplus-staging/edugradeplus.env`
-5. production log path: `/var/log/edugradeplus`
-6. staging log path: `/var/log/edugradeplus-staging`
+1. production app path: `/opt/teachermateplus`
+2. staging app path: `/opt/teachermateplus-staging`
+3. production env path: `/etc/teachermateplus/teachermateplus.env`
+4. staging env path: `/etc/teachermateplus-staging/teachermateplus.env`
+5. production log path: `/var/log/teachermateplus`
+6. staging log path: `/var/log/teachermateplus-staging`
 
 ## 4. Database Readiness
 
@@ -66,8 +66,8 @@ Confirm:
 
 Prepare from these templates:
 
-1. [edugradeplus.production.env.example](/d:/edugradeplus/ops/env/edugradeplus.production.env.example)
-2. [edugradeplus.staging.env.example](/d:/edugradeplus/ops/env/edugradeplus.staging.env.example)
+1. [teachermateplus.production.env.example](/d:/teachermateplus/ops/env/teachermateplus.production.env.example)
+2. [teachermateplus.staging.env.example](/d:/teachermateplus/ops/env/teachermateplus.staging.env.example)
 
 Confirm:
 
@@ -83,13 +83,13 @@ Confirm:
 Prepare and verify:
 
 1. production service file:
-   - [edugradeplus-gunicorn.service](/d:/edugradeplus/ops/systemd/edugradeplus-gunicorn.service)
+   - [teachermateplus-gunicorn.service](/d:/teachermateplus/ops/systemd/teachermateplus-gunicorn.service)
 2. staging service file:
-   - [edugradeplus-staging-gunicorn.service](/d:/edugradeplus/ops/systemd/edugradeplus-staging-gunicorn.service)
+   - [teachermateplus-staging-gunicorn.service](/d:/teachermateplus/ops/systemd/teachermateplus-staging-gunicorn.service)
 3. production nginx config:
-   - [edugradeplus.conf](/d:/edugradeplus/ops/nginx/edugradeplus.conf)
+   - [teachermateplus.conf](/d:/teachermateplus/ops/nginx/teachermateplus.conf)
 4. staging nginx config:
-   - [edugradeplus-staging.conf](/d:/edugradeplus/ops/nginx/edugradeplus-staging.conf)
+   - [teachermateplus-staging.conf](/d:/teachermateplus/ops/nginx/teachermateplus-staging.conf)
 
 Confirm:
 
@@ -102,7 +102,7 @@ Confirm:
 
 Before importing real data:
 
-1. review [PRODUCTION_DATA_PROMOTION.md](/d:/edugradeplus/docs/PRODUCTION_DATA_PROMOTION.md)
+1. review [PRODUCTION_DATA_PROMOTION.md](/d:/teachermateplus/docs/PRODUCTION_DATA_PROMOTION.md)
 2. export the reviewed setup bundle from local
 3. inspect the JSON bundle
 4. confirm there are no junk/test records
@@ -185,7 +185,7 @@ Confirm:
 1. DB backup command is tested
 2. media backup plan exists
 3. rollback decision path is clear
-4. [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/edugradeplus/docs/PRODUCTION_INCIDENT_RUNBOOK.md) is available to the responsible admin
+4. [PRODUCTION_INCIDENT_RUNBOOK.md](/d:/teachermateplus/docs/PRODUCTION_INCIDENT_RUNBOOK.md) is available to the responsible admin
 
 ## 15. Final Go / No-Go Questions
 

@@ -484,6 +484,11 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Faculty Assignment Dashboard")
         self.assertContains(response, "Campus Snapshot")
+        self.assertContains(response, "logos/teachermate_logo_text_official.png")
+        self.assertNotContains(response, "logos/teachermateplus_logo.png")
+        self.assertContains(response, "linear-gradient(180deg, #214f25 0%, #39742d 32%, #4d8c33 68%, #5b9a37 100%)")
+        self.assertContains(response, ".admin-scope-form .form-select")
+        self.assertContains(response, "flex: 0 0 13.5rem;")
 
     def test_configurable_features_can_store_assignment_workflow_settings(self):
         self.client.force_login(self.admin_user)

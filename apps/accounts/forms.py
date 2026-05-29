@@ -204,7 +204,7 @@ class PrivacyConsentForm(forms.Form):
 
     consent = forms.BooleanField(
         required=True,
-        label="I have read and agree to the EduGrade+ Privacy Consent.",
+        label="I have read and agree to the TeacherMate+ Privacy Consent.",
     )
     confirmation_phrase = forms.CharField(
         required=True,
@@ -231,7 +231,7 @@ class PrivacyConsentForm(forms.Form):
 class UserSignatureUploadForm(forms.Form):
     signature_file = forms.FileField(
         label="Signature Image",
-        help_text="Upload a PNG or JPG/JPEG file. EduGrade+ will normalize and encrypt it before storage.",
+        help_text="Upload a PNG or JPG/JPEG file. TeacherMate+ will normalize and encrypt it before storage.",
     )
     current_password = forms.CharField(
         widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),

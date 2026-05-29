@@ -1386,7 +1386,7 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
     message = EmailMultiAlternatives(
         subject=format_email_subject("Account Created"),
         body=text_body,
-        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local"),
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local"),
         to=[user.email],
     )
     attach_logo_for_src(
@@ -9402,7 +9402,7 @@ def grading_template_calculator_view(request):
             if calculation["input_errors"]:
                 messages.warning(
                     request,
-                    "Some sample rows had invalid percentages, so EduGrade+ temporarily used the default sample value for those rows.",
+                    "Some sample rows had invalid percentages, so TeacherMate+ temporarily used the default sample value for those rows.",
                 )
 
     context = {
@@ -9413,8 +9413,8 @@ def grading_template_calculator_view(request):
         "usage_notes": [
             "This tool is read-only. It does not create grades, activities, or student records.",
             "Enter sample raw score and total score values at the lowest active level of the selected template.",
-            "EduGrade+ will first convert raw score to computed percentage, then roll the result upward into component, period, and final grades.",
-            "Period grades follow the same current EduGrade+ computation logic used by the official grading engine.",
+            "TeacherMate+ will first convert raw score to computed percentage, then roll the result upward into component, period, and final grades.",
+            "Period grades follow the same current TeacherMate+ computation logic used by the official grading engine.",
             "The final-grade section uses the matched active tenant grading profile for this template. If no active profile matches, it shows the active-period average fallback.",
         ],
     }
@@ -10986,7 +10986,7 @@ def course_template_assignment_create_view(request):
     context = {
         "form": form,
         "title": "Bulk Assign Course Templates",
-        "term_scope_help": "EduGrade+ will skip courses that already have a prior assignment in the same term scope.",
+        "term_scope_help": "TeacherMate+ will skip courses that already have a prior assignment in the same term scope.",
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/course_template_assignment_bulk_form.html", context)

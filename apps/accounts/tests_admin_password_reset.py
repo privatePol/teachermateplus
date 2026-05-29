@@ -67,7 +67,7 @@ class AdminPasswordResetTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("accounts:admin_password_reset_otp"))
         self.assertEqual(LoginOtpChallenge.objects.count(), 1)
-        self.assertEqual(mail.outbox[0].subject, "NCBA | EduGradePlus: Admin Password Reset Code")
+        self.assertEqual(mail.outbox[0].subject, "NCBA | TeacherMatePlus: Admin Password Reset Code")
 
     def test_admin_forgot_password_does_not_send_otp_for_faculty_only_user(self):
         response = self.client.post(

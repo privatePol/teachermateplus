@@ -1,6 +1,6 @@
 # Course and Faculty Identity Refactor Proposal
 
-This document turns the multi-campus identity findings into a concrete technical proposal for EduGrade+.
+This document turns the multi-campus identity findings into a concrete technical proposal for TeacherMate+.
 
 It is intended for product planning, architecture review, and future implementation scoping.
 
@@ -8,7 +8,7 @@ It does **not** mean the refactor has already been implemented.
 
 ## 1. Problem Statement
 
-EduGrade+ already supports multi-campus tenants, but two identity rules are too rigid for broader tenant diversity:
+TeacherMate+ already supports multi-campus tenants, but two identity rules are too rigid for broader tenant diversity:
 
 1. `Course.code` is unique by `tenant`, not by `campus`
 2. faculty business identity is effectively tied to global `User.username` / `User.email`
@@ -25,7 +25,7 @@ But they become risky for tenants where:
 
 ## 2. Goals
 
-The refactor should allow EduGrade+ to support both:
+The refactor should allow TeacherMate+ to support both:
 
 - tenants with strict tenant-wide academic normalization
 - tenants with campus-local code reuse and local identity variation
@@ -389,7 +389,7 @@ Why faculty first:
 
 ## 14. Recommended Product Position
 
-EduGrade+ should support:
+TeacherMate+ should support:
 
 - strict canonical tenants like NCBA
 - more flexible multi-campus tenants with local code reuse

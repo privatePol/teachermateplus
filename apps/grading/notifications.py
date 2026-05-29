@@ -90,7 +90,7 @@ class CorrectionNotificationService:
         if not recipients:
             return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_matching_role_recipients"}
 
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
         subject = format_email_subject(cls.SUBJECT_MESSAGE)
         petitioner_name = (
             getattr(request_obj.requested_by_user, "full_name", None)
@@ -181,7 +181,7 @@ class CorrectionNotificationService:
         if not recipient_emails:
             return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_registrar_recipient"}
 
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
         subject = format_email_subject("Approved Petition for Correction of Grades for Registrar Reference")
         pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=request_obj)
         petitioner_name = (
@@ -316,7 +316,7 @@ class GradebookReopenNotificationService:
         if not recipients:
             return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_review_recipients"}
 
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
         subject = format_email_subject(cls.SUBJECT_MESSAGE)
         requester_name = (
             getattr(request_obj.requested_by_user, "full_name", None)

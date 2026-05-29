@@ -1059,7 +1059,7 @@ def _build_faculty_template_preview(template):
     if active_period_names:
         final_formula = (
             "FINAL GRADE follows the tenant grading profile formula for the class. "
-            "If no special formula is configured, EduGrade+ averages the active grading periods "
+            "If no special formula is configured, TeacherMate+ averages the active grading periods "
             f"({', '.join(active_period_names)})."
         )
 
@@ -1939,7 +1939,7 @@ def _build_deadline_reminder_for_offerings(offerings, *, now=None):
                 "has_deadline": False,
                 "title": "No matching deadline for your active classes yet",
                 "note": (
-                    "A submission deadline exists in EduGrade+, but it does not match the campus, academic year, "
+                    "A submission deadline exists in TeacherMate+, but it does not match the campus, academic year, "
                     "or term of your accepted classes."
                 ),
                 "variant": "neutral",
@@ -3419,7 +3419,7 @@ def offering_grading_calculator_view(request, offering_id: int):
             raise InvalidOperation
     except (InvalidOperation, ValueError):
         sample_value = GradingTemplateTestingCalculatorService.DEFAULT_SAMPLE_VALUE
-        messages.warning(request, "The sample value was invalid, so EduGrade+ used 85.00 instead.")
+        messages.warning(request, "The sample value was invalid, so TeacherMate+ used 85.00 instead.")
 
     calculation = GradingTemplateTestingCalculatorService.build_calculation(
         template=template,
@@ -3430,7 +3430,7 @@ def offering_grading_calculator_view(request, offering_id: int):
     if calculation["input_errors"]:
         messages.warning(
             request,
-            "Some sample rows had invalid percentages, so EduGrade+ temporarily used the default sample value for those rows.",
+            "Some sample rows had invalid percentages, so TeacherMate+ temporarily used the default sample value for those rows.",
         )
 
     context = {
@@ -5061,7 +5061,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         {
             "title": "1. Start with only active students and active records",
             "body": (
-                "EduGrade+ reads only ACTIVE students in the class. Students marked DRP, W, or INC are not used "
+                "TeacherMate+ reads only ACTIVE students in the class. Students marked DRP, W, or INC are not used "
                 "in the prediction computation. It also reads only active grade activities and active attendance sessions "
                 "in the selected grading period."
             ),
@@ -5083,7 +5083,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         {
             "title": "4. Build three period outcomes",
             "body": (
-                "For each student, EduGrade+ keeps a current value from encoded records, a worst-case value that treats "
+                "For each student, TeacherMate+ keeps a current value from encoded records, a worst-case value that treats "
                 "missing work as zero, and a best-case value that treats missing work as full score."
             ),
         },
@@ -5145,21 +5145,21 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         {
             "title": "Raw-to-computed score using Base 50",
             "body": (
-                "For normal raw-score activities, EduGrade+ converts the raw score into a computed score using: "
+                "For normal raw-score activities, TeacherMate+ converts the raw score into a computed score using: "
                 "Computed Score = ((Raw Score / Total Score) × Base Value) + (100 − Base Value)."
             ),
         },
         {
             "title": "Default base behavior",
             "body": (
-                "If the class does not have a more specific base-value override, EduGrade+ ultimately falls back to "
+                "If the class does not have a more specific base-value override, TeacherMate+ ultimately falls back to "
                 "Base 50. That means zero raw score starts at 50.00 and perfect raw score reaches 100.00."
             ),
         },
         {
             "title": "Direct percentage mode",
             "body": (
-                "If an activity uses Direct Percentage mode, EduGrade+ does not transmute the raw score through Base 50. "
+                "If an activity uses Direct Percentage mode, TeacherMate+ does not transmute the raw score through Base 50. "
                 "The entered percentage itself becomes the computed score."
             ),
         },
@@ -5182,8 +5182,8 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
 
     period_grade_steps = [
         "Each encoded activity score is first converted into a computed score using the active scoring rule of that activity.",
-        "If a subcomponent has details, EduGrade+ averages those details upward using the detail weights.",
-        "If a component has subcomponents, EduGrade+ averages those subcomponents upward using the subcomponent weights.",
+        "If a subcomponent has details, TeacherMate+ averages those details upward using the detail weights.",
+        "If a component has subcomponents, TeacherMate+ averages those subcomponents upward using the subcomponent weights.",
         "The period grade is then the weighted sum of all active top-level components in the selected period.",
         "If the template has a configured exam component and there is still no exam data, the official period grade remains unavailable until the exam side has data.",
     ]
@@ -5194,9 +5194,9 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
     )
 
     final_grade_steps = [
-        "EduGrade+ stores an official period grade per active grading period when that period is recomputed.",
+        "TeacherMate+ stores an official period grade per active grading period when that period is recomputed.",
         "The official final grade record is then computed using the final-grade formula resolved from the matched tenant grading profile.",
-        "If no special tenant formula is configured, EduGrade+ falls back to averaging the active grading periods of the assigned template.",
+        "If no special tenant formula is configured, TeacherMate+ falls back to averaging the active grading periods of the assigned template.",
     ]
 
     final_grade_formula = (
@@ -5224,7 +5224,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
         {
             "title": "Example 3: Using What-If Simulation",
             "body": (
-                "If the faculty enters 80% as Remaining Performance, EduGrade+ does not save any grade. "
+                "If the faculty enters 80% as Remaining Performance, TeacherMate+ does not save any grade. "
                 "It only answers: 'If the student performs at around 80% on the remaining items, what might the period grade become?' "
                 "The result is for planning and advising only."
             ),
@@ -5241,7 +5241,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
             "title": "Example 5: Average Needed to Pass Final",
             "body": (
                 "If PRELIM is 91.43 and MIDTERM is 99.80, and the passing final grade is 75.00, "
-                "EduGrade+ can show the average still needed across the remaining final periods. "
+                "TeacherMate+ can show the average still needed across the remaining final periods. "
                 "For example, it may say '54.39% average needed across PRE-FINAL, FX'."
             ),
         },
@@ -5631,7 +5631,7 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                     )
                 messages.success(
                     request,
-                    "Correction request submitted for review. Once approved, EduGrade+ will post the corrected values automatically.",
+                    "Correction request submitted for review. Once approved, TeacherMate+ will post the corrected values automatically.",
                 )
                 return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
 

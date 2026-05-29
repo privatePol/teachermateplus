@@ -3,32 +3,47 @@
 Last updated by Codex: 2026-05-28
 
 ## Purpose
-This file preserves continuity between Codex sessions for EduGrade+ V1.
+This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-05-28
-- Session focus: Continued management-demo adjustments, including configurable simultaneous-login behavior, Faculty Portal prediction/intervention access, Faculty Portal class-card/summary simplification, Student Intervention Monitor redesign, Admin Portal student enrollment/grade query, Faculty Dashboard/My Classes direct guide tags, server ransomware-protection planning, Faculty Portal public-login invalid-credential handling, and Admin Portal login branding.
+- Session focus: Faculty/Admin login and header logo replacements after repository-wide TeacherMatePlus rename.
 - Current branch: main
-- Current environment: Windows PowerShell workspace at `D:\edugradeplus`; Django apps-based project using SQLite for development.
+- Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
+- Repository/product rename:
+  - Replaced legacy product naming with TeacherMatePlus/TeacherMate+ across repo text, docs, templates, settings, scripts, logs, tests, and exported fixtures.
+  - Renamed matching files/assets/configs, including `TEACHERMATEPLUS_CONTEXT.md`, `media/logos/teachermateplus_logo.png`, `ops/cron/teachermateplus.cron`, nginx configs, systemd service files, and ignored `ops/env/teachermateplus.*.env.example` files.
+  - Also renamed older legacy presentation, fixture, import, and logo filenames so no previous brand-family text remains in file contents or paths.
+  - Corrected mechanically renamed placeholder email domains to use `teachermateplus.local` and normalized deployment examples that require shell/database-safe lowercase identifiers.
+  - Changed Git `origin` to `https://github.com/privatePol/teachermateplus.git`.
 - Admin Portal login branding:
-  - Replaced the `/admin-portal/login/` logo reference from `media/logos/edugradepro_logo.png` to `media/logos/edugradeplus_logo.png`.
-  - Updated the login panel copy to `Sign in as an authorized NCBA EduGradePlus user.` and added an MIS Department credential reminder for users without login credentials.
+  - Replaced the `/admin-portal/login/` branding-panel image with `media/logos/teachermate_logo_text_official.png`.
+  - Replaced the authenticated Admin Portal left-nav logo with `media/logos/teachermate_logo_text_official.png`.
+  - Reversed the authenticated Admin Portal left-nav green gradient so it starts darker at the top and becomes lighter toward the bottom.
+  - Updated the Admin topbar scope controls so Tenant and Campus dropdowns stay on the same row on desktop and wrap on mobile.
+  - Previous Admin login logo work standardized the login page on TeacherMate branding and added the NCBA NPC seal column.
+  - Updated the login panel copy to `Sign in as an authorized NCBA TeacherMatePlus user.` and added an MIS Department credential reminder for users without login credentials.
   - Added the NCBA NPC seal from `media/logos/ncba_npc_seal.png` to a dedicated right-side column on the Admin Portal login page.
   - Render-checked the Admin login page and confirmed the new logo filename appears while the old filename does not.
 - Faculty Portal public-login adjustment:
   - Changed the public Faculty Portal inline login forms on `/faculty/` to post back to `/faculty/` instead of `/faculty/login/`.
   - Added POST handling to `faculty_portal:public_index` using the normal Faculty login form, permission check, lockout behavior, OTP redirect, audit logging, and dashboard redirect path.
   - Invalid username/password attempts now keep the browser on `/faculty/` and show the error beside the inline login form.
-  - Added a shared Faculty password-recovery brand partial that displays `media/logos/edugradeplus_logo.png`.
+  - Added a shared Faculty password-recovery brand partial that displays `media/logos/teachermateplus_logo.png`.
   - Updated Faculty forgot-password, reset-link-sent, reset-confirm, and reset-complete pages so their `Back to Faculty Login` / `Go to Faculty Login` links return to `/faculty/`.
-  - Updated Faculty guide/manual wording, `CHANGE_LOG.md`, and `EDUGRADEPLUS_CONTEXT.md`.
+  - Updated Faculty guide/manual wording, `CHANGE_LOG.md`, and `TEACHERMATEPLUS_CONTEXT.md`.
 - Faculty Portal public homepage branding:
+  - Replaced the hero/main logo image on `/faculty/` with `media/logos/teachermate_logo_official.png`.
+  - Replaced the authenticated Faculty Portal header logo on pages such as `/faculty/dashboard/` with `media/logos/teachermate_logo_official.png`.
+  - Increased the spacing between the authenticated Faculty Portal top-nav heading and subtitle, and increased the subtitle height/readability.
+  - Updated the public landing hero headline to `Welcome to NCBA's TeacherMate+` and revised the supporting sentence to say TeacherMate+ helps `our faculty members`.
+  - Reworked the Faculty Portal public landing page copy to address NCBA faculty members and NCBA operations directly, including active-period governance, SIS integration, and grade-file continuity sections.
   - Removed the final `Proceed to Login` call-to-action section from `/faculty/`.
   - Added the NCBA NPC seal from `media/logos/ncba_npc_seal.png` centered in its own soft-gradient section on `/faculty/`.
   - Added a second proportion-preserving 75px-high NCBA NPC seal in the desktop navbar beside the login controls on `/faculty/`.
-  - Renamed the public navbar brand from `EduGrade+` to `NCBA | EduGrade+` and changed the nav label `Entry Experience` to `Experience`.
+  - Renamed the public navbar brand from `TeacherMate+` to `NCBA | TeacherMate+` and changed the nav label `Entry Experience` to `Experience`.
   - Seal sizing is capped at 150px with explicit image width/inline sizing as a cache-resistant safeguard.
   - Seal section now centers the seal across the full page width with inline flex centering and a stronger green/gold background gradient; the background gradient is also applied inline on the section as a cache-resistant safeguard.
   - Increased the lower seal section padding to `6rem` top and `6.5rem` bottom, with inline padding as a cache-resistant safeguard, to improve headroom and tail room around the NPC seal.
@@ -93,12 +108,12 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Faculty approved reopen display/edit-state adjustment:
   - Fixed Faculty Portal period-card and period work-page state so an approved gradebook reopen request overrides the raw period lock/deadline closure for a controlled reopen window.
   - Reopened periods now show a `Reopened` badge and approved reopen notice instead of staying visually locked after campus admin approval.
-  - Added a 24-hour validity window for approved gradebook reopen requests. When the latest approved 24-hour window expires before submission, EduGrade+ creates a course-level lock again and requires a new reopen request before further encoding or late submission.
+  - Added a 24-hour validity window for approved gradebook reopen requests. When the latest approved 24-hour window expires before submission, TeacherMate+ creates a course-level lock again and requires a new reopen request before further encoding or late submission.
   - Tightened submission governance so locked or overdue unsubmitted gradebooks can submit only during the latest active approved reopen window. Older expired approved requests remain audit history and no longer block a newer active approval.
   - Fixed final submission from an active approved reopen window by allowing the submission recompute step to proceed even when the underlying period lock is still present.
   - Enforced the confirmed route: submitted/finalized gradebooks after the deadline cannot use Gradebook Reopen Request and must use Correction of Grades. Submitted gradebooks can use reopen request only before the configured deadline.
 - Email notification standardization:
-  - Added a shared email subject formatter so system-generated emails use `NCBA | EduGradePlus: <Message>`.
+  - Added a shared email subject formatter so system-generated emails use `NCBA | TeacherMatePlus: <Message>`.
   - Updated account/password, new-user credentials, faculty reminder, non-compliance, correction, registrar, gradebook reopen, and email diagnostic send paths to use the standard subject format.
   - Switched email card branding to the NCBA logo (`media/logos/ncba-logo.png`) and the green-to-yellow card header style used by the password reset message.
   - Removed embedded Data Privacy Notice blocks from email templates.
@@ -149,7 +164,8 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
   - Added `/admin-portal/students/enrollment-query/`, governed by the new `student_enrollment_query.read` permission.
   - Authorized admins can search a scoped student, select Academic Year and Term, and view consolidated enrollment rows with period grades, submission status, final grade, and encoded activity-score details.
   - Added audit event `VIEW_STUDENT_ENROLLMENT_QUERY` whenever a selected student/AY/term query is opened.
-  - Added RBAC and navigation seed migrations so the page appears under the Admin Portal Students menu for authorized users.
+  - Added RBAC and navigation seed migrations so the page appears under the Admin Portal Enrollment menu for authorized users.
+  - Moved the existing `Student Enrollment Query` sidebar item from `Students` to `Enrollment` with migration `navigation.0005_move_student_enrollment_query_to_enrollment`.
 - Faculty activity score encoding:
   - Disabled Enter-key form submission inside activity score inputs on `/faculty/my-courses/<offering>/periods/<period>/activities/<activity>/scores/`.
   - Faculty must click `Save Scores`, reducing accidental saves while encoding grades row by row.
@@ -158,23 +174,29 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
   - Technical projection details remain on the separate prediction/analytics pages, with `Advanced Analytics` shown only when the user has `faculty_analytics.read`.
   - Added audit event `VIEW_STUDENT_INTERVENTION_MONITOR` whenever the faculty monitor is opened.
 - Infrastructure/security planning discussion:
-  - Recommended isolating uploaded documents outside the app directory under `/srv/edugradeplus-media`.
+  - Recommended isolating uploaded documents outside the app directory under `/srv/teachermateplus-media`.
   - Recommended mounting upload storage with `nodev,nosuid,noexec`.
-  - Recommended a practical 1TB RAID10 layout: `/` about 100 GB, `/var/log` about 30 GB, `/tmp` about 20 GB, `/opt/edugradeplus` about 80 GB, `/srv/edugradeplus-media` about 700 GB, `/srv/backup-staging` about 100 GB, and swap about 8-16 GB.
+  - Recommended a practical 1TB RAID10 layout: `/` about 100 GB, `/var/log` about 30 GB, `/tmp` about 20 GB, `/opt/teachermateplus` about 80 GB, `/srv/teachermateplus-media` about 700 GB, `/srv/backup-staging` about 100 GB, and swap about 8-16 GB.
   - Recommended Synology immutable/snapshot-backed backups as the main ransomware recovery layer, with ClamAV/Wazuh/CrowdSec/fail2ban/UFW/SSH hardening as supporting controls.
 - Added focused tests for pending-consent locks and syllabus link behavior.
 - Added a focused Faculty Dashboard active-period display test.
 - Added focused Faculty Summary table tests for grade-column order and status display.
 - Added a focused reopen request notification test for role, direct user-permission, and superuser recipients.
 - Added focused role-permissions page tests for module descriptions, section-save behavior, section anchor redirect, and saved label display.
-- Updated `CHANGE_LOG.md`, `EDUGRADEPLUS_CONTEXT.md`, Admin guide, Faculty guide/manual, and institution implementation reference.
+- Updated `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, Admin guide, Faculty guide/manual, and institution implementation reference.
 
 ## Files Created / Modified
+- Rename sweep touched many text files across `apps/`, `templates/`, `docs/`, `ops/`, `scripts/`, logs, fixtures, and top-level docs. Review with `git diff --stat` / `git status --short` rather than this legacy handoff list.
+- Renamed the context document to `TEACHERMATEPLUS_CONTEXT.md`.
+- Renamed the product logo asset to `media/logos/teachermateplus_logo.png`.
+- Renamed ops cron/nginx/systemd/env example filenames to use `teachermateplus`.
+- Renamed older legacy presentation docs, CSV/JSON fixtures, media import CSVs, and logo variants to use `teachermateplus`.
 - Added: `apps/faculty_portal/tests_public_login.py`
 - Added: `apps/academics/migrations/0009_course_syllabus_url.py`
 - Added: `apps/admin_portal/tests_student_enrollment_query.py`
 - Added: `apps/rbac/migrations/0011_seed_student_enrollment_query_permission.py`
 - Added: `apps/navigation/migrations/0004_seed_student_enrollment_query_menu.py`
+- Added: `apps/navigation/migrations/0005_move_student_enrollment_query_to_enrollment.py`
 - Added: `templates/admin_portal/students/student_enrollment_query.html`
 - Modified: `apps/academics/models.py`
 - Modified: `apps/academics/admin.py`
@@ -201,6 +223,10 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Modified: `apps/faculty_portal/forms.py`
 - Modified: `apps/faculty_portal/urls.py`
 - Modified: `apps/faculty_portal/tests_assignment_acceptance.py`
+- Modified: `templates/admin_portal/login.html`
+- Modified: `apps/accounts/tests_login_otp.py`
+- Modified: `templates/admin_portal/base.html`
+- Modified: `apps/admin_portal/tests_assignment_acceptance.py`
 - Modified: `apps/grading/notifications.py`
 - Modified: `apps/grading/management/commands/auto_lock_period_deadlines.py`
 - Modified: `apps/grading/services.py`
@@ -213,6 +239,9 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Modified: `templates/faculty_portal/base.html`
 - Modified: `templates/faculty_portal/dashboard.html`
 - Modified: `templates/faculty_portal/public_index.html`
+- Modified: `apps/faculty_portal/tests_public_login.py`
+- Modified: `templates/faculty_portal/base.html`
+- Modified: `apps/faculty_portal/tests_assignment_acceptance.py`
 - Modified: `static/faculty_portal/css/public_index.css`
 - Modified: `templates/faculty_portal/partials/deadline_banner.html`
 - Modified: `templates/faculty_portal/partials/active_period_banner.html`
@@ -246,6 +275,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Modified: `templates/grading/emails/registrar_official_report.html`
 - Modified: `templates/admin_portal/guide.html`
 - Modified: `templates/admin_portal/tools/configurable_features.html`
+- Modified: `templates/admin_portal/guide.html`
 - Modified: `templates/faculty_portal/guide.html`
 - Modified: `templates/faculty_portal/guide_manual.html`
 - Modified: `templates/faculty_portal/password_forgot.html`
@@ -254,7 +284,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Modified: `templates/faculty_portal/password_reset_confirm.html`
 - Modified: `docs/INSTITUTION_IMPLEMENTATION_REFERENCE.md`
 - Modified: `CHANGE_LOG.md`
-- Modified: `EDUGRADEPLUS_CONTEXT.md`
+- Modified: `TEACHERMATEPLUS_CONTEXT.md`
 - Modified: `HANDOFF.md`
 - Existing working tree notes not introduced by these requests:
   - DepEd ECR compatibility changes from the prior turn remain in the working tree, including `apps/grading/migrations/0026_tenantgradingprofile_period_formula.py`.
@@ -264,8 +294,8 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
   - `docs/START_SESSION_PROMPT.md` was already untracked.
 
 ## Important Decisions
-- Syllabus storage stays in Google Drive; EduGrade+ stores only the URL.
-- EduGrade+ enforces tenant/faculty assignment visibility before redirecting to the link, but Google Workspace still enforces whether the opened document is viewable.
+- Syllabus storage stays in Google Drive; TeacherMate+ stores only the URL.
+- TeacherMate+ enforces tenant/faculty assignment visibility before redirecting to the link, but Google Workspace still enforces whether the opened document is viewable.
 - If a course has no syllabus link, Faculty My Classes renders no syllabus icon/action.
 - The syllabus URL is course-level metadata, so all offerings of the same course inherit the same link.
 - Successful faculty syllabus-link opens are audited without storing the raw Google Drive URL in audit metadata.
@@ -286,7 +316,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Approved gradebook reopen requests are limited to 24 hours from approval. Only the latest approved request controls the current window. If the faculty does not submit/resubmit within that window, the period is locked again and a new request is required.
 - Submitted/finalized gradebooks after deadline must use Correction of Grades for changes. Reopen Request is reserved for unsubmitted overdue/locked gradebooks, plus submitted gradebooks only before the deadline.
 - Dashboard reopen request panel is permission-gated and scope-filtered through `AdminScopeService.scoped_grade_submission_reopen_requests`.
-- System email subjects should use `NCBA | EduGradePlus: <Message>`. Shared email card branding should use the NCBA logo and the green-to-yellow header, without embedding a Data Privacy Notice block in the email body.
+- System email subjects should use `NCBA | TeacherMatePlus: <Message>`. Shared email card branding should use the NCBA logo and the green-to-yellow header, without embedding a Data Privacy Notice block in the email body.
 - Single-device session enforcement is now tenant-configurable in Login Security. The global Django setting `ENFORCE_SINGLE_DEVICE_SESSION=False` still disables the behavior platform-wide; otherwise the tenant toggle decides whether the same user is limited to one active browser/device session.
 - Period-card setup counts intentionally use lightweight bucket-level activity counts. Avoid adding per-student detail to every card unless performance is rechecked, because that can multiply gradebook queries on `/faculty/my-courses/<offering>/periods/`.
 - Missing-record checks are based on missing saved score/attendance rows for required items. A saved zero score counts as encoded and should not be treated as missing.
@@ -298,6 +328,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Ransomware protection strategy should not rely on antivirus alone. The preferred server-side approach is least privilege, separated upload storage, no-execute mounts, restricted backup credentials, and Synology snapshots/immutability with tested restore procedures.
 
 ## Pending Work
+- Create the new GitHub repository at `privatePol/teachermateplus` before pushing, then push the renamed branch.
 - Continue with the next management/academic-head demo adjustment from the user.
 - If the institution wants simultaneous logins allowed, turn off `Allow only one active login session per user` in `Admin Portal -> Tools -> Configuration Management -> Login Security`.
 - If Grade Prediction or Student Intervention Monitor is missing in another environment, enable it from `Admin Portal -> Tools -> Configuration Management -> Grade Prediction`, make sure the `FACULTY` role is included, and turn on the intervention/monitor flag.
@@ -309,6 +340,16 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
   - Open governance/design topics remain in the context document, including expanded grading methodology options, active AY/Term governance, correction/reopen policy finalization, passing-threshold management, and configurable feature governance.
 
 ## Known Issues / Risks
+- Browser smoke test for the Faculty public landing logo replacement was not run because no in-app Browser tool was available in this session; validation was command/test based.
+- Browser smoke test for the authenticated Faculty header logo replacement was not run because no in-app Browser tool was available in this session; validation was command/test based.
+- Browser smoke test for the Faculty top-nav subtitle spacing was not run because no in-app Browser tool was available in this session; validation was command/test based.
+- Browser smoke test for the Faculty public landing copy change was not run because no in-app Browser tool was available in this session; validation was command/test based.
+- Browser smoke test for the broader Faculty public landing internal-voice rewrite was not run because no in-app Browser tool was available in this session; validation was command/test/search based.
+- Browser smoke test for the Admin login logo replacement was not run because no in-app Browser tool was available in this session; validation was command/test based.
+- Browser smoke test for the Admin left-nav logo replacement was not run because no in-app Browser tool was available in this session; validation was command/test based.
+- Browser smoke test for the Admin topbar scope dropdown layout was not run because no in-app Browser tool was available in this session; validation was command/test based.
+- The new GitHub repo was not created from this workspace; `origin` has been repointed but push will fail until `privatePol/teachermateplus` exists and credentials allow access.
+- Browser/admin/faculty smoke tests were not run for the rename-only sweep; validation was command/search based.
 - Browser smoke tests were not run for the syllabus feature; validation was command/test based.
 - Browser smoke tests were not run for the Faculty active-period display changes; validation was command/test based.
 - Browser smoke tests were not run for the Faculty deadline reminder and dashboard card color changes; validation was command/test based.
@@ -335,17 +376,32 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - The Faculty Portal public-login, password-recovery return-link, and password-recovery logo fixes were validated by Django client tests and `manage.py check`, not by a manual browser smoke test.
 - The NCBA Grade Prediction feature was enabled in the local development database only; other environments must be configured through Configuration Management.
 - The prior DepEd implementation remains uncommitted in the same working tree. If the project wants that work parked or reverted, handle it explicitly and carefully.
-- `EDUGRADEPLUS_CONTEXT.md` now exists under the expected filename; the working tree still shows the rename from `EDUGRADESPRO_CONTEXT.md` as an uncommitted delete/add.
+- `TEACHERMATEPLUS_CONTEXT.md` now exists under the expected filename; the working tree still shows the rename from `TEACHERMATEPLUS_CONTEXT.md` as an uncommitted delete/add.
 - The ransomware/partitioning discussion was advisory only. No server partition, mount, Synology, antivirus, or Django `MEDIA_ROOT` configuration changes were applied in this workspace.
 
 ## Validation Completed
+- [x] Rename residual content scan - passed: no legacy brand-family matches remain in repository text.
+- [x] Rename residual path scan - passed: no file/directory names outside `.git` matched the legacy brand-family patterns.
+- [x] Git remote update check - passed: `origin` fetch/push now point to `https://github.com/privatePol/teachermateplus.git`.
+- [x] Rename Django check - passed: `python manage.py check`
+- [x] Rename-focused Faculty public-login regression - passed: `python manage.py test apps.faculty_portal.tests_public_login`
+- [x] Faculty public landing hero logo render assertion - passed through `python manage.py test apps.faculty_portal.tests_public_login`; response contains `logos/teachermate_logo_official.png` and does not contain the old hero image reference.
+- [x] Authenticated Faculty header logo render assertion - passed through `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_active_grading_period_shows_ay_and_campus_name`; response contains `logos/teachermate_logo_official.png` and does not contain the old header image reference.
+- [x] Faculty top-nav subtitle spacing/style assertion - passed through `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_dashboard_active_grading_period_shows_ay_and_campus_name`; response contains the updated subtitle font size, line height, and margin-top rules.
+- [x] Faculty public landing hero copy assertion - passed through `python manage.py test apps.faculty_portal.tests_public_login`; response contains `Welcome to NCBA's TeacherMate+` and `TeacherMate+ helps our faculty members manage teaching loads`.
+- [x] Faculty public landing internal-voice assertions - passed through `python manage.py test apps.faculty_portal.tests_public_login`; response contains NCBA-specific faculty/SIS/grade-file wording and no longer contains client-facing phrases such as `your existing SIS`, `TeacherMate+ vs Standalone Grade Files`, or `helps institutions`.
+- [x] Faculty public landing client-facing language scan - passed: `rg -n "institution|institutions|client|promot|your existing|TeacherMate\\+ vs Standalone|Standalone Spreadsheets|faculty users" templates\faculty_portal\public_index.html` returned no matches.
+- [x] Admin login official text-logo render assertion - passed through `python manage.py test apps.accounts.tests_login_otp.LoginOtpTests.test_admin_login_uses_official_teachermate_text_logo`; response contains `logos/teachermate_logo_text_official.png` and does not contain the previous login logo reference.
+- [x] Admin authenticated left-nav text-logo render assertion - passed through `python manage.py test apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_assignment_dashboard_view_loads`; response contains `logos/teachermate_logo_text_official.png` and does not contain the previous sidebar logo reference.
+- [x] Admin left-nav reversed-gradient render assertion - passed through `python manage.py test apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_assignment_dashboard_view_loads`; response contains the reversed `linear-gradient(180deg, #214f25 0%, #39742d 32%, #4d8c33 68%, #5b9a37 100%)`.
+- [x] Admin topbar scope dropdown layout assertion - passed through `python manage.py test apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_assignment_dashboard_view_loads`; response contains the desktop select sizing rule for same-row tenant/campus controls.
 - [x] `python manage.py check` - passed
-- [x] `python manage.py migrate` - passed; applied `academics.0009_course_syllabus_url` in earlier validation and later applied `rbac.0011_seed_student_enrollment_query_permission` and `navigation.0004_seed_student_enrollment_query_menu`
+- [x] `python manage.py migrate` - passed; applied `academics.0009_course_syllabus_url` in earlier validation, later applied `rbac.0011_seed_student_enrollment_query_permission` and `navigation.0004_seed_student_enrollment_query_menu`, and this session applied `navigation.0005_move_student_enrollment_query_to_enrollment`
 - [x] `python manage.py makemigrations --check --dry-run` - passed; no changes detected
-- [x] Admin Portal login logo render check - passed: rendered `/admin-portal/login/` with HTTP 200 and confirmed `logos/edugradeplus_logo.png` is present while `logos/edugradepro_logo.png` is absent.
+- [x] Admin Portal login logo render check - passed in earlier validation for the prior branding asset; current text-logo replacement is covered by the focused Admin login official text-logo assertion above.
 - [x] Admin Portal login copy render check - passed: rendered `/admin-portal/login/` with HTTP 200 and confirmed the authorized-user line plus MIS Department credential reminder are present.
 - [x] Admin Portal login NPC seal render check - passed: rendered `/admin-portal/login/` with HTTP 200 and confirmed the right-side `seal-panel`, `col-lg-3` column, and `logos/ncba_npc_seal.png` are present.
-- [x] Faculty Portal public homepage render check - passed: rendered `/faculty/` with HTTP 200 and confirmed the final CTA section is absent, the navbar shows `NCBA | EduGrade+` and `Experience`, and `fp-npc-seal-nav`, `fp-npc-seal-section`, full-width `fp-final-npc-seal`, and `logos/ncba_npc_seal.png` are present; navbar seal is capped at 75px high with natural width and section seal at 150px wide.
+- [x] Faculty Portal public homepage render check - passed: rendered `/faculty/` with HTTP 200 and confirmed the final CTA section is absent, the navbar shows `NCBA | TeacherMate+` and `Experience`, and `fp-npc-seal-nav`, `fp-npc-seal-section`, full-width `fp-final-npc-seal`, and `logos/ncba_npc_seal.png` are present; navbar seal is capped at 75px high with natural width and section seal at 150px wide.
 - [x] Faculty Portal public-login, password-recovery link, and password-recovery logo focused tests - passed: `python manage.py test apps.faculty_portal.tests_public_login`
 - [x] Faculty Portal public-login plus account login-lockout regression tests - passed: `python manage.py test apps.faculty_portal.tests_public_login apps.accounts.tests_login_lockout`
 - [x] Privacy Consent focused tests - passed: `python manage.py test apps.accounts.tests_privacy_consent`
@@ -390,6 +446,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - [x] Required Faculty Portal assignment test suite - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance` (95 tests)
 - [x] Reopen/faculty combined regression suite - passed: `python manage.py test apps.admin_portal.tests_reopen_requests apps.faculty_portal.tests_assignment_acceptance` (104 tests)
 - [x] Admin Student Enrollment Query focused tests - passed: `python manage.py test apps.admin_portal.tests_student_enrollment_query` (2 tests)
+- [x] Admin sidebar navigation data check - passed: confirmed `STUDENT_ENROLLMENT_QUERY` is assigned to the `ENROLLMENT` menu group after migration.
 - [x] Faculty activity-score Enter-key guard focused test - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_activity_scores_shows_quick_jump_links_and_unsaved_warning_copy`
 - [x] Default monitor banned-term scan - passed: `rg -n "below passing|failing|likely to fail|possible final grade below passing|prediction confidence|coverage percentage|projected final grade|class ranking" templates\faculty_portal\student_at_risk_monitor.html templates\faculty_portal\dashboard.html apps\faculty_portal\services.py apps\faculty_portal\views.py` returned no matches.
 - [x] Admin Guide Grade Prediction enablement render check - passed: rendered `/admin-portal/guide/` with HTTP 200 and confirmed the Grade Prediction / At-Risk Monitor setup checklist is present.
@@ -401,7 +458,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - [x] Tenant/campus scope checked - syllabus redirect blocks course/offering tenant mismatch and non-assigned faculty
 
 ## Exact Next Steps For Next Codex Session
-1. Read `AGENTS.md`, `EDUGRADEPLUS_CONTEXT.md`, `CHANGE_LOG.md`, and this file.
+1. Read `AGENTS.md`, `TEACHERMATEPLUS_CONTEXT.md`, `CHANGE_LOG.md`, and this file.
 2. Continue with the next management/academic-head demo adjustment from the user.
 3. If preparing a release, decide whether to keep, park, or revert the paused DepEd working-tree changes.
 4. If server hardening proceeds, draft a production-safe step-by-step plan for partitioning, `MEDIA_ROOT` relocation, fstab mount options, Synology snapshots, backup credentials, ClamAV/Wazuh/CrowdSec/fail2ban/UFW, and restore testing before applying changes.
@@ -409,7 +466,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 
 ## Files To Inspect First Next Session
 - AGENTS.md
-- EDUGRADEPLUS_CONTEXT.md
+- TEACHERMATEPLUS_CONTEXT.md
 - CHANGE_LOG.md
 - HANDOFF.md
 - apps/academics/models.py
@@ -422,7 +479,7 @@ This file preserves continuity between Codex sessions for EduGrade+ V1.
 - Enforce RBAC server-side and UI-side.
 - Avoid broad rewrites.
 - Preserve grading governance and auditability.
-- Update CHANGE_LOG.md and EDUGRADEPLUS_CONTEXT.md when behavior changes.
+- Update CHANGE_LOG.md and TEACHERMATEPLUS_CONTEXT.md when behavior changes.
 - Run validation before handoff.
 - Run `python manage.py check`.
 - Run `python manage.py migrate` if migrations exist.

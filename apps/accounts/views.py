@@ -46,7 +46,7 @@ User = get_user_model()
 
 def _send_faculty_password_reset_email(request, user, reset_url: str) -> int:
     subject = format_email_subject("Faculty Password Reset")
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@EduGrade+.local")
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
     recipient = [user.email]
     logo_context = build_email_logo_context(
         filename="ncba-logo.png",

@@ -51,6 +51,17 @@ class FacultyPublicLoginTests(TestCase):
         response = self.client.get(reverse("faculty_portal:public_index"))
 
         self.assertContains(response, 'action="/faculty/"', status_code=200)
+        self.assertContains(response, "logos/teachermate_logo_official.png")
+        self.assertNotContains(response, "logos/egp_logo_official.png")
+        self.assertContains(response, "Welcome to NCBA's TeacherMate+")
+        self.assertContains(response, "TeacherMate+ helps our faculty members manage teaching loads")
+        self.assertContains(response, "What NCBA Faculty Members See When They Enter TeacherMate+")
+        self.assertContains(response, "Connected Grade Records for NCBA Operations")
+        self.assertContains(response, "Why NCBA Uses TeacherMate+ Instead of Standalone Grade Files")
+        self.assertContains(response, "NCBA's authorized systems")
+        self.assertNotContains(response, "your existing SIS")
+        self.assertNotContains(response, "TeacherMate+ vs Standalone Grade Files")
+        self.assertNotContains(response, "helps institutions")
 
     def test_invalid_public_faculty_login_stays_on_landing_page(self):
         response = self.client.post(
@@ -87,6 +98,5 @@ class FacultyPublicLoginTests(TestCase):
             with self.subTest(url=url):
                 response = self.client.get(url)
                 self.assertContains(response, 'href="/faculty/"', status_code=200)
-                self.assertContains(response, "logos/edugradeplus_logo.png")
+                self.assertContains(response, "logos/teachermateplus_logo.png")
                 self.assertNotContains(response, 'href="/faculty/login/"')
-                self.assertNotContains(response, "logos/edugradepro_logo.png")

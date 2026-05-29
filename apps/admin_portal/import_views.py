@@ -37,7 +37,7 @@ class EmailDiagnosticsForm(forms.Form):
         required=True,
         widget=forms.Textarea(attrs={"rows": 5}),
         initial=(
-            "This is a test email from EduGrade+.\n\n"
+            "This is a test email from TeacherMate+.\n\n"
             "If you received this message, SMTP settings are working."
         ),
     )

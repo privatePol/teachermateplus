@@ -59,6 +59,12 @@ class LoginOtpTests(TestCase):
         self.assertEqual(LoginOtpChallenge.objects.count(), 0)
         self.assertEqual(len(mail.outbox), 0)
 
+    def test_admin_login_uses_official_teachermate_text_logo(self):
+        response = self.client.get(reverse("accounts:admin_login"))
+
+        self.assertContains(response, "logos/teachermate_logo_text_official.png", status_code=200)
+        self.assertNotContains(response, "logos/teachermateplus_logo.png")
+
     def test_email_otp_enabled_sends_code_before_login_completion(self):
         self._set_otp_enabled(True)
 
@@ -71,7 +77,7 @@ class LoginOtpTests(TestCase):
         self.assertEqual(response.url, reverse("accounts:admin_login_otp"))
         self.assertEqual(LoginOtpChallenge.objects.count(), 1)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertEqual(mail.outbox[0].subject, "NCBA | EduGradePlus: Login Verification")
+        self.assertEqual(mail.outbox[0].subject, "NCBA | TeacherMatePlus: Login Verification")
 
         code_match = re.search(r"\b(\d{6})\b", mail.outbox[0].body)
         self.assertIsNotNone(code_match)

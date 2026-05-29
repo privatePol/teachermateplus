@@ -6,17 +6,17 @@ from pathlib import Path
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 
-EMAIL_SUBJECT_PREFIX = "NCBA | EduGradePlus: "
+EMAIL_SUBJECT_PREFIX = "NCBA | TeacherMatePlus: "
 
 
 def format_email_subject(message: str) -> str:
     text = str(message or "").strip()
     legacy_prefixes = [
         EMAIL_SUBJECT_PREFIX,
-        "NCBA-EduGrade+:",
-        "NCBA EduGrade+",
-        "EduGrade+",
-        "EduGradePlus",
+        "NCBA-TeacherMate+:",
+        "NCBA TeacherMate+",
+        "TeacherMate+",
+        "TeacherMatePlus",
     ]
     for prefix in legacy_prefixes:
         if text.lower().startswith(prefix.lower()):

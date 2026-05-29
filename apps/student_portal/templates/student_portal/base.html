@@ -1,7 +1,7 @@
 {% extends "shared/base_public.html" %}
 {% load static %}
 
-{% block title %}{{ title|default:"Student Portal" }} | EduGrade+{% endblock %}
+{% block title %}{{ title|default:"Student Portal" }} | TeacherMate+{% endblock %}
 {% block extra_head %}
 <style>
   body { background: #f5f8f4; }
@@ -39,9 +39,9 @@
   <nav class="navbar student-topbar px-3">
     <div class="container-fluid">
       <div class="d-flex align-items-center gap-2">
-        <img src="{% get_media_prefix %}logos/egp_logo_official.png" alt="EduGrade+" class="student-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/edp_logo.png';">
+        <img src="{% get_media_prefix %}logos/egp_logo_official.png" alt="TeacherMate+" class="student-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/edp_logo.png';">
         <div>
-          <div class="student-brand">NCBA | EduGrade+</div>
+          <div class="student-brand">NCBA | TeacherMate+</div>
           <div class="student-subtitle">
             Student Portal
             {% if active_academic_year and active_term %}

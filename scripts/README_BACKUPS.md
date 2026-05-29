@@ -1,4 +1,4 @@
-# edugradeplus Backup Scripts
+# teachermateplus Backup Scripts
 
 These scripts are application-level helpers only. They do not configure the production server.
 
@@ -7,12 +7,12 @@ These scripts are application-level helpers only. They do not configure the prod
 Set the database variables from the deployment environment file, then run:
 
 ```bash
-export DB_NAME=edugradeplus
+export DB_NAME=teachermateplus
 export DB_USER=egpro1_admin
 export DB_PASSWORD='set-from-secure-env'
 export DB_HOST=127.0.0.1
 export DB_PORT=3306
-export BACKUP_DIR=/secure/backups/edugradeplus
+export BACKUP_DIR=/secure/backups/teachermateplus
 
 ./scripts/backup_mysql.sh
 ```
@@ -21,7 +21,7 @@ export BACKUP_DIR=/secure/backups/edugradeplus
 
 ```bash
 export BACKUP_ENCRYPTION_PASSWORD='long-random-secret-from-password-manager'
-./scripts/encrypt_backup.sh /secure/backups/edugradeplus/edugradeplus-YYYYMMDD-HHMMSS.sql.gz
+./scripts/encrypt_backup.sh /secure/backups/teachermateplus/teachermateplus-YYYYMMDD-HHMMSS.sql.gz
 ```
 
 Store encrypted backups off-server where possible. Test restore procedures regularly.
@@ -30,7 +30,7 @@ Store encrypted backups off-server where possible. Test restore procedures regul
 
 ```bash
 export BACKUP_ENCRYPTION_PASSWORD='long-random-secret-from-password-manager'
-./scripts/decrypt_backup.sh /secure/backups/edugradeplus/edugradeplus-YYYYMMDD-HHMMSS.sql.gz.enc
+./scripts/decrypt_backup.sh /secure/backups/teachermateplus/teachermateplus-YYYYMMDD-HHMMSS.sql.gz.enc
 ```
 
 Do not commit generated backup files, encrypted backup files, or passwords.
