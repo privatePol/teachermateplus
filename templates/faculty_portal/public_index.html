@@ -6,9 +6,78 @@
 {% block extra_head %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Kaushan+Script&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{% static 'faculty_portal/css/public_index.css' %}">
 <style>
+  .fp-npc-seal-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+  }
+  .fp-npc-seal-tagline {
+    position: relative;
+    display: inline-block;
+    margin: 1rem 1rem 0;
+    padding: 0 2.2rem;
+    color: #175936;
+    font-family: "Kaushan Script", cursive;
+    font-size: 2.35rem;
+    font-weight: 400;
+    line-height: 1.18;
+    text-align: center;
+    text-shadow: 0 2px 0 rgba(255, 255, 255, 0.7);
+  }
+  .fp-npc-seal-tagline .fp-tagline-quote {
+    position: absolute;
+    color: rgba(126, 148, 36, 0.72);
+    font-family: Georgia, serif;
+    font-size: 3.5rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .fp-npc-seal-tagline .fp-tagline-quote-open {
+    top: -0.55rem;
+    left: 0;
+  }
+  .fp-npc-seal-tagline .fp-tagline-quote-close {
+    right: 0;
+    bottom: -0.45rem;
+  }
+  .fp-npc-seal-tagline .fp-tagline-accent {
+    color: #879a20;
+  }
+  .fp-npc-seal-flourish {
+    display: block;
+    width: min(22rem, 78vw);
+    height: auto;
+    margin: 0.15rem auto 0;
+    overflow: visible;
+  }
+  .fp-npc-seal-flourish .flourish-gold,
+  .fp-npc-seal-flourish .flourish-green {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .fp-npc-seal-flourish .flourish-gold {
+    stroke: #9bad2d;
+    stroke-width: 3.4;
+  }
+  .fp-npc-seal-flourish .flourish-green {
+    stroke: #175936;
+    stroke-width: 2.5;
+  }
+  @media (max-width: 575.98px) {
+    .fp-npc-seal-tagline {
+      max-width: 21rem;
+      padding-inline: 1.7rem;
+      font-size: 1.85rem;
+    }
+    .fp-npc-seal-tagline .fp-tagline-quote {
+      font-size: 2.8rem;
+    }
+  }
   .fp-compare-table-clean {
     width: 100%;
     border-collapse: collapse;
@@ -309,6 +378,58 @@
         <div class="col-lg-6">
           <div>
             <div class="fp-image-holder has-image fp-hero-logo-holder">
+              <div class="fp-logo-starfield" aria-hidden="true">
+                <span class="fp-logo-star star-1"></span>
+                <span class="fp-logo-star star-2"></span>
+                <span class="fp-logo-star star-3"></span>
+                <span class="fp-logo-star star-4"></span>
+                <span class="fp-logo-star star-5"></span>
+                <span class="fp-logo-star star-6"></span>
+                <span class="fp-logo-star star-7"></span>
+                <span class="fp-logo-star star-8"></span>
+                <span class="fp-logo-star star-9"></span>
+                <span class="fp-logo-star star-10"></span>
+                <span class="fp-logo-star star-11"></span>
+                <span class="fp-logo-star star-12"></span>
+                <span class="fp-logo-star star-13"></span>
+                <span class="fp-logo-star star-14"></span>
+                <span class="fp-logo-star star-15"></span>
+                <span class="fp-logo-star star-16"></span>
+                <span class="fp-logo-star star-17"></span>
+                <span class="fp-logo-star star-18"></span>
+                <span class="fp-logo-star star-19"></span>
+                <span class="fp-logo-star star-20"></span>
+                <span class="fp-logo-star star-21"></span>
+                <span class="fp-logo-star star-22"></span>
+                <span class="fp-logo-star star-23"></span>
+                <span class="fp-logo-star star-24"></span>
+              </div>
+              <div class="fp-logo-starfield fp-logo-starfield-neon" aria-hidden="true">
+                <span class="fp-logo-star fp-logo-star-neon star-1"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-2"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-3"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-4"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-5"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-6"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-7"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-8"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-9"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-10"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-11"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-12"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-13"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-14"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-15"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-16"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-17"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-18"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-19"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-20"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-21"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-22"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-23"></span>
+                <span class="fp-logo-star fp-logo-star-neon star-24"></span>
+              </div>
               <img class="fp-hero-logo-image" src="{% get_media_prefix %}logos/teachermate_logo_official.png" alt="TeacherMate+ Faculty Portal hero visual">
             </div>
             {% comment %} <div class="fp-float-chip">Live Grading Status</div>
@@ -640,13 +761,35 @@
     aria-label="NCBA National Privacy Commission seal"
     style="padding: 6rem 0 6.5rem; background: radial-gradient(circle at 50% 18%, rgba(210, 191, 43, 0.42), transparent 34%), linear-gradient(135deg, #dcebd4 0%, #f8fbf3 45%, #d5e7c8 100%);"
   >
-    <div class="fp-final-npc-seal" aria-label="NCBA National Privacy Commission seal" style="display: flex; justify-content: center; width: 100%;">
-      <img
-        src="{% get_media_prefix %}logos/ncba_npc_seal.png"
-        alt="NCBA National Privacy Commission seal"
-        width="150"
-        style="width: 150px; max-width: 150px; height: auto;"
+    <div class="fp-npc-seal-content">
+      <div class="fp-final-npc-seal" aria-label="NCBA National Privacy Commission seal" style="display: flex; justify-content: center; width: 100%;">
+        <img
+          src="{% get_media_prefix %}logos/ncba_npc_seal.png"
+          alt="NCBA National Privacy Commission seal"
+          width="150"
+          style="width: 150px; max-width: 150px; height: auto;"
+        >
+      </div>
+      <div class="fp-npc-seal-tagline" aria-label="Grado Mo, Protektado Ko!">
+        <span class="fp-tagline-quote fp-tagline-quote-open" aria-hidden="true">&ldquo;</span>
+        Grado Mo, <span class="fp-tagline-accent">Protektado Ko!</span>
+        <span class="fp-tagline-quote fp-tagline-quote-close" aria-hidden="true">&rdquo;</span>
+      </div>
+      <svg
+        class="fp-npc-seal-flourish"
+        viewBox="0 0 420 48"
+        role="img"
+        aria-label="Decorative pen-stroke flourish"
       >
+        <path
+          class="flourish-gold"
+          d="M22 19 C82 34, 154 31, 218 20 C267 12, 314 10, 349 18 C374 24, 366 35, 341 32"
+        />
+        <path
+          class="flourish-green"
+          d="M214 21 C273 20, 321 25, 350 37 C363 42, 372 41, 381 35 M350 37 C363 32, 373 27, 389 25"
+        />
+      </svg>
     </div>
   </section>
 </div>

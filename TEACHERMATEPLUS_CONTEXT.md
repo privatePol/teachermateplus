@@ -34,6 +34,8 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 ### Admin Portal
 - Security: users, roles, scoped permissions
 - The public site root `/` redirects to `/faculty/`; Admin Portal access remains available directly under `/admin-portal/`.
+- The Faculty Portal public-page privacy seal section shows `“Grado Mo, Protektado Ko!”` beneath the NPC seal as a responsive two-tone Kaushan Script signature with integrated quotation marks and a custom two-color vector pen flourish.
+- The Faculty Portal public hero places a lightweight 48-star CSS field behind the TeacherMate+ logo, composed of 24 gold-white and 24 neon-green stars with separate animation timing and glow, plus a soft halo. The logo remains above the decorative layers, and `prefers-reduced-motion` disables the animation.
 - Admin Portal sidebar and login-page branding use the official TeacherMate text logo from `/media/logos/teachermate_logo_text_official.png`.
 - Admin Portal login branding panel uses the official TeacherMate text logo from `/media/logos/teachermate_logo_text_official.png`.
 - Admin Portal authenticated left navigation uses a reversed green gradient, with the deeper shade at the top and lighter shade toward the bottom.

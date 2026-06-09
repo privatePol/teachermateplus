@@ -30,6 +30,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 
 ### Changed
 - The TeacherMate+ site root `/` now redirects to the Faculty Portal landing page at `/faculty/`, making the faculty experience the default page for the public domain while preserving direct Admin Portal URLs.
+- The Faculty Portal public-page privacy seal section now presents `“Grado Mo, Protektado Ko!”` as a two-tone Kaushan Script signature with integrated quotation marks and a custom two-color vector pen flourish beneath the NCBA National Privacy Commission seal.
+- The Faculty Portal public hero now displays a 48-star animated field behind the TeacherMate+ logo: 24 gold-white stars and 24 neon-green stars with distinct timing, glow, and positioning, plus a breathing light halo and static reduced-motion fallback.
 - Faculty Portal public landing hero and authenticated Faculty Portal header now use `/media/logos/teachermate_logo_official.png` as the main logo image.
 - Admin Portal login branding panel now uses `/media/logos/teachermate_logo_text_official.png`.
 - Admin Portal authenticated left navigation branding now uses `/media/logos/teachermate_logo_text_official.png`.

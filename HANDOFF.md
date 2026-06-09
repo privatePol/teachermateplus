@@ -16,6 +16,14 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Changed the bare site root `/` to issue a temporary redirect to the Faculty Portal landing page at `/faculty/`.
   - Preserved direct `/admin-portal/`, `/index/`, `/index.php`, and all existing portal routes.
   - Added a Faculty public-login regression test for the root redirect.
+- Faculty public-page privacy seal:
+  - Added `“Grado Mo, Protektado Ko!”` immediately beneath the NPC seal.
+  - Styled the slogan with Kaushan Script, deep-green and olive-gold phrase segments, integrated softened quotation marks, responsive mobile sizing, and a custom two-color SVG pen-stroke flourish underneath.
+- Faculty public hero logo animation:
+  - Added forty-eight staggered CSS sparkles behind the TeacherMate+ hero logo: 24 gold-white stars and 24 neon-green stars.
+  - Mirrored and slightly rotated the neon-green layer and gave it separate timing and glow so the two colors interleave without stacking directly.
+  - Added a soft breathing halo and logo drop shadow while preserving the logo as the foreground layer.
+  - Added a `prefers-reduced-motion` fallback that keeps the stars static and disables the halo animation.
 - Grading template faculty-activity averaging:
   - Corrected the initial implementation after user clarification: the required behavior is averaging faculty-created activities under Recitation/Assignment/Activity-style detail rows, not averaging the template detail buckets themselves.
   - Added `DetailComputationMode` with `WEIGHTED_DETAILS` and `AVERAGE_ACTIVITIES`.
@@ -355,6 +363,8 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 ## Changed Files This Session
 - `apps/accounts/urls.py`
 - `apps/faculty_portal/tests_public_login.py`
+- `static/faculty_portal/css/public_index.css`
+- `templates/faculty_portal/public_index.html`
 - `apps/grading/models.py`
 - `apps/grading/migrations/0027_gradingtemplatesubcomponent_detail_computation_mode.py`
 - `apps/grading/services.py`
@@ -439,6 +449,12 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - The ransomware/partitioning discussion was advisory only. No server partition, mount, Synology, antivirus, or Django `MEDIA_ROOT` configuration changes were applied in this workspace.
 
 ## Validation Completed
+- [x] Faculty hero logo sparkle render regression - passed through `python manage.py test apps.faculty_portal.tests_public_login.FacultyPublicLoginTests.test_public_faculty_login_form_posts_to_landing_page`.
+- [x] Django system check after hero logo animation - passed: `python manage.py check`.
+- [x] Static deployment dry run after hero logo animation - passed: `python manage.py collectstatic --noinput --dry-run`.
+- [x] Faculty privacy-seal slogan render regression - passed: `python manage.py test apps.faculty_portal.tests_public_login.FacultyPublicLoginTests.test_public_faculty_login_form_posts_to_landing_page`.
+- [x] Django system check after privacy-seal slogan change - passed: `python manage.py check`.
+- [ ] Visual browser smoke test for the privacy-seal slogan was not run because the local in-app browser target was unavailable.
 - [x] Default root redirect regression - passed: `python manage.py test apps.faculty_portal.tests_public_login` (5 tests).
 - [x] Django system check after root redirect - passed: `python manage.py check`.
 - [x] Detail computation migration applied - passed: `python manage.py migrate` applied `grading.0027_gradingtemplatesubcomponent_detail_computation_mode`.

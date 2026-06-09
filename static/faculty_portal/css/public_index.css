@@ -312,16 +312,165 @@ body {
 }
 
 .fp-hero-logo-holder {
+  position: relative;
+  isolation: isolate;
   min-height: 360px;
   background: transparent;
   box-shadow: none;
 }
 
+.fp-hero-logo-holder::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 10% 8%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(255, 239, 116, 0.3) 0%, rgba(215, 225, 124, 0.14) 38%, transparent 70%);
+  filter: blur(10px);
+  animation: fp-logo-halo 5.5s ease-in-out infinite;
+}
+
 .fp-hero-logo-holder .fp-hero-logo-image {
+  position: relative;
+  z-index: 2;
   width: 50%;
   height: auto;
   object-fit: contain;
   margin: 0 auto;
+  filter: drop-shadow(0 18px 22px rgba(31, 84, 39, 0.12));
+}
+
+.fp-logo-starfield {
+  position: absolute;
+  z-index: 1;
+  inset: 4% 8%;
+  pointer-events: none;
+}
+
+.fp-logo-starfield-neon {
+  inset: 7% 10% 2% 6%;
+  transform: scaleX(-1) rotate(3deg);
+}
+
+.fp-logo-star {
+  --star-size: 12px;
+  --star-delay: 0s;
+  --star-duration: 3.6s;
+  position: absolute;
+  width: var(--star-size);
+  aspect-ratio: 1;
+  background: #ffd51f;
+  clip-path: polygon(50% 0%, 61% 38%, 100% 50%, 61% 62%, 50% 100%, 39% 62%, 0% 50%, 39% 38%);
+  filter: drop-shadow(0 0 5px rgba(255, 210, 31, 0.72));
+  opacity: 0;
+  animation: fp-logo-sparkle var(--star-duration) ease-in-out var(--star-delay) infinite;
+}
+
+.fp-logo-star-neon {
+  background: #6cff00;
+  filter:
+    drop-shadow(0 0 4px rgba(108, 255, 0, 0.95))
+    drop-shadow(0 0 9px rgba(48, 210, 0, 0.58));
+  animation-name: fp-logo-sparkle-neon;
+  animation-delay: calc(var(--star-delay) - 0.65s);
+}
+
+.fp-logo-star::after {
+  content: "";
+  position: absolute;
+  inset: 35%;
+  border-radius: 50%;
+  background: #fffce0;
+}
+
+.fp-logo-star-neon::after {
+  background: #efffe4;
+}
+
+.fp-logo-star.star-1 { top: 8%; left: 15%; --star-size: 16px; --star-delay: -0.4s; }
+.fp-logo-star.star-2 { top: 18%; left: 38%; --star-size: 9px; --star-delay: -2.2s; --star-duration: 3.1s; }
+.fp-logo-star.star-3 { top: 7%; right: 20%; --star-size: 12px; --star-delay: -1.1s; }
+.fp-logo-star.star-4 { top: 30%; right: 8%; --star-size: 18px; --star-delay: -2.7s; --star-duration: 4.2s; }
+.fp-logo-star.star-5 { top: 48%; right: 17%; --star-size: 8px; --star-delay: -0.8s; --star-duration: 3s; }
+.fp-logo-star.star-6 { bottom: 18%; right: 10%; --star-size: 13px; --star-delay: -1.9s; }
+.fp-logo-star.star-7 { bottom: 7%; right: 34%; --star-size: 10px; --star-delay: -2.9s; --star-duration: 4s; }
+.fp-logo-star.star-8 { bottom: 10%; left: 28%; --star-size: 17px; --star-delay: -1.4s; --star-duration: 4.4s; }
+.fp-logo-star.star-9 { bottom: 28%; left: 10%; --star-size: 8px; --star-delay: -2.5s; }
+.fp-logo-star.star-10 { top: 43%; left: 5%; --star-size: 14px; --star-delay: -0.1s; --star-duration: 3.9s; }
+.fp-logo-star.star-11 { top: 23%; left: 20%; --star-size: 7px; --star-delay: -1.7s; --star-duration: 2.8s; }
+.fp-logo-star.star-12 { top: 15%; right: 39%; --star-size: 7px; --star-delay: -3.1s; --star-duration: 3.3s; }
+.fp-logo-star.star-13 { top: 3%; left: 47%; --star-size: 9px; --star-delay: -2.4s; --star-duration: 3.7s; }
+.fp-logo-star.star-14 { top: 12%; left: 7%; --star-size: 7px; --star-delay: -1.3s; --star-duration: 2.9s; }
+.fp-logo-star.star-15 { top: 25%; right: 28%; --star-size: 6px; --star-delay: -0.6s; --star-duration: 3.2s; }
+.fp-logo-star.star-16 { top: 37%; left: 17%; --star-size: 10px; --star-delay: -3.4s; --star-duration: 4.1s; }
+.fp-logo-star.star-17 { top: 41%; right: 30%; --star-size: 7px; --star-delay: -1.8s; --star-duration: 3.5s; }
+.fp-logo-star.star-18 { top: 57%; right: 5%; --star-size: 10px; --star-delay: -2.6s; --star-duration: 3.8s; }
+.fp-logo-star.star-19 { bottom: 30%; right: 26%; --star-size: 6px; --star-delay: -0.9s; --star-duration: 2.7s; }
+.fp-logo-star.star-20 { bottom: 17%; left: 16%; --star-size: 11px; --star-delay: -3.2s; --star-duration: 4.3s; }
+.fp-logo-star.star-21 { bottom: 4%; left: 48%; --star-size: 7px; --star-delay: -1.5s; --star-duration: 3.1s; }
+.fp-logo-star.star-22 { bottom: 35%; left: 28%; --star-size: 6px; --star-delay: -2.1s; --star-duration: 2.8s; }
+.fp-logo-star.star-23 { top: 64%; left: 4%; --star-size: 8px; --star-delay: -0.3s; --star-duration: 3.4s; }
+.fp-logo-star.star-24 { top: 68%; right: 38%; --star-size: 9px; --star-delay: -2.8s; --star-duration: 3.9s; }
+
+@keyframes fp-logo-sparkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateY(6px) rotate(0deg) scale(0.35);
+  }
+  38% {
+    opacity: 0.35;
+  }
+  52% {
+    opacity: 1;
+    transform: translateY(0) rotate(45deg) scale(1);
+  }
+  68% {
+    opacity: 0.42;
+  }
+}
+
+@keyframes fp-logo-sparkle-neon {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateY(-5px) rotate(0deg) scale(0.3);
+  }
+  34% {
+    opacity: 0.28;
+  }
+  55% {
+    opacity: 0.92;
+    transform: translateY(1px) rotate(-45deg) scale(0.9);
+  }
+  72% {
+    opacity: 0.36;
+  }
+}
+
+@keyframes fp-logo-halo {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fp-logo-star,
+  .fp-hero-logo-holder::before {
+    animation: none;
+  }
+
+  .fp-logo-star {
+    opacity: 0.55;
+    transform: scale(0.7);
+  }
 }
 
 .fp-image-holder.soft {
