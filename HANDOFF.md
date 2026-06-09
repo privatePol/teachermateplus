@@ -1,17 +1,40 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-05-28
+Last updated by Codex: 2026-06-09
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
-- Date: 2026-05-28
-- Session focus: Faculty/Admin login and header logo replacements after repository-wide TeacherMatePlus rename.
+- Date: 2026-06-09
+- Session focus: Added optional average-based faculty-activity rollup for grading-template subcomponents, requested for Participation/Output-style categories.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
+- Default public route:
+  - Changed the bare site root `/` to issue a temporary redirect to the Faculty Portal landing page at `/faculty/`.
+  - Preserved direct `/admin-portal/`, `/index/`, `/index.php`, and all existing portal routes.
+  - Added a Faculty public-login regression test for the root redirect.
+- Grading template faculty-activity averaging:
+  - Corrected the initial implementation after user clarification: the required behavior is averaging faculty-created activities under Recitation/Assignment/Activity-style detail rows, not averaging the template detail buckets themselves.
+  - Added `DetailComputationMode` with `WEIGHTED_DETAILS` and `AVERAGE_ACTIVITIES`.
+  - Added `GradingTemplateSubcomponent.detail_computation_mode`, defaulting to `WEIGHTED_DETAILS` so existing templates keep their current behavior.
+  - Exposed `Detail Computation` on Admin Portal subcomponent create/edit forms.
+  - Updated official period-grade computation so subcomponents with active detail rows can average the faculty-created activities under those details equally when configured.
+  - Updated reporting, prediction snapshot, admin grade-distribution analytics, template duplication, and template calculator preview paths so they respect the selected detail-computation mode.
+  - Fixed the Admin Portal template testing calculator crash at `/admin-portal/grading/templates/calculator/` by routing the calculator's detail rollup through `FacultyGradingService.aggregate_detail_scores`.
+  - Added a calculator regression test for a `Participation/Output` subcomponent configured as `Average Activities`, covering the reported GET URL pattern with `grading_template` and `sample_value`.
+  - Fixed Faculty Summary of Periodic Grades display for nested `Average Activities` subcomponents. The summary table now uses the average of faculty-created activities under the subcomponent instead of the old detail-weight math when calculating the visible Class Standing total.
+  - Fixed the visual/table-layout bug reported from the Faculty Summary screenshot: the highlighted `87.75` was mathematically the weighted Class Standing total, but it appeared under Participation/Output because nested subcomponents had no separate subcomponent-average column. The table now shows Participation/Output average separately and labels the final weighted column `CS AVE`.
+  - Fixed the follow-up summary label issue: the Participation/Output subcomponent average now displays as `P/O AVE` instead of incorrectly borrowing the first activity prefix and showing `R.AVE`.
+  - Updated Faculty Summary detail visibility: when a subcomponent uses `Average Activities`, empty detail columns are omitted from the summary table; when it uses `Weighted Details`, all configured detail columns remain visible.
+  - Added an editable-summary refresh for periods using `Average Activities`, so stored unsubmitted period summary rows are recomputed after a template setting change without asking faculty to re-save existing activities.
+  - Recomputed the affected local dev gradebook for offering `419` / Midterm `21` (`A132-ITAPPS`, `BSA 1-BSA_1A`) with audit reason `AVERAGE_ACTIVITIES_RECHECK`; first rows now show corrected Class Standing values such as `98.00`, `86.00`, and `88.00` instead of stale old-weight values.
+  - Verified Correction of Grades final approval uses the same `FacultyGradingService.recompute_period_summary_for_students` path and added regression coverage for an approved correction under `Average Activities`.
+  - Updated Admin grading-template builder/list/structure-preview displays to show the detail computation rule and show detail weights as ignored when `Average Activities` is enabled.
+  - Added a focused regression test proving `Weighted Details` yields 70 and switching the same Recitation/Assignment/Activity setup to `Average Activities` yields 75 by averaging the four faculty-created activities.
+  - Documented the change in `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, Admin Guide, and `docs/TENANT_GRADING_PROFILE_SETUP_GUIDE.md`.
 - Repository/product rename:
   - Replaced legacy product naming with TeacherMatePlus/TeacherMate+ across repo text, docs, templates, settings, scripts, logs, tests, and exported fixtures.
   - Renamed matching files/assets/configs, including `TEACHERMATEPLUS_CONTEXT.md`, `media/logos/teachermateplus_logo.png`, `ops/cron/teachermateplus.cron`, nginx configs, systemd service files, and ignored `ops/env/teachermateplus.*.env.example` files.
@@ -325,7 +348,36 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Student Enrollment Query is read-only and scoped through Admin Portal student visibility plus tenant/campus enrollment filters. It does not create or recompute grades.
 - `student_enrollment_query.read` is the permission to grant if an admin user should be able to open the consolidated one-student enrollment/grade lookup.
 - Activity score encoding intentionally blocks Enter-key submission only inside score inputs. It does not block clicking `Save Scores`.
+- Subcomponent `Detail Computation` is additive and backward-compatible: existing rows default to `Weighted Details`; only subcomponents explicitly set to `Average Activities` ignore individual detail weights and average the active faculty-created activity scores under that subcomponent.
+- `Average Activities` affects the rollup from faculty-created activities to the owning subcomponent only. The subcomponent still contributes to its parent component by its own configured weight, and component weights still control period-grade contribution.
 - Ransomware protection strategy should not rely on antivirus alone. The preferred server-side approach is least privilege, separated upload storage, no-execute mounts, restricted backup credentials, and Synology snapshots/immutability with tested restore procedures.
+
+## Changed Files This Session
+- `apps/accounts/urls.py`
+- `apps/faculty_portal/tests_public_login.py`
+- `apps/grading/models.py`
+- `apps/grading/migrations/0027_gradingtemplatesubcomponent_detail_computation_mode.py`
+- `apps/grading/services.py`
+- `apps/grading/reporting.py`
+- `apps/grading/duplication.py`
+- `apps/grading/tests.py`
+- `apps/faculty_portal/views.py`
+- `apps/faculty_portal/tests_assignment_acceptance.py`
+- `apps/predictions/services.py`
+- `apps/admin_portal/forms.py`
+- `apps/admin_portal/views.py`
+- `templates/admin_portal/grading/subcomponent_table.html`
+- `templates/admin_portal/grading/detail_table.html`
+- `templates/admin_portal/grading/template_builder.html`
+- `templates/admin_portal/grading/template_structure_preview.html`
+- `templates/admin_portal/guide.html`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `docs/TENANT_GRADING_PROFILE_SETUP_GUIDE.md`
+- `HANDOFF.md`
+- `logs/errors.log` changed because the reported calculator AttributeError was logged by the dev server.
+- `logs/security.log` changed because one local Django test-client render attempt used the default `testserver` host before rerunning with `127.0.0.1:8000`.
+- `logs/system.log` changed from dev-server logging during the session.
 
 ## Pending Work
 - Create the new GitHub repository at `privatePol/teachermateplus` before pushing, then push the renamed branch.
@@ -334,6 +386,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - If Grade Prediction or Student Intervention Monitor is missing in another environment, enable it from `Admin Portal -> Tools -> Configuration Management -> Grade Prediction`, make sure the `FACULTY` role is included, and turn on the intervention/monitor flag.
 - If the institution proceeds with server hardening, create an implementation checklist/doc before changing production partitions or moving `MEDIA_ROOT`.
 - Browser smoke test Admin Course create/edit/list and Faculty My Classes syllabus icon/redirect when convenient.
+- Browser smoke test Admin grading-template subcomponent create/edit/list/builder/structure-preview for the new `Detail Computation` UI when convenient.
 - DepEd E-Class Record work is paused. Do not continue import/export, presets, MAPEH handling, or diagnostics unless the user resumes that topic.
 - Preserve previous unresolved continuity items:
   - Future sessions should continue to use `AGENTS.md`, the context document, `CHANGE_LOG.md`, and this file as the first-read continuity set.
@@ -356,6 +409,8 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Browser smoke tests were not run for the Faculty Dashboard guide-tag links; validation was command/test based.
 - Browser smoke tests were not run for the Faculty My Classes guide-tag links; validation was command/test based.
 - Browser smoke tests were not run for the Faculty Summary table layout change; validation was command/test based.
+- Browser smoke tests were not run for the Faculty Summary `P/O AVE` label fix; validation was command/test based.
+- Browser smoke tests were not run for the Faculty Summary empty-detail visibility rule; validation was command/test based.
 - Browser smoke tests were not run for the reopen notification recipient correction; validation was command/test based.
 - Browser smoke tests were not run for the role-permissions page description change; validation was command/test based.
 - Browser smoke tests were not run for the role-permissions save-position change; validation was command/test based.
@@ -367,6 +422,10 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Browser smoke tests were not run for the new Admin Student Enrollment Query; validation was command/test based.
 - Browser smoke tests were not run for the Faculty activity-score Enter-key guard; validation was command/render-test based.
 - Browser smoke tests were not run for the Active Grading Period setup change; validation was command/test/data-inspection based.
+- Browser smoke tests were not run for the new subcomponent `Detail Computation` UI; validation was command/test/migration based.
+- Browser smoke tests were not run for the template calculator fix; validation was Django client regression tests for the reported URL pattern.
+- The local `logs/system.log` changed during this session because the already-running dev server logged page requests/reloads; this was not part of the feature implementation.
+- The local `logs/security.log` contains one additional `DisallowedHost: testserver` entry from a manual Django client render check; the check was rerun successfully with `127.0.0.1:8000`.
 - Google Drive access depends on the institution's Google Workspace sharing settings. Faculty must use an allowed school Google account if the file is domain-restricted.
 - Email styling was validated by template rendering and focused email tests, not by opening emails in a real email client.
 - The simultaneous-login setting was validated by focused Django client/session tests, not by a manual browser smoke test.
@@ -380,6 +439,24 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - The ransomware/partitioning discussion was advisory only. No server partition, mount, Synology, antivirus, or Django `MEDIA_ROOT` configuration changes were applied in this workspace.
 
 ## Validation Completed
+- [x] Default root redirect regression - passed: `python manage.py test apps.faculty_portal.tests_public_login` (5 tests).
+- [x] Django system check after root redirect - passed: `python manage.py check`.
+- [x] Detail computation migration applied - passed: `python manage.py migrate` applied `grading.0027_gradingtemplatesubcomponent_detail_computation_mode`.
+- [x] Detail computation migration check - passed: `python manage.py makemigrations --check --dry-run`
+- [x] Detail computation Django check - passed: `python manage.py check`
+- [x] Detail computation focused regression - passed: `python manage.py test apps.grading.tests.FinalGradeFormulaTests.test_subcomponent_can_average_faculty_activities_instead_of_detail_weights`
+- [x] Faculty Summary Average Activities display/regression - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_average_activities_display_matches_detail_computation_mode`
+- [x] Faculty Summary Participation/Output label regression - passed in the same focused test; it now asserts the nested subcomponent average header is `P/O AVE`.
+- [x] Faculty Summary empty-detail visibility regression - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_average_activities_display_matches_detail_computation_mode apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_weighted_details_keeps_empty_detail_columns`
+- [x] Django system check after Faculty Summary label/visibility fixes - passed: `python manage.py check`
+- [x] Local Faculty Summary render check - passed for `CourseOffering 419` / `MIDTERM 21`: page renders `96.25` for Participation/Output average and `CS AVE` for the final weighted Class Standing column; `87.75` remains the correct weighted Class Standing value for student `2025-10102`.
+- [x] Affected local gradebook refresh - passed: recomputed `CourseOffering 419` / `MIDTERM 21`; sample stored Class Standing rows changed to corrected values (`98.00`, `98.00`, `86.00`, `86.00`, `88.00`).
+- [x] Correction approval Average Activities regression - passed: `python manage.py test apps.grading.tests.CorrectionWorkflowTests.test_final_approval_recomputes_average_activity_detail_mode`
+- [x] Full correction workflow regression - passed: `python manage.py test apps.grading.tests.CorrectionWorkflowTests` (20 tests)
+- [x] Template calculator regression - passed: `python manage.py test apps.admin_portal.tests_template_calculator`
+- [x] Grade distribution monitor regression - passed: `python manage.py test apps.admin_portal.tests_grade_distribution_monitor`
+- [x] Prediction page focused regression - passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_prediction_page_uses_teacher_friendly_period_specific_labels`
+- [x] Local data sanity check - passed: no existing `GradingTemplateSubcomponent` rows used the temporary `AVERAGE_DETAILS` value from the initial implementation attempt.
 - [x] Rename residual content scan - passed: no legacy brand-family matches remain in repository text.
 - [x] Rename residual path scan - passed: no file/directory names outside `.git` matched the legacy brand-family patterns.
 - [x] Git remote update check - passed: `origin` fetch/push now point to `https://github.com/privatePol/teachermateplus.git`.
@@ -459,7 +536,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Exact Next Steps For Next Codex Session
 1. Read `AGENTS.md`, `TEACHERMATEPLUS_CONTEXT.md`, `CHANGE_LOG.md`, and this file.
-2. Continue with the next management/academic-head demo adjustment from the user.
+2. If the academic community approves the new behavior, configure selected subcomponents such as Participation/Output to `Average Activities` and recompute/verify sample gradebooks before live use.
 3. If preparing a release, decide whether to keep, park, or revert the paused DepEd working-tree changes.
 4. If server hardening proceeds, draft a production-safe step-by-step plan for partitioning, `MEDIA_ROOT` relocation, fstab mount options, Synology snapshots, backup credentials, ClamAV/Wazuh/CrowdSec/fail2ban/UFW, and restore testing before applying changes.
 5. For UI-facing changes, run `python manage.py check`, focused tests, and browser smoke tests when feasible.
@@ -469,10 +546,13 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - TEACHERMATEPLUS_CONTEXT.md
 - CHANGE_LOG.md
 - HANDOFF.md
-- apps/academics/models.py
+- apps/grading/models.py
+- apps/grading/services.py
+- apps/predictions/services.py
 - apps/admin_portal/forms.py
-- apps/faculty_portal/views.py
-- templates/faculty_portal/my_courses.html
+- apps/admin_portal/views.py
+- templates/admin_portal/grading/subcomponent_table.html
+- templates/admin_portal/grading/template_builder.html
 
 ## Do Not Forget
 - Respect tenant/campus scope.

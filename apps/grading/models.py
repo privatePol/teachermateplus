@@ -17,6 +17,11 @@ class ScoreInputModeOverride(models.TextChoices):
     DIRECT_PERCENTAGE = ScoreInputMode.DIRECT_PERCENTAGE, "Direct Percentage"
 
 
+class DetailComputationMode(models.TextChoices):
+    WEIGHTED_DETAILS = "WEIGHTED_DETAILS", "Weighted Details"
+    AVERAGE_ACTIVITIES = "AVERAGE_ACTIVITIES", "Average Activities"
+
+
 class GradingTemplate(TimeStampedModel, ActivatableModel):
     class ApprovalStatus(models.TextChoices):
         DRAFT = "DRAFT", "Draft"
@@ -320,6 +325,12 @@ class GradingTemplateSubcomponent(TimeStampedModel, ActivatableModel):
         max_length=24,
         choices=ScoreInputModeOverride.choices,
         default=ScoreInputModeOverride.INHERIT,
+    )
+    detail_computation_mode = models.CharField(
+        max_length=24,
+        choices=DetailComputationMode.choices,
+        default=DetailComputationMode.WEIGHTED_DETAILS,
+        help_text="Controls how faculty-created activities under detail rows roll up into the subcomponent score.",
     )
     is_attendance_component = models.BooleanField(default=False)
     admin_locked = models.BooleanField(default=True)

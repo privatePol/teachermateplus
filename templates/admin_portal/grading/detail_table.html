@@ -7,7 +7,7 @@
         <th>Subcomponent</th>
         <th>Code</th>
         <th>Name</th>
-        <th>Weight %</th>
+        <th>Weight / Share</th>
         <th>Score Entry</th>
         <th>Admin Locked</th>
         <th>Record State</th>
@@ -23,7 +23,7 @@
         <td>{{ row.template_subcomponent.name }}</td>
         <td>{{ row.code }}</td>
         <td>{{ row.name }}</td>
-        <td>{{ row.weight_percentage }}</td>
+        <td>{% if row.template_subcomponent.detail_computation_mode == "AVERAGE_ACTIVITIES" %}Ignored for activity average{% else %}{{ row.weight_percentage }}{% endif %}</td>
         <td>{{ row.get_score_input_mode_display }}</td>
         <td>{% if row.admin_locked %}Yes{% else %}No{% endif %}</td>
         <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>

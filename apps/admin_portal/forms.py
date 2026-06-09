@@ -1501,6 +1501,7 @@ class GradingTemplateSubcomponentForm(forms.ModelForm):
             "weight_percentage",
             "sort_order",
             "score_input_mode",
+            "detail_computation_mode",
             "is_attendance_component",
             "admin_locked",
             "is_active",
@@ -1518,6 +1519,11 @@ class GradingTemplateSubcomponentForm(forms.ModelForm):
         self.fields["score_input_mode"].help_text = (
             "Choose how this subcomponent accepts scores when activities are encoded directly here. "
             "Use Inherit Parent Rule to follow the major component setting."
+        )
+        self.fields["detail_computation_mode"].label = "Detail Computation"
+        self.fields["detail_computation_mode"].help_text = (
+            "Weighted Details uses each detail item's configured weight. "
+            "Average Activities ignores detail weights and averages the faculty-created activities under this subcomponent."
         )
         _enforce_active_reference_choices(self)
 

@@ -23,6 +23,7 @@ from apps.auditlog.models import AuditLog
 from apps.enrollment.models import Enrollment
 from apps.grading.models import (
     CourseTemplateAssignment,
+    DetailComputationMode,
     FacultyFinalClearanceReport,
     GradeActivity,
     GradeSubmission,
@@ -2035,6 +2036,176 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         student_row = table_html.split("2025-DEFAULT-001", 1)[1].split("</tr>", 1)[0]
         self.assertNotIn("status-active-label", student_row)
         self.assertNotIn(">ACTIVE<", student_row)
+
+    def test_period_summary_average_activities_display_matches_detail_computation_mode(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-AVE-ACT-001",
+            last_name="Average",
+            first_name="Activity",
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        quizzes = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="QUIZZES",
+            name="Quizzes",
+            weight_percentage=Decimal("40.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        participation = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="PG_CA_PO",
+            name="Participation/Output",
+            weight_percentage=Decimal("60.00"),
+            sort_order=2,
+            detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            is_active=True,
+        )
+        recitation = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="RECITATION",
+            name="Recitation",
+            weight_percentage=Decimal("20.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        assignment = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="ASSIGNMENT",
+            name="Assignment",
+            weight_percentage=Decimal("40.00"),
+            sort_order=2,
+            is_active=True,
+        )
+        oral = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="ORAL",
+            name="Oral Presentation",
+            weight_percentage=Decimal("40.00"),
+            sort_order=3,
+            is_active=True,
+        )
+
+        def add_activity_score(title, subcomponent, detail, computed_score):
+            activity = GradeActivity.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=self.prelim,
+                template_component=class_standing,
+                template_subcomponent=subcomponent,
+                template_detail=detail,
+                title=title,
+                total_score=Decimal("100.00"),
+                created_by_user=self.faculty_user,
+                is_active=True,
+            )
+            StudentActivityScore.objects.create(
+                activity=activity,
+                student=student,
+                raw_score=computed_score,
+                computed_score=computed_score,
+                encoded_by_user=self.faculty_user,
+                is_active=True,
+            )
+
+        add_activity_score("Q1", quizzes, None, Decimal("75.00"))
+        add_activity_score("R1", participation, recitation, Decimal("97.50"))
+        add_activity_score("ASSIGN1", participation, assignment, Decimal("95.00"))
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            student=student,
+            class_standing_grade=Decimal("75.00"),
+            computed_by_user=self.faculty_user,
+            is_finalized=False,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        block = response.context["rows"][0]["class_standing_blocks"][0]
+        self.assertEqual(block["sections"][1]["groups"][0]["average"], Decimal("97.50"))
+        self.assertEqual(block["sections"][1]["groups"][1]["average"], Decimal("95.00"))
+        self.assertEqual(len(block["sections"][1]["groups"]), 2)
+        self.assertNotContains(response, "ORAL PRESENTATION")
+        self.assertEqual(block["sections"][1]["average"], Decimal("96.25"))
+        self.assertEqual(block["total"], Decimal("87.75"))
+        self.assertEqual(response.context["summary_layout"]["class_standing_blocks"][0]["sections"][1]["avg_label"], "P/O AVE")
+        self.assertContains(response, "P/O AVE")
+        self.assertContains(response, "CS AVE")
+        refreshed = StudentPeriodGrade.objects.get(offering=self.offering, template_period=self.prelim, student=student)
+        self.assertEqual(refreshed.class_standing_grade, Decimal("88"))
+
+    def test_period_summary_weighted_details_keeps_empty_detail_columns(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-WGT-DETAIL-001",
+            last_name="Weighted",
+            first_name="Detail",
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        participation = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="PG_CA_PO_WEIGHTED",
+            name="Participation/Output",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        recitation = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="RECITATION_WEIGHTED",
+            name="Recitation",
+            weight_percentage=Decimal("50.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="ORAL_WEIGHTED",
+            name="Oral Presentation",
+            weight_percentage=Decimal("50.00"),
+            sort_order=2,
+            is_active=True,
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            template_subcomponent=participation,
+            template_detail=recitation,
+            title="R1",
+            total_score=Decimal("100.00"),
+            created_by_user=self.faculty_user,
+            is_active=True,
+        )
+        StudentActivityScore.objects.create(
+            activity=activity,
+            student=student,
+            raw_score=Decimal("90.00"),
+            computed_score=Decimal("90.00"),
+            encoded_by_user=self.faculty_user,
+            is_active=True,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        section = response.context["summary_layout"]["class_standing_blocks"][0]["sections"][0]
+        self.assertEqual([group["label"] for group in section["groups"]], ["RECITATION", "ORAL PRESENTATION"])
+        self.assertContains(response, "ORAL PRESENTATION")
 
     def test_period_summary_hides_active_status_but_shows_non_active_status(self):
         active_student = self._create_active_student(

@@ -842,6 +842,7 @@
                 {% for group in section.groups %}
                   <th colspan="{{ group.colspan }}" class="band-subsection">{{ group.label }}</th>
                 {% endfor %}
+                <th class="metric-col"></th>
               {% else %}
                 <th colspan="{{ section.colspan }}" class="band-subsection"></th>
               {% endif %}
@@ -859,6 +860,7 @@
                   {% endfor %}
                   <th class="metric-col">{{ group.avg_label }}</th>
                 {% endfor %}
+                <th class="metric-col">{{ section.avg_label }}</th>
               {% else %}
                 {% for column in section.activity_columns %}
                   <th>{{ column.label }}</th>
@@ -894,6 +896,7 @@
                 {% endfor %}
                 <td class="metric-col"></td>
               {% endfor %}
+              <td class="metric-col"></td>
             {% else %}
               {% for column in section.activity_columns %}
                 <td>{{ column.total_score|default:"" }}</td>
@@ -949,6 +952,7 @@
                   {% endfor %}
                   <td class="metric-col">{{ group.average|default:"" }}</td>
                 {% endfor %}
+                <td class="metric-col">{{ section.average|default:"" }}</td>
               {% else %}
                 {% for value in section.activity_values %}
                   <td>{{ value|default:"" }}</td>

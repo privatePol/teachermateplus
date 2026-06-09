@@ -10,7 +10,13 @@ from django.utils import timezone
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.core.services.features import FeatureSettingsService
 from apps.enrollment.models import Enrollment
-from apps.grading.models import GradeActivity, StudentActivityScore, StudentFinalGrade, StudentPeriodGrade
+from apps.grading.models import (
+    DetailComputationMode,
+    GradeActivity,
+    StudentActivityScore,
+    StudentFinalGrade,
+    StudentPeriodGrade,
+)
 from apps.grading.services import FacultyGradingService
 from apps.predictions.models import (
     PredictionAssumptionMode,
@@ -300,6 +306,31 @@ class PredictionComputationService:
         )
 
     @classmethod
+    def _average_from_children(cls, *, rows: list[tuple[Decimal, ScenarioScores]]) -> ScenarioScores:
+        if not rows:
+            return ScenarioScores(current=None, worst=None, best=None, encoded_count=0, expected_count=0)
+        encoded_count = sum(row.encoded_count for _weight, row in rows)
+        expected_count = sum(row.expected_count for _weight, row in rows)
+
+        def pick(attribute: str, require_current: bool = False):
+            values = [getattr(row, attribute) for _weight, row in rows if getattr(row, attribute) is not None]
+            if require_current and not values:
+                return None
+            if not require_current and expected_count == 0:
+                return None
+            if not values:
+                return None
+            return cls._round(sum(values) / Decimal(len(values)))
+
+        return ScenarioScores(
+            current=pick("current", require_current=True),
+            worst=pick("worst"),
+            best=pick("best"),
+            encoded_count=encoded_count,
+            expected_count=expected_count,
+        )
+
+    @classmethod
     def _resolve_component_scores(
         cls,
         *,
@@ -347,7 +378,18 @@ class PredictionComputationService:
                                 ),
                             )
                         )
-                    row = cls._weighted_from_children(rows=detail_rows)
+                    if subcomponent.detail_computation_mode == DetailComputationMode.AVERAGE_ACTIVITIES:
+                        detail_activities = []
+                        for detail in details:
+                            detail_activities.extend(grouped_activities.get((component.id, subcomponent.id, detail.id), []))
+                        row = cls._resolve_activity_group(
+                            student_id=student_id,
+                            activities=detail_activities,
+                            score_lookup=score_lookup,
+                            base_value=base_value,
+                        )
+                    else:
+                        row = cls._weighted_from_children(rows=detail_rows)
                 else:
                     key = (component.id, subcomponent.id, None)
                     row = cls._resolve_activity_group(

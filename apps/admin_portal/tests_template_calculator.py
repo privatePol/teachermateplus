@@ -9,9 +9,12 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Term
 from apps.grading.models import (
+    DetailComputationMode,
     GradingTemplate,
     GradingTemplateComponent,
+    GradingTemplateDetail,
     GradingTemplatePeriod,
+    GradingTemplateSubcomponent,
     TenantGradingProfile,
 )
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
@@ -172,6 +175,51 @@ class GradingTemplateCalculatorViewTests(TestCase):
         self.assertContains(response, "Testing Template")
         self.assertContains(response, "Final Grade")
         self.assertContains(response, "85.00")
+
+    def test_get_calculator_handles_average_activity_subcomponent_details(self):
+        subcomponent = GradingTemplateSubcomponent.objects.create(
+            template_component=self.prelim_cs,
+            code="PG_CA_PO",
+            name="Participation/Output",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            is_active=True,
+        )
+        GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="RECITATION",
+            name="Recitation",
+            weight_percentage=Decimal("40.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="ASSIGNMENT",
+            name="Assignment",
+            weight_percentage=Decimal("30.00"),
+            sort_order=2,
+            is_active=True,
+        )
+        GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="ACTIVITY",
+            name="Activity",
+            weight_percentage=Decimal("30.00"),
+            sort_order=3,
+            is_active=True,
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("admin_portal:grading_template_calculator"),
+            {"grading_template": self.template.id, "sample_value": "85.00"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Participation/Output")
+        self.assertContains(response, "Final Grade")
 
     def test_post_calculator_computes_periods_and_final_grade(self):
         self.client.force_login(self.user)

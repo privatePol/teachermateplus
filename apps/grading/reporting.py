@@ -237,19 +237,26 @@ class CorrectionOfficialReportService:
                                 base_value=base_value,
                             )
                         elif detail_rows:
-                            detail_total = sum(Decimal(detail.weight_percentage or 0) for detail in detail_rows)
-                            detail_denominator = detail_total if detail_total > 0 else Decimal("100")
-                            detail_raw = Decimal("0")
                             detail_has_data = False
+                            detail_scores = []
                             for detail in detail_rows:
+                                detail_key = (student_id, component.id, sub.id, detail.id)
                                 detail_score = FacultyGradingService._average_score_or_none(
                                     score_lookup,
-                                    (student_id, component.id, sub.id, detail.id),
+                                    detail_key,
+                                )
+                                detail_scores.append(
+                                    (
+                                        Decimal(detail.weight_percentage or 0),
+                                        score_lookup.get(detail_key, []) if sub.detail_computation_mode == "AVERAGE_ACTIVITIES" else detail_score,
+                                    )
                                 )
                                 if detail_score is not None:
                                     detail_has_data = True
-                                    detail_raw += (Decimal(detail.weight_percentage) / detail_denominator) * detail_score
-                            sub_score = FacultyGradingService._round(detail_raw)
+                            sub_score = FacultyGradingService.aggregate_detail_scores(
+                                subcomponent=sub,
+                                detail_scores=detail_scores,
+                            )
                             if detail_has_data:
                                 component_has_data = True
                         else:

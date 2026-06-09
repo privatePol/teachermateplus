@@ -3190,3 +3190,275 @@
 2026-05-28 22:11:08,071 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 27993
 2026-05-28 22:13:12,437 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 28101
 2026-05-28 22:15:46,395 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 28092
+2026-05-31 22:20:09,204 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:20:22,904 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 28092
+2026-05-31 22:20:23,024 INFO [django.server] "GET /static/faculty_portal/css/public_index.css HTTP/1.1" 200 13441
+2026-05-31 22:20:23,028 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 200 375758
+2026-05-31 22:20:23,028 INFO [django.server] "GET /media/logos/teachermate_logo_official.png HTTP/1.1" 200 365907
+2026-05-31 22:20:23,051 INFO [django.server] "GET /media/imahe/techsupp.jpg HTTP/1.1" 200 1100794
+2026-05-31 22:20:23,058 INFO [django.server] "GET /static/faculty_portal/js/public_index.js HTTP/1.1" 304 0
+2026-05-31 22:20:23,077 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
+2026-05-31 22:20:23,078 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
+2026-05-31 22:20:26,281 INFO [django.server] "GET /admin-portal/ HTTP/1.1" 302 0
+2026-05-31 22:20:26,303 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 4654
+2026-05-31 22:20:26,323 INFO [django.server] "GET /media/logos/teachermate_logo_text_official.png HTTP/1.1" 200 402376
+2026-05-31 22:20:29,100 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 72632
+2026-05-31 22:20:37,753 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
+2026-05-31 22:20:38,186 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 67650
+2026-05-31 22:20:51,278 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 80840
+2026-05-31 22:20:55,273 INFO [django.server] "GET /admin-portal/grading/templates/6/builder/ HTTP/1.1" 200 123503
+2026-05-31 22:32:20,139 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 80840
+2026-05-31 22:32:23,112 INFO [django.server] "GET /admin-portal/grading/templates/6/structure/ HTTP/1.1" 200 67263
+2026-05-31 22:53:07,788 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\models.py changed, reloading.
+2026-05-31 22:53:08,605 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:53:12,390 INFO [django.utils.autoreload] D:\teachermateplus\apps\admin_portal\forms.py changed, reloading.
+2026-05-31 22:53:13,112 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:53:18,877 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\services.py changed, reloading.
+2026-05-31 22:53:19,593 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:53:32,706 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\services.py changed, reloading.
+2026-05-31 22:53:33,423 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:53:39,286 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\services.py changed, reloading.
+2026-05-31 22:53:40,067 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:53:53,131 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\services.py changed, reloading.
+2026-05-31 22:53:53,890 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:54:21,392 INFO [django.utils.autoreload] D:\teachermateplus\apps\admin_portal\views.py changed, reloading.
+2026-05-31 22:54:22,164 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:54:32,346 INFO [django.utils.autoreload] D:\teachermateplus\apps\admin_portal\views.py changed, reloading.
+2026-05-31 22:54:33,045 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:56:33,078 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\reporting.py changed, reloading.
+2026-05-31 22:56:33,785 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:56:36,563 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\duplication.py changed, reloading.
+2026-05-31 22:56:37,262 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 22:56:48,151 INFO [django.utils.autoreload] D:\teachermateplus\apps\predictions\services.py changed, reloading.
+2026-05-31 22:56:48,868 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:08:06,172 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\models.py changed, reloading.
+2026-05-31 23:08:06,971 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:08:16,971 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\migrations\0027_gradingtemplatesubcomponent_detail_computation_mode.py changed, reloading.
+2026-05-31 23:08:17,716 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:08:24,585 INFO [django.utils.autoreload] D:\teachermateplus\apps\admin_portal\forms.py changed, reloading.
+2026-05-31 23:08:25,342 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:08:41,375 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\services.py changed, reloading.
+2026-05-31 23:08:42,135 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:08:49,043 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\services.py changed, reloading.
+2026-05-31 23:08:49,810 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:08:59,804 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\reporting.py changed, reloading.
+2026-05-31 23:09:00,555 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:09:20,809 INFO [django.utils.autoreload] D:\teachermateplus\apps\admin_portal\views.py changed, reloading.
+2026-05-31 23:09:21,550 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:09:33,797 INFO [django.utils.autoreload] D:\teachermateplus\apps\admin_portal\views.py changed, reloading.
+2026-05-31 23:09:34,539 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:09:39,621 INFO [django.utils.autoreload] D:\teachermateplus\apps\predictions\services.py changed, reloading.
+2026-05-31 23:09:40,637 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:10:41,006 INFO [django.utils.autoreload] D:\teachermateplus\apps\faculty_portal\views.py changed, reloading.
+2026-05-31 23:10:41,757 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:11:40,275 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\services.py changed, reloading.
+2026-05-31 23:11:41,046 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:14:16,399 INFO [django.server] "GET /admin-portal/grading/templates/6/structure/ HTTP/1.1" 200 67803
+2026-05-31 23:14:48,631 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 80840
+2026-05-31 23:14:51,536 INFO [django.server] "GET /admin-portal/grading/templates/6/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 64801
+2026-05-31 23:15:16,510 INFO [django.server] "GET /admin-portal/grading/templates/8/builder/ HTTP/1.1" 200 74802
+2026-05-31 23:15:28,158 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 80840
+2026-05-31 23:15:34,408 INFO [django.server] "GET /admin-portal/grading/templates/9/builder/ HTTP/1.1" 200 123505
+2026-05-31 23:15:46,785 INFO [django.server] "GET /admin-portal/grading/details/27/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 200 62954
+2026-05-31 23:17:29,953 INFO [django.server] "GET /admin-portal/grading/components/?template_id=9&period_id=20 HTTP/1.1" 200 53333
+2026-05-31 23:17:35,210 INFO [django.server] "GET /admin-portal/grading/subcomponents/?template_id=9&period_id=20&component_id=22 HTTP/1.1" 200 51678
+2026-05-31 23:17:43,514 INFO [django.server] "GET /admin-portal/grading/subcomponents/19/edit/?next=%2Fadmin-portal%2Fgrading%2Fsubcomponents%2F%3Ftemplate_id%3D9%26period_id%3D20%26component_id%3D22 HTTP/1.1" 200 63992
+2026-05-31 23:18:06,608 INFO [django.server] "GET /admin-portal/grading/subcomponents/20/edit/?next=%2Fadmin-portal%2Fgrading%2Fsubcomponents%2F%3Ftemplate_id%3D9%26period_id%3D20%26component_id%3D22 HTTP/1.1" 200 64013
+2026-05-31 23:18:27,958 INFO [django.server] "POST /admin-portal/grading/subcomponents/20/edit/?next=%2Fadmin-portal%2Fgrading%2Fsubcomponents%2F%3Ftemplate_id%3D9%26period_id%3D20%26component_id%3D22 HTTP/1.1" 302 0
+2026-05-31 23:18:28,045 INFO [django.server] "GET /admin-portal/grading/subcomponents/?template_id=9&period_id=20&component_id=22 HTTP/1.1" 200 55121
+2026-05-31 23:18:37,665 INFO [django.server] "GET /admin-portal/grading/subcomponents/19/edit/?next=%2Fadmin-portal%2Fgrading%2Fsubcomponents%2F%3Ftemplate_id%3D9%26period_id%3D20%26component_id%3D22 HTTP/1.1" 200 63992
+2026-05-31 23:22:27,940 INFO [django.server] "GET /admin-portal/grading/components/?template_id=9&period_id=20 HTTP/1.1" 200 53333
+2026-05-31 23:22:37,819 INFO [django.server] "GET /admin-portal/grading/templates/9/builder/ HTTP/1.1" 200 123573
+2026-05-31 23:22:41,627 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 80840
+2026-05-31 23:22:47,821 ERROR [django.server] "GET /admin-portal/grading/templates/calculator/?grading_template=9&sample_value=85.00 HTTP/1.1" 500 127167
+2026-05-31 23:23:54,747 INFO [django.server] "GET /admin-portal/logout/ HTTP/1.1" 302 0
+2026-05-31 23:23:54,753 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 8090
+2026-05-31 23:23:54,838 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 200 375758
+2026-05-31 23:23:59,877 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 28092
+2026-05-31 23:23:59,905 INFO [django.server] "GET /media/logos/teachermate_logo_official.png HTTP/1.1" 200 365907
+2026-05-31 23:23:59,990 INFO [django.server] "GET /media/imahe/techsupp.jpg HTTP/1.1" 200 1100794
+2026-05-31 23:24:00,033 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
+2026-05-31 23:24:00,033 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
+2026-05-31 23:24:09,184 INFO [django.server] "POST /faculty/ HTTP/1.1" 302 0
+2026-05-31 23:24:09,414 INFO [django.server] "GET /faculty/dashboard/ HTTP/1.1" 200 56128
+2026-05-31 23:24:11,525 INFO [django.utils.autoreload] D:\teachermateplus\apps\grading\services.py changed, reloading.
+2026-05-31 23:24:12,445 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:24:13,339 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 43778
+2026-05-31 23:24:15,772 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 51892
+2026-05-31 23:24:31,745 INFO [django.server] "GET /admin-portal/ HTTP/1.1" 302 0
+2026-05-31 23:24:31,765 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 4654
+2026-05-31 23:24:31,834 INFO [django.server] "GET /media/logos/teachermate_logo_text_official.png HTTP/1.1" 304 0
+2026-05-31 23:24:31,837 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 304 0
+2026-05-31 23:24:39,135 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
+2026-05-31 23:24:39,498 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 68199
+2026-05-31 23:24:39,730 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 72632
+2026-05-31 23:24:44,499 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 80840
+2026-05-31 23:24:56,571 INFO [django.server] "GET /admin-portal/grading/period-locks/ HTTP/1.1" 200 55072
+2026-05-31 23:25:06,199 INFO [django.server] "GET /admin-portal/tools/active-grading-period/ HTTP/1.1" 200 58925
+2026-05-31 23:25:11,148 INFO [django.server] "GET /admin-portal/tools/active-grading-period/?scope_tenant_id=8&scope_campus_id=14 HTTP/1.1" 200 64479
+2026-05-31 23:25:20,307 INFO [django.server] "POST /admin-portal/tools/active-grading-period/?scope_tenant_id=8&scope_campus_id=14 HTTP/1.1" 302 0
+2026-05-31 23:25:20,444 INFO [django.server] "GET /admin-portal/tools/active-grading-period/?term_id=7&campus_id=8 HTTP/1.1" 200 68045
+2026-05-31 23:25:22,389 INFO [django.server] "POST /admin-portal/tools/active-grading-period/?term_id=7&campus_id=8 HTTP/1.1" 302 0
+2026-05-31 23:25:22,553 INFO [django.server] "GET /admin-portal/tools/active-grading-period/?term_id=7&campus_id=8 HTTP/1.1" 200 68004
+2026-05-31 23:25:24,100 INFO [django.server] "POST /admin-portal/tools/active-grading-period/?term_id=7&campus_id=8 HTTP/1.1" 302 0
+2026-05-31 23:25:24,232 INFO [django.server] "GET /admin-portal/tools/active-grading-period/?term_id=7&campus_id=8 HTTP/1.1" 200 67953
+2026-05-31 23:25:25,937 INFO [django.server] "POST /admin-portal/tools/active-grading-period/?term_id=7&campus_id=8 HTTP/1.1" 302 0
+2026-05-31 23:25:26,071 INFO [django.server] "GET /admin-portal/tools/active-grading-period/?term_id=7&campus_id=8 HTTP/1.1" 200 68115
+2026-05-31 23:25:32,024 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 51087
+2026-05-31 23:25:40,344 INFO [django.server] "GET /admin-portal/grading/period-locks/ HTTP/1.1" 200 55385
+2026-05-31 23:25:44,298 INFO [django.server] "GET /admin-portal/grading/period-locks/12/edit/?next=%2Fadmin-portal%2Fgrading%2Fperiod-locks%2F HTTP/1.1" 200 120028
+2026-05-31 23:25:55,808 INFO [django.server] "POST /admin-portal/grading/period-locks/12/edit/?next=%2Fadmin-portal%2Fgrading%2Fperiod-locks%2F HTTP/1.1" 302 0
+2026-05-31 23:25:56,046 INFO [django.server] "GET /admin-portal/grading/period-locks/ HTTP/1.1" 200 57957
+2026-05-31 23:25:58,909 INFO [django.server] "GET /admin-portal/grading/period-locks/11/edit/?next=%2Fadmin-portal%2Fgrading%2Fperiod-locks%2F HTTP/1.1" 200 120028
+2026-05-31 23:26:03,012 INFO [django.server] "POST /admin-portal/grading/period-locks/11/edit/?next=%2Fadmin-portal%2Fgrading%2Fperiod-locks%2F HTTP/1.1" 302 0
+2026-05-31 23:26:03,165 INFO [django.server] "GET /admin-portal/grading/period-locks/ HTTP/1.1" 200 57100
+2026-05-31 23:26:08,657 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 51088
+2026-05-31 23:26:26,863 INFO [django.server] "GET /admin-portal/tools/active-grading-period/ HTTP/1.1" 200 64453
+2026-05-31 23:26:33,601 INFO [django.server] "GET /admin-portal/grading/period-locks/ HTTP/1.1" 200 53669
+2026-05-31 23:26:51,307 INFO [django.server] "GET /admin-portal/grading/period-locks/12/edit/?next=%2Fadmin-portal%2Fgrading%2Fperiod-locks%2F HTTP/1.1" 200 120020
+2026-05-31 23:27:18,792 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 34691
+2026-05-31 23:27:37,368 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F HTTP/1.1" 200 51088
+2026-05-31 23:27:46,535 INFO [django.server] "GET /faculty/my-courses/419/periods/22/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F21%252Factivities%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F%25253Fnext%25253D%2525252Ffaculty%2525252Fmy-courses%2525252F HTTP/1.1" 200 33183
+2026-05-31 23:29:40,220 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 81048
+2026-05-31 23:29:44,831 INFO [django.server] "GET /admin-portal/grading/templates/calculator/?grading_template=9&sample_value=85.00 HTTP/1.1" 200 129937
+2026-05-31 23:31:24,068 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F22%2Factivities%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F21%25252Factivities%25252F%25253Fnext%25253D%2525252Ffaculty%2525252Fmy-courses%2525252F419%2525252Fperiods%2525252F%2525253Fnext%2525253D%252525252Ffaculty%252525252Fmy-courses%252525252F HTTP/1.1" 200 51088
+2026-05-31 23:31:27,049 INFO [django.server] "GET /faculty/my-courses/419/periods/20/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F22%252Factivities%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F%25253Fnext%25253D%2525252Ffaculty%2525252Fmy-courses%2525252F419%2525252Fperiods%2525252F21%2525252Factivities%2525252F%2525253Fnext%2525253D%252525252Ffaculty%252525252Fmy-courses%252525252F419%252525252Fperiods%252525252F%252525253Fnext%252525253D%25252525252Ffaculty%25252525252Fmy-courses%25252525252F HTTP/1.1" 200 32813
+2026-05-31 23:31:39,108 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F20%2Factivities%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F22%25252Factivities%25252F%25253Fnext%25253D%2525252Ffaculty%2525252Fmy-courses%2525252F419%2525252Fperiods%2525252F%2525253Fnext%2525253D%252525252Ffaculty%252525252Fmy-courses%252525252F419%252525252Fperiods%252525252F21%252525252Factivities%252525252F%252525253Fnext%252525253D%25252525252Ffaculty%25252525252Fmy-courses%25252525252F419%25252525252Fperiods%25252525252F%25252525253Fnext%25252525253D%2525252525252Ffaculty%2525252525252Fmy-courses%2525252525252F HTTP/1.1" 200 51088
+2026-05-31 23:31:51,456 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F20%252Factivities%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F%25253Fnext%25253D%2525252Ffaculty%2525252Fmy-courses%2525252F419%2525252Fperiods%2525252F22%2525252Factivities%2525252F%2525253Fnext%2525253D%252525252Ffaculty%252525252Fmy-courses%252525252F419%252525252Fperiods%252525252F%252525253Fnext%252525253D%25252525252Ffaculty%25252525252Fmy-courses%25252525252F419%25252525252Fperiods%25252525252F21%25252525252Factivities%25252525252F%25252525253Fnext%25252525253D%2525252525252Ffaculty%2525252525252Fmy-courses%2525252525252F419%2525252525252Fperiods%2525252525252F%2525252525253Fnext%2525252525253D%252525252525252Ffaculty%252525252525252Fmy-courses%252525252525252F HTTP/1.1" 200 34691
+2026-05-31 23:32:18,030 INFO [django.server] "POST /faculty/my-courses/419/periods/21/activities/ HTTP/1.1" 302 0
+2026-05-31 23:32:18,163 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/ HTTP/1.1" 200 38143
+2026-05-31 23:32:27,277 INFO [django.server] "GET /admin-portal/grading/period-locks/ HTTP/1.1" 200 53669
+2026-05-31 23:32:37,515 INFO [django.server] "GET /admin-portal/grading/period-locks/13/edit/?next=%2Fadmin-portal%2Fgrading%2Fperiod-locks%2F HTTP/1.1" 200 120020
+2026-05-31 23:32:54,021 INFO [django.server] "POST /admin-portal/grading/period-locks/13/edit/?next=%2Fadmin-portal%2Fgrading%2Fperiod-locks%2F HTTP/1.1" 302 0
+2026-05-31 23:32:54,136 INFO [django.server] "GET /admin-portal/grading/period-locks/ HTTP/1.1" 200 57100
+2026-05-31 23:33:03,319 INFO [django.server] "GET /admin-portal/grading/period-locks/12/edit/?next=%2Fadmin-portal%2Fgrading%2Fperiod-locks%2F HTTP/1.1" 200 120020
+2026-05-31 23:33:10,833 INFO [django.server] "POST /admin-portal/grading/period-locks/12/edit/?next=%2Fadmin-portal%2Fgrading%2Fperiod-locks%2F HTTP/1.1" 302 0
+2026-05-31 23:33:10,943 INFO [django.server] "GET /admin-portal/grading/period-locks/ HTTP/1.1" 200 57100
+2026-05-31 23:33:14,353 INFO [django.server] "GET /admin-portal/grading/period-locks/ HTTP/1.1" 200 53669
+2026-05-31 23:33:25,547 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/ HTTP/1.1" 200 34477
+2026-05-31 23:33:51,108 INFO [django.server] "POST /faculty/my-courses/419/periods/21/activities/ HTTP/1.1" 302 0
+2026-05-31 23:33:51,248 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/ HTTP/1.1" 200 39212
+2026-05-31 23:33:53,739 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/145/scores/ HTTP/1.1" 200 46797
+2026-05-31 23:34:02,946 INFO [django.server] "POST /faculty/my-courses/419/periods/21/activities/145/scores/ HTTP/1.1" 302 0
+2026-05-31 23:34:03,095 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/145/scores/ HTTP/1.1" 200 50239
+2026-05-31 23:34:04,576 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F145%2Fscores%2F HTTP/1.1" 200 35784
+2026-05-31 23:34:06,511 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/146/scores/ HTTP/1.1" 200 46732
+2026-05-31 23:34:46,548 INFO [django.server] "POST /faculty/my-courses/419/periods/21/activities/146/scores/ HTTP/1.1" 302 0
+2026-05-31 23:34:46,678 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/146/scores/ HTTP/1.1" 200 50274
+2026-05-31 23:34:50,115 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F146%2Fscores%2F HTTP/1.1" 200 35785
+2026-05-31 23:34:53,231 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 43755
+2026-05-31 23:34:57,381 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 48852
+2026-05-31 23:35:03,147 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 35785
+2026-05-31 23:35:30,409 INFO [django.server] "POST /faculty/my-courses/419/periods/21/activities/ HTTP/1.1" 302 0
+2026-05-31 23:35:30,562 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/ HTTP/1.1" 200 40542
+2026-05-31 23:35:33,279 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/147/scores/ HTTP/1.1" 200 46799
+2026-05-31 23:36:08,471 INFO [django.server] "POST /faculty/my-courses/419/periods/21/activities/147/scores/ HTTP/1.1" 302 0
+2026-05-31 23:36:08,608 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/147/scores/ HTTP/1.1" 200 50341
+2026-05-31 23:36:12,666 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F147%2Fscores%2F HTTP/1.1" 200 75496
+2026-05-31 23:37:00,937 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 81048
+2026-05-31 23:37:07,691 INFO [django.server] "GET /admin-portal/grading/templates/9/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 64965
+2026-05-31 23:37:17,336 INFO [django.server] "GET /admin-portal/grading/templates/9/structure/ HTTP/1.1" 200 67788
+2026-05-31 23:37:22,856 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 81048
+2026-05-31 23:37:31,101 INFO [django.server] "GET /admin-portal/grading/templates/9/builder/ HTTP/1.1" 200 123781
+2026-05-31 23:37:35,069 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 81048
+2026-05-31 23:37:39,636 INFO [django.server] "GET /admin-portal/grading/templates/9/structure/ HTTP/1.1" 200 67788
+2026-05-31 23:37:43,397 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 81048
+2026-05-31 23:37:51,602 INFO [django.server] "GET /admin-portal/grading/templates/9/builder/ HTTP/1.1" 200 123781
+2026-05-31 23:38:12,061 INFO [django.server] "GET /admin-portal/grading/subcomponents/24/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 200 64131
+2026-05-31 23:38:17,441 INFO [django.server] "POST /admin-portal/grading/subcomponents/24/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 302 0
+2026-05-31 23:38:17,521 INFO [django.server] "GET /admin-portal/grading/templates/9/builder/ HTTP/1.1" 200 127290
+2026-05-31 23:38:27,951 INFO [django.server] "GET /admin-portal/grading/subcomponents/26/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 200 64131
+2026-05-31 23:38:31,760 INFO [django.server] "POST /admin-portal/grading/subcomponents/26/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 302 0
+2026-05-31 23:38:31,843 INFO [django.server] "GET /admin-portal/grading/templates/9/builder/ HTTP/1.1" 200 127358
+2026-05-31 23:38:38,179 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F147%2Fscores%2F HTTP/1.1" 200 75496
+2026-05-31 23:38:39,096 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F147%2Fscores%2F HTTP/1.1" 200 75496
+2026-05-31 23:38:39,869 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F147%2Fscores%2F HTTP/1.1" 200 75496
+2026-05-31 23:39:53,301 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 81048
+2026-05-31 23:39:56,754 INFO [django.server] "GET /admin-portal/grading/templates/9/hotfix/create/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 433584
+2026-05-31 23:40:32,206 INFO [django.server] "POST /admin-portal/grading/templates/9/hotfix/create/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 433714
+2026-05-31 23:40:45,029 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 43755
+2026-05-31 23:41:00,827 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 81048
+2026-05-31 23:41:03,768 INFO [django.server] "GET /admin-portal/grading/templates/9/builder/ HTTP/1.1" 200 123917
+2026-05-31 23:41:12,021 INFO [django.server] "GET /admin-portal/grading/subcomponents/20/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 200 64131
+2026-05-31 23:41:19,810 INFO [django.server] "GET /admin-portal/grading/subcomponents/24/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 200 64131
+2026-05-31 23:41:27,876 INFO [django.server] "GET /admin-portal/grading/subcomponents/26/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 200 64131
+2026-05-31 23:42:06,163 INFO [django.server] "GET /admin-portal/grading/subcomponents/24/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 200 64131
+2026-05-31 23:43:48,301 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 48847
+2026-05-31 23:43:54,362 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 75496
+2026-05-31 23:45:09,026 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Fsummary%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F HTTP/1.1" 200 48847
+2026-05-31 23:47:29,511 INFO [django.utils.autoreload] D:\teachermateplus\apps\faculty_portal\views.py changed, reloading.
+2026-05-31 23:47:30,294 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:47:39,235 INFO [django.utils.autoreload] D:\teachermateplus\apps\faculty_portal\views.py changed, reloading.
+2026-05-31 23:47:39,962 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:50:30,091 INFO [django.utils.autoreload] D:\teachermateplus\apps\faculty_portal\views.py changed, reloading.
+2026-05-31 23:50:30,788 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:50:41,797 INFO [django.utils.autoreload] D:\teachermateplus\apps\faculty_portal\views.py changed, reloading.
+2026-05-31 23:50:42,476 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:53:58,336 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F21%252Fsummary%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F%25253Fnext%25253D%2525252Ffaculty%2525252Fmy-courses%2525252F HTTP/1.1" 200 75496
+2026-05-31 23:59:34,745 INFO [django.utils.autoreload] D:\teachermateplus\apps\faculty_portal\views.py changed, reloading.
+2026-05-31 23:59:35,471 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-05-31 23:59:59,778 INFO [django.utils.autoreload] D:\teachermateplus\apps\faculty_portal\views.py changed, reloading.
+2026-06-01 00:00:00,482 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-06-01 00:01:01,310 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F21%252Fsummary%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F%25253Fnext%25253D%2525252Ffaculty%2525252Fmy-courses%2525252F HTTP/1.1" 200 76890
+2026-06-01 15:07:54,458 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F21%252Fsummary%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F%25253Fnext%25253D%2525252Ffaculty%2525252Fmy-courses%2525252F HTTP/1.1" 302 0
+2026-06-01 15:07:54,522 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 28092
+2026-06-01 15:07:54,613 INFO [django.server] "GET /static/faculty_portal/css/public_index.css HTTP/1.1" 304 0
+2026-06-01 15:07:54,630 INFO [django.server] "GET /media/logos/teachermate_logo_official.png HTTP/1.1" 304 0
+2026-06-01 15:07:54,908 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 200 375758
+2026-06-01 15:07:55,039 INFO [django.server] "GET /media/imahe/techsupp.jpg HTTP/1.1" 200 1100794
+2026-06-01 15:07:55,077 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
+2026-06-01 15:07:55,080 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
+2026-06-01 15:08:13,012 INFO [django.server] "POST /faculty/ HTTP/1.1" 302 0
+2026-06-01 15:08:14,378 INFO [django.server] "GET /faculty/dashboard/ HTTP/1.1" 200 56101
+2026-06-01 15:08:27,461 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 43755
+2026-06-01 15:08:34,144 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 48847
+2026-06-01 15:08:43,264 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F HTTP/1.1" 200 37115
+2026-06-01 15:27:44,731 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F HTTP/1.1" 200 48847
+2026-06-01 20:57:25,487 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F21%252Factivities%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F%25253Fnext%25253D%2525252Ffaculty%2525252Fmy-courses%2525252F HTTP/1.1" 200 37115
+2026-06-01 20:58:52,738 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/147/scores/ HTTP/1.1" 200 46899
+2026-06-01 20:59:01,195 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F147%2Fscores%2F HTTP/1.1" 200 37115
+2026-06-01 20:59:07,503 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F21%252Factivities%252F147%252Fscores%252F HTTP/1.1" 200 76889
+2026-06-01 20:59:19,618 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Fsummary%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F21%252Factivities%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F21%25252Factivities%25252F147%25252Fscores%25252F HTTP/1.1" 200 37115
+2026-06-01 20:59:25,576 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/147/scores/ HTTP/1.1" 200 46899
+2026-06-01 20:59:41,015 INFO [django.server] "POST /faculty/my-courses/419/periods/21/activities/147/scores/ HTTP/1.1" 302 0
+2026-06-01 20:59:41,350 INFO [django.server] "GET /faculty/my-courses/419/periods/21/activities/147/scores/ HTTP/1.1" 200 50340
+2026-06-01 20:59:46,530 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F147%2Fscores%2F HTTP/1.1" 200 76889
+2026-06-01 21:20:21,456 INFO [django.utils.autoreload] D:\teachermateplus\apps\faculty_portal\views.py changed, reloading.
+2026-06-01 21:20:23,631 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-06-01 21:23:03,229 INFO [django.server] - Broken pipe from ('127.0.0.1', 50046)
+2026-06-01 21:23:05,905 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F147%2Fscores%2F HTTP/1.1" 200 76891
+2026-06-01 21:24:57,880 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 302 0
+2026-06-01 21:24:57,952 INFO [django.server] "GET /admin-portal/login/ HTTP/1.1" 200 4654
+2026-06-01 21:24:58,298 INFO [django.server] "GET /media/logos/teachermate_logo_text_official.png HTTP/1.1" 200 402376
+2026-06-01 21:24:58,307 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 200 375758
+2026-06-01 21:24:58,427 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 72632
+2026-06-01 21:25:10,210 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 200 4747
+2026-06-01 21:25:22,620 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 200 4747
+2026-06-01 21:25:42,682 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 200 4747
+2026-06-01 21:26:02,084 INFO [django.server] "POST /admin-portal/login/ HTTP/1.1" 302 0
+2026-06-01 21:26:03,228 INFO [django.server] "GET /admin-portal/dashboard/ HTTP/1.1" 200 68583
+2026-06-01 21:26:03,399 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 72632
+2026-06-01 21:26:07,338 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 80840
+2026-06-01 21:26:15,775 INFO [django.server] "GET /admin-portal/grading/templates/9/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 64757
+2026-06-01 21:26:51,381 INFO [django.server] "GET /admin-portal/grading/templates/9/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 64757
+2026-06-01 21:27:13,479 INFO [django.server] "GET /admin-portal/grading/templates/9/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 64757
+2026-06-01 21:27:28,756 INFO [django.server] "GET /admin-portal/grading/base-overrides/ HTTP/1.1" 200 86792
+2026-06-01 21:27:37,892 INFO [django.server] - Broken pipe from ('127.0.0.1', 55796)
+2026-06-01 21:27:39,753 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/ HTTP/1.1" 200 91071
+2026-06-01 21:27:48,628 INFO [django.server] "GET /admin-portal/tools/configurable-features/ HTTP/1.1" 200 120365
+2026-06-01 21:27:53,608 INFO [django.server] "GET /admin-portal/tools/template-governance/ HTTP/1.1" 200 96272
+2026-06-01 21:28:30,332 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 80840
+2026-06-01 21:28:39,378 INFO [django.server] "GET /admin-portal/grading/templates/7/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 64810
+2026-06-01 21:29:24,041 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-06-01 21:29:33,072 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F147%2Fscores%2F HTTP/1.1" 200 76891
+2026-06-01 21:29:51,278 INFO [django.server] "GET /admin-portal/grading/templates/7/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F HTTP/1.1" 200 64810
+2026-06-01 21:30:23,238 INFO [django.server] "GET /admin-portal/grading/course-template-assignments/ HTTP/1.1" 200 91071
+2026-06-01 21:30:57,806 INFO [django.server] "GET /admin-portal/grading/templates/ HTTP/1.1" 200 80840
+2026-06-01 21:31:13,089 INFO [django.server] "GET /admin-portal/grading/templates/9/builder/ HTTP/1.1" 200 123709
+2026-06-01 21:31:20,837 INFO [django.server] "GET /admin-portal/grading/subcomponents/20/edit/?next=%2Fadmin-portal%2Fgrading%2Ftemplates%2F9%2Fbuilder%2F HTTP/1.1" 200 63923
+2026-06-01 21:36:33,300 INFO [django.utils.autoreload] D:\teachermateplus\apps\faculty_portal\views.py changed, reloading.
+2026-06-01 21:36:34,786 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-06-01 21:41:03,639 INFO [django.server] "GET /faculty/my-courses/419/periods/21/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Factivities%2F147%2Fscores%2F HTTP/1.1" 200 74555
+2026-06-01 21:41:21,525 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F21%2Fsummary%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F21%252Factivities%252F147%252Fscores%252F HTTP/1.1" 200 48847
+2026-06-01 21:41:25,854 INFO [django.server] "GET /faculty/my-courses/419/periods/20/summary/?next=%2Ffaculty%2Fmy-courses%2F419%2Fperiods%2F%3Fnext%3D%252Ffaculty%252Fmy-courses%252F419%252Fperiods%252F21%252Fsummary%252F%253Fnext%253D%25252Ffaculty%25252Fmy-courses%25252F419%25252Fperiods%25252F21%25252Factivities%25252F147%25252Fscores%25252F HTTP/1.1" 200 91518
+2026-06-01 21:41:26,027 INFO [django.server] "GET /media/logos/ncba-logo.png HTTP/1.1" 200 61790

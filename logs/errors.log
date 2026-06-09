@@ -43,3 +43,23 @@ Traceback (most recent call last):
     if can_resubmit_auto_locked_reopen:
        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 NameError: name 'can_resubmit_auto_locked_reopen' is not defined
+2026-05-31 23:22:47,815 ERROR [django.request] Internal Server Error: /admin-portal/grading/templates/calculator/
+Traceback (most recent call last):
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\core\handlers\base.py", line 197, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+  File "D:\teachermateplus\apps\core\decorators.py", line 52, in _wrapped
+    return view_func(request, *args, **kwargs)
+  File "D:\teachermateplus\apps\core\decorators.py", line 27, in _wrapped
+    return view_func(request, *args, **kwargs)
+  File "D:\teachermateplus\apps\admin_portal\views.py", line 9409, in grading_template_calculator_view
+    calculation = GradingTemplateTestingCalculatorService.build_calculation(
+        template=selected_template,
+        raw_inputs=request.POST if request.method == "POST" else None,
+        default_sample=Decimal(form.cleaned_data["sample_value"]),
+    )
+  File "D:\teachermateplus\apps\grading\services.py", line 773, in build_calculation
+    sub_score = cls.aggregate_detail_scores(subcomponent=subcomponent, detail_scores=detail_scores)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'GradingTemplateTestingCalculatorService' has no attribute 'aggregate_detail_scores'

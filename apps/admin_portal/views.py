@@ -113,6 +113,7 @@ from apps.grading.models import (
     CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
+    DetailComputationMode,
     FacultyFinalClearanceReport,
     GradeActivity,
     GradeCorrectionAttachment,
@@ -2396,13 +2397,16 @@ def grading_analytics_view(request):
                 for sub in subcomponents:
                     details = detail_map.get(sub.id, [])
                     if details:
-                        detail_weight_total = sum(Decimal(detail.weight_percentage or 0) for detail in details)
-                        detail_denominator = detail_weight_total if detail_weight_total > 0 else Decimal("100")
-                        sub_raw = Decimal("0")
                         sub_has_data = False
+                        detail_scores = []
                         for detail in details:
-                            detail_value = _score_avg(
-                                (offering_id, period_id, student_id, component.id, sub.id, detail.id)
+                            detail_key = (offering_id, period_id, student_id, component.id, sub.id, detail.id)
+                            detail_value = _score_avg(detail_key)
+                            detail_scores.append(
+                                (
+                                    Decimal(detail.weight_percentage or 0),
+                                    score_lookup.get(detail_key, []) if sub.detail_computation_mode == DetailComputationMode.AVERAGE_ACTIVITIES else detail_value,
+                                )
                             )
                             if detail_value is not None:
                                 sub_has_data = True
@@ -2436,10 +2440,14 @@ def grading_analytics_view(request):
                                     or threshold > detail_bucket["threshold_max"]
                                 ):
                                     detail_bucket["threshold_max"] = threshold
-                            sub_raw += (Decimal(detail.weight_percentage or 0) / detail_denominator) * (
-                                detail_value or Decimal("0")
+                        sub_value = (
+                            FacultyGradingService.aggregate_detail_scores(
+                                subcomponent=sub,
+                                detail_scores=detail_scores,
                             )
-                        sub_value = GradingGovernanceService._round(sub_raw) if sub_has_data else None
+                            if sub_has_data
+                            else None
+                        )
                     else:
                         sub_value = _score_avg((offering_id, period_id, student_id, component.id, sub.id, None))
 
@@ -9346,7 +9354,11 @@ def grading_template_structure_view(request, template_id: int):
                             "weight": sub_weight,
                             "details": detail_rows,
                             "detail_total": detail_total,
-                            "detail_total_ok": detail_total is None or detail_total == Decimal("100"),
+                            "detail_total_ok": (
+                                detail_total is None
+                                or detail_total == Decimal("100")
+                                or subcomponent.detail_computation_mode == DetailComputationMode.AVERAGE_ACTIVITIES
+                            ),
                         }
                     )
 

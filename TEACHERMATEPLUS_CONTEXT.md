@@ -33,6 +33,7 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 
 ### Admin Portal
 - Security: users, roles, scoped permissions
+- The public site root `/` redirects to `/faculty/`; Admin Portal access remains available directly under `/admin-portal/`.
 - Admin Portal sidebar and login-page branding use the official TeacherMate text logo from `/media/logos/teachermate_logo_text_official.png`.
 - Admin Portal login branding panel uses the official TeacherMate text logo from `/media/logos/teachermate_logo_text_official.png`.
 - Admin Portal authenticated left navigation uses a reversed green gradient, with the deeper shade at the top and lighter shade toward the bottom.
@@ -727,3 +728,8 @@ Before changing anything:
 - Tenant Grading Profiles now support a period-grade formula mode in addition to the final-grade formula mode:
   - `Weighted Components` preserves the existing TeacherMate+ computation path.
   - `DepEd Transmutation Table` supports DepEd K-12 E-Class Record style quarterly grading by summing raw scores per component, converting each component to a percentage score, applying component weights to produce the initial grade, then transmuting the initial grade through a configurable table. The default table follows the Grade 1 ECR workbook pattern with `0.00-3.99` mapping to `60`.
+- Grading-template subcomponents now support a `Detail Computation` rule:
+  - `Weighted Details` preserves existing behavior, where each active detail row contributes by its configured detail weight.
+  - `Average Activities` lets faculty-created activities under Participation/Output-style details count equally inside the subcomponent, while the subcomponent still contributes upward by its own configured weight.
+  - Faculty Summary of Periodic Grades display and editable stored period rows honor `Average Activities`, so changing a live unsubmitted template subcomponent refreshes the gradebook summary without requiring faculty to re-save each activity. The summary table now shows a separate subcomponent average column for nested Participation/Output-style groups, labels Participation/Output as `P/O AVE`, labels the final weighted Class Standing total as `CS AVE`, and hides empty detail columns only when that subcomponent uses `Average Activities`.
+  - Correction of Grades final approval uses the same recompute path, so approved score corrections also honor the selected detail-computation rule before updating official period and final grade records.

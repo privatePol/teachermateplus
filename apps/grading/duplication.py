@@ -91,6 +91,7 @@ class GradingTemplateDuplicationService:
                         weight_percentage=subcomponent.weight_percentage,
                         sort_order=subcomponent.sort_order,
                         score_input_mode=subcomponent.score_input_mode,
+                        detail_computation_mode=subcomponent.detail_computation_mode,
                         is_attendance_component=subcomponent.is_attendance_component,
                         admin_locked=subcomponent.admin_locked,
                         is_active=subcomponent.is_active,

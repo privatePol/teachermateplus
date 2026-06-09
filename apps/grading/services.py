@@ -28,6 +28,7 @@ from apps.grading.models import (
     GradeSubmission,
     GradeSubmissionReopenRequest,
     GradeActivity,
+    DetailComputationMode,
     GradingPeriodLock,
     GradingTemplate,
     GradingTemplateApprovalStep,
@@ -709,8 +710,8 @@ class GradingTemplateTestingCalculatorService:
                         if details:
                             detail_weight_total = sum(cls._to_decimal(detail.weight_percentage) for detail in details)
                             detail_denominator = detail_weight_total if detail_weight_total > 0 else Decimal("100")
-                            detail_raw = Decimal("0")
                             detail_rows = []
+                            detail_scores = []
                             for detail in details:
                                 input_key = cls._leaf_key(
                                     component=component,
@@ -750,22 +751,29 @@ class GradingTemplateTestingCalculatorService:
                                 period_input_rows.append(detail_input_row)
                                 if detail_input_row["error"]:
                                     input_errors.append(detail_input_row["error"])
-                                weighted_detail = (cls._to_decimal(detail.weight_percentage) / detail_denominator) * detail_value
+                                detail_weight = cls._to_decimal(detail.weight_percentage)
+                                detail_scores.append((detail_weight, detail_value))
+                                if subcomponent.detail_computation_mode == DetailComputationMode.AVERAGE_ACTIVITIES:
+                                    contribution = detail_value / Decimal(len(details))
+                                    formula = f"{detail_value:.2f} / {len(details)} sample detail inputs"
+                                else:
+                                    contribution = (detail_weight / detail_denominator) * detail_value
+                                    formula = f"({detail.weight_percentage}% / {detail_denominator}%) x {detail_value:.2f}"
                                 detail_rows.append(
                                     {
                                         "row": detail,
                                         "input": detail_input_row,
                                         "score": detail_value,
-                                        "weight": cls._to_decimal(detail.weight_percentage),
-                                        "contribution": cls._round(weighted_detail),
-                                        "formula": (
-                                            f"({detail.weight_percentage}% / {detail_denominator}%) x {detail_value:.2f}"
-                                        ),
+                                        "weight": detail_weight,
+                                        "contribution": cls._round(contribution),
+                                        "formula": formula,
                                     }
                                 )
-                                detail_raw += weighted_detail
 
-                            sub_score = cls._round(detail_raw)
+                            sub_score = FacultyGradingService.aggregate_detail_scores(
+                                subcomponent=subcomponent,
+                                detail_scores=detail_scores,
+                            )
                             subcomponent_rows.append(
                                 {
                                     "row": subcomponent,
@@ -774,6 +782,7 @@ class GradingTemplateTestingCalculatorService:
                                     "input_rows": sub_input_rows,
                                     "details": detail_rows,
                                     "sub_score": sub_score,
+                                    "detail_computation_mode": subcomponent.detail_computation_mode,
                                     "formula": (
                                         " + ".join(detail_row["formula"] for detail_row in detail_rows)
                                         if detail_rows
@@ -3835,6 +3844,28 @@ class FacultyGradingService:
             "DIRECT_PERCENTAGE": "Direct Percentage",
         }.get(score_input_mode, "Raw Score (Base-50)")
 
+    @classmethod
+    def aggregate_detail_scores(cls, *, subcomponent, detail_scores):
+        if getattr(subcomponent, "detail_computation_mode", DetailComputationMode.WEIGHTED_DETAILS) == DetailComputationMode.AVERAGE_ACTIVITIES:
+            activity_values = []
+            for _weight, score in detail_scores:
+                if score is None:
+                    continue
+                if isinstance(score, (list, tuple)):
+                    activity_values.extend(Decimal(value) for value in score)
+                else:
+                    activity_values.append(Decimal(score))
+            if not activity_values:
+                return None
+            return cls._round(sum(activity_values) / Decimal(len(activity_values)))
+
+        scored_details = [(Decimal(weight or 0), Decimal(score)) for weight, score in detail_scores if score is not None]
+        if not scored_details:
+            return None
+        total_weight = sum(Decimal(weight or 0) for weight, _score in detail_scores)
+        denominator = total_weight if total_weight > 0 else Decimal("100")
+        return cls._round(sum((weight / denominator) * score for weight, score in scored_details))
+
     @staticmethod
     def is_exam_component(component: GradingTemplateComponent) -> bool:
         return bool(getattr(component, "is_exam_component", False))
@@ -4551,18 +4582,22 @@ class FacultyGradingService:
                         )
                         sub_attendance_rows = attendance_rows()
                     elif detail_rows:
-                        detail_total = sum(Decimal(detail.weight_percentage or 0) for detail in detail_rows)
-                        detail_denominator = detail_total if detail_total > 0 else Decimal("100")
-                        detail_raw = Decimal("0")
                         detail_has_data = False
+                        detail_scores = []
                         for detail in detail_rows:
+                            detail_key = (student_id, component.id, sub.id, detail.id)
                             detail_score = cls._average_score_or_none(
                                 score_lookup,
-                                (student_id, component.id, sub.id, detail.id),
+                                detail_key,
+                            )
+                            detail_scores.append(
+                                (
+                                    Decimal(detail.weight_percentage or 0),
+                                    score_lookup.get(detail_key, []) if sub.detail_computation_mode == DetailComputationMode.AVERAGE_ACTIVITIES else detail_score,
+                                )
                             )
                             if detail_score is not None:
                                 detail_has_data = True
-                                detail_raw += (Decimal(detail.weight_percentage) / detail_denominator) * detail_score
                             detail_breakdown.append(
                                 {
                                     "id": detail.id,
@@ -4573,7 +4608,10 @@ class FacultyGradingService:
                                     "activities": activity_rows_for(component, sub, detail),
                                 }
                             )
-                        sub_score = cls._round(detail_raw)
+                        sub_score = cls.aggregate_detail_scores(
+                            subcomponent=sub,
+                            detail_scores=detail_scores,
+                        )
                         if detail_has_data:
                             component_has_data = True
                     else:

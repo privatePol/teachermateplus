@@ -8,6 +8,7 @@
         <th>Name</th>
         <th>Weight %</th>
         <th>Score Entry</th>
+        <th>Detail Computation</th>
         <th>Attendance</th>
         <th>Admin Locked</th>
         <th>Record State</th>
@@ -24,6 +25,7 @@
         <td>{{ row.name }}</td>
         <td>{{ row.weight_percentage }}</td>
         <td>{{ row.get_score_input_mode_display }}</td>
+        <td>{{ row.get_detail_computation_mode_display }}</td>
         <td>{% if row.is_attendance_component %}Yes{% else %}No{% endif %}</td>
         <td>{% if row.admin_locked %}Yes{% else %}No{% endif %}</td>
         <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
@@ -39,7 +41,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="{% if show_inactive_tools %}11{% else %}10{% endif %}" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
+      <tr><td colspan="{% if show_inactive_tools %}12{% else %}11{% endif %}" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

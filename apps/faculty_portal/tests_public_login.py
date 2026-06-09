@@ -63,6 +63,16 @@ class FacultyPublicLoginTests(TestCase):
         self.assertNotContains(response, "TeacherMate+ vs Standalone Grade Files")
         self.assertNotContains(response, "helps institutions")
 
+    def test_site_root_redirects_to_faculty_landing_page(self):
+        response = self.client.get("/")
+
+        self.assertRedirects(
+            response,
+            reverse("faculty_portal:public_index"),
+            status_code=302,
+            target_status_code=200,
+        )
+
     def test_invalid_public_faculty_login_stays_on_landing_page(self):
         response = self.client.post(
             reverse("faculty_portal:public_index"),

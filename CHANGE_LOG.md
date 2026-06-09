@@ -7,6 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added a `Detail Computation` option for grading-template subcomponents. Existing subcomponents default to weighted detail rollup, while admins can choose `Average Activities` so faculty-created activities under Participation/Output-style detail rows are averaged equally inside that subcomponent.
 - Added an Admin Portal `Student Enrollment Query` page with the new `student_enrollment_query.read` permission. Authorized admins can search one scoped student, choose Academic Year and Term, then view the student's consolidated enrollment, period grade, submission, final grade, and encoded activity-score details.
 - Added course-level syllabus links for Google Drive or other approved URLs, with Admin Course maintenance support, a faculty-only assigned-offering redirect used by the My Classes syllabus icon, and audit logging whenever faculty open the syllabus link.
 - Added an opt-in DepEd K-12 period-grade formula on Tenant Grading Profiles. DepEd mode sums raw scores by component, converts each component to a percentage score, applies component weights to produce the initial grade, then uses a configurable transmutation table to store the official period grade.
@@ -28,6 +29,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- The TeacherMate+ site root `/` now redirects to the Faculty Portal landing page at `/faculty/`, making the faculty experience the default page for the public domain while preserving direct Admin Portal URLs.
 - Faculty Portal public landing hero and authenticated Faculty Portal header now use `/media/logos/teachermate_logo_official.png` as the main logo image.
 - Admin Portal login branding panel now uses `/media/logos/teachermate_logo_text_official.png`.
 - Admin Portal authenticated left navigation branding now uses `/media/logos/teachermate_logo_text_official.png`.
@@ -44,9 +46,14 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Faculty Portal public navbar now labels the brand as `NCBA | TeacherMate+`, shortens `Entry Experience` to `Experience`, and gives the lower NPC seal section more vertical breathing room.
 - Admin Portal sidebar now places `Student Enrollment Query` under the `Enrollment` menu group instead of `Students`.
 - Faculty Portal Summary of Periodic Grades now places visible period/final grade columns immediately after Status and leaves ACTIVE student status cells blank while still showing non-active statuses such as DRP, W, and INC.
+- Faculty Portal Summary of Periodic Grades now respects `Average Activities` when displaying nested Participation/Output-style totals, and editable summaries using that rule refresh stored period rows so template-setting changes are reflected without requiring faculty to re-save every activity.
+- Faculty Portal Summary of Periodic Grades now separates nested subcomponent averages from the Class Standing total, so Participation/Output shows its own activity average and the final weighted Class Standing value is labeled `CS AVE`.
+- Faculty Portal Summary of Periodic Grades now labels nested subcomponent average columns from the subcomponent name, so Participation/Output shows `P/O AVE` instead of borrowing the first activity prefix such as `R.AVE`.
+- Faculty Portal Summary of Periodic Grades now hides empty detail columns for subcomponents using `Average Activities`, while `Weighted Details` subcomponents still show every configured detail column.
 - Faculty Portal Current Active Grading Period cards now place Campus / AY / Term in the first row as an H4-styled scope line with separate colors, followed by the active-period explanation and the grading-period chip. Campus labels still show friendly names such as `NCBA-Cubao`, `NCBA-Fairview`, or `NCBA-Taytay` instead of numeric campus codes.
 - Privacy Consent pages now lock and collapse the left navigation and hide Change Password while consent is pending, keeping first-login focus on the consent form until the user accepts the current version.
 - Gradebook reopen request email recipients now follow effective `reopen_requests.review` authorization for the request tenant/campus, including direct user permission grants and active superusers, instead of relying only on role-row lookup.
+- Correction of Grades final approval now has regression coverage confirming approved score corrections recompute submitted gradebooks using the selected subcomponent `Detail Computation` rule, including `Average Activities`.
 - Admin Portal role-permission sections now use clearer display labels and plain-English header descriptions so admins can understand what each permission group controls before granting access.
 - Admin Portal role-permission saves now keep admins on the role-permissions page; section saves return to the saved permission section and show a compact `Changes saved` label.
 - Admin Portal role-permission Critical Access Safeguard now stays hidden during ordinary edits and appears only when critical permissions are added/removed or validation requires the reason/confirmation fields.

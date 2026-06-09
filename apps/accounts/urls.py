@@ -1,4 +1,5 @@
 from django.urls import path
+from django.views.generic import RedirectView
 
 from .views import (
     AdminForgotPasswordView,
@@ -31,7 +32,11 @@ from .views import (
 app_name = "accounts"
 
 urlpatterns = [
-    path("", PublicIndexView.as_view(), name="public_index"),
+    path(
+        "",
+        RedirectView.as_view(pattern_name="faculty_portal:public_index", permanent=False),
+        name="public_index",
+    ),
     path("index/", PublicIndexView.as_view(), name="public_index_alias"),
     path("index.php", PublicIndexView.as_view(), name="public_index_php"),
     path("login/", PublicLoginView.as_view(), name="public_login"),

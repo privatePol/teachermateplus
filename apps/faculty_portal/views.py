@@ -723,6 +723,21 @@ def _average_label_from_titles(titles, fallback_label="AVE"):
     return fallback_label
 
 
+def _average_label_from_section_label(label, fallback_label="AVE"):
+    value = str(label or "").strip()
+    if not value:
+        return fallback_label
+    if "/" in value:
+        parts = [part for part in re.split(r"/+", value) if part.strip()]
+        initials = [match.group(0)[0].upper() for part in parts if (match := re.search(r"[A-Za-z]", part))]
+        if initials:
+            return f"{'/'.join(initials)} AVE"
+    words = re.findall(r"[A-Za-z]+", value)
+    if len(words) >= 2:
+        return f"{''.join(word[0].upper() for word in words)} AVE"
+    return f"{words[0].upper()} AVE" if words else fallback_label
+
+
 def _activity_title_sort_key(title: str):
     value = (title or "").strip().upper()
     match = re.match(r"^([A-Z]+)\s*([0-9]+)?(.*)$", value)
@@ -759,7 +774,7 @@ def _build_summary_layout(period, activities):
             "component_code": component.code,
             "label": component.name.upper(),
             "sections": [],
-            "total_label": "AVE",
+            "total_label": "CS AVE" if not component_is_exam else "AVE",
             "colspan": 1,
         }
 
@@ -795,15 +810,29 @@ def _build_summary_layout(period, activities):
                         }
                     )
 
-                if detail_groups and any(group["activity_columns"] for group in detail_groups):
+                visible_detail_groups = detail_groups
+                if subcomponent.detail_computation_mode == "AVERAGE_ACTIVITIES":
+                    visible_detail_groups = [group for group in detail_groups if group["activity_columns"]]
+
+                if visible_detail_groups:
+                    nested_activity_titles = [
+                        activity.title
+                        for group in visible_detail_groups
+                        for activity in activities_by_detail.get(group["id"], [])
+                    ]
                     component_layout["sections"].append(
                         {
                             "id": subcomponent.id,
                             "label": subcomponent.name.upper(),
                             "uses_nested": True,
-                            "groups": detail_groups,
+                            "groups": visible_detail_groups,
+                            "avg_label": _average_label_from_section_label(
+                                subcomponent.name or subcomponent.code,
+                                fallback_label=_average_label_from_titles(nested_activity_titles, fallback_label="AVE"),
+                            ),
                             "weight_percentage": Decimal(subcomponent.weight_percentage or 0),
-                            "colspan": sum(group["colspan"] for group in detail_groups),
+                            "detail_computation_mode": subcomponent.detail_computation_mode,
+                            "colspan": sum(group["colspan"] for group in visible_detail_groups) + 1,
                         }
                     )
                 else:
@@ -1086,13 +1115,16 @@ def _build_summary_row_values(row, summary_layout, score_by_activity):
                 nested_numeric = Decimal("0")
                 nested_has_data = False
                 nested_weight_total = sum(group["weight_percentage"] for group in section["groups"]) or Decimal("100")
+                section_activity_values = []
 
                 for group in section["groups"]:
                     activity_values = [score_by_activity.get((student_id, activity_id)) for activity_id in group["activity_ids"]]
+                    section_activity_values.extend(activity_values)
                     average_value = _average_display(activity_values)
                     if average_value is not None:
                         nested_has_data = True
-                    nested_numeric += (group["weight_percentage"] / nested_weight_total) * (average_value or Decimal("0"))
+                    if section.get("detail_computation_mode") != "AVERAGE_ACTIVITIES":
+                        nested_numeric += (group["weight_percentage"] / nested_weight_total) * (average_value or Decimal("0"))
                     section_values["groups"].append(
                         {
                             "activity_values": activity_values,
@@ -1100,11 +1132,15 @@ def _build_summary_row_values(row, summary_layout, score_by_activity):
                         }
                     )
 
-                section_score = FacultyGradingService._round(nested_numeric)
+                if section.get("detail_computation_mode") == "AVERAGE_ACTIVITIES":
+                    section_score = _average_display(section_activity_values) or Decimal("0")
+                else:
+                    section_score = FacultyGradingService._round(nested_numeric)
                 component_numeric += (section["weight_percentage"] / section_weight_total) * section_score
                 if nested_has_data:
                     component_has_data = True
                 block_values["sections"].append(section_values)
+                section_values["average"] = section_score if nested_has_data else None
             else:
                 activity_values = [score_by_activity.get((student_id, activity_id)) for activity_id in section["activity_ids"]]
                 average_value = _average_display(activity_values)
@@ -1135,14 +1171,20 @@ def _build_summary_row_values(row, summary_layout, score_by_activity):
                     nested_weight_total = sum(group["weight_percentage"] for group in section["groups"]) or Decimal("100")
                     nested_numeric = Decimal("0")
                     nested_has_data = False
+                    section_activity_values = []
                     for group in section["groups"]:
                         activity_values = [score_by_activity.get((student_id, activity_id)) for activity_id in group["activity_ids"]]
+                        section_activity_values.extend(activity_values)
                         average_value = _average_display(activity_values)
                         if average_value is not None:
                             nested_has_data = True
-                        nested_numeric += (group["weight_percentage"] / nested_weight_total) * (average_value or Decimal("0"))
+                        if section.get("detail_computation_mode") != "AVERAGE_ACTIVITIES":
+                            nested_numeric += (group["weight_percentage"] / nested_weight_total) * (average_value or Decimal("0"))
                     if nested_has_data:
-                        nested_values.append(FacultyGradingService._round(nested_numeric))
+                        if section.get("detail_computation_mode") == "AVERAGE_ACTIVITIES":
+                            nested_values.append(_average_display(section_activity_values))
+                        else:
+                            nested_values.append(FacultyGradingService._round(nested_numeric))
                     section_scores.extend(nested_values)
                 else:
                     activity_values = [score_by_activity.get((student_id, activity_id)) for activity_id in section["activity_ids"]]
@@ -1156,6 +1198,14 @@ def _build_summary_row_values(row, summary_layout, score_by_activity):
         "class_standing_blocks": class_standing_blocks,
         "exam_values": exam_values,
     }
+
+
+def _period_uses_average_activity_details(period) -> bool:
+    return period.components.filter(
+        is_active=True,
+        subcomponents__is_active=True,
+        subcomponents__detail_computation_mode="AVERAGE_ACTIVITIES",
+    ).exists()
 
 
 def _all_template_periods_submitted(offering, periods):
@@ -4352,13 +4402,18 @@ def period_summary_view(request, offering_id: int, period_id: int):
 
     stored_summary_payload = _stored_period_summary()
     if state["is_editable"]:
-        missing_student_ids = stored_summary_payload["missing_student_ids"]
-        if missing_student_ids:
+        missing_student_ids = set(stored_summary_payload["missing_student_ids"])
+        recompute_student_ids = set(missing_student_ids)
+        if _period_uses_average_activity_details(period):
+            recompute_student_ids.update(
+                Enrollment.objects.filter(course_offering_id=offering.id, is_active=True).values_list("student_id", flat=True)
+            )
+        if recompute_student_ids:
             FacultyGradingService.recompute_period_summary_for_students(
                 user=request.user,
                 offering=offering,
                 template_period=period,
-                student_ids=missing_student_ids,
+                student_ids=recompute_student_ids,
                 audit_portal="FACULTY",
             )
             AuditService.log_event(
@@ -4372,8 +4427,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
                 metadata={
                     "offering_id": offering.id,
                     "period_id": period.id,
-                    "recomputed_student_count": len(missing_student_ids),
-                    "scope": "missing_students",
+                    "recomputed_student_count": len(recompute_student_ids),
+                    "scope": "average_activities_refresh" if recompute_student_ids - missing_student_ids else "missing_students",
                 },
                 request=request,
             )
@@ -4577,6 +4632,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
             if section["uses_nested"]:
                 for group in section["groups"]:
                     summary_table_colspan += len(group["activity_columns"]) + 1
+                summary_table_colspan += 1
             else:
                 summary_table_colspan += len(section["activity_columns"]) + 1
         summary_table_colspan += 1
@@ -5182,7 +5238,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
 
     period_grade_steps = [
         "Each encoded activity score is first converted into a computed score using the active scoring rule of that activity.",
-        "If a subcomponent has details, TeacherMate+ averages those details upward using the detail weights.",
+        "If a subcomponent has details, TeacherMate+ either uses the detail weights or averages the faculty-created activities under those details, depending on the admin template setting.",
         "If a component has subcomponents, TeacherMate+ averages those subcomponents upward using the subcomponent weights.",
         "The period grade is then the weighted sum of all active top-level components in the selected period.",
         "If the template has a configured exam component and there is still no exam data, the official period grade remains unavailable until the exam side has data.",
@@ -5190,7 +5246,7 @@ def period_prediction_guide_view(request, offering_id: int, period_id: int):
 
     period_grade_formula = (
         "Period Grade = sum of [Component Score × Component Weight]. "
-        "Component Score may itself be built from weighted subcomponents and weighted details."
+        "Component Score may itself be built from weighted subcomponents and the configured detail-computation rule."
     )
 
     final_grade_steps = [

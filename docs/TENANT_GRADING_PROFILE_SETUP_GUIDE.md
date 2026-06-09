@@ -63,6 +63,11 @@ under the `Periods` column, and also at the bottom of the grading template creat
 
 Use those exact codes when entering `Final Grade Period Weights` in a Tenant Grading Profile.
 
+For subcomponents with level-3 detail rows, set `Detail Computation` based on the approved policy:
+
+- `Weighted Details` keeps the traditional detail-weight calculation.
+- `Average Activities` makes faculty-created activities under detail rows such as Recitation, Assignment, and Activity count equally inside that subcomponent, while the subcomponent itself still uses its configured weight.
+
 Based on the attached NCBA samples, the regular-term template families are:
 
 | Template Family | Typical Scope |

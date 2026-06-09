@@ -251,6 +251,7 @@
               <td>
                 <div class="subcomponent-name">{{ sub.row.name }}</div>
                 <div class="meta-muted">{{ sub.row.code }}</div>
+                <span class="badge text-bg-light border mt-1">{{ sub.row.get_detail_computation_mode_display }}</span>
                 {% if sub.row.is_attendance_component %}
                 <span class="badge text-bg-info mt-1">Attendance</span>
                 {% endif %}
@@ -275,7 +276,7 @@
                       <thead>
                         <tr>
                           <th>Detail</th>
-                          <th class="text-end">Weight</th>
+                          <th class="text-end">Weight / Share</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -285,7 +286,7 @@
                             <div class="detail-name">{{ detail.row.name }}</div>
                             <div class="detail-code">{{ detail.row.code }}</div>
                           </td>
-                          <td class="text-end fw-semibold">{{ detail.weight }}%</td>
+                          <td class="text-end fw-semibold">{% if sub.row.detail_computation_mode == "AVERAGE_ACTIVITIES" %}Ignored for activity average{% else %}{{ detail.weight }}%{% endif %}</td>
                         </tr>
                         {% endfor %}
                       </tbody>

@@ -643,6 +643,10 @@
                           <span class="builder-meta-value">{% if sub.details %}Uses detail items{% else %}Direct activity entry{% endif %}</span>
                         </div>
                         <div class="builder-meta-card">
+                          <span class="builder-meta-label">Detail Computation</span>
+                          <span class="builder-meta-value">{{ sub.row.get_detail_computation_mode_display }}</span>
+                        </div>
+                        <div class="builder-meta-card">
                           <span class="builder-meta-label">Score Entry Method</span>
                           <span class="builder-meta-value">{{ sub.row.get_score_input_mode_display }}</span>
                         </div>
@@ -682,7 +686,7 @@
                           <div class="builder-detail-actions">
                             <div class="builder-meta-card">
                               <span class="builder-meta-label">Weight</span>
-                              <span class="builder-meta-value">{{ detail.weight_percentage }}%</span>
+                              <span class="builder-meta-value">{% if sub.row.detail_computation_mode == "AVERAGE_ACTIVITIES" %}Ignored for activity average{% else %}{{ detail.weight_percentage }}%{% endif %}</span>
                             </div>
                             <div class="builder-meta-card">
                               <span class="builder-meta-label">Score Entry Method</span>

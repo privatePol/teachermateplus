@@ -23,6 +23,7 @@ from apps.grading.models import (
     CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
+    DetailComputationMode,
     FacultyFinalClearanceReport,
     GradeActivity,
     GradeCorrectionRequest,
@@ -31,6 +32,7 @@ from apps.grading.models import (
     GradingPeriodLock,
     GradingTemplate,
     GradingTemplateComponent,
+    GradingTemplateDetail,
     GradingTemplateSubcomponent,
     GradingTemplatePeriod,
     StudentActivityScore,
@@ -633,6 +635,125 @@ class CorrectionWorkflowTests(TestCase):
             ).exists()
         )
         self.assertTrue(updated.unlock_window.is_consumed)
+
+    def test_final_approval_recomputes_average_activity_detail_mode(self):
+        participation = GradingTemplateSubcomponent.objects.create(
+            template_component=self.component,
+            code="PART_OUTPUT",
+            name="Participation/Output",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            is_active=True,
+        )
+        recitation = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="RECITATION",
+            name="Recitation",
+            weight_percentage=Decimal("20.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        assignment = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="ASSIGNMENT",
+            name="Assignment",
+            weight_percentage=Decimal("80.00"),
+            sort_order=2,
+            is_active=True,
+        )
+
+        def add_activity(detail, title, raw_score):
+            activity = GradeActivity.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=self.period,
+                template_component=self.component,
+                template_subcomponent=participation,
+                template_detail=detail,
+                title=title,
+                total_score=Decimal("100.00"),
+                created_by_user=self.faculty_user,
+                is_active=True,
+            )
+            StudentActivityScore.objects.create(
+                activity=activity,
+                student=self.student1,
+                raw_score=raw_score,
+                computed_score=FacultyGradingService.compute_activity_score(
+                    raw_score=raw_score,
+                    total_score=Decimal("100.00"),
+                    base_value=Decimal("50.00"),
+                ),
+                encoded_by_user=self.faculty_user,
+                is_active=True,
+            )
+            return activity
+
+        recitation_activity = add_activity(recitation, "R1", Decimal("50.00"))
+        add_activity(assignment, "ASSIGN1", Decimal("100.00"))
+
+        GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
+            status=GradeSubmission.Status.REOPENED
+        )
+        FacultyGradingService.recompute_period_summary_for_students(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            student_ids=[self.student1.id],
+            audit_reason="TEST_INITIAL_AVERAGE_ACTIVITIES",
+        )
+        initial_period_grade = StudentPeriodGrade.objects.get(
+            offering=self.offering,
+            template_period=self.period,
+            student=self.student1,
+        )
+        self.assertEqual(initial_period_grade.period_grade, Decimal("88.00"))
+        GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
+            status=GradeSubmission.Status.SUBMITTED
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Correct recitation score.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": recitation_activity.id,
+                    "new_value": "100",
+                }
+            ],
+        )
+
+        updated = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Approved average activity correction.",
+        )
+
+        corrected_score = StudentActivityScore.objects.get(
+            activity=recitation_activity,
+            student=self.student1,
+            is_active=True,
+        )
+        period_grade = StudentPeriodGrade.objects.get(
+            offering=self.offering,
+            template_period=self.period,
+            student=self.student1,
+        )
+        final_grade = StudentFinalGrade.objects.get(offering=self.offering, student=self.student1)
+
+        self.assertEqual(updated.status, GradeCorrectionRequest.Status.CLOSED)
+        self.assertEqual(corrected_score.computed_score, Decimal("100.00"))
+        self.assertEqual(period_grade.period_grade, Decimal("100.00"))
+        self.assertEqual(final_grade.final_grade, Decimal("100.00"))
+        self.assertTrue(period_grade.is_finalized)
+        self.assertTrue(final_grade.is_submitted)
 
     def test_score_write_recomputes_scoped_period_and_final_immediately(self):
         GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
@@ -1285,6 +1406,107 @@ class FinalGradeFormulaTests(TestCase):
         self.assertEqual(result["rows"][0]["component_scores"]["QA"], Decimal("95.00"))
         self.assertEqual(result["rows"][0]["period_grade_raw"], Decimal("87.40"))
         self.assertEqual(row.period_grade, Decimal("92"))
+
+    def test_subcomponent_can_average_faculty_activities_instead_of_detail_weights(self):
+        component = GradingTemplateComponent.objects.create(
+            template_period=self.prelim,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        subcomponent = GradingTemplateSubcomponent.objects.create(
+            template_component=component,
+            code="OUTPUTS",
+            name="Participation/Output",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        recitation = GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="RECITATION",
+            name="Recitation",
+            weight_percentage=Decimal("40.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        assignment = GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="ASSIGNMENT",
+            name="Assignment",
+            weight_percentage=Decimal("30.00"),
+            sort_order=2,
+            is_active=True,
+        )
+        activity_detail = GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="ACTIVITY",
+            name="Activity",
+            weight_percentage=Decimal("30.00"),
+            sort_order=3,
+            is_active=True,
+        )
+
+        def add_detail_score(detail, title, computed_score):
+            activity = GradeActivity.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=self.prelim,
+                template_component=component,
+                template_subcomponent=subcomponent,
+                template_detail=detail,
+                title=title,
+                total_score=Decimal("100.00"),
+                created_by_user=self.faculty_user,
+                is_active=True,
+            )
+            StudentActivityScore.objects.create(
+                activity=activity,
+                student=self.student,
+                raw_score=computed_score,
+                computed_score=computed_score,
+                encoded_by_user=self.faculty_user,
+                is_active=True,
+            )
+
+        add_detail_score(recitation, "Recitation 1", Decimal("100.00"))
+        add_detail_score(recitation, "Recitation 2", Decimal("100.00"))
+        add_detail_score(assignment, "Assignment 1", Decimal("50.00"))
+        add_detail_score(activity_detail, "Seatwork 1", Decimal("50.00"))
+
+        weighted_result = FacultyGradingService.recompute_period_summary(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.prelim,
+        )
+        weighted_row = StudentPeriodGrade.objects.get(
+            offering=self.offering,
+            student=self.student,
+            template_period=self.prelim,
+        )
+
+        self.assertEqual(weighted_result["rows"][0]["period_grade_raw"], Decimal("70.00"))
+        self.assertEqual(weighted_row.period_grade, Decimal("70"))
+
+        subcomponent.detail_computation_mode = DetailComputationMode.AVERAGE_ACTIVITIES
+        subcomponent.save(update_fields=["detail_computation_mode", "updated_at"])
+
+        average_result = FacultyGradingService.recompute_period_summary(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.prelim,
+        )
+        average_row = StudentPeriodGrade.objects.get(
+            offering=self.offering,
+            student=self.student,
+            template_period=self.prelim,
+        )
+
+        self.assertEqual(average_result["rows"][0]["period_grade_raw"], Decimal("75.00"))
+        self.assertEqual(average_row.period_grade, Decimal("75"))
 
     def test_regular_term_selects_regular_profile_over_general_profile(self):
         fallback = self._create_profile(code="GENERAL", priority=1, is_default=True)
