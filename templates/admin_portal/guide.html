@@ -1186,6 +1186,11 @@
                 <td>Applied automatically by the account security flow after user creation and password reset.</td>
               </tr>
               <tr>
+                <td>New Account Portal Access</td>
+                <td>Uses assigned RBAC permissions to decide whether the account may enter the Faculty Portal, Admin Portal, or both. The Django <code>Is staff</code> flag is not the portal-access switch.</td>
+                <td>Create the account normally, then assign the appropriate scoped role and portal-access permission. Credential emails contain only the neutral TeacherMate+ root link and do not disclose the Admin Portal URL.</td>
+              </tr>
+              <tr>
                 <td>Privacy Consent Flow</td>
                 <td>Requires users to accept the Privacy Consent before using the portal.</td>
                 <td>Shown automatically at login when consent is missing. The left navigation and Change Password are locked until consent is accepted.</td>
@@ -1211,6 +1216,11 @@
                   <td><strong>Admin Portal Login -> Forgot password?</strong>; the account must have <code>admin_portal.access</code>.</td>
                 </tr>
                 <tr>
+                  <td>Faculty Forgot Password</td>
+                  <td>Lets active faculty users reset their password through an emailed reset link.</td>
+                  <td><strong>Faculty Portal -> Forgot password?</strong>; the account must have <code>faculty_portal.access</code>. Dual-access users are allowed; admin-only users must use Admin Portal recovery.</td>
+                </tr>
+                <tr>
                   <td>Temporary Login Lockout</td>
                   <td>Temporarily blocks accounts after too many failed logins.</td>
                   <td><strong>Admin Portal -> Tools -> Configuration Management -> Login Security</strong> for policy, and <strong>Admin Portal -> Security -> Login Lockouts</strong> for monitoring and manual unlock.</td>
@@ -1225,6 +1235,8 @@
           <div class="guide-subhead">Admin Rules</div>
           <ul class="guide-list">
             <li>Set the user's default tenant, campus, and department before giving access.</li>
+            <li>The normal Create User form intentionally omits <strong>Is staff</strong>. Assign portal access through scoped roles and permissions instead.</li>
+            <li>New-user emails use only the public TeacherMate+ root link. Give the Admin Portal URL separately only to authorized administrative users.</li>
             <li>Give only the permissions the user needs.</li>
             <li>Use the role-permission descriptions to understand what each permission group controls.</li>
             <li>For users who are both admin and faculty, give both portal permissions.</li>

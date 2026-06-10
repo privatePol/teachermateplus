@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import random
 from dataclasses import dataclass
 from datetime import timedelta
@@ -32,6 +33,7 @@ from apps.core.services.email_assets import attach_logo_for_src, build_email_log
 from apps.core.services.features import FeatureSettingsService
 
 User = get_user_model()
+logger = logging.getLogger("teachermateplus.system")
 
 
 class UserDeactivationService:
@@ -607,7 +609,17 @@ class AdminPasswordResetOtpService:
             sent_to_email=email,
             expires_at=timezone.now() + timedelta(minutes=LoginOtpService._expiry_minutes_for_user(user)),
         )
-        sent_count = cls._send_email(request=request, user=user, challenge=challenge, code=code)
+        delivery_error = None
+        try:
+            sent_count = cls._send_email(request=request, user=user, challenge=challenge, code=code)
+        except Exception as exc:
+            sent_count = 0
+            delivery_error = exc
+            logger.exception(
+                "Admin password reset OTP email failed for user_id=%s recipient_domain=%s",
+                user.id,
+                email.rsplit("@", 1)[-1] if "@" in email else "invalid",
+            )
         AuditService.log_event(
             action="PASSWORD_RESET_OTP_SENT",
             portal="ADMIN",
@@ -621,14 +633,15 @@ class AdminPasswordResetOtpService:
                 "email": LoginOtpService._masked_email(email),
                 "sent": sent_count > 0,
                 "expires_at": challenge.expires_at,
+                "delivery_error_type": type(delivery_error).__name__ if delivery_error else None,
             },
             request=request,
         )
         if sent_count <= 0:
+            challenge.delete()
             return LoginOtpResult(
                 success=False,
                 message="TeacherMate+ could not send the reset verification code. Please try again or contact your administrator.",
-                challenge=challenge,
             )
         return LoginOtpResult(success=True, challenge=challenge)
 
@@ -661,7 +674,7 @@ class AdminPasswordResetOtpService:
             configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
         )
         message.attach_alternative(html_body, "text/html")
-        return message.send(fail_silently=True)
+        return message.send(fail_silently=False)
 
     @classmethod
     def verify(cls, *, user, code: str, challenge_id: int | None = None, request=None) -> LoginOtpResult:

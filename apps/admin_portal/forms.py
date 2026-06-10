@@ -400,7 +400,6 @@ class UserCreateForm(forms.ModelForm):
             "default_campus",
             "default_department",
             "is_active",
-            "is_staff",
         ]
 
     def __init__(self, *args, tenant_queryset=None, campus_queryset=None, department_queryset=None, **kwargs):

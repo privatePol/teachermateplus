@@ -1,4 +1,5 @@
 import re
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
@@ -9,6 +10,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from apps.accounts.models import LoginOtpChallenge, User
+from apps.auditlog.models import AuditLog
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 
 
@@ -79,6 +81,25 @@ class AdminPasswordResetTests(TestCase):
         self.assertEqual(response.url, reverse("accounts:admin_forgot_password_done"))
         self.assertEqual(LoginOtpChallenge.objects.count(), 0)
         self.assertEqual(len(mail.outbox), 0)
+        audit = AuditLog.objects.filter(action="PASSWORD_RESET_REQUEST").latest("created_at")
+        self.assertEqual(audit.metadata_json["outcome"], "admin_access_denied")
+
+    @patch("apps.accounts.services.EmailMultiAlternatives.send", side_effect=RuntimeError("SMTP rejected message"))
+    def test_admin_forgot_password_records_delivery_failure_and_removes_challenge(self, mocked_send):
+        response = self.client.post(
+            reverse("accounts:admin_forgot_password"),
+            {"identifier": self.admin_user.username},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("accounts:admin_forgot_password"))
+        self.assertEqual(LoginOtpChallenge.objects.count(), 0)
+        audit = AuditLog.objects.filter(action="PASSWORD_RESET_OTP_SENT").latest("created_at")
+        self.assertFalse(audit.metadata_json["sent"])
+        self.assertEqual(audit.metadata_json["delivery_error_type"], "RuntimeError")
+        request_audit = AuditLog.objects.filter(action="PASSWORD_RESET_REQUEST").latest("created_at")
+        self.assertEqual(request_audit.metadata_json["outcome"], "delivery_failed")
+        mocked_send.assert_called_once_with(fail_silently=False)
 
     def test_admin_password_reset_requires_otp_before_setting_new_password(self):
         blocked_response = self.client.get(reverse("accounts:admin_password_reset_confirm"))

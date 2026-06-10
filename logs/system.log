@@ -3530,3 +3530,123 @@
 2026-06-09 21:16:50,789 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
 2026-06-09 21:16:50,792 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
 2026-06-09 21:16:51,123 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 72632
+2026-06-09 21:18:04,267 INFO [django.server] "POST /faculty/ HTTP/1.1" 302 0
+2026-06-09 21:18:04,918 INFO [django.server] "GET /faculty/dashboard/ HTTP/1.1" 200 56128
+2026-06-09 21:18:41,884 INFO [django.server] "GET /faculty/guide/ HTTP/1.1" 200 75130
+2026-06-09 21:18:42,024 INFO [django.server] "GET /media/portal-img/recommended_daily_faculty_workflow.png HTTP/1.1" 200 2063648
+2026-06-09 21:18:42,044 INFO [django.server] "GET /media/portal-img/faculty_portal_guide.png HTTP/1.1" 200 1508973
+2026-06-09 21:18:42,100 INFO [django.server] "GET /media/portal-img/daily_work_rythm.png HTTP/1.1" 200 1470398
+2026-06-09 21:18:42,108 INFO [django.server] "GET /media/portal-img/activities_encoding_scores_workflow.png HTTP/1.1" 200 2398373
+2026-06-09 21:18:42,127 INFO [django.server] "GET /media/portal-img/submission_rules.png HTTP/1.1" 200 2445019
+2026-06-09 21:18:42,129 INFO [django.server] "GET /media/portal-img/focused_checking.png HTTP/1.1" 200 1442928
+2026-06-09 21:19:56,074 INFO [django.server] "GET /faculty/guide/manual/ HTTP/1.1" 200 62271
+2026-06-09 21:20:16,545 INFO [django.server] "GET /faculty/analytics/ HTTP/1.1" 200 27593
+2026-06-09 21:20:34,995 INFO [django.server] "GET /faculty/my-courses/ HTTP/1.1" 200 43778
+2026-06-09 21:20:50,295 INFO [django.server] "GET /faculty/my-courses/419/periods/?next=%2Ffaculty%2Fmy-courses%2F HTTP/1.1" 200 51079
+2026-06-09 21:22:03,093 INFO [django.server] "GET /faculty/logout/ HTTP/1.1" 302 0
+2026-06-09 21:22:03,097 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 37499
+2026-06-09 21:22:03,140 INFO [django.server] "GET /static/faculty_portal/css/public_index.css HTTP/1.1" 304 0
+2026-06-10 20:07:07,809 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-06-10 20:07:49,713 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 20:08:04,028 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:09:04,787 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:10:06,260 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:10:08,283 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 30796
+2026-06-10 20:10:08,481 INFO [django.server] "GET /media/logos/ncba_npc_seal.png HTTP/1.1" 200 375758
+2026-06-10 20:10:08,488 INFO [django.server] "GET /media/logos/teachermate_logo_official.png HTTP/1.1" 200 365907
+2026-06-10 20:10:08,495 INFO [django.server] "GET /static/faculty_portal/css/public_index.css HTTP/1.1" 200 15413
+2026-06-10 20:10:08,573 INFO [django.server] "GET /media/imahe/techsupp.jpg HTTP/1.1" 200 1100794
+2026-06-10 20:10:08,683 INFO [django.server] "GET /media/imahe/facultygrades.jpg HTTP/1.1" 200 4014399
+2026-06-10 20:10:08,686 INFO [django.server] "GET /media/imahe/focused.jpg HTTP/1.1" 200 4079113
+2026-06-10 20:10:08,762 WARNING [django.server] "GET /favicon.ico HTTP/1.1" 404 72632
+2026-06-10 20:11:07,071 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:12:07,887 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:12:23,322 INFO [django.utils.autoreload] D:\teachermateplus\apps\accounts\services.py changed, reloading.
+2026-06-10 20:12:24,771 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-06-10 20:12:50,523 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 20:13:08,955 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:14:08,993 INFO [django.utils.autoreload] D:\teachermateplus\apps\accounts\services.py changed, reloading.
+2026-06-10 20:14:10,136 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-06-10 20:14:10,863 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:15:02,909 ERROR [teachermateplus.system] Admin password reset OTP email failed for user_id=1 recipient_domain=ncba.edu.ph
+Traceback (most recent call last):
+  File "D:\teachermateplus\apps\accounts\services.py", line 614, in create_and_send
+    sent_count = cls._send_email(request=request, user=user, challenge=challenge, code=code)
+  File "D:\teachermateplus\apps\accounts\services.py", line 677, in _send_email
+    return message.send(fail_silently=False)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1175, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1179, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1234, in _execute_mock_call
+    raise effect
+RuntimeError: SMTP rejected message
+2026-06-10 20:15:11,563 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:16:12,214 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:16:36,964 INFO [django.server] "GET /faculty/forgot-password/ HTTP/1.1" 200 1882
+2026-06-10 20:16:37,131 INFO [django.server] "GET /media/logos/teachermateplus_logo.png HTTP/1.1" 200 2244225
+2026-06-10 20:16:52,008 INFO [django.server] "POST /faculty/forgot-password/ HTTP/1.1" 302 0
+2026-06-10 20:16:52,015 INFO [django.server] "GET /faculty/forgot-password/sent/ HTTP/1.1" 200 4740
+2026-06-10 20:17:12,862 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:17:41,507 INFO [django.server] "GET /faculty/ HTTP/1.1" 200 30796
+2026-06-10 20:17:41,536 INFO [django.server] "GET /static/faculty_portal/css/public_index.css HTTP/1.1" 304 0
+2026-06-10 20:17:51,461 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 20:18:13,853 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:19:18,829 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:20:15,524 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:21:16,214 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:22:17,023 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:22:51,485 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 20:23:17,831 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:24:18,578 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:25:19,449 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:26:20,102 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:27:20,736 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:27:53,219 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 20:28:21,561 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:29:22,243 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:30:23,094 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:31:23,797 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:32:24,502 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:32:54,971 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 20:33:25,343 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:34:26,096 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:35:26,776 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:36:27,491 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:37:28,195 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:37:56,596 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 20:38:29,093 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:39:30,832 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:40:31,541 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:41:32,311 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:42:33,084 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:42:57,446 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 20:43:33,982 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:44:29,479 INFO [django.utils.autoreload] D:\teachermateplus\apps\admin_portal\views.py changed, reloading.
+2026-06-10 20:44:30,423 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-06-10 20:44:34,692 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:45:35,347 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:46:35,900 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:47:19,324 ERROR [teachermateplus.system] Admin password reset OTP email failed for user_id=1 recipient_domain=ncba.edu.ph
+Traceback (most recent call last):
+  File "D:\teachermateplus\apps\accounts\services.py", line 614, in create_and_send
+    sent_count = cls._send_email(request=request, user=user, challenge=challenge, code=code)
+  File "D:\teachermateplus\apps\accounts\services.py", line 677, in _send_email
+    return message.send(fail_silently=False)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1175, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1179, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1234, in _execute_mock_call
+    raise effect
+RuntimeError: SMTP rejected message
+2026-06-10 20:47:36,554 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:47:58,996 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 20:48:37,631 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 20:49:38,456 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657

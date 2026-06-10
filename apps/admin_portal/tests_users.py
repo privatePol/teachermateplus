@@ -1,5 +1,6 @@
 from django.conf import settings
-from django.test import TestCase
+from django.core import mail
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -7,6 +8,7 @@ from apps.accounts.models import User
 from apps.auditlog.models import AuditLog
 from apps.rbac.models import Permission, Role
 from apps.admin_portal.forms import UserCreateForm, UserRoleAssignmentForm, UserUpdateForm
+from apps.admin_portal.views import _send_new_user_credentials_email
 from apps.tenants.models import Campus, Department, Tenant
 
 
@@ -279,3 +281,34 @@ class UserListTests(TestCase):
         self.assertContains(response, "rebuildDepartmentOptions")
         self.assertContains(response, "NCBA-01 | COLLEGE")
         self.assertContains(response, "NCBA-02 | COLLEGE")
+
+    def test_user_create_form_does_not_expose_is_staff(self):
+        form = UserCreateForm()
+
+        self.assertNotIn("is_staff", form.fields)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        ALLOWED_HOSTS=["tmp.ncba.edu.ph"],
+    )
+    def test_new_user_credentials_email_uses_only_neutral_teachermate_link(self):
+        user = User.objects.create_user(
+            username="neutral_link_user",
+            email="neutral_link_user@example.com",
+            password="TemporaryPass123!",
+        )
+        request = RequestFactory().get("/", HTTP_HOST="tmp.ncba.edu.ph", secure=True)
+
+        sent_count = _send_new_user_credentials_email(request, user, "TemporaryPass123!")
+
+        self.assertEqual(sent_count, 1)
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertIn("https://tmp.ncba.edu.ph/", email.body)
+        self.assertNotIn("/admin-portal/", email.body)
+        self.assertNotIn("/faculty/", email.body)
+        self.assertNotIn("Admin Portal", email.body)
+        html_body = email.alternatives[0].content
+        self.assertIn("Open TeacherMate+", html_body)
+        self.assertNotIn("/admin-portal/", html_body)
+        self.assertNotIn("/faculty/", html_body)

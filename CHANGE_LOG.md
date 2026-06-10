@@ -29,9 +29,13 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Normal Admin Portal user creation no longer exposes the Django `Is staff` flag. Portal access continues to be governed by assigned RBAC permissions such as `admin_portal.access` and `faculty_portal.access`.
+- New-user credential emails now contain only the neutral TeacherMate+ root URL. The message no longer discloses the Admin Portal URL or separately lists portal entry points; the root URL redirects users to the Faculty Portal landing page.
+- Faculty Portal password recovery now enforces `faculty_portal.access` both when requesting a reset email and when opening the reset link. Faculty-only and dual-access admin/faculty users may reset there, while admin-only users must use Admin Portal recovery.
+- Admin Portal Forgot Password now reports OTP email delivery exceptions to the system log and audit trail instead of suppressing them, removes undelivered reset challenges, and records whether a request was delivered, denied by portal access, missing an email, unmatched, or failed during delivery.
 - The TeacherMate+ site root `/` now redirects to the Faculty Portal landing page at `/faculty/`, making the faculty experience the default page for the public domain while preserving direct Admin Portal URLs.
 - The Faculty Portal public-page privacy seal section now presents `“Grado Mo, Protektado Ko!”` as a two-tone Kaushan Script signature with integrated quotation marks and a custom two-color vector pen flourish beneath the NCBA National Privacy Commission seal.
-- The Faculty Portal public hero now displays a 48-star animated field behind the TeacherMate+ logo: 24 gold-white stars and 24 neon-green stars with distinct timing, glow, and positioning, plus a breathing light halo and static reduced-motion fallback.
+- Replaced the Faculty Portal public hero starfield, which was not reliably visible in production, with a production-friendly animated logo treatment: gentle vertical floating, a breathing green-gold aura, and two counter-rotating orbital rings with a static reduced-motion fallback.
 - Faculty Portal public landing hero and authenticated Faculty Portal header now use `/media/logos/teachermate_logo_official.png` as the main logo image.
 - Admin Portal login branding panel now uses `/media/logos/teachermate_logo_text_official.png`.
 - Admin Portal authenticated left navigation branding now uses `/media/logos/teachermate_logo_text_official.png`.

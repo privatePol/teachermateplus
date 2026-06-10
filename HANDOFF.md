@@ -1,17 +1,29 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-06-09
+Last updated by Codex: 2026-06-10
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
-- Date: 2026-06-09
+- Date: 2026-06-10
 - Session focus: Added optional average-based faculty-activity rollup for grading-template subcomponents, requested for Participation/Output-style categories.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
+- User onboarding and portal-reset access:
+  - Removed `Is staff` from the normal Admin Portal Create User form; newly created accounts remain non-staff by default.
+  - Kept portal authorization under RBAC: `admin_portal.access` grants Admin Portal entry, `faculty_portal.access` grants Faculty Portal entry, and users may hold both.
+  - Changed new-user credential emails to include only the neutral TeacherMate+ root URL, which redirects to `/faculty/`; the email no longer names or links the Admin Portal.
+  - Confirmed the Faculty forgot-password request already required `faculty_portal.access`, then hardened reset-link confirmation to enforce the same permission.
+  - Added regression coverage for faculty-only, admin-only, and dual-access password-reset eligibility, plus the neutral onboarding email and hidden create-form staff field.
+- Admin forgot-password email diagnostics:
+  - Confirmed Email Diagnostics and Admin Forgot Password use different recipient sources: diagnostics uses the manually entered address, while forgot password uses the email stored on the matched active Admin Portal user.
+  - Changed Admin reset OTP sending from silent SMTP failure handling to explicit exception capture and system logging.
+  - Added audit outcome metadata for `delivered`, `delivery_failed`, `missing_email`, `admin_access_denied`, and `account_not_found`.
+  - Failed sends now remove the unusable OTP challenge instead of leaving a stale active record.
+  - Added regression coverage for a simulated SMTP rejection.
 - Default public route:
   - Changed the bare site root `/` to issue a temporary redirect to the Faculty Portal landing page at `/faculty/`.
   - Preserved direct `/admin-portal/`, `/index/`, `/index.php`, and all existing portal routes.
@@ -20,10 +32,10 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Added `“Grado Mo, Protektado Ko!”` immediately beneath the NPC seal.
   - Styled the slogan with Kaushan Script, deep-green and olive-gold phrase segments, integrated softened quotation marks, responsive mobile sizing, and a custom two-color SVG pen-stroke flourish underneath.
 - Faculty public hero logo animation:
-  - Added forty-eight staggered CSS sparkles behind the TeacherMate+ hero logo: 24 gold-white stars and 24 neon-green stars.
-  - Mirrored and slightly rotated the neon-green layer and gave it separate timing and glow so the two colors interleave without stacking directly.
-  - Added a soft breathing halo and logo drop shadow while preserving the logo as the foreground layer.
-  - Added a `prefers-reduced-motion` fallback that keeps the stars static and disables the halo animation.
+  - Removed the 48-star field after the user confirmed the stars were not visible in production.
+  - Replaced it with a gentle vertical logo float, a visible breathing green-gold aura, and two thin counter-rotating orbital rings.
+  - Preserved the logo as the foreground layer with a restrained drop shadow.
+  - Added a `prefers-reduced-motion` fallback that disables the logo float, halo pulse, and orbital rotation.
 - Grading template faculty-activity averaging:
   - Corrected the initial implementation after user clarification: the required behavior is averaging faculty-created activities under Recitation/Assignment/Activity-style detail rows, not averaging the template detail buckets themselves.
   - Added `DetailComputationMode` with `WEIGHTED_DETAILS` and `AVERAGE_ACTIVITIES`.
@@ -361,7 +373,11 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Ransomware protection strategy should not rely on antivirus alone. The preferred server-side approach is least privilege, separated upload storage, no-execute mounts, restricted backup credentials, and Synology snapshots/immutability with tested restore procedures.
 
 ## Changed Files This Session
+- `apps/accounts/tests_faculty_password_reset.py`
 - `apps/accounts/urls.py`
+- `apps/accounts/services.py`
+- `apps/accounts/tests_admin_password_reset.py`
+- `apps/accounts/views.py`
 - `apps/faculty_portal/tests_public_login.py`
 - `static/faculty_portal/css/public_index.css`
 - `templates/faculty_portal/public_index.html`
@@ -380,6 +396,8 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - `templates/admin_portal/grading/detail_table.html`
 - `templates/admin_portal/grading/template_builder.html`
 - `templates/admin_portal/grading/template_structure_preview.html`
+- `templates/admin_portal/emails/new_user_credentials.html`
+- `templates/admin_portal/emails/new_user_credentials.txt`
 - `templates/admin_portal/guide.html`
 - `CHANGE_LOG.md`
 - `TEACHERMATEPLUS_CONTEXT.md`
@@ -403,6 +421,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Open governance/design topics remain in the context document, including expanded grading methodology options, active AY/Term governance, correction/reopen policy finalization, passing-threshold management, and configurable feature governance.
 
 ## Known Issues / Risks
+- Browser smoke tests were not run for the Create User field change, onboarding email, or Faculty password-reset pages; validation was performed with focused Django tests.
 - Browser smoke test for the Faculty public landing logo replacement was not run because no in-app Browser tool was available in this session; validation was command/test based.
 - Browser smoke test for the authenticated Faculty header logo replacement was not run because no in-app Browser tool was available in this session; validation was command/test based.
 - Browser smoke test for the Faculty top-nav subtitle spacing was not run because no in-app Browser tool was available in this session; validation was command/test based.
@@ -449,6 +468,13 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - The ransomware/partitioning discussion was advisory only. No server partition, mount, Synology, antivirus, or Django `MEDIA_ROOT` configuration changes were applied in this workspace.
 
 ## Validation Completed
+- [x] User onboarding and portal-reset focused tests - passed: `python manage.py test apps.accounts.tests_faculty_password_reset apps.admin_portal.tests_users.UserListTests.test_user_create_form_does_not_expose_is_staff apps.admin_portal.tests_users.UserListTests.test_new_user_credentials_email_uses_only_neutral_teachermate_link` (5 tests).
+- [x] Broader user/password-reset regression - passed: `python manage.py test apps.admin_portal.tests_users apps.accounts.tests_faculty_password_reset apps.accounts.tests_admin_password_reset` (17 tests). The expected simulated SMTP-rejection error log appeared while the suite remained successful.
+- [x] Django system check after onboarding/reset changes - passed: `python manage.py check`.
+- [x] Migration drift check after onboarding/reset changes - passed: `python manage.py makemigrations --check --dry-run`; no changes detected.
+- [x] Admin forgot-password workflow regression - passed: `python manage.py test apps.accounts.tests_admin_password_reset` (5 tests).
+- [x] Admin forgot-password SMTP failure regression - passed in the same suite; simulated delivery failure is logged, audited, redirected safely, and leaves no active challenge.
+- [x] Django system check after Admin forgot-password diagnostics change - passed: `python manage.py check`.
 - [x] Faculty hero logo sparkle render regression - passed through `python manage.py test apps.faculty_portal.tests_public_login.FacultyPublicLoginTests.test_public_faculty_login_form_posts_to_landing_page`.
 - [x] Django system check after hero logo animation - passed: `python manage.py check`.
 - [x] Static deployment dry run after hero logo animation - passed: `python manage.py collectstatic --noinput --dry-run`.

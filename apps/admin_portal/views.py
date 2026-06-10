@@ -1367,8 +1367,7 @@ def _faculty_assignment_scope_snapshot(assignment):
 
 
 def _send_new_user_credentials_email(request, user, temporary_password: str) -> int:
-    admin_login_url = request.build_absolute_uri(reverse("accounts:admin_login"))
-    faculty_public_url = request.build_absolute_uri(reverse("faculty_portal:public_index"))
+    teachermate_url = request.build_absolute_uri(reverse("accounts:public_index"))
     logo_context = build_email_logo_context(
         filename="ncba-logo.png",
         cid="ncba-logo",
@@ -1378,8 +1377,7 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
     context = {
         "user": user,
         "temporary_password": temporary_password,
-        "admin_login_url": admin_login_url,
-        "faculty_public_url": faculty_public_url,
+        "teachermate_url": teachermate_url,
         **logo_context,
     }
     text_body = render_to_string("admin_portal/emails/new_user_credentials.txt", context)

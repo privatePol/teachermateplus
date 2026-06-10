@@ -397,7 +397,8 @@ class AdminForgotPasswordView(FormView):
         )
         delivered = False
         reset_result = None
-        if user and user.email and PermissionService.has_permission(user, "admin_portal.access"):
+        allowed_admin_portal = bool(user and PermissionService.has_permission(user, "admin_portal.access"))
+        if user and user.email and allowed_admin_portal:
             reset_result = AdminPasswordResetOtpService.create_and_send(request=self.request, user=user)
             delivered = reset_result.success
             if delivered:
@@ -415,7 +416,18 @@ class AdminForgotPasswordView(FormView):
                 "identifier": identifier,
                 "delivered": delivered,
                 "target_username": user.username if user else None,
-                "allowed_admin_portal": bool(user and PermissionService.has_permission(user, "admin_portal.access")),
+                "allowed_admin_portal": allowed_admin_portal,
+                "outcome": (
+                    "delivered"
+                    if delivered
+                    else "delivery_failed"
+                    if reset_result
+                    else "missing_email"
+                    if user and not user.email
+                    else "admin_access_denied"
+                    if user
+                    else "account_not_found"
+                ),
             },
             request=self.request,
         )
@@ -575,7 +587,11 @@ def faculty_password_reset_confirm_view(request, uidb64: str, token: str):
     except (TypeError, ValueError, OverflowError):
         user = None
 
-    if user and default_token_generator.check_token(user, token):
+    if (
+        user
+        and PermissionService.has_permission(user, "faculty_portal.access")
+        and default_token_generator.check_token(user, token)
+    ):
         valid_link = True
 
     if not valid_link:
