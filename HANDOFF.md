@@ -12,6 +12,11 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
+- Faculty password-reset email branding:
+  - Removed the NCBA logo from the Faculty reset notification.
+  - Replaced it with the text wordmark `NCBA | TeacherMate+` in the green-gold header and aligned the footer branding.
+  - Removed logo context generation and CID attachment work from the Faculty reset email sender.
+  - Added regression assertions that the HTML contains the text brand, contains no image tag, and sends no attachment.
 - Production hero animation and Faculty reset eligibility review:
   - Confirmed the hero motion depended on `static/faculty_portal/css/public_index.css`, so a production pull/restart without refreshed collected static files could continue serving the old non-animated CSS.
   - Added the critical float, halo, and counter-rotating orbit rules directly to the Faculty landing template and added a version query to the external stylesheet URL.
@@ -486,6 +491,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - The ransomware/partitioning discussion was advisory only. No server partition, mount, Synology, antivirus, or Django `MEDIA_ROOT` configuration changes were applied in this workspace.
 
 ## Validation Completed
+- [x] Faculty reset email text-brand regression - passed through `python manage.py test apps.accounts.tests_faculty_password_reset`.
 - [x] Faculty reset eligibility and public hero regression suites - passed: `python manage.py test apps.accounts.tests_faculty_password_reset apps.faculty_portal.tests_public_login` (11 tests).
 - [x] Static deployment dry run after production hero hardening - passed: `python manage.py collectstatic --noinput --dry-run`.
 - [x] Faculty logout/back-button protection regression - passed: `python manage.py test apps.faculty_portal.tests_public_login.FacultyPublicLoginTests.test_protected_faculty_pages_cannot_be_restored_as_usable_after_logout`.

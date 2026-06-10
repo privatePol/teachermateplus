@@ -37,7 +37,7 @@ from apps.accounts.forms import (
 from apps.accounts.services import AdminPasswordResetOtpService, LoginLockoutService, LoginOtpService, UserSignatureService
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
-from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
+from apps.core.services.email_assets import format_email_subject
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 
@@ -48,17 +48,10 @@ def _send_faculty_password_reset_email(request, user, reset_url: str) -> int:
     subject = format_email_subject("Faculty Password Reset")
     from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
     recipient = [user.email]
-    logo_context = build_email_logo_context(
-        filename="ncba-logo.png",
-        cid="ncba-logo",
-        external_url=getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
-        configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
-    )
 
     context = {
         "user": user,
         "reset_url": reset_url,
-        **logo_context,
     }
     text_body = render_to_string("faculty_portal/emails/password_reset.txt", context)
     html_body = render_to_string("faculty_portal/emails/password_reset.html", context)
@@ -68,13 +61,6 @@ def _send_faculty_password_reset_email(request, user, reset_url: str) -> int:
         body=text_body,
         from_email=from_email,
         to=recipient,
-    )
-    attach_logo_for_src(
-        message,
-        src=logo_context["email_logo_src"],
-        filename="ncba-logo.png",
-        cid="ncba-logo",
-        configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
     )
     message.attach_alternative(html_body, "text/html")
     return message.send(fail_silently=True)

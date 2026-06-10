@@ -3732,3 +3732,26 @@ Traceback (most recent call last):
   File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1234, in _execute_mock_call
     raise effect
 RuntimeError: SMTP rejected message
+2026-06-10 21:43:15,342 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 21:43:23,667 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:44:24,348 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:45:25,065 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:46:25,724 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:47:26,390 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:48:16,964 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 21:48:27,357 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:49:28,078 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:50:28,757 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:51:29,442 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:52:30,119 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:53:18,761 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 21:53:31,105 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:54:31,755 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:55:32,502 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:56:33,246 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:57:33,903 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:58:20,442 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 21:58:35,040 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:59:35,769 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 21:59:39,043 INFO [django.utils.autoreload] D:\teachermateplus\apps\accounts\views.py changed, reloading.
+2026-06-10 21:59:40,000 INFO [django.utils.autoreload] Watching for file changes with StatReloader

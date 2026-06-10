@@ -29,6 +29,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Admin and Faculty privacy-consent screens now require users to tick the consent checkbox and type the non-personal confirmation phrase `I CONSENT` before acceptance is recorded.
 
 ### Changed
+- Faculty password-reset emails now use the text wordmark `NCBA | TeacherMate+` in the header and footer instead of embedding or loading the NCBA logo.
 - Portal pages now send strict private no-cache/no-store response headers, and the authenticated Faculty Portal layout reloads pages restored from the browser back-forward cache. After logout, using Back on a previously opened grade-entry page triggers a fresh authorization check and returns the user to Faculty login instead of leaving a stale editable screen visible.
 - Normal Admin Portal user creation no longer exposes the Django `Is staff` flag. Portal access continues to be governed by assigned RBAC permissions such as `admin_portal.access` and `faculty_portal.access`.
 - New-user credential emails now contain only the neutral TeacherMate+ root URL. The message no longer discloses the Admin Portal URL or separately lists portal entry points; the root URL redirects users to the Faculty Portal landing page.

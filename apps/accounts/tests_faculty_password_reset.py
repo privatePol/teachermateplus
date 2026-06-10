@@ -64,6 +64,12 @@ class FacultyPasswordResetEligibilityTests(TestCase):
 
         self.assertRedirects(response, reverse("accounts:faculty_forgot_password_done"))
         self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        html_body = email.alternatives[0].content
+        self.assertIn("NCBA", html_body)
+        self.assertIn("TeacherMate+", html_body)
+        self.assertNotIn("<img", html_body)
+        self.assertEqual(email.attachments, [])
         self.assertEqual(self.client.get(self._reset_url(user)).status_code, 200)
 
     def test_admin_only_user_cannot_receive_or_open_faculty_reset_link(self):
