@@ -541,7 +541,7 @@ class FacultyForgotPasswordView(FormView):
             .first()
         )
         delivered = False
-        if user and user.email and PermissionService.has_permission(user, "faculty_portal.access"):
+        if user and user.email and PermissionService.has_assigned_permission(user, "faculty_portal.access"):
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
             reset_url = self.request.build_absolute_uri(
@@ -589,7 +589,7 @@ def faculty_password_reset_confirm_view(request, uidb64: str, token: str):
 
     if (
         user
-        and PermissionService.has_permission(user, "faculty_portal.access")
+        and PermissionService.has_assigned_permission(user, "faculty_portal.access")
         and default_token_generator.check_token(user, token)
     ):
         valid_link = True

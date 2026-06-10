@@ -90,3 +90,39 @@ class FacultyPasswordResetEligibilityTests(TestCase):
         self.assertRedirects(response, reverse("accounts:faculty_forgot_password_done"))
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(self.client.get(self._reset_url(user)).status_code, 200)
+
+    def test_superuser_without_assigned_faculty_access_cannot_use_faculty_reset(self):
+        user = User.objects.create_superuser(
+            username="superadmin_reset_only",
+            email="superadmin_reset_only@ncba.edu.ph",
+            password="CurrentPass123!",
+        )
+
+        response = self.client.post(
+            reverse("accounts:faculty_forgot_password"),
+            {"identifier": user.email},
+        )
+
+        self.assertRedirects(response, reverse("accounts:faculty_forgot_password_done"))
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertRedirects(
+            self.client.get(self._reset_url(user)),
+            reverse("accounts:faculty_forgot_password"),
+        )
+
+    def test_superuser_with_assigned_faculty_access_can_use_faculty_reset(self):
+        user = User.objects.create_superuser(
+            username="superadmin_faculty_reset",
+            email="superadmin_faculty_reset@ncba.edu.ph",
+            password="CurrentPass123!",
+        )
+        UserRole.objects.create(user=user, role=self.faculty_role)
+
+        response = self.client.post(
+            reverse("accounts:faculty_forgot_password"),
+            {"identifier": user.email},
+        )
+
+        self.assertRedirects(response, reverse("accounts:faculty_forgot_password_done"))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(self.client.get(self._reset_url(user)).status_code, 200)

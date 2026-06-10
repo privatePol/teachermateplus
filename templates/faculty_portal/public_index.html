@@ -7,8 +7,98 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Kaushan+Script&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="{% static 'faculty_portal/css/public_index.css' %}">
+<link rel="stylesheet" href="{% static 'faculty_portal/css/public_index.css' %}?v=20260610-hero2">
 <style>
+  /* Keep the production-critical logo motion with the template so a stale
+     collected static file cannot silently remove the hero animation. */
+  .fp-hero-logo-holder {
+    position: relative;
+    isolation: isolate;
+    min-height: 360px;
+    background: transparent;
+    box-shadow: none;
+  }
+  .fp-hero-logo-holder::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    inset: 8% 7%;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle,
+      rgba(255, 224, 53, 0.35) 0%,
+      rgba(151, 207, 63, 0.23) 38%,
+      transparent 70%
+    );
+    filter: blur(12px);
+    animation: fp-logo-halo 4.8s ease-in-out infinite;
+  }
+  .fp-hero-logo-holder .fp-hero-logo-image {
+    position: relative;
+    z-index: 3;
+    width: 50%;
+    height: auto;
+    object-fit: contain;
+    margin: 0 auto;
+    filter: drop-shadow(0 20px 24px rgba(31, 84, 39, 0.16));
+    animation: fp-logo-float 5.2s ease-in-out infinite;
+  }
+  .fp-logo-orbit {
+    position: absolute;
+    z-index: 1;
+    left: 50%;
+    top: 50%;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .fp-logo-orbit-outer {
+    width: 62%;
+    aspect-ratio: 1.55;
+    border: 2px solid rgba(194, 170, 42, 0.48);
+    border-left-color: rgba(194, 170, 42, 0.08);
+    border-bottom-color: rgba(74, 144, 47, 0.26);
+    animation: fp-logo-orbit 14s linear infinite;
+  }
+  .fp-logo-orbit-inner {
+    width: 51%;
+    aspect-ratio: 1.35;
+    border: 2px solid rgba(71, 157, 43, 0.42);
+    border-right-color: rgba(71, 157, 43, 0.08);
+    border-top-color: rgba(215, 187, 38, 0.3);
+    animation: fp-logo-orbit-reverse 11s linear infinite;
+  }
+  @keyframes fp-logo-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-12px); }
+  }
+  @keyframes fp-logo-orbit {
+    from { transform: translate(-50%, -50%) rotate(0deg); }
+    to { transform: translate(-50%, -50%) rotate(360deg); }
+  }
+  @keyframes fp-logo-orbit-reverse {
+    from { transform: translate(-50%, -50%) rotate(360deg); }
+    to { transform: translate(-50%, -50%) rotate(0deg); }
+  }
+  @keyframes fp-logo-halo {
+    0%, 100% {
+      opacity: 0.55;
+      transform: scale(0.94);
+    }
+    50% {
+      opacity: 0.9;
+      transform: scale(1.04);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fp-hero-logo-holder::before,
+    .fp-hero-logo-holder .fp-hero-logo-image,
+    .fp-logo-orbit {
+      animation: none;
+    }
+    .fp-logo-orbit {
+      transform: translate(-50%, -50%);
+    }
+  }
   .fp-npc-seal-content {
     display: flex;
     flex-direction: column;

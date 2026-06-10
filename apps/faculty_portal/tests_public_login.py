@@ -66,6 +66,9 @@ class FacultyPublicLoginTests(TestCase):
         self.assertContains(response, "Decorative pen-stroke flourish")
         self.assertContains(response, "fp-logo-orbit fp-logo-orbit-outer")
         self.assertContains(response, "fp-logo-orbit fp-logo-orbit-inner")
+        self.assertContains(response, "20260610-hero2")
+        self.assertContains(response, "animation: fp-logo-float 5.2s ease-in-out infinite")
+        self.assertContains(response, "@keyframes fp-logo-orbit")
         self.assertNotContains(response, "fp-logo-starfield")
         self.assertNotContains(response, "your existing SIS")
         self.assertNotContains(response, "TeacherMate+ vs Standalone Grade Files")
@@ -98,6 +101,34 @@ class FacultyPublicLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("faculty_portal:dashboard"))
+
+    def test_protected_faculty_pages_cannot_be_restored_as_usable_after_logout(self):
+        self.client.force_login(self.user)
+
+        protected_response = self.client.get(reverse("faculty_portal:my_courses"))
+
+        self.assertEqual(protected_response.status_code, 200)
+        self.assertIn("no-store", protected_response["Cache-Control"])
+        self.assertIn("no-cache", protected_response["Cache-Control"])
+        self.assertIn("must-revalidate", protected_response["Cache-Control"])
+        self.assertEqual(protected_response["Pragma"], "no-cache")
+        self.assertEqual(protected_response["Expires"], "0")
+        self.assertContains(protected_response, 'window.addEventListener("pageshow"')
+        self.assertContains(protected_response, "event.persisted")
+        self.assertContains(protected_response, "window.location.reload()")
+
+        logout_response = self.client.get(reverse("accounts:faculty_logout"))
+
+        self.assertEqual(logout_response.status_code, 302)
+        self.assertIn("no-store", logout_response["Cache-Control"])
+
+        after_logout_response = self.client.get(reverse("faculty_portal:my_courses"))
+        self.assertRedirects(
+            after_logout_response,
+            reverse("faculty_portal:public_index"),
+            status_code=302,
+            target_status_code=200,
+        )
 
     def test_faculty_password_recovery_links_return_to_public_landing(self):
         uid = urlsafe_base64_encode(force_bytes(self.user.pk))

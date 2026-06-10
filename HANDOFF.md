@@ -12,6 +12,19 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
+- Production hero animation and Faculty reset eligibility review:
+  - Confirmed the hero motion depended on `static/faculty_portal/css/public_index.css`, so a production pull/restart without refreshed collected static files could continue serving the old non-animated CSS.
+  - Added the critical float, halo, and counter-rotating orbit rules directly to the Faculty landing template and added a version query to the external stylesheet URL.
+  - Preserved the `prefers-reduced-motion` static fallback for users whose operating system requests reduced motion.
+  - Confirmed Faculty forgot-password used the general effective-permission check, which gives every active permission to superusers and therefore allowed an admin-only superuser to receive a Faculty reset link.
+  - Added `PermissionService.has_assigned_permission` for checks that must require a real role/direct permission assignment without the superuser shortcut.
+  - Updated Faculty reset request and reset-link confirmation to require explicitly assigned `faculty_portal.access`.
+  - Added regressions proving an admin-only superuser is blocked while a superuser with an actual Faculty access assignment remains eligible as a dual-access user.
+- Portal logout/back-button protection:
+  - Added strict private `no-cache`, `no-store`, `must-revalidate`, zero-age, `Pragma`, and `Expires` response headers for Admin, Faculty, and Student Portal URLs.
+  - Added a Faculty layout `pageshow` safeguard that reloads pages restored from the browser back-forward cache.
+  - After Faculty logout, a restored grade-entry or other protected page now performs a fresh server authorization check and redirects to `/faculty/`; stale forms cannot remain presented as usable.
+  - Added regression coverage for cache headers, the browser-restoration safeguard, logout, and protected-page redirect after logout.
 - User onboarding and portal-reset access:
   - Removed `Is staff` from the normal Admin Portal Create User form; newly created accounts remain non-staff by default.
   - Kept portal authorization under RBAC: `admin_portal.access` grants Admin Portal entry, `faculty_portal.access` grants Faculty Portal entry, and users may hold both.
@@ -373,6 +386,9 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Ransomware protection strategy should not rely on antivirus alone. The preferred server-side approach is least privilege, separated upload storage, no-execute mounts, restricted backup credentials, and Synology snapshots/immutability with tested restore procedures.
 
 ## Changed Files This Session
+- `apps/core/services/permissions.py`
+- `apps/core/middleware.py`
+- `config/settings/base.py`
 - `apps/accounts/tests_faculty_password_reset.py`
 - `apps/accounts/urls.py`
 - `apps/accounts/services.py`
@@ -421,6 +437,8 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Open governance/design topics remain in the context document, including expanded grading methodology options, active AY/Term governance, correction/reopen policy finalization, passing-threshold management, and configurable feature governance.
 
 ## Known Issues / Risks
+- The hero animation intentionally remains static when the device/browser reports `prefers-reduced-motion: reduce`. If production still shows no movement after deployment and a hard refresh, check the operating-system accessibility animation setting.
+- Portal cache behavior was validated through response-header and rendered-script regression tests. The local in-app browser smoke test was attempted but its browser target was unavailable; a manual Back-button smoke test should still be performed after deployment because browser and reverse-proxy cache behavior can vary.
 - Browser smoke tests were not run for the Create User field change, onboarding email, or Faculty password-reset pages; validation was performed with focused Django tests.
 - Browser smoke test for the Faculty public landing logo replacement was not run because no in-app Browser tool was available in this session; validation was command/test based.
 - Browser smoke test for the authenticated Faculty header logo replacement was not run because no in-app Browser tool was available in this session; validation was command/test based.
@@ -468,6 +486,9 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - The ransomware/partitioning discussion was advisory only. No server partition, mount, Synology, antivirus, or Django `MEDIA_ROOT` configuration changes were applied in this workspace.
 
 ## Validation Completed
+- [x] Faculty reset eligibility and public hero regression suites - passed: `python manage.py test apps.accounts.tests_faculty_password_reset apps.faculty_portal.tests_public_login` (11 tests).
+- [x] Static deployment dry run after production hero hardening - passed: `python manage.py collectstatic --noinput --dry-run`.
+- [x] Faculty logout/back-button protection regression - passed: `python manage.py test apps.faculty_portal.tests_public_login.FacultyPublicLoginTests.test_protected_faculty_pages_cannot_be_restored_as_usable_after_logout`.
 - [x] User onboarding and portal-reset focused tests - passed: `python manage.py test apps.accounts.tests_faculty_password_reset apps.admin_portal.tests_users.UserListTests.test_user_create_form_does_not_expose_is_staff apps.admin_portal.tests_users.UserListTests.test_new_user_credentials_email_uses_only_neutral_teachermate_link` (5 tests).
 - [x] Broader user/password-reset regression - passed: `python manage.py test apps.admin_portal.tests_users apps.accounts.tests_faculty_password_reset apps.accounts.tests_admin_password_reset` (17 tests). The expected simulated SMTP-rejection error log appeared while the suite remained successful.
 - [x] Django system check after onboarding/reset changes - passed: `python manage.py check`.

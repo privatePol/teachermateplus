@@ -65,6 +65,35 @@ class PermissionService:
         )
 
     @classmethod
+    def has_assigned_permission(
+        cls, user, permission_code: str, tenant_id: int | None = None, campus_id: int | None = None
+    ) -> bool:
+        """Check explicit RBAC assignment without the superuser permission shortcut."""
+        if not user or not user.is_authenticated:
+            return False
+
+        scoped_user_perms = cls._scoped_user_permissions(user, tenant_id=tenant_id, campus_id=campus_id)
+        if scoped_user_perms.filter(
+            permission__code=permission_code,
+            grant_type=UserPermission.GrantType.DENY,
+        ).exists():
+            return False
+        if scoped_user_perms.filter(
+            permission__code=permission_code,
+            grant_type=UserPermission.GrantType.ALLOW,
+        ).exists():
+            return True
+
+        return cls._scoped_user_roles(
+            user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+        ).filter(
+            role__role_permissions__permission__code=permission_code,
+            role__role_permissions__permission__is_active=True,
+        ).exists()
+
+    @classmethod
     def has_any_permission(
         cls, user, permission_codes: Iterable[str], tenant_id: int | None = None, campus_id: int | None = None
     ) -> bool:

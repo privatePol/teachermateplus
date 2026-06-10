@@ -1218,12 +1218,17 @@
                 <tr>
                   <td>Faculty Forgot Password</td>
                   <td>Lets active faculty users reset their password through an emailed reset link.</td>
-                  <td><strong>Faculty Portal -> Forgot password?</strong>; the account must have <code>faculty_portal.access</code>. Dual-access users are allowed; admin-only users must use Admin Portal recovery.</td>
+                  <td><strong>Faculty Portal -> Forgot password?</strong>; the account must have an explicit active assignment of <code>faculty_portal.access</code>. Dual-access users are allowed; admin-only users, including admin-only superusers, must use Admin Portal recovery.</td>
                 </tr>
                 <tr>
                   <td>Temporary Login Lockout</td>
                   <td>Temporarily blocks accounts after too many failed logins.</td>
                   <td><strong>Admin Portal -> Tools -> Configuration Management -> Login Security</strong> for policy, and <strong>Admin Portal -> Security -> Login Lockouts</strong> for monitoring and manual unlock.</td>
+                </tr>
+                <tr>
+                  <td>Protected Page Cache Control</td>
+                  <td>Prevents portal pages containing grades or personal data from remaining usable through the browser Back button after logout.</td>
+                  <td>Applied automatically to Admin, Faculty, and Student Portal responses. A restored Faculty page reloads and performs a fresh login and permission check.</td>
                 </tr>
                 <tr>
                   <td>Scheduled Faculty Deactivation</td>

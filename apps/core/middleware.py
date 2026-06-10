@@ -4,6 +4,7 @@ from django.conf import settings
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils.cache import patch_cache_control
 
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
@@ -42,6 +43,32 @@ class SessionTimeoutMiddleware:
             )
             session.set_expiry(timeout_minutes * 60)
         return self.get_response(request)
+
+
+class PortalCacheControlMiddleware:
+    PORTAL_PREFIXES = (
+        "/admin-portal/",
+        "/faculty/",
+        "/student/",
+    )
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if request.path.startswith(self.PORTAL_PREFIXES):
+            patch_cache_control(
+                response,
+                private=True,
+                no_cache=True,
+                no_store=True,
+                must_revalidate=True,
+                max_age=0,
+            )
+            response["Pragma"] = "no-cache"
+            response["Expires"] = "0"
+        return response
 
 
 class PortalAccessMiddleware:

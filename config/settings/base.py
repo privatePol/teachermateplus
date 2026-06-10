@@ -63,6 +63,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.core.middleware.ScopeResolutionMiddleware",
     "apps.core.middleware.SessionTimeoutMiddleware",
+    "apps.core.middleware.PortalCacheControlMiddleware",
     "apps.core.middleware.PortalAccessMiddleware",
     "apps.core.middleware.PostLoginSecurityMiddleware",
 ]
