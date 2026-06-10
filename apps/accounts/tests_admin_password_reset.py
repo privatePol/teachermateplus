@@ -70,6 +70,10 @@ class AdminPasswordResetTests(TestCase):
         self.assertEqual(response.url, reverse("accounts:admin_password_reset_otp"))
         self.assertEqual(LoginOtpChallenge.objects.count(), 1)
         self.assertEqual(mail.outbox[0].subject, "NCBA | TeacherMatePlus: Admin Password Reset Code")
+        otp_page = self.client.get(reverse("accounts:admin_password_reset_otp"))
+        self.assertContains(otp_page, "logos/teachermate_logo_text_official.png", status_code=200)
+        self.assertNotContains(otp_page, "logos/egp_logo_official.png")
+        self.assertNotContains(otp_page, "logos/edp_logo.png")
 
     def test_admin_forgot_password_does_not_send_otp_for_faculty_only_user(self):
         response = self.client.post(

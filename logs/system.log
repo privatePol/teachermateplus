@@ -3755,3 +3755,36 @@ RuntimeError: SMTP rejected message
 2026-06-10 21:59:35,769 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
 2026-06-10 21:59:39,043 INFO [django.utils.autoreload] D:\teachermateplus\apps\accounts\views.py changed, reloading.
 2026-06-10 21:59:40,000 INFO [django.utils.autoreload] Watching for file changes with StatReloader
+2026-06-10 22:00:36,462 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:01:37,126 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:02:37,897 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:03:20,438 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 22:03:38,754 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:04:39,349 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:05:39,998 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:06:40,689 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:07:41,330 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:08:21,878 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 22:08:42,269 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:09:42,947 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:10:43,599 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:11:44,346 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:12:45,047 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:13:23,624 WARNING [django.server] "POST /api/agent/heartbeat/ HTTP/1.1" 404 72660
+2026-06-10 22:13:45,992 WARNING [django.server] "POST /api/agent/snapshot/ HTTP/1.1" 404 72657
+2026-06-10 22:13:53,171 ERROR [teachermateplus.system] Admin password reset OTP email failed for user_id=1 recipient_domain=ncba.edu.ph
+Traceback (most recent call last):
+  File "D:\teachermateplus\apps\accounts\services.py", line 614, in create_and_send
+    sent_count = cls._send_email(request=request, user=user, challenge=challenge, code=code)
+  File "D:\teachermateplus\apps\accounts\services.py", line 677, in _send_email
+    return message.send(fail_silently=False)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1175, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1179, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\Lib\unittest\mock.py", line 1234, in _execute_mock_call
+    raise effect
+RuntimeError: SMTP rejected message

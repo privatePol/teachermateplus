@@ -12,6 +12,14 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
+- Legacy logo template sweep:
+  - Scanned the repository for EduGradePlus/EGP logo references and legacy TeacherMatePlus logo display paths.
+  - Replaced the Faculty forgot/reset-password shared brand image with `media/logos/teachermate_logo_text_official.png`.
+  - Replaced legacy logo and fallback references in shared login OTP, Admin password-reset OTP, and Student Portal navigation.
+  - Replaced the authenticated Faculty header's legacy fallback with the official TeacherMate text logo.
+  - Added Faculty password-recovery render assertions for the official text logo and absence of old logo paths.
+  - Added shared login-OTP and Admin reset-OTP render assertions for the official text logo and absence of legacy image paths.
+  - Legacy binaries remain under `media/logos` as unused historical assets; no live template references them.
 - Faculty password-reset email branding:
   - Removed the NCBA logo from the Faculty reset notification.
   - Replaced it with the text wordmark `NCBA | TeacherMate+` in the green-gold header and aligned the footer branding.
@@ -392,6 +400,10 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Changed Files This Session
 - `apps/core/services/permissions.py`
+- `templates/accounts/login_otp.html`
+- `templates/admin_portal/password_reset_otp.html`
+- `templates/faculty_portal/partials/password_recovery_brand.html`
+- `apps/student_portal/templates/student_portal/base.html`
 - `apps/core/middleware.py`
 - `config/settings/base.py`
 - `apps/accounts/tests_faculty_password_reset.py`
@@ -491,6 +503,10 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - The ransomware/partitioning discussion was advisory only. No server partition, mount, Synology, antivirus, or Django `MEDIA_ROOT` configuration changes were applied in this workspace.
 
 ## Validation Completed
+- [x] Legacy logo authentication-page regressions - passed: `python manage.py test apps.faculty_portal.tests_public_login apps.accounts.tests_login_otp apps.accounts.tests_admin_password_reset` (15 tests).
+- [x] Final live-template legacy-logo scan - passed: no `egp_logo`, `edp_logo`, `edugrade`, or `teachermateplus_logo.png` references remain in template HTML/text files.
+- [x] Static deployment dry run after logo replacement - passed: `python manage.py collectstatic --noinput --dry-run`.
+- [x] Legacy live-template logo scan - passed: no `egp_logo`, `edp_logo`, or `teachermateplus_logo.png` references remain in live template directories.
 - [x] Faculty reset email text-brand regression - passed through `python manage.py test apps.accounts.tests_faculty_password_reset`.
 - [x] Faculty reset eligibility and public hero regression suites - passed: `python manage.py test apps.accounts.tests_faculty_password_reset apps.faculty_portal.tests_public_login` (11 tests).
 - [x] Static deployment dry run after production hero hardening - passed: `python manage.py collectstatic --noinput --dry-run`.

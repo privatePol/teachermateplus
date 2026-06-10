@@ -78,6 +78,10 @@ class LoginOtpTests(TestCase):
         self.assertEqual(LoginOtpChallenge.objects.count(), 1)
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].subject, "NCBA | TeacherMatePlus: Login Verification")
+        otp_page = self.client.get(reverse("accounts:admin_login_otp"))
+        self.assertContains(otp_page, "logos/teachermate_logo_text_official.png", status_code=200)
+        self.assertNotContains(otp_page, "logos/egp_logo_official.png")
+        self.assertNotContains(otp_page, "logos/edp_logo.png")
 
         code_match = re.search(r"\b(\d{6})\b", mail.outbox[0].body)
         self.assertIsNotNone(code_match)

@@ -147,5 +147,7 @@ class FacultyPublicLoginTests(TestCase):
             with self.subTest(url=url):
                 response = self.client.get(url)
                 self.assertContains(response, 'href="/faculty/"', status_code=200)
-                self.assertContains(response, "logos/teachermateplus_logo.png")
+                self.assertContains(response, "logos/teachermate_logo_text_official.png")
+                self.assertNotContains(response, "logos/teachermateplus_logo.png")
+                self.assertNotContains(response, "logos/egp_logo_official.png")
                 self.assertNotContains(response, 'href="/faculty/login/"')
