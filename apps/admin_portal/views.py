@@ -87,6 +87,7 @@ from apps.academics.services import AcademicGovernanceService, FacultyAssignment
 from apps.admin_portal.data_reset import ActualDataResetService
 from apps.admin_portal.services import AdminScopeService, model_before_after
 from apps.admin_portal.grade_distribution import GradeDistributionMonitorService
+from apps.admin_portal.help_guide import build_admin_help_sections
 from apps.academics.models import (
     AcademicYear,
     ActiveGradingPeriodSetting,
@@ -2730,12 +2731,27 @@ def grade_distribution_monitor_view(request):
 
 @portal_required("ADMIN")
 def admin_guide_view(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    if not FeatureSettingsService.is_role_based_help_guide_enabled(tenant_id=tenant_id, default=True):
+        context = {
+            "title": "Admin Portal User Guide",
+            "show_production_incident_response": _user_has_role_code(request.user, "SUPER_ADMIN")
+            or request.user.is_superuser,
+        }
+        context.update(_scope_context(request))
+        return render(request, "admin_portal/guide.html", context)
+
+    campus_id = getattr(request, "scope", {}).get("campus_id") or getattr(request.user, "default_campus_id", None)
     context = {
-        "title": "Admin Portal User Guide",
-        "show_production_incident_response": _user_has_role_code(request.user, "SUPER_ADMIN") or request.user.is_superuser,
+        "title": "Admin Portal Help Guide",
+        "help_sections": build_admin_help_sections(
+            user=request.user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+        ),
     }
     context.update(_scope_context(request))
-    return render(request, "admin_portal/guide.html", context)
+    return render(request, "admin_portal/guide_role_based.html", context)
 
 
 @portal_required("ADMIN")
@@ -3460,7 +3476,7 @@ def configurable_features_settings_view(request):
     current_submission_non_compliance_notice_interval_days = (
         FeatureSettingsService.get_submission_non_compliance_notice_interval_days(
             tenant_id=tenant_id,
-            default=3,
+            default=1,
         )
     )
     current_submission_non_compliance_head_role_codes = (
@@ -3614,10 +3630,15 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default=False,
     )
+    current_role_based_help_guide_enabled = FeatureSettingsService.is_role_based_help_guide_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
 
     form = ConfigurableFeatureSettingForm(
         request.POST or None,
         initial={
+            "role_based_help_guide_enabled": current_role_based_help_guide_enabled,
             "student_portal_enabled": current_student_portal_enabled,
             "student_portal_period_grades_after_submission": current_student_portal_period_grades_after_submission,
             "student_portal_final_grades_after_submission": current_student_portal_final_grades_after_submission,
@@ -3732,6 +3753,13 @@ def configurable_features_settings_view(request):
             else:
                 updated_enrollment_override_map.pop(override_key, None)
 
+        SystemSettingService.set(
+            FeatureSettingsService.ROLE_BASED_HELP_GUIDE_ENABLED_KEY,
+            bool(form.cleaned_data["role_based_help_guide_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
         SystemSettingService.set(
             FeatureSettingsService.STUDENT_PORTAL_ENABLED_KEY,
             bool(form.cleaned_data["student_portal_enabled"]),
@@ -4162,6 +4190,7 @@ def configurable_features_settings_view(request):
             tenant=tenant_id,
             campus=getattr(request, "scope", {}).get("campus_id"),
             before_data={
+                "role_based_help_guide_enabled": current_role_based_help_guide_enabled,
                 "correction_official_report_enabled": current_report_enabled,
                 "user_signatures_enabled": current_user_signatures_enabled,
                 "user_signatures_final_clearance_enabled": current_user_signatures_final_clearance_enabled,
@@ -4219,6 +4248,7 @@ def configurable_features_settings_view(request):
                 "sis_periodic_grades_api_enabled": current_sis_periodic_grades_api_enabled,
             },
             after_data={
+                "role_based_help_guide_enabled": bool(form.cleaned_data["role_based_help_guide_enabled"]),
                 "student_portal_enabled": bool(form.cleaned_data["student_portal_enabled"]),
                 "student_portal_period_grades_after_submission": bool(
                     form.cleaned_data["student_portal_period_grades_after_submission"]
@@ -11738,6 +11768,14 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
         AdminScopeService.scoped_grade_submission_reopen_requests(request),
         id=request_id,
     )
+    if not GradingGovernanceService.is_assigned_reopen_reviewer(
+        user=request.user,
+        tenant_id=reopen_request.tenant_id,
+        campus_id=reopen_request.campus_id,
+    ):
+        raise PermissionDenied(
+            "Only a user explicitly assigned to review reopen requests for this campus can access this request."
+        )
     can_review_request = reopen_request.status == GradeSubmissionReopenRequest.Status.PENDING
     if request.method == "POST" and not can_review_request:
         messages.error(request, "Only pending reopen requests can be reviewed.")
@@ -11747,107 +11785,92 @@ def grade_submission_reopen_request_review_view(request, request_id: int):
     _style_form(form)
     if can_review_request and request.method == "POST" and form.is_valid():
         approved = form.cleaned_data["decision"] == GradeSubmissionReopenReviewForm.Decision.APPROVE
-        has_force_reopen = PermissionService.has_permission(
-            request.user,
-            "grade_submissions.reopen",
-            tenant_id=reopen_request.tenant_id,
-            campus_id=reopen_request.campus_id,
+        lock = GradingGovernanceService.resolve_lock(
+            offering=reopen_request.offering,
+            template_period=reopen_request.template_period,
         )
-        has_revert_before_deadline = PermissionService.has_permission(
-            request.user,
-            "grade_submissions.revert_before_deadline",
-            tenant_id=reopen_request.tenant_id,
-            campus_id=reopen_request.campus_id,
-        )
-        if approved and not (has_force_reopen or has_revert_before_deadline):
-            form.add_error(None, "You do not have permission to approve reopen requests.")
-        else:
-            lock = GradingGovernanceService.resolve_lock(
-                offering=reopen_request.offering,
-                template_period=reopen_request.template_period,
-            )
-            is_deadline_auto_close_request = reopen_request.submission.status in {
-                GradeSubmission.Status.DRAFT,
-                GradeSubmission.Status.REOPENED,
-            }
-            if approved and not has_force_reopen and not is_deadline_auto_close_request:
-                if not lock or not lock.deadline_at:
-                    form.add_error(
-                        None,
-                        "Cannot approve reopen request because no submission deadline is configured for this period scope.",
-                    )
-                elif timezone.now() > lock.deadline_at:
-                    form.add_error(
-                        None,
-                        f"Cannot approve reopen request because the deadline passed on {lock.deadline_at:%Y-%m-%d %H:%M}.",
-                    )
-            if not form.non_field_errors():
-                before_request = model_before_after(reopen_request)
-                before_submission = model_before_after(reopen_request.submission)
-                try:
-                    updated = GradingGovernanceService.review_reopen_request(
-                        request_obj=reopen_request,
-                        reviewer=request.user,
-                        approved=approved,
-                        review_remarks=form.cleaned_data.get("review_remarks"),
-                    )
-                except ValidationError as exc:
-                    form.add_error(None, "; ".join(exc.messages))
-                else:
+        is_deadline_auto_close_request = reopen_request.submission.status in {
+            GradeSubmission.Status.DRAFT,
+            GradeSubmission.Status.REOPENED,
+        }
+        if approved and not is_deadline_auto_close_request:
+            if not lock or not lock.deadline_at:
+                form.add_error(
+                    None,
+                    "Cannot approve reopen request because no submission deadline is configured for this period scope.",
+                )
+            elif timezone.now() > lock.deadline_at:
+                form.add_error(
+                    None,
+                    f"Cannot approve reopen request because the deadline passed on {lock.deadline_at:%Y-%m-%d %H:%M}.",
+                )
+        if not form.non_field_errors():
+            before_request = model_before_after(reopen_request)
+            before_submission = model_before_after(reopen_request.submission)
+            try:
+                updated = GradingGovernanceService.review_reopen_request(
+                    request_obj=reopen_request,
+                    reviewer=request.user,
+                    approved=approved,
+                    review_remarks=form.cleaned_data.get("review_remarks"),
+                )
+            except ValidationError as exc:
+                form.add_error(None, "; ".join(exc.messages))
+            else:
+                AuditService.log_event(
+                    action="APPROVE" if approved else "REJECT",
+                    portal="ADMIN",
+                    entity_type="GradeSubmissionReopenRequest",
+                    entity_id=updated.id,
+                    actor=request.user,
+                    tenant=updated.tenant,
+                    campus=updated.campus,
+                    before_data=before_request,
+                    after_data=model_before_after(updated),
+                    metadata={
+                        "critical_action": True,
+                        "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
+                        "impact_summary": {
+                            "offering_id": updated.offering_id,
+                            "period_code": updated.template_period.code if updated.template_period_id else "",
+                            "decision": "APPROVE" if approved else "REJECT",
+                        },
+                    },
+                    request=request,
+                )
+                if approved:
+                    refreshed_submission = GradeSubmission.objects.get(id=updated.submission_id)
                     AuditService.log_event(
-                        action="APPROVE" if approved else "REJECT",
+                        action="REOPEN",
                         portal="ADMIN",
-                        entity_type="GradeSubmissionReopenRequest",
-                        entity_id=updated.id,
+                        entity_type="GradeSubmission",
+                        entity_id=refreshed_submission.id,
                         actor=request.user,
-                        tenant=updated.tenant,
-                        campus=updated.campus,
-                        before_data=before_request,
-                        after_data=model_before_after(updated),
+                        tenant=refreshed_submission.tenant,
+                        campus=refreshed_submission.campus,
+                        before_data=before_submission,
+                        after_data=model_before_after(refreshed_submission),
                         metadata={
                             "critical_action": True,
                             "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
                             "impact_summary": {
-                                "offering_id": updated.offering_id,
-                                "period_code": updated.template_period.code if updated.template_period_id else "",
-                                "decision": "APPROVE" if approved else "REJECT",
+                                "offering_id": refreshed_submission.offering_id,
+                                "period_id": refreshed_submission.template_period_id,
                             },
                         },
                         request=request,
                     )
-                    if approved:
-                        refreshed_submission = GradeSubmission.objects.get(id=updated.submission_id)
-                        AuditService.log_event(
-                            action="REOPEN",
-                            portal="ADMIN",
-                            entity_type="GradeSubmission",
-                            entity_id=refreshed_submission.id,
-                            actor=request.user,
-                            tenant=refreshed_submission.tenant,
-                            campus=refreshed_submission.campus,
-                            before_data=before_submission,
-                            after_data=model_before_after(refreshed_submission),
-                            metadata={
-                                "critical_action": True,
-                                "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
-                                "impact_summary": {
-                                    "offering_id": refreshed_submission.offering_id,
-                                    "period_id": refreshed_submission.template_period_id,
-                                },
-                            },
-                            request=request,
-                        )
-                    messages.success(
-                        request,
-                        (
-                            "Reopen request approved. Faculty encoding is available for 24 hours and will lock again if not submitted."
-                            if is_deadline_auto_close_request
-                            else "Reopen request approved and submission reopened for 24 hours."
-                        )
-                        if approved
-                        else "Reopen request rejected.",
+                messages.success(
+                    request,
+                    (
+                        "Reopen request approved. Faculty encoding is available for 24 hours and will lock again if not submitted."
+                        if is_deadline_auto_close_request
+                        else "Reopen request approved and submission reopened for 24 hours."
                     )
-                    return _redirect_back_or_default(request, "admin_portal:grade_submission_reopen_request_list")
+                    if approved
+                    else "Reopen request rejected.",
+                )
+                return _redirect_back_or_default(request, "admin_portal:grade_submission_reopen_request_list")
     context = {
         "title": f"Review Reopen Request #{reopen_request.id}",
         "form": form,

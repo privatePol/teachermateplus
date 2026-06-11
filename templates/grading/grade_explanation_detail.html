@@ -4,255 +4,410 @@
   <div>{{ restricted_message }}</div>
   {% if official_grade_release_notes %}
     <ul class="mb-0 mt-2">
-      {% for note in official_grade_release_notes %}
-      <li>{{ note }}</li>
-      {% endfor %}
+      {% for note in official_grade_release_notes %}<li>{{ note }}</li>{% endfor %}
     </ul>
   {% endif %}
 </div>
 {% else %}
 <div class="grade-explain">
-  <div class="row g-3 mb-3">
-    <div class="col-md-7">
-      <div class="border rounded-3 p-3 h-100">
-        <div class="text-uppercase text-muted small fw-semibold">Overview</div>
-        <div class="h5 mb-1">{{ explanation.student.name }}</div>
-        <div class="small text-muted">{{ explanation.student.student_no }}{% if explanation.student.masked %} · identity masked{% endif %}</div>
-        <div class="small mt-2">{{ explanation.offering.course }} · {{ explanation.offering.section }} · {{ explanation.offering.term }}</div>
+  <style>
+    .grade-explain { color: #263c30; }
+    .grade-explain-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem;
+      border: 1px solid #d8e5dc;
+      border-radius: 8px;
+      background: linear-gradient(120deg, #f1f8f3, #fff9df);
+      margin-bottom: 1rem;
+    }
+    .grade-explain-student { font-size: 1.05rem; font-weight: 700; color: #19452c; }
+    .grade-explain-meta { color: #667a6d; font-size: .85rem; }
+    .grade-explain-final { min-width: 210px; padding-left: 1rem; border-left: 1px solid #cfded3; text-align: right; }
+    .grade-explain-final-label { color: #536b5c; font-size: .82rem; font-weight: 700; text-transform: uppercase; }
+    .grade-explain-final-value { color: #176438; font-size: 2.25rem; line-height: 1.05; font-weight: 800; }
+    .grade-explain-section { margin-bottom: 1rem; }
+    .grade-explain-section-title { color: #19452c; font-size: 1rem; font-weight: 800; margin-bottom: .6rem; }
+    .grade-explain-lead { margin-bottom: .75rem; color: #334f3e; }
+    .grade-explain-formula {
+      padding: .8rem .9rem;
+      border-left: 4px solid #8ba63b;
+      border-radius: 4px;
+      background: #f8fbf6;
+      color: #405c4a;
+      font-size: .9rem;
+    }
+    .grade-explain-formula div + div { margin-top: .3rem; }
+    .grade-explain-card-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: .75rem;
+    }
+    .grade-explain-card {
+      border: 1px solid #d9e5dd;
+      border-radius: 8px;
+      background: #fff;
+      padding: .85rem .95rem;
+    }
+    .grade-explain-card-title { color: #234d34; font-weight: 800; margin-bottom: .55rem; }
+    .grade-explain-metric { display: flex; justify-content: space-between; gap: 1rem; padding: .25rem 0; color: #506759; }
+    .grade-explain-metric + .grade-explain-metric { border-top: 1px solid #edf2ee; }
+    .grade-explain-metric strong { color: #233e2d; text-align: right; }
+    .grade-explain-contribution { color: #176438 !important; font-size: 1.05rem; }
+    .grade-explain-activity-group + .grade-explain-activity-group { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid #e5ece7; }
+    .grade-explain-activity-title { color: #315a40; font-weight: 750; margin-bottom: .25rem; }
+    .grade-explain-activity-row { display: flex; justify-content: space-between; gap: 1rem; padding: .2rem 0; color: #566d5e; }
+    .grade-explain-activity-row strong { color: #2d4836; text-align: right; }
+    .grade-explain-details {
+      border: 1px solid #d7e3da;
+      border-radius: 8px;
+      background: #fbfcfb;
+      margin-top: 1rem;
+    }
+    .grade-explain-details > summary { cursor: pointer; padding: .85rem 1rem; color: #244d34; font-weight: 800; }
+    .grade-explain-details[open] > summary { border-bottom: 1px solid #d7e3da; }
+    .grade-explain-details-body { padding: 1rem; }
+    .grade-explain .computation-table { font-size: .84rem; }
+    .grade-explain .computation-table .component-total > * { background-color: #eef0f2; }
+    .grade-explain .computation-table .category-total.category-soft-yellow > * { background-color: #fff7bf; }
+    .grade-explain .computation-table .category-total.category-soft-green > * { background-color: #dff6d6; }
+    .grade-explain .computation-table .subcategory-total > * { background-color: #d8f1fb; }
+    @media (max-width: 767.98px) {
+      .grade-explain-header { grid-template-columns: 1fr; }
+      .grade-explain-final { min-width: 0; padding: .75rem 0 0; border-left: 0; border-top: 1px solid #cfded3; text-align: left; }
+      .grade-explain-card-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <header class="grade-explain-header">
+    <div>
+      <div class="grade-explain-student">{{ explanation.student.name }}</div>
+      <div class="grade-explain-meta">
+        {{ explanation.student.student_no }}{% if explanation.student.masked %} &middot; identity masked{% endif %}
+      </div>
+      <div class="grade-explain-meta mt-1">
+        {{ explanation.offering.course }} &middot; {{ explanation.offering.section }} &middot; {{ explanation.offering.term }}
       </div>
     </div>
-    <div class="col-md-5">
-      <div class="border rounded-3 p-3 h-100">
-        <div class="text-uppercase text-muted small fw-semibold">Grade</div>
-        <div class="d-flex align-items-center gap-2">
-          <span class="display-6 fw-bold text-success">{{ explanation.official_value|default:"-" }}</span>
-          {% if explanation.pass_fail %}
-          <span class="badge {% if explanation.pass_fail == 'PASSED' %}text-bg-success{% else %}text-bg-danger{% endif %}">{{ explanation.pass_fail }}</span>
-          {% endif %}
-        </div>
-        <div class="small text-muted">
-          Raw diagnostic value: {{ explanation.raw_value|floatformat:4|default:"-" }} · Rounded: {{ explanation.computed_official_value|default:"-" }}
-        </div>
+    <div class="grade-explain-final">
+      <div class="grade-explain-final-label">
+        {% if explanation.grade_type == "FINAL" %}Final Grade{% else %}Final {{ explanation.period.name }} Grade{% endif %}
       </div>
+      <div class="grade-explain-final-value">
+        {{ explanation.official_value|default_if_none:explanation.computed_official_value|default_if_none:"-" }}
+      </div>
+      {% if explanation.grade_type != "FINAL" and explanation.diagnostic_differs_from_official %}
+      <div class="grade-explain-meta">
+        Current setup calculation: {{ explanation.computed_official_value|floatformat:2|default_if_none:"-" }}
+        {% if explanation.raw_value is not None %}(before rounding: {{ explanation.raw_value|floatformat:2 }}){% endif %}
+      </div>
+      {% elif explanation.grade_type != "FINAL" and explanation.raw_value is not None %}
+      <div class="grade-explain-meta">Before official rounding: {{ explanation.raw_value|floatformat:2 }}</div>
+      {% endif %}
+      {% if explanation.pass_fail %}
+      <span class="badge mt-1 {% if explanation.pass_fail == 'PASSED' %}text-bg-success{% else %}text-bg-danger{% endif %}">
+        {{ explanation.pass_fail }}
+      </span>
+      {% endif %}
     </div>
-  </div>
+  </header>
 
   {% if explanation.warnings %}
   <div class="mb-3">
-    {% for warning in explanation.warnings %}
-      <span class="badge text-bg-warning me-1 mb-1">{{ warning }}</span>
-    {% endfor %}
+    {% for warning in explanation.warnings %}<span class="badge text-bg-warning me-1 mb-1">{{ warning }}</span>{% endfor %}
   </div>
   {% endif %}
 
-  <div class="border rounded-3 p-3 mb-3">
-    <div class="text-uppercase text-muted small fw-semibold mb-2">Source of Truth</div>
-    <div class="row g-2 small">
-      <div class="col-md-6"><strong>Template:</strong> {{ explanation.template.name }} <span class="text-muted">({{ explanation.template.source_label }})</span></div>
-      <div class="col-md-6"><strong>Profile:</strong> {{ explanation.profile.name }}</div>
-      <div class="col-md-6"><strong>Passing Threshold:</strong> {{ explanation.passing_threshold.value }} <span class="text-muted">({{ explanation.passing_threshold.source_label }})</span></div>
-      <div class="col-md-6"><strong>Base Value:</strong> {{ explanation.base_value.value }} <span class="text-muted">({{ explanation.base_value.source_label }})</span></div>
-      <div class="col-md-6"><strong>Final Formula:</strong> {{ explanation.final_formula.source_label }}</div>
-      <div class="col-md-6"><strong>Rounding:</strong> {{ explanation.rounding_policy.mode }}</div>
-    </div>
-  </div>
-
   {% if explanation.grade_type == "FINAL" %}
-  <div class="border rounded-3 p-3 mb-3">
-    <div class="text-uppercase text-muted small fw-semibold mb-2">Period Breakdown</div>
-    <div class="small mb-2">{{ explanation.formula_text }}</div>
-    <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0">
-        <thead><tr><th>Period</th><th>Official Period Grade</th><th>Value Used</th><th>Weight/Share</th><th>Contribution</th></tr></thead>
-        <tbody>
-          {% for row in explanation.period_breakdown %}
-          <tr>
-            <td>{{ row.period_name }}</td>
-            <td>{{ row.period_grade|default:"-" }}</td>
-            <td>{% if row.missing %}0{% else %}{{ row.value_used }}{% endif %}</td>
-            <td>{% if row.weight %}{{ row.weight }}%{% else %}Average divisor{% endif %}</td>
-            <td>{{ row.contribution|floatformat:4|default:"-" }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <section class="grade-explain-section">
+    <h3 class="grade-explain-section-title">Final Grade Summary</h3>
+    <p class="grade-explain-lead">Your final grade is computed from the submitted grading periods below.</p>
+    <div class="grade-explain-card-grid">
+      {% for row in explanation.period_breakdown %}
+      <article class="grade-explain-card">
+        <div class="grade-explain-card-title">{{ row.period_name }}</div>
+        <div class="grade-explain-metric"><span>Period Grade</span><strong>{{ row.period_grade|default_if_none:"-" }}</strong></div>
+        <div class="grade-explain-metric"><span>Weight or Share</span><strong>{% if row.weight %}{{ row.weight }}%{% else %}Average share{% endif %}</strong></div>
+        <div class="grade-explain-metric"><span>Contribution</span><strong class="grade-explain-contribution">{{ row.contribution|floatformat:2|default_if_none:"-" }}</strong></div>
+      </article>
+      {% endfor %}
     </div>
-  </div>
+  </section>
   {% else %}
-  <div class="border rounded-3 p-3 mb-3">
-    <div class="text-uppercase text-muted small fw-semibold mb-2">Period Breakdown</div>
-    <div class="small mb-2">{{ explanation.formula_text }}</div>
-    <div class="table-responsive">
-      <table class="table table-sm align-middle mb-0">
-        <thead><tr><th>Component</th><th>Type</th><th>Weight</th><th>Computed</th><th>Weighted Contribution</th></tr></thead>
-        <tbody>
-          {% for component in explanation.component_breakdown %}
-          <tr>
-            <td>{{ component.name }}</td>
-            <td>{% if component.is_exam_component %}Exam{% else %}Class Standing{% endif %}</td>
-            <td>{{ component.weight }}%</td>
-            <td>{{ component.score|default:"-" }}</td>
-            <td>{{ component.weighted_contribution|floatformat:4 }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <section class="grade-explain-section">
+    {% if explanation.diagnostic_differs_from_official %}
+    <h3 class="grade-explain-section-title">Official Submitted Grade</h3>
+    <p class="grade-explain-lead">
+      The official {{ explanation.period.name }} Grade is {{ explanation.official_value|floatformat:2 }}.
+      It remains the recorded grade unless an approved correction or reopen process changes it.
+    </p>
+    <div class="grade-explain-card-grid">
+      <article class="grade-explain-card">
+        <div class="grade-explain-card-title">Stored Grade Record</div>
+        <div class="grade-explain-metric"><span>Class Standing</span><strong>{{ explanation.class_standing|floatformat:2|default_if_none:"-" }}</strong></div>
+        <div class="grade-explain-metric"><span>Exam</span><strong>{{ explanation.exam_grade|floatformat:2|default_if_none:"-" }}</strong></div>
+        <div class="grade-explain-metric"><span>Official {{ explanation.period.name }} Grade</span><strong class="grade-explain-contribution">{{ explanation.official_value|floatformat:2 }}</strong></div>
+      </article>
     </div>
-  </div>
+    <div class="alert alert-info mt-3">
+      <strong>Why the numbers differ:</strong>
+      {% if explanation.is_submitted %}
+      The grading setup or source records changed after submission.
+      {% else %}
+      The stored grade was created from an earlier grading state.
+      {% endif %}
+      The current calculation below is a comparison only and does not replace the recorded grade.
+    </div>
+    <h3 class="grade-explain-section-title">Current Grading Setup Check</h3>
+    <p class="grade-explain-lead">
+      Using the grading setup and activity records available now, the result is
+      {{ explanation.computed_official_value|floatformat:2 }} after rounding
+      {% if explanation.raw_value is not None %}from {{ explanation.raw_value|floatformat:2 }}{% endif %}.
+    </p>
+    {% else %}
+    <h3 class="grade-explain-section-title">{{ explanation.period.name }} Grade Summary</h3>
+    <p class="grade-explain-lead">Your {{ explanation.period.name }} Grade is computed from:</p>
+    {% endif %}
+    <div class="grade-explain-card-grid">
+      {% for component in explanation.component_breakdown %}
+      <article class="grade-explain-card">
+        <div class="grade-explain-card-title">{{ component.name }}</div>
+        <div class="grade-explain-metric"><span>Score</span><strong>{{ component.score|floatformat:2|default_if_none:"-" }}</strong></div>
+        <div class="grade-explain-metric"><span>Weight</span><strong>{{ component.weight|floatformat:2 }}%</strong></div>
+        <div class="grade-explain-metric">
+          <span>Contribution to Period Grade</span>
+          <strong class="grade-explain-contribution">{{ component.weighted_contribution|floatformat:2 }}</strong>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    <div class="grade-explain-formula mt-3">
+      <div><strong>Formula used:</strong> Period Grade = {% for component in explanation.component_breakdown %}{{ component.name }} contribution{% if not forloop.last %} + {% endif %}{% endfor %}.</div>
+      {% for component in explanation.component_breakdown %}
+      <div>{{ component.name }} contribution = {{ component.name }} Score &times; {{ component.name }} Weight.</div>
+      {% endfor %}
+    </div>
+  </section>
 
-  <details class="border rounded-3 p-3 mb-3">
-    <summary class="fw-semibold">Show Detailed Computation</summary>
-    <div class="mt-3">
+  <section class="grade-explain-section">
+    <h3 class="grade-explain-section-title">Class Standing Breakdown</h3>
+    <div class="grade-explain-card-grid">
+      {% for component in explanation.component_breakdown %}
+        {% if not component.is_exam_component %}
+          {% for sub in component.subcomponents %}
+          <article class="grade-explain-card">
+            <div class="grade-explain-card-title">{{ sub.name }}</div>
+            <div class="grade-explain-metric"><span>Category Score</span><strong>{{ sub.score|floatformat:2|default_if_none:"-" }}</strong></div>
+            <div class="grade-explain-metric"><span>Weight inside {{ component.name }}</span><strong>{{ sub.weight|floatformat:2 }}%</strong></div>
+          </article>
+          {% empty %}
+          <article class="grade-explain-card">
+            <div class="grade-explain-card-title">{{ component.name }}</div>
+            <div class="grade-explain-metric"><span>Final Class Standing Score</span><strong>{{ component.score|floatformat:2|default_if_none:"-" }}</strong></div>
+          </article>
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="grade-explain-section">
+    <h3 class="grade-explain-section-title">Activity Details</h3>
+    <div class="grade-explain-card-grid">
+      {% for component in explanation.component_breakdown %}
+        {% if not component.is_exam_component %}
+          {% for sub in component.subcomponents %}
+          <article class="grade-explain-card">
+            <div class="grade-explain-card-title">{{ sub.name }}</div>
+            {% for detail in sub.details %}
+            <div class="grade-explain-activity-group">
+              <div class="grade-explain-activity-title">{{ detail.name }}</div>
+              {% for activity in detail.activities %}
+              <div class="grade-explain-activity-row">
+                <span>{{ activity.title }}</span>
+                <strong>{% if activity.missing %}Missing{% else %}{{ activity.raw_score|default_if_none:"-" }} / {{ activity.total_score }}{% endif %}</strong>
+              </div>
+              {% empty %}<div class="grade-explain-meta">No activity recorded.</div>{% endfor %}
+            </div>
+            {% endfor %}
+            {% for activity in sub.activities %}
+            <div class="grade-explain-activity-row">
+              <span>{{ activity.title }}</span>
+              <strong>{% if activity.missing %}Missing{% else %}{{ activity.raw_score|default_if_none:"-" }} / {{ activity.total_score }}{% endif %}</strong>
+            </div>
+            {% endfor %}
+            {% for attendance in sub.attendance_records %}
+            <div class="grade-explain-activity-row">
+              <span>{{ attendance.title }}</span>
+              <strong>{% if attendance.missing %}Missing{% else %}{{ attendance.status_label }}{% endif %}</strong>
+            </div>
+            {% endfor %}
+          </article>
+          {% endfor %}
+          {% if component.activities %}
+          <article class="grade-explain-card">
+            <div class="grade-explain-card-title">{{ component.name }}</div>
+            {% for activity in component.activities %}
+            <div class="grade-explain-activity-row">
+              <span>{{ activity.title }}</span>
+              <strong>{% if activity.missing %}Missing{% else %}{{ activity.raw_score|default_if_none:"-" }} / {{ activity.total_score }}{% endif %}</strong>
+            </div>
+            {% endfor %}
+          </article>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="grade-explain-section">
+    <h3 class="grade-explain-section-title">Exam Details</h3>
+    <div class="grade-explain-card-grid">
+      {% for component in explanation.component_breakdown %}
+        {% if component.is_exam_component %}
+        <article class="grade-explain-card">
+          <div class="grade-explain-card-title">{{ component.name }}</div>
+          {% for activity in component.activities %}
+          <div class="grade-explain-activity-row">
+            <span>{{ activity.title }}</span>
+            <strong>{% if activity.missing %}Missing{% else %}{{ activity.raw_score|default_if_none:"-" }} / {{ activity.total_score }}{% endif %}</strong>
+          </div>
+          {% endfor %}
+          {% for sub in component.subcomponents %}
+            {% for activity in sub.activities %}
+            <div class="grade-explain-activity-row">
+              <span>{{ activity.title }}</span>
+              <strong>{% if activity.missing %}Missing{% else %}{{ activity.raw_score|default_if_none:"-" }} / {{ activity.total_score }}{% endif %}</strong>
+            </div>
+            {% endfor %}
+            {% for detail in sub.details %}
+              {% for activity in detail.activities %}
+              <div class="grade-explain-activity-row">
+                <span>{{ activity.title }}</span>
+                <strong>{% if activity.missing %}Missing{% else %}{{ activity.raw_score|default_if_none:"-" }} / {{ activity.total_score }}{% endif %}</strong>
+              </div>
+              {% endfor %}
+            {% endfor %}
+          {% endfor %}
+          <div class="grade-explain-metric mt-2"><span>Final Exam Score</span><strong>{{ component.score|floatformat:2|default_if_none:"-" }}</strong></div>
+        </article>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <details class="grade-explain-details">
+    <summary>View full computation details</summary>
+    <div class="grade-explain-details-body">
+      <div class="grade-explain-formula mb-3">
+        {{ explanation.formula_text }}
+        {% if explanation.diagnostic_differs_from_official %}
+        <div class="mt-2"><strong>Note:</strong> The table below uses the current grading setup. It is a comparison and does not replace the official recorded grade.</div>
+        {% endif %}
+      </div>
       <div class="table-responsive">
-        <style>
-          .grade-explain .computation-table .component-total > * {
-            background-color: #eef0f2;
-          }
-
-          .grade-explain .computation-table .category-total.category-soft-yellow > * {
-            background-color: #fff7bf;
-          }
-
-          .grade-explain .computation-table .category-total.category-soft-green > * {
-            background-color: #dff6d6;
-          }
-
-          .grade-explain .computation-table .subcategory-total > * {
-            background-color: #d8f1fb;
-          }
-        </style>
+        {% if explanation.grade_type == "FINAL" %}
+        <table class="table table-sm table-bordered align-middle mb-0 computation-table">
+          <thead class="table-light"><tr><th>Period</th><th>Official Period Grade</th><th>Value Used</th><th>Weight or Share</th><th>Contribution</th></tr></thead>
+          <tbody>
+            {% for row in explanation.period_breakdown %}
+            <tr>
+              <td>{{ row.period_name }}</td>
+              <td>{{ row.period_grade|default_if_none:"-" }}</td>
+              <td>{% if row.missing %}0{% else %}{{ row.value_used }}{% endif %}</td>
+              <td>{% if row.weight %}{{ row.weight }}%{% else %}Average divisor{% endif %}</td>
+              <td>{{ row.contribution|floatformat:4|default_if_none:"-" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
         <table class="table table-sm table-bordered align-middle mb-0 computation-table">
           <thead class="table-light">
-            <tr>
-              <th scope="col">Component</th>
-              <th scope="col">Category</th>
-              <th scope="col">Item</th>
-              <th scope="col" class="text-end">Weight</th>
-              <th scope="col" class="text-end">Raw / Status</th>
-              <th scope="col" class="text-end">Total</th>
-              <th scope="col" class="text-end">Computed</th>
-              <th scope="col">Notes</th>
-            </tr>
+            <tr><th>Component</th><th>Category</th><th>Item</th><th class="text-end">Weight</th><th class="text-end">Raw / Status</th><th class="text-end">Total</th><th class="text-end">Score</th><th>Notes</th></tr>
           </thead>
           <tbody>
             {% for component in explanation.component_breakdown %}
             <tr class="component-total">
-              <th scope="row">{{ component.name }}</th>
-              <td>Component</td>
-              <td>Overall {{ component.name }}</td>
-              <td class="text-end">{{ component.weight }}%</td>
-              <td class="text-end">-</td>
-              <td class="text-end">-</td>
-              <td class="text-end">{{ component.score|default:"-" }}</td>
-              <td>Weighted contribution: {{ component.weighted_contribution|floatformat:4 }}</td>
+              <th>{{ component.name }}</th><td>Component</td><td>{% if component.is_exam_component %}Final Exam Score{% else %}Final Class Standing Score{% endif %}</td>
+              <td class="text-end">{{ component.weight }}%</td><td class="text-end">-</td><td class="text-end">-</td>
+              <td class="text-end">{{ component.score|default_if_none:"-" }}</td><td>Contribution to Period Grade: {{ component.weighted_contribution|floatformat:4 }}</td>
             </tr>
-            {% if component.subcomponents %}
-              {% for sub in component.subcomponents %}
-              <tr class="category-total {% cycle 'category-soft-yellow' 'category-soft-green' %}">
-                <td>{{ component.name }}</td>
-                <td><strong>{{ sub.name }}</strong></td>
-                <td>Category average</td>
-                <td class="text-end">{{ sub.weight }}%</td>
-                <td class="text-end">-</td>
-                <td class="text-end">-</td>
-                <td class="text-end">{{ sub.score|default:"-" }}</td>
-                <td>{% if sub.is_attendance_component %}Attendance component{% else %}-{% endif %}</td>
-              </tr>
-              {% if sub.details %}
-                {% for detail in sub.details %}
-                <tr class="subcategory-total">
-                  <td>{{ component.name }}</td>
-                  <td>{{ sub.name }}</td>
-                  <td><strong>{{ detail.name }}</strong></td>
-                  <td class="text-end">{{ detail.weight }}%</td>
-                  <td class="text-end">-</td>
-                  <td class="text-end">-</td>
-                  <td class="text-end">{{ detail.score|default:"-" }}</td>
-                  <td>Subcategory average</td>
-                </tr>
-                {% for activity in detail.activities %}
-                <tr>
-                  <td>{{ component.name }}</td>
-                  <td>{{ detail.name }}</td>
-                  <td>{{ activity.title }}</td>
-                  <td class="text-end">-</td>
-                  <td class="text-end">{{ activity.raw_score|default:"-" }}</td>
-                  <td class="text-end">{{ activity.total_score }}</td>
-                  <td class="text-end">{{ activity.computed_score|default:"-" }}</td>
-                  <td>{% if activity.missing %}<span class="badge text-bg-light">missing</span>{% else %}-{% endif %}</td>
-                </tr>
-                {% endfor %}
-                {% endfor %}
-              {% endif %}
-              {% for activity in sub.activities %}
-              <tr>
-                <td>{{ component.name }}</td>
-                <td>{{ sub.name }}</td>
-                <td>{{ activity.title }}</td>
-                <td class="text-end">-</td>
-                <td class="text-end">{{ activity.raw_score|default:"-" }}</td>
-                <td class="text-end">{{ activity.total_score }}</td>
-                <td class="text-end">{{ activity.computed_score|default:"-" }}</td>
-                <td>{% if activity.missing %}<span class="badge text-bg-light">missing</span>{% else %}-{% endif %}</td>
-              </tr>
-              {% endfor %}
-              {% for attendance in sub.attendance_records %}
-              <tr>
-                <td>{{ component.name }}</td>
-                <td>{{ sub.name }}</td>
-                <td>{{ attendance.title }}</td>
-                <td class="text-end">-</td>
-                <td class="text-end">{{ attendance.status_label }}</td>
-                <td class="text-end">-</td>
-                <td class="text-end">{{ attendance.mapped_score|default:"-" }}</td>
-                <td>{% if attendance.missing %}<span class="badge text-bg-light">missing</span>{% else %}Attendance mapping{% endif %}</td>
-              </tr>
-              {% endfor %}
-              {% endfor %}
-            {% endif %}
+            {% for sub in component.subcomponents %}
+            <tr class="category-total {% cycle 'category-soft-yellow' 'category-soft-green' %}">
+              <td>{{ component.name }}</td><td><strong>{{ sub.name }}</strong></td><td>Category Score</td><td class="text-end">{{ sub.weight }}%</td>
+              <td class="text-end">-</td><td class="text-end">-</td><td class="text-end">{{ sub.score|default_if_none:"-" }}</td><td>{% if sub.is_attendance_component %}Attendance component{% else %}-{% endif %}</td>
+            </tr>
+            {% for detail in sub.details %}
+            <tr class="subcategory-total">
+              <td>{{ component.name }}</td><td>{{ sub.name }}</td><td><strong>{{ detail.name }}</strong></td><td class="text-end">{{ detail.weight }}%</td>
+              <td class="text-end">-</td><td class="text-end">-</td><td class="text-end">{{ detail.score|default_if_none:"-" }}</td><td>Subcategory Score</td>
+            </tr>
+            {% for activity in detail.activities %}
+            <tr><td>{{ component.name }}</td><td>{{ detail.name }}</td><td>{{ activity.title }}</td><td class="text-end">-</td>
+              <td class="text-end">{{ activity.raw_score|default_if_none:"-" }}</td><td class="text-end">{{ activity.total_score }}</td>
+              <td class="text-end">{{ activity.computed_score|default_if_none:"-" }}</td><td>{% if activity.missing %}<span class="badge text-bg-light">missing</span>{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+            {% endfor %}
+            {% for activity in sub.activities %}
+            <tr><td>{{ component.name }}</td><td>{{ sub.name }}</td><td>{{ activity.title }}</td><td class="text-end">-</td>
+              <td class="text-end">{{ activity.raw_score|default_if_none:"-" }}</td><td class="text-end">{{ activity.total_score }}</td>
+              <td class="text-end">{{ activity.computed_score|default_if_none:"-" }}</td><td>{% if activity.missing %}<span class="badge text-bg-light">missing</span>{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+            {% for attendance in sub.attendance_records %}
+            <tr><td>{{ component.name }}</td><td>{{ sub.name }}</td><td>{{ attendance.title }}</td><td class="text-end">-</td>
+              <td class="text-end">{{ attendance.status_label }}</td><td class="text-end">-</td><td class="text-end">{{ attendance.mapped_score|default_if_none:"-" }}</td>
+              <td>{% if attendance.missing %}<span class="badge text-bg-light">missing</span>{% else %}Attendance mapping{% endif %}</td>
+            </tr>
+            {% endfor %}
+            {% endfor %}
             {% for activity in component.activities %}
-            <tr>
-              <td>{{ component.name }}</td>
-              <td>Direct activity</td>
-              <td>{{ activity.title }}</td>
-              <td class="text-end">-</td>
-              <td class="text-end">{{ activity.raw_score|default:"-" }}</td>
-              <td class="text-end">{{ activity.total_score }}</td>
-              <td class="text-end">{{ activity.computed_score|default:"-" }}</td>
-              <td>{% if activity.missing %}<span class="badge text-bg-light">missing</span>{% else %}-{% endif %}</td>
+            <tr><td>{{ component.name }}</td><td>Direct activity</td><td>{{ activity.title }}</td><td class="text-end">-</td>
+              <td class="text-end">{{ activity.raw_score|default_if_none:"-" }}</td><td class="text-end">{{ activity.total_score }}</td>
+              <td class="text-end">{{ activity.computed_score|default_if_none:"-" }}</td><td>{% if activity.missing %}<span class="badge text-bg-light">missing</span>{% else %}-{% endif %}</td>
             </tr>
             {% endfor %}
             {% endfor %}
           </tbody>
         </table>
+        <div class="small text-muted mt-2">Attendance mapping: Present = 100, Excused = 100, Late = 90, Absent = 0.</div>
+        {% endif %}
       </div>
-      <div class="small text-muted mt-2">Attendance mapping: Present = 100, Excused = 100, Late = 90, Absent = 0.</div>
+
+      <div class="grade-explain-card mt-3">
+        <div class="grade-explain-card-title">Calculation Settings</div>
+        <div class="grade-explain-metric"><span>Grade Formula Setup</span><strong>{{ explanation.template.name }} ({{ explanation.template.source_label }})</strong></div>
+        <div class="grade-explain-metric"><span>Grading Profile</span><strong>{{ explanation.profile.name }}</strong></div>
+        <div class="grade-explain-metric"><span>Passing Grade</span><strong>{{ explanation.passing_threshold.value }}</strong></div>
+        <div class="grade-explain-metric"><span>Base Value</span><strong>{{ explanation.base_value.value }}</strong></div>
+        <div class="grade-explain-metric"><span>Rounding</span><strong>{{ explanation.rounding_policy.mode }}</strong></div>
+      </div>
     </div>
   </details>
-  {% endif %}
 
   {% if explanation.correction_history %}
-  <div class="border rounded-3 p-3">
-    <div class="text-uppercase text-muted small fw-semibold mb-2">Correction History</div>
-    <div class="table-responsive">
+  <details class="grade-explain-details">
+    <summary>View correction history</summary>
+    <div class="grade-explain-details-body table-responsive">
       <table class="table table-sm align-middle mb-0">
         <thead><tr><th>Request</th><th>Period</th><th>Item</th><th>Original</th><th>Corrected</th><th>Approved By</th><th>Approved At</th></tr></thead>
         <tbody>
           {% for item in explanation.correction_history %}
           <tr>
-            <td>#{{ item.request_id }}</td>
-            <td>{{ item.period }}</td>
-            <td>{{ item.item }}</td>
-            <td>{{ item.old_value|default:"-" }}</td>
-            <td>{{ item.new_value|default:"-" }}</td>
-            <td>{{ item.approved_by|default:"-" }}</td>
-            <td>{{ item.approved_at|date:"M d, Y H:i"|default:"-" }}</td>
+            <td>#{{ item.request_id }}</td><td>{{ item.period }}</td><td>{{ item.item }}</td>
+            <td>{{ item.old_value|default_if_none:"-" }}</td><td>{{ item.new_value|default_if_none:"-" }}</td>
+            <td>{{ item.approved_by|default:"-" }}</td><td>{{ item.approved_at|date:"M d, Y H:i"|default:"-" }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-  </div>
+  </details>
   {% endif %}
 </div>
 {% endif %}

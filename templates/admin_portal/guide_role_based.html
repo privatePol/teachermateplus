@@ -1,0 +1,154 @@
+{% extends "admin_portal/base.html" %}
+
+{% block title %}Admin Portal Help Guide | TeacherMate+{% endblock %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .help-shell { max-width: 1180px; margin: 0 auto; padding-bottom: 4rem; }
+  .help-hero { padding: 1.5rem; border: 1px solid #d7e3da; border-radius: 8px; background: linear-gradient(120deg, #eff7ef, #fff8d8); }
+  .help-hero h1 { color: #173f29; font-size: 1.8rem; margin-bottom: .45rem; }
+  .help-hero p { color: #496454; margin-bottom: 0; }
+  .help-scope-note { margin-top: .8rem; padding: .7rem .8rem; border-left: 4px solid #2f8050; background: rgba(255,255,255,.72); color: #31523e; }
+  .help-nav { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+  .help-nav a { border: 1px solid #cadbce; border-radius: 6px; padding: .45rem .7rem; color: #22553a; background: #fff; text-decoration: none; font-weight: 700; font-size: .88rem; }
+  .help-section { scroll-margin-top: 5rem; margin-top: 1.25rem; }
+  .help-section-head { border-bottom: 2px solid #2f8050; padding-bottom: .55rem; margin-bottom: .8rem; }
+  .help-section-head h2 { color: #173f29; font-size: 1.3rem; margin: 0; }
+  .help-section-head p { color: #667b6c; margin: .2rem 0 0; }
+  .help-topic { border: 1px solid #d9e4dc; border-radius: 8px; background: #fff; margin-bottom: 1rem; overflow: hidden; }
+  .help-topic-head { padding: .9rem 1rem; background: #f3f8f4; border-bottom: 1px solid #d9e4dc; }
+  .help-topic-head h3 { color: #204b32; font-size: 1.08rem; margin: 0; }
+  .help-audience { color: #657c6c; font-size: .86rem; margin-top: .25rem; }
+  .help-topic-body { padding: 1rem; }
+  .help-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; margin-bottom: .9rem; }
+  .help-block { border-left: 3px solid #83a43a; padding-left: .75rem; }
+  .help-block h4 { color: #264d36; font-size: .92rem; margin: 0 0 .35rem; }
+  .help-block p, .help-block li { color: #536b5b; font-size: .9rem; }
+  .help-block ul { margin: 0; padding-left: 1.05rem; }
+  .help-block li + li { margin-top: .25rem; }
+  .help-action-table { width: 100%; border-collapse: collapse; font-size: .86rem; margin-top: .7rem; }
+  .help-action-table th, .help-action-table td { border: 1px solid #dbe5de; padding: .55rem; vertical-align: top; }
+  .help-action-table th { background: #edf5ef; color: #264d36; }
+  .help-workflow { margin-top: .85rem; padding: .8rem; background: #fff9df; border: 1px solid #eadb91; border-radius: 6px; }
+  .help-workflow strong { color: #5c4b12; }
+  .help-workflow-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem .8rem; margin-top: .45rem; color: #625b3b; font-size: .88rem; }
+  .help-empty { padding: 1rem; border: 1px solid #d9e4dc; background: #fff; color: #536b5b; }
+  @media (max-width: 800px) {
+    .help-grid, .help-workflow-grid { grid-template-columns: 1fr; }
+    .help-action-table { display: block; overflow-x: auto; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="help-shell" id="help-top">
+  <header class="help-hero">
+    <h1>Admin Portal Help Guide</h1>
+    <p>Practical instructions for the pages and responsibilities available to your account.</p>
+    <div class="help-scope-note">
+      Guide topics are filtered by your current permissions. Sensitive Superadmin instructions are not shown to Campus Admin or other operational roles.
+    </div>
+  </header>
+
+  {% if help_sections %}
+  <nav class="help-nav" aria-label="Help topics">
+    {% for section in help_sections %}
+    <a href="#help-{{ section.code }}">{{ section.title }}</a>
+    {% endfor %}
+  </nav>
+
+  {% for section in help_sections %}
+  <section class="help-section" id="help-{{ section.code }}">
+    <div class="help-section-head">
+      <h2>{{ section.title }}</h2>
+      <p>{{ section.summary }}</p>
+    </div>
+
+    {% for topic in section.topics %}
+    {% if topic.code == "dashboard-scope" %}<span id="quick-start"></span><span id="scope"></span>{% endif %}
+    {% if topic.code == "academic-records" %}<span id="cfg"></span><span id="records"></span><span id="imports"></span>{% endif %}
+    {% if topic.code == "people-and-classes" %}<span id="assignment-acceptance"></span>{% endif %}
+    {% if topic.code == "grading-template" %}<span id="grading-template-calculator"></span>{% endif %}
+    {% if topic.code == "grading-assignment" %}<span id="settings"></span>{% endif %}
+    {% if topic.code == "submission-monitor" %}<span id="submission"></span>{% endif %}
+    {% if topic.code == "corrections" %}<span id="corrections"></span>{% endif %}
+    {% if topic.code == "reports" %}<span id="audit"></span><span id="ops"></span><span id="policies"></span>{% endif %}
+    {% if topic.code == "users" %}<span id="security"></span>{% endif %}
+    {% if topic.code == "system-control" %}<span id="incident-response"></span>{% endif %}
+    <article class="help-topic" id="help-{{ topic.code }}">
+      <header class="help-topic-head">
+        <h3>{{ topic.title }}</h3>
+        <div class="help-audience"><strong>Who should use this:</strong> {{ topic.audience }}</div>
+      </header>
+      <div class="help-topic-body">
+        <div class="help-grid">
+          <section class="help-block">
+            <h4>What is this for?</h4>
+            <p>{{ topic.purpose }}</p>
+          </section>
+          <section class="help-block">
+            <h4>What should I check first?</h4>
+            <ul>{% for item in topic.check_first %}<li>{{ item }}</li>{% endfor %}</ul>
+          </section>
+          <section class="help-block">
+            <h4>What should I avoid?</h4>
+            <p>{{ topic.avoid }}</p>
+          </section>
+          <section class="help-block">
+            <h4>What is the next step?</h4>
+            <p>{{ topic.next_step }}</p>
+          </section>
+        </div>
+
+        {% if topic.actions %}
+        <h4 class="mb-2">Actions and buttons</h4>
+        <table class="help-action-table">
+          <thead>
+            <tr>
+              <th>Action</th>
+              <th>What it does</th>
+              <th>When to use it</th>
+              <th>Do not use it when</th>
+              <th>What happens next</th>
+              <th>Can it still be edited?</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for action in topic.actions %}
+            <tr>
+              <th>{{ action.name }}</th>
+              <td>{{ action.does }}</td>
+              <td>{{ action.when }}</td>
+              <td>{{ action.avoid }}</td>
+              <td>{{ action.result }}</td>
+              <td>{{ action.editable }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+
+        {% if topic.workflow %}
+        <section class="help-workflow">
+          <strong>Complete workflow</strong>
+          <div class="help-workflow-grid">
+            <div><strong>Who starts:</strong> {{ topic.workflow.starts }}</div>
+            <div><strong>Who reviews:</strong> {{ topic.workflow.reviews }}</div>
+            <div><strong>Who approves:</strong> {{ topic.workflow.approves }}</div>
+            <div><strong>Who receives the result:</strong> {{ topic.workflow.receives }}</div>
+            <div><strong>When complete:</strong> {{ topic.workflow.complete }}</div>
+            <div><strong>Records updated:</strong> {{ topic.workflow.records }}</div>
+          </div>
+        </section>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% endfor %}
+  {% else %}
+  <div class="help-empty mt-3">No guide topics are available for the current account and scope.</div>
+  {% endif %}
+</main>
+{% endblock %}

@@ -1248,6 +1248,30 @@
     </div>
     </div>
   </div>
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-help-guide" aria-expanded="false" aria-controls="feature-card-help-guide">
+      <strong>Help Guide Version</strong>
+      <span class="toggle-indicator" aria-hidden="true">&#8964;</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-help-guide" aria-expanded="false" aria-controls="feature-card-help-guide">
+      <span class="settings-card-summary-title">Role-Based Help Guide</span>
+      <span class="settings-card-summary-text">Use the revised practical guide or restore the previous guide pages without removing either version.</span>
+    </button>
+    <div id="feature-card-help-guide" class="collapse">
+      <div class="card-body">
+        <div class="form-check form-switch mb-0">
+          {{ form.role_based_help_guide_enabled }}
+          <label class="form-check-label" for="{{ form.role_based_help_guide_enabled.id_for_label }}">
+            {{ form.role_based_help_guide_enabled.label }}
+          </label>
+          {% if form.role_based_help_guide_enabled.help_text %}
+          <div class="form-text">{{ form.role_based_help_guide_enabled.help_text }}</div>
+          {% endif %}
+          {% for error in form.role_based_help_guide_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
   </div>
 
   <div class="settings-footer">

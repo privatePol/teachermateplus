@@ -443,10 +443,10 @@ class SubmissionNonComplianceNoticeService:
     @classmethod
     def _title_for_level(cls, level: str) -> str:
         return {
-            SubmissionNonComplianceNotice.NoticeLevel.NOTICE: "Notice for Non-Compliance",
-            SubmissionNonComplianceNotice.NoticeLevel.WARNING: "Warning for Continued Non-Compliance",
-            SubmissionNonComplianceNotice.NoticeLevel.ESCALATION: "Escalation for Unresolved Non-Compliance",
-        }.get(level, "Notice for Non-Compliance")
+            SubmissionNonComplianceNotice.NoticeLevel.NOTICE: "Course Gradebook Not Submitted",
+            SubmissionNonComplianceNotice.NoticeLevel.WARNING: "Course Gradebook Still Not Submitted",
+            SubmissionNonComplianceNotice.NoticeLevel.ESCALATION: "Escalation: Course Gradebook Not Submitted",
+        }.get(level, "Course Gradebook Not Submitted")
 
     @classmethod
     def _message_for_level(cls, *, level: str, offering, template_period, deadline_at):
@@ -458,8 +458,8 @@ class SubmissionNonComplianceNoticeService:
         }.get(level, "The periodic grade submission is overdue.")
         return (
             f"{prefix} "
-            f"Class: {offering.course.code} / {offering.section.code}. "
-            f"Period: {template_period.name}. "
+            f"Unsubmitted course gradebook: {offering.course.title} ({offering.course.code}) / "
+            f"{offering.section.name or offering.section.code}, {template_period.name}. "
             f"Original deadline: {deadline_text}. "
             "Please complete any missing records and submit the period as soon as possible."
         )
@@ -531,6 +531,7 @@ class SubmissionNonComplianceNoticeService:
                 offering_id__in=offering_ids,
                 is_active=True,
                 faculty_user__is_active=True,
+                accepted_at__isnull=False,
             ).select_related("faculty_user")
         )
         assignments_by_offering = {}
@@ -540,8 +541,7 @@ class SubmissionNonComplianceNoticeService:
         for offering_id, assignments in grouped_assignments.items():
             accepted_primary = next((row for row in assignments if row.accepted_at and row.is_primary), None)
             accepted_any = next((row for row in assignments if row.accepted_at), None)
-            primary_any = next((row for row in assignments if row.is_primary), None)
-            assignments_by_offering[offering_id] = accepted_primary or accepted_any or primary_any or assignments[0]
+            assignments_by_offering[offering_id] = accepted_primary or accepted_any
 
         targets = []
         for (offering_id, period_key), lock in lock_targets.items():
@@ -785,10 +785,7 @@ class SubmissionNonComplianceNoticeService:
                 template_period=template_period,
                 faculty_user=faculty_user,
             )
-            interval_days = FeatureSettingsService.get_submission_non_compliance_notice_interval_days(
-                tenant_id=offering.tenant_id
-            )
-            if latest_notice and now < latest_notice.issued_at + timedelta(days=interval_days):
+            if latest_notice and timezone.localdate(now) <= timezone.localdate(latest_notice.issued_at):
                 continue
             if latest_notice is None:
                 level = SubmissionNonComplianceNotice.NoticeLevel.NOTICE

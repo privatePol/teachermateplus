@@ -974,7 +974,7 @@
               <tr>
                 <td>Deadline Enforcement Policy</td>
                 <td><strong>Admin Portal -> Tools -> Configuration Management -> Grade Deadline Enforcement</strong></td>
-                <td>Choose whether overdue gradebooks stay open or automatically close encoding after the deadline.</td>
+                <td>Enable automatic deadline closure or disable it when the institution intentionally wants unlocked gradebooks to remain open.</td>
               </tr>
               <tr>
                 <td>Grade Submission Status</td>
@@ -1006,11 +1006,12 @@
             <li>Use <strong>Scope Type: Campus</strong> when the same deadline applies to all classes in the campus.</li>
             <li>Use <strong>Scope Type: Course Offering</strong> only when one class needs a different rule.</li>
             <li>Turn on <strong>Is active</strong>. Inactive rules are ignored.</li>
-            <li>Use <strong>Configuration Management -> Grade Deadline Enforcement</strong> to keep the tenant's deadline workflow label aligned with policy.</li>
+            <li>Use <strong>Configuration Management -> Grade Deadline Enforcement</strong> to enable or disable automatic deadline closure.</li>
             <li>After the deadline or period lock, faculty must send a reopen request before encoding or submitting an unsubmitted gradebook.</li>
             <li>After the deadline, submitted/finalized gradebooks must use <strong>Correction of Grades</strong>. Do not use Gradebook Reopen Request for submitted gradebooks after deadline.</li>
             <li>After the deadline, monitor late rows in <strong>Non-Compliance on Periodic Grades Submission</strong>.</li>
-            <li>Review faculty reopen requests in <strong>Submission Reopen Requests</strong>. Once approved, the reopen window lasts 24 hours only.</li>
+            <li>Only users explicitly assigned <code>reopen_requests.review</code> by the Superadmin for the affected tenant/campus may review faculty reopen requests in <strong>Submission Reopen Requests</strong>. Once approved, the reopen window lasts 24 hours only.</li>
+            <li>Keep the daily <code>issue_submission_non_compliance_notices</code> production cron active so accepted faculty receive one follow-up per unsubmitted course gradebook each day until submission.</li>
           </ol>
           <div class="guide-note">
             Simple rule: Active Grading Period tells faculty which period is the current focus. Period Locks tell TeacherMate+ the deadline for each campus and period.

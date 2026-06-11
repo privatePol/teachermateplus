@@ -38,6 +38,7 @@ from apps.faculty_portal.forms import (
     GradeCorrectionRequestForm,
 )
 from apps.faculty_portal.services import StudentInterventionService
+from apps.faculty_portal.help_guide import FACULTY_HELP_SECTIONS
 from apps.grading.models import (
     CourseTemplateAssignment,
     FacultyFinalClearanceReport,
@@ -203,7 +204,14 @@ def public_index_view(request):
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def guide_view(request):
-    return render(request, "faculty_portal/guide.html")
+    tenant_id = getattr(request, "scope", {}).get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    if not FeatureSettingsService.is_role_based_help_guide_enabled(tenant_id=tenant_id, default=True):
+        return render(request, "faculty_portal/guide.html")
+    return render(
+        request,
+        "faculty_portal/guide_role_based.html",
+        {"help_sections": FACULTY_HELP_SECTIONS},
+    )
 
 
 @portal_required("FACULTY")
@@ -738,6 +746,15 @@ def _average_label_from_section_label(label, fallback_label="AVE"):
     return f"{words[0].upper()} AVE" if words else fallback_label
 
 
+def _summary_section_color_class(label):
+    value = str(label or "").strip().upper()
+    if "QUIZ" in value:
+        return "summary-group-quizzes"
+    if "PARTICIPATION" in value or "OUTPUT" in value:
+        return "summary-group-participation"
+    return "summary-group-standard"
+
+
 def _activity_title_sort_key(title: str):
     value = (title or "").strip().upper()
     match = re.match(r"^([A-Z]+)\s*([0-9]+)?(.*)$", value)
@@ -824,6 +841,7 @@ def _build_summary_layout(period, activities):
                         {
                             "id": subcomponent.id,
                             "label": subcomponent.name.upper(),
+                            "color_class": _summary_section_color_class(subcomponent.name or subcomponent.code),
                             "uses_nested": True,
                             "groups": visible_detail_groups,
                             "avg_label": _average_label_from_section_label(
@@ -844,6 +862,7 @@ def _build_summary_layout(period, activities):
                         {
                             "id": subcomponent.id,
                             "label": subcomponent.name.upper(),
+                            "color_class": _summary_section_color_class(subcomponent.name or subcomponent.code),
                             "uses_nested": False,
                             "activity_ids": [activity.id for activity in ordered_sub_activities],
                             "activity_columns": [
@@ -871,6 +890,7 @@ def _build_summary_layout(period, activities):
                 {
                     "id": component.id,
                     "label": component.name.upper(),
+                    "color_class": _summary_section_color_class(component.name or component.code),
                     "uses_nested": False,
                     "activity_ids": [activity.id for activity in direct_activities],
                     "activity_columns": [

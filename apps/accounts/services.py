@@ -649,30 +649,16 @@ class AdminPasswordResetOtpService:
     def _send_email(cls, *, request, user, challenge: LoginOtpChallenge, code: str) -> int:
         subject = format_email_subject("Admin Password Reset Code")
         from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
-        logo_context = build_email_logo_context(
-            filename="ncba-logo.png",
-            cid="ncba-logo",
-            external_url=getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
-            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
-        )
         context = {
             "user": user,
             "otp_code": code,
             "expires_at": challenge.expires_at,
             "expires_in_minutes": max(1, int(((challenge.expires_at - timezone.now()).total_seconds() + 59) // 60)),
             "admin_reset_url": request.build_absolute_uri(reverse("accounts:admin_password_reset_otp")) if request else "",
-            **logo_context,
         }
         text_body = render_to_string("accounts/emails/admin_password_reset_otp.txt", context)
         html_body = render_to_string("accounts/emails/admin_password_reset_otp.html", context)
         message = EmailMultiAlternatives(subject=subject, body=text_body, from_email=from_email, to=[challenge.sent_to_email])
-        attach_logo_for_src(
-            message,
-            src=logo_context["email_logo_src"],
-            filename="ncba-logo.png",
-            cid="ncba-logo",
-            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
-        )
         message.attach_alternative(html_body, "text/html")
         return message.send(fail_silently=False)
 

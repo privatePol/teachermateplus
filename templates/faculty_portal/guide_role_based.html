@@ -1,0 +1,117 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block title %}Faculty Help Guide | TeacherMate+{% endblock %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .faculty-help { max-width: 1160px; margin: 0 auto; padding-bottom: 4rem; }
+  .faculty-help-hero { padding: 1.5rem; border-radius: 8px; color: #fff; background: linear-gradient(120deg, #125232, #32804b 66%, #b6a91d); }
+  .faculty-help-hero-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .faculty-help-hero h1 { font-size: 1.85rem; margin-bottom: .4rem; }
+  .faculty-help-hero p { margin: 0; color: rgba(255,255,255,.88); }
+  .faculty-help-back { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.62); border-radius: 6px; padding: .5rem .75rem; color: #fff; text-decoration: none; font-weight: 700; background: rgba(255,255,255,.12); }
+  .faculty-help-back:hover { color: #173f29; background: #fff; }
+  .faculty-help-nav { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+  .faculty-help-nav a { border: 1px solid #cadbce; border-radius: 6px; padding: .45rem .7rem; color: #22553a; background: #fff; text-decoration: none; font-weight: 700; font-size: .88rem; }
+  .faculty-help-section { scroll-margin-top: 5rem; margin-top: 1.2rem; }
+  .faculty-help-section > h2 { color: #173f29; font-size: 1.3rem; border-bottom: 2px solid #d0b921; padding-bottom: .5rem; }
+  .faculty-help-topic { border: 1px solid #d9e4dc; border-radius: 8px; background: #fff; margin: .85rem 0; overflow: hidden; }
+  .faculty-help-topic h3 { margin: 0; padding: .85rem 1rem; color: #204b32; font-size: 1.08rem; background: #f3f8f4; border-bottom: 1px solid #d9e4dc; }
+  .faculty-help-body { padding: 1rem; }
+  .faculty-help-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .8rem; }
+  .faculty-help-block { border-left: 3px solid #7ca13b; padding-left: .75rem; }
+  .faculty-help-block h4 { color: #284f38; font-size: .92rem; margin: 0 0 .35rem; }
+  .faculty-help-block p, .faculty-help-block li { color: #526a5a; font-size: .9rem; }
+  .faculty-help-block ul { margin: 0; padding-left: 1.05rem; }
+  .faculty-help-actions { width: 100%; border-collapse: collapse; margin-top: .9rem; font-size: .86rem; }
+  .faculty-help-actions th, .faculty-help-actions td { border: 1px solid #dbe5de; padding: .55rem; vertical-align: top; }
+  .faculty-help-actions th { background: #edf5ef; color: #264d36; }
+  .faculty-help-workflow { margin-top: .85rem; padding: .8rem; border-radius: 6px; border: 1px solid #eadb91; background: #fff9df; color: #625b3b; font-size: .88rem; }
+  .faculty-help-workflow-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .4rem .8rem; margin-top: .4rem; }
+  @media (max-width: 800px) {
+    .faculty-help-hero-row { flex-direction: column; }
+    .faculty-help-grid, .faculty-help-workflow-grid { grid-template-columns: 1fr; }
+    .faculty-help-actions { display: block; overflow-x: auto; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="faculty-help" id="faculty-help-top">
+  <header class="faculty-help-hero">
+    <div class="faculty-help-hero-row">
+      <div>
+        <h1>Faculty Help Guide</h1>
+        <p>Short, practical answers for accepting classes, encoding grades, checking computations, submitting, reopening, and correcting grades.</p>
+      </div>
+      <a class="faculty-help-back" href="{% url 'faculty_portal:dashboard' %}">&larr; Back to Dashboard</a>
+    </div>
+  </header>
+  <span id="guide-workflow"></span>
+
+  <nav class="faculty-help-nav" aria-label="Faculty help topics">
+    {% for section in help_sections %}<a href="#faculty-help-{{ section.code }}">{{ section.title }}</a>{% endfor %}
+  </nav>
+
+  {% for section in help_sections %}
+  <section class="faculty-help-section" id="faculty-help-{{ section.code }}">
+    <h2>{{ section.title }}</h2>
+    {% for topic in section.topics %}
+    {% if topic.code == "assignments" %}<span id="guide-archived"></span>{% endif %}
+    {% if topic.code == "login" %}<span id="guide-password"></span><span id="guide-first-login"></span>{% endif %}
+    {% if topic.code == "attendance" %}<span id="guide-attendance-summary"></span>{% endif %}
+    {% if topic.code == "support-security" %}<span id="guide-privacy"></span>{% endif %}
+    <article class="faculty-help-topic" id="guide-{{ topic.code }}">
+      <h3>{{ topic.title }}</h3>
+      <div class="faculty-help-body">
+        <div class="faculty-help-grid">
+          <section class="faculty-help-block">
+            <h4>What is this page for?</h4>
+            <p>{{ topic.purpose }}</p>
+          </section>
+          <section class="faculty-help-block">
+            <h4>What should I check first?</h4>
+            <ul>{% for item in topic.check_first %}<li>{{ item }}</li>{% endfor %}</ul>
+          </section>
+          <section class="faculty-help-block">
+            <h4>What should I avoid?</h4>
+            <p>{{ topic.avoid }}</p>
+          </section>
+          <section class="faculty-help-block">
+            <h4>What is the next step?</h4>
+            <p>{{ topic.next_step }}</p>
+          </section>
+        </div>
+
+        {% if topic.actions %}
+        <table class="faculty-help-actions">
+          <thead><tr><th>Action</th><th>What it does</th><th>When to click</th><th>When not to click</th><th>What happens</th><th>Can it be edited?</th></tr></thead>
+          <tbody>
+            {% for action in topic.actions %}
+            <tr><th>{{ action.name }}</th><td>{{ action.does }}</td><td>{{ action.when }}</td><td>{{ action.avoid }}</td><td>{{ action.result }}</td><td>{{ action.editable }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+
+        {% if topic.workflow %}
+        <section class="faculty-help-workflow">
+          <strong>Complete workflow</strong>
+          <div class="faculty-help-workflow-grid">
+            <div><strong>Who starts:</strong> {{ topic.workflow.starts }}</div>
+            <div><strong>Who reviews:</strong> {{ topic.workflow.reviews }}</div>
+            <div><strong>Who approves:</strong> {{ topic.workflow.approves }}</div>
+            <div><strong>Who receives the result:</strong> {{ topic.workflow.receives }}</div>
+            <div><strong>When complete:</strong> {{ topic.workflow.complete }}</div>
+            <div><strong>Records updated:</strong> {{ topic.workflow.records }}</div>
+          </div>
+        </section>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% endfor %}
+</main>
+{% endblock %}

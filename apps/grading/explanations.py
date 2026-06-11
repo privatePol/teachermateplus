@@ -244,6 +244,16 @@ class GradeExplanationService:
             student=student,
         ).first()
         official_value = period_row.period_grade if period_row else None
+        submission = GradingGovernanceService.get_submission(
+            offering=offering,
+            template_period=template_period,
+        )
+        is_submitted = bool(submission and submission.status == GradeSubmission.Status.SUBMITTED)
+        diagnostic_differs_from_official = bool(
+            period_row
+            and period_detail["period_grade"] is not None
+            and period_detail["period_grade"] != period_row.period_grade
+        )
         payload.update(
             {
                 "period": {
@@ -254,6 +264,8 @@ class GradeExplanationService:
                 "official_value": official_value,
                 "raw_value": period_detail["period_grade_raw"],
                 "computed_official_value": period_detail["period_grade"],
+                "diagnostic_differs_from_official": diagnostic_differs_from_official,
+                "is_submitted": is_submitted,
                 "class_standing": period_row.class_standing_grade if period_row else None,
                 "exam_grade": period_row.exam_grade if period_row else None,
                 "class_standing_raw": period_detail["class_standing_raw"],
@@ -274,8 +286,16 @@ class GradeExplanationService:
         payload["warnings"].append(cls._submission_note(offering=offering, template_period=template_period))
         if period_row is None:
             payload["warnings"].append("No stored period-grade row is available yet.")
-        elif period_detail["period_grade"] != period_row.period_grade:
-            payload["warnings"].append("Stored period grade differs from the current diagnostic recomputation path.")
+        elif diagnostic_differs_from_official:
+            if is_submitted:
+                payload["warnings"].append(
+                    "The grading setup or source records changed after this grade was submitted. "
+                    "The official submitted grade remains unchanged."
+                )
+            else:
+                payload["warnings"].append(
+                    "The stored grade differs from a fresh calculation using the current grading setup."
+                )
         if include_correction_history:
             payload["correction_history"] = cls._correction_history(
                 offering=offering,

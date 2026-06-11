@@ -280,17 +280,17 @@ class GradebookReopenNotificationService:
                 campus_id__in=[request_obj.campus_id, None],
             ).values_list("user_id", flat=True)
         )
-        candidate_user_ids.update(User.objects.filter(is_active=True, is_superuser=True).values_list("id", flat=True))
-
         role_name_by_user_id = {}
         for row in role_rows:
             role_name_by_user_id.setdefault(row.user_id, row.role.name)
 
         recipients = []
         seen = set()
-        users = User.objects.filter(id__in=candidate_user_ids, is_active=True).order_by("last_name", "first_name", "id")
+        users = User.objects.filter(id__in=candidate_user_ids, is_active=True).order_by(
+            "last_name", "first_name", "id"
+        )
         for user in users:
-            if not PermissionService.has_permission(
+            if not PermissionService.has_assigned_permission(
                 user,
                 permission_code,
                 tenant_id=request_obj.tenant_id,
@@ -304,10 +304,13 @@ class GradebookReopenNotificationService:
             if key in seen:
                 continue
             seen.add(key)
-            role_name = role_name_by_user_id.get(user.id)
-            if not role_name and user.is_superuser:
-                role_name = "Superuser"
-            recipients.append({"user": user, "role_name": role_name or "Authorized Reopen Reviewer", "email": email})
+            recipients.append(
+                {
+                    "user": user,
+                    "role_name": role_name_by_user_id.get(user.id) or "Assigned Reopen Reviewer",
+                    "email": email,
+                }
+            )
         return recipients
 
     @classmethod

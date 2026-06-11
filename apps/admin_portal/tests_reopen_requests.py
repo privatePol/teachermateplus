@@ -105,7 +105,7 @@ class GradeSubmissionReopenRequestReviewTests(TestCase):
             privacy_consent_version="2026-03",
             privacy_consent_at=timezone.now(),
         )
-        role = Role.objects.create(code="REGISTRAR", name="Registrar")
+        role = Role.objects.create(code="DEAN", name="Dean")
         for code, module, action in [
             ("admin_portal.access", "admin_portal", "access"),
             ("dashboard.read", "dashboard", "read"),
@@ -204,6 +204,40 @@ class GradeSubmissionReopenRequestReviewTests(TestCase):
             approved=True,
             review_remarks="Approved for completion.",
         )
+
+        self.assertFalse(
+            GradingGovernanceService.is_auto_closed_after_deadline(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+        self.assertTrue(
+            GradingGovernanceService.assert_encoding_allowed(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+
+    def test_disabled_deadline_policy_keeps_unlocked_gradebook_open_after_deadline(self):
+        SystemSettingService.set(
+            FeatureSettingsService.GRADE_DEADLINE_ENFORCEMENT_POLICY_KEY,
+            FeatureSettingsService.GRADE_DEADLINE_POLICY_DISABLED,
+            tenant_id=self.tenant.id,
+            value_type="STRING",
+            is_active=True,
+        )
+        GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.period.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=timezone.now() - timezone.timedelta(hours=1),
+            is_locked=False,
+        )
+        self.submission.status = GradeSubmission.Status.DRAFT
+        self.submission.save(update_fields=["status", "updated_at"])
 
         self.assertFalse(
             GradingGovernanceService.is_auto_closed_after_deadline(
@@ -444,7 +478,7 @@ class GradeSubmissionReopenRequestReviewTests(TestCase):
             reverse("admin_portal:grade_submission_reopen_request_review", args=[reopen_request.id]),
         )
 
-    def test_reopen_request_email_uses_effective_review_permission_recipients(self):
+    def test_reopen_request_email_is_sent_to_explicitly_assigned_reviewers(self):
         permission = Permission.objects.get(code="reopen_requests.review")
         direct_reviewer = User.objects.create_user(
             username="direct_reopen_reviewer",
@@ -495,15 +529,84 @@ class GradeSubmissionReopenRequestReviewTests(TestCase):
             request_obj=reopen_request,
         )
 
-        self.assertEqual(result["attempted"], 3)
-        self.assertEqual(result["sent"], 3)
+        self.assertEqual(result["attempted"], 2)
+        self.assertEqual(result["sent"], 2)
         self.assertCountEqual(
             result["recipients"],
-            [
-                "reopen_admin@example.com",
-                "direct_reviewer@example.com",
-                "super_reviewer@example.com",
-            ],
+            ["reopen_admin@example.com", "direct_reviewer@example.com"],
         )
+        self.assertNotIn(superuser.email, result["recipients"])
         self.assertNotIn(no_permission_user.email, result["recipients"])
-        self.assertEqual(len(mail.outbox), 3)
+        self.assertEqual(len(mail.outbox), 2)
+
+    def test_any_scoped_role_assigned_by_superadmin_can_review_reopen_request(self):
+        reviewer_role = Role.objects.create(code="ACADEMIC_REVIEWER", name="Academic Reviewer")
+        for code in ["admin_portal.access", "reopen_requests.read", "reopen_requests.review"]:
+            RolePermission.objects.create(
+                role=reviewer_role,
+                permission=Permission.objects.get(code=code),
+            )
+        reviewer_user = User.objects.create_user(
+            username="assigned_reopen_reviewer",
+            email="assigned_reopen_reviewer@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version="2026-03",
+            privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(
+            user=reviewer_user,
+            role=reviewer_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        reopen_request = GradeSubmissionReopenRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            submission=self.submission,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.admin_user,
+            status=GradeSubmissionReopenRequest.Status.PENDING,
+            justification="Need to finish required records.",
+        )
+
+        self.client.force_login(reviewer_user)
+        response = self.client.post(
+            reverse("admin_portal:grade_submission_reopen_request_review", args=[reopen_request.id]),
+            {"decision": "APPROVE", "review_remarks": "Approved by assigned reviewer."},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        reopen_request.refresh_from_db()
+        self.assertEqual(reopen_request.status, GradeSubmissionReopenRequest.Status.APPROVED)
+        self.assertEqual(reopen_request.reviewed_by_user, reviewer_user)
+
+    def test_unassigned_superuser_cannot_review_reopen_request(self):
+        superuser = User.objects.create_superuser(
+            username="unassigned_superuser",
+            email="unassigned_superuser@example.com",
+            password="testpass123",
+        )
+        reopen_request = GradeSubmissionReopenRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            submission=self.submission,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.admin_user,
+            status=GradeSubmissionReopenRequest.Status.PENDING,
+            justification="Need to finish required records.",
+        )
+
+        with self.assertRaisesMessage(ValidationError, "explicitly assigned"):
+            GradingGovernanceService.review_reopen_request(
+                request_obj=reopen_request,
+                reviewer=superuser,
+                approved=True,
+                review_remarks="Should not be allowed.",
+            )

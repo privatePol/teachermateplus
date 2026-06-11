@@ -1,17 +1,80 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-06-10
+Last updated by Codex: 2026-06-11
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
-- Date: 2026-06-10
-- Session focus: Added optional average-based faculty-activity rollup for grading-template subcomponents, requested for Participation/Output-style categories.
+- Date: 2026-06-11
+- Session focus: Implemented reversible, role-based practical Help Guides for Admin and Faculty users.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
+- Faculty forced-password-change navigation lock:
+  - Added a server-driven `password_change_required` state to `/faculty/change-password/`.
+  - Collapsed and locked the left Faculty navigation while `must_change_password` remains active.
+  - Disabled the sidebar toggle and removed portal navigation links from the rendered locked state.
+  - Hid My Signature, Change Password, Help, quick tour, and the password page Back action during the required-change step; Logout remains available.
+  - Added a plain warning explaining that navigation returns after a successful password update.
+  - Confirmed invalid password-change submissions keep the account flag and navigation lock.
+  - Confirmed a successful password update clears `must_change_password`, preserves authentication, redirects to the Faculty dashboard, and restores normal navigation.
+  - Generalized the existing Faculty privacy-consent sidebar lock without changing the Admin privacy-consent shell.
+  - Updated the revised Faculty Help Guide login wording.
+- Faculty Period Summary group-header refinement:
+  - Added separate pale green, pale blue, and pale gold column-group treatments for Quizzes, Participation/Output, and `CS AVE`.
+  - Moved `CS AVE` to the same header level as Quizzes and Participation/Output by making it span the remaining three activity-header rows.
+  - Applied each group color consistently to its activity, average, perfect-score, and student-value cells.
+  - Added semantic summary color metadata and regression assertions for the expected group classes and `CS AVE` rowspan.
+  - Updated the revised Faculty Help Guide wording to mention the color-band grouping.
+  - No grade calculation, stored score, layout column count, or submission behavior was changed.
+- Grade-explanation rounding/source mismatch correction:
+  - Confirmed the official whole-grade rounding function uses `ROUND_HALF_UP` correctly: examples such as `69.72`, `91.50`, and `83.62` round to `70`, `92`, and `84`.
+  - Traced the reported contradictory pairs to the modal combining a stored submitted official grade with a fresh calculation from the current live grading template after the setup or source records changed.
+  - Kept the stored period grade as the prominent official result.
+  - When current recalculation differs, the modal now labels the current rounded result and pre-rounding decimal as a comparison and explains that it does not replace the submitted grade.
+  - Added a stored-grade summary showing the recorded Class Standing, Exam, and official period grade before the current-setup comparison.
+  - Removed the misleading `Official rounded grade` presentation from this mismatch path.
+  - Added regression coverage for a submitted stored grade of `71` that differs from the current grading calculation.
+  - No grade formula, score, database value, correction record, or submission status was changed.
+- Faculty Help Guide navigation and grade-explanation privacy redesign:
+  - Added a visible `Back to Dashboard` action to the revised Faculty Help Guide, including deep-linked sections.
+  - Added an opaque blurred privacy shield behind the `Explain This Grade` modal so the background class list, student names, scores, and grades are not readable.
+  - Reworked the period explanation into a simplified card-first presentation covering dynamic period result, component scores/weights/contributions, class standing categories, grouped activities, and exam details.
+  - Added a plain-language dynamic formula explanation using the real component names.
+  - Renamed technical display labels to faculty-friendly wording without changing service payloads or computation.
+  - Kept the existing complete audit table under a collapsed `View full computation details` section.
+  - Preserved final-grade explanation and correction-history access in collapsible sections.
+  - Added/updated template tests for the guide Back action, privacy shield, simplified explanation sections, and collapsed detail label.
+  - No grading service, model, migration, score, submission, or stored grade value was changed.
+- Role-based Help Guide revision:
+  - Added new practical Admin and Faculty guide templates while preserving the existing templates as the legacy fallback.
+  - Added tenant setting `FEATURE_ROLE_BASED_HELP_GUIDE_ENABLED`, defaulting On, with a `Help Guide Version` card under Configuration Management.
+  - Turning the setting off immediately restores the original Admin and Faculty guide pages.
+  - Added server-side Admin topic filtering using effective tenant/campus permissions.
+  - Added a second Superadmin identity check for the sensitive system-control section; Campus Admin users cannot see that section even if they hold an unusually broad system permission.
+  - Rewrote guide coverage around real user questions: page purpose, audience, first checks, actions, when to use/avoid them, result, editability, next step, workflow ownership, completion, and records updated.
+  - Added Faculty explanations for blank versus zero, Raw Score Base-50, Direct Percentage, Weighted Details, Average Activities, `Q.AVE`, `R.AVE`, `P/O AVE`, `CS AVE`, submission, reopening, corrections, reports, and privacy.
+  - Kept ordinary gradebook states accurate as `Draft`, `Submitted`, and `Reopened`; the guide does not invent ordinary approval or posting states.
+  - Added focused Admin and Faculty regression tests for visibility, content, and legacy fallback.
+- Admin password-recovery branding:
+  - Added the official `media/logos/teachermate_logo_text_official.png` wordmark to all Admin Portal password-recovery screens through a shared partial.
+  - Replaced the Admin forgot-password OTP email logo with the text wordmark `NCBA | TeacherMate+`.
+  - Removed password-reset OTP email logo context generation and CID attachment work.
+  - Added regressions confirming the reset pages render the official wordmark and the OTP email contains no image markup or attachments.
+- Deadline closure/reopen governance policy:
+  - Confirmed unsubmitted gradebooks become non-editable after their configured deadline, regardless of whether the database lock row is manually marked locked.
+  - Confirmed late submission is also blocked until an active approved reopen request exists.
+  - Made reopen review and approval assignment-driven: any active user explicitly assigned `reopen_requests.review` by the Superadmin for the affected tenant/campus can act, regardless of role name.
+  - Matched reopen-request email recipients to those explicit scoped role/direct-user assignments. Scoped deny grants are honored; unassigned superuser status alone does not qualify.
+  - Removed the secondary grade-submission permission requirement so an explicitly assigned reopen reviewer can both review and approve/reject the request.
+  - Confirmed overdue non-compliance notices email the accepted faculty member daily, once per local calendar day, until submission resolves the notices.
+  - Updated non-compliance subjects and bodies to identify the unsubmitted course gradebook, section, and grading period.
+  - Replaced the misleading policy choices with a real Enabled/Disabled control and wired it into deadline closure. Legacy `COMPLIANCE_ONLY` values normalize to Enabled to preserve production behavior.
+  - Limited overdue notice targeting to accepted faculty assignments.
+  - Changed `issue_submission_non_compliance_notices` in the production cron template to daily at 7:15 AM server time.
+  - Converted the unreleased `0012_limit_reopen_review_to_campus_admin` migration to a compatibility no-op so deployment does not remove Superadmin-configured reviewer assignments.
 - Legacy logo template sweep:
   - Scanned the repository for EduGradePlus/EGP logo references and legacy TeacherMatePlus logo display paths.
   - Replaced the Faculty forgot/reset-password shared brand image with `media/logos/teachermate_logo_text_official.png`.
@@ -399,7 +462,45 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Ransomware protection strategy should not rely on antivirus alone. The preferred server-side approach is least privilege, separated upload storage, no-execute mounts, restricted backup credentials, and Synology snapshots/immutability with tested restore procedures.
 
 ## Changed Files This Session
+- `apps/accounts/views.py`
+- `apps/accounts/tests_privacy_consent.py`
+- `apps/grading/explanations.py`
+- `apps/faculty_portal/views.py`
+- `apps/faculty_portal/help_guide.py`
+- `templates/faculty_portal/base.html`
+- `templates/faculty_portal/password_change.html`
+- `templates/faculty_portal/period_summary.html`
+- `templates/grading/grade_explanation_detail.html`
+- `apps/admin_portal/help_guide.py`
+- `apps/admin_portal/tests_help_guide.py`
+- `apps/faculty_portal/help_guide.py`
+- `apps/faculty_portal/tests_help_guide.py`
+- `templates/admin_portal/guide_role_based.html`
+- `templates/faculty_portal/guide_role_based.html`
+- `templates/admin_portal/tools/configurable_features.html`
+- `apps/accounts/services.py`
+- `apps/accounts/tests_admin_password_reset.py`
+- `templates/accounts/emails/admin_password_reset_otp.html`
+- `templates/accounts/emails/admin_password_reset_otp.txt`
+- `templates/admin_portal/partials/password_recovery_brand.html`
+- `templates/admin_portal/password_forgot.html`
+- `templates/admin_portal/password_forgot_done.html`
+- `templates/admin_portal/password_reset_otp.html`
+- `templates/admin_portal/password_reset_confirm.html`
+- `templates/admin_portal/password_reset_complete.html`
 - `apps/core/services/permissions.py`
+- `apps/core/services/features.py`
+- `apps/core/management/commands/seed_stage_0_1.py`
+- `apps/rbac/migrations/0012_limit_reopen_review_to_campus_admin.py`
+- `apps/grading/notifications.py`
+- `apps/notifications/services.py`
+- `apps/notifications/tests.py`
+- `templates/notifications/emails/submission_non_compliance_notice.html`
+- `templates/notifications/emails/submission_non_compliance_notice.txt`
+- `apps/admin_portal/tests_reopen_requests.py`
+- `apps/admin_portal/tests_assignment_acceptance.py`
+- `ops/cron/teachermateplus.cron`
+- `docs/DEPLOYMENT_UBUNTU.md`
 - `templates/accounts/login_otp.html`
 - `templates/admin_portal/password_reset_otp.html`
 - `templates/faculty_portal/partials/password_recovery_brand.html`
@@ -441,6 +542,11 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - `logs/system.log` changed from dev-server logging during the session.
 
 ## Pending Work
+- Consider expanding the submission snapshot in a future migration so it freezes the exact template weights, component decimals, detail rules, and computed contributions used at submission. Current snapshots preserve the official stored result but cannot always reconstruct the complete historical decimal trail after setup changes.
+- Perform a manual visual review of the redesigned `Explain This Grade` modal at desktop and mobile sizes when a browser target is available, confirming the privacy shield fully blocks the background and the cards stack cleanly.
+- Perform a manual browser review of both revised guide pages using representative Campus Admin, academic reviewer, Registrar, Superadmin, and Faculty accounts when the in-app browser is available.
+- Ask school users to review the revised wording. If they prefer the original presentation, turn off `Use the revised role-based Help Guide` in Configuration Management.
+- Verify production installs the updated `ops/cron/teachermateplus.cron` after deployment; pulling the repository alone does not update the user's installed crontab.
 - Create the new GitHub repository at `privatePol/teachermateplus` before pushing, then push the renamed branch.
 - Continue with the next management/academic-head demo adjustment from the user.
 - If the institution wants simultaneous logins allowed, turn off `Allow only one active login session per user` in `Admin Portal -> Tools -> Configuration Management -> Login Security`.
@@ -454,6 +560,10 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Open governance/design topics remain in the context document, including expanded grading methodology options, active AY/Term governance, correction/reopen policy finalization, passing-threshold management, and configurable feature governance.
 
 ## Known Issues / Risks
+- Historical grade submissions do not contain a complete immutable computation snapshot. The explanation now clearly separates the official stored grade from a current-template comparison, but exact old decimal contributions may be unavailable after template or source-record changes.
+- The grade-explanation redesign passed template rendering and the full Faculty Portal regression suite, but visual screenshot verification could not be completed because no in-app browser target was connected.
+- The revised guides passed server-side rendering and role-visibility tests, but a visual browser smoke test could not be completed because the local in-app browser target `iab` was unavailable.
+- Admin topic visibility uses effective scoped permissions, while the Superadmin-only section additionally checks Superadmin identity. Future sensitive guide topics must retain both controls and default to hidden.
 - The hero animation intentionally remains static when the device/browser reports `prefers-reduced-motion: reduce`. If production still shows no movement after deployment and a hard refresh, check the operating-system accessibility animation setting.
 - Portal cache behavior was validated through response-header and rendered-script regression tests. The local in-app browser smoke test was attempted but its browser target was unavailable; a manual Back-button smoke test should still be performed after deployment because browser and reverse-proxy cache behavior can vary.
 - Browser smoke tests were not run for the Create User field change, onboarding email, or Faculty password-reset pages; validation was performed with focused Django tests.
@@ -503,6 +613,49 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - The ransomware/partitioning discussion was advisory only. No server partition, mount, Synology, antivirus, or Django `MEDIA_ROOT` configuration changes were applied in this workspace.
 
 ## Validation Completed
+- [x] Broader account-security regression suite passed: `python manage.py test apps.accounts.tests_admin_password_reset apps.accounts.tests_faculty_password_reset apps.accounts.tests_login_lockout apps.accounts.tests_login_otp apps.accounts.tests_privacy_consent apps.accounts.tests_signatures` (32 tests). The logged SMTP rejection is an intentional tested failure path.
+- [x] Revised Faculty Help Guide tests passed after the forced-change wording update: `python manage.py test apps.faculty_portal.tests_help_guide` (2 tests).
+- [x] Faculty forced-password-change and related account regressions passed: `python manage.py test apps.accounts.tests_privacy_consent apps.accounts.tests_login_otp apps.accounts.tests_signatures` (15 tests).
+- [x] Required-change tests cover locked initial render, lock persistence after invalid submission, and navigation restoration after successful password change.
+- [x] `python manage.py check` and `python manage.py makemigrations --check --dry-run` passed; no migration is required.
+- [x] Focused `git diff --check` passed with only existing line-ending warnings.
+- [ ] Visual password-change page verification was not completed because no in-app browser target was connected.
+- [x] Faculty Summary group-color and `CS AVE` alignment focused tests passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_average_activities_display_matches_detail_computation_mode apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_weighted_details_keeps_empty_detail_columns` (2 tests).
+- [x] Full Faculty Portal assignment/grade workflow suite passed after the Summary header refinement: `python manage.py test apps.faculty_portal.tests_assignment_acceptance` (97 tests).
+- [x] `python manage.py check` and `python manage.py makemigrations --check --dry-run` passed after the Summary header refinement; no migration is required.
+- [x] Focused `git diff --check` passed with only existing line-ending warnings.
+- [ ] Visual Summary-table verification was not completed because no in-app browser target was connected.
+- [x] Reported rounding path verified: `FacultyGradingService._round_official_grade` uses whole-number `ROUND_HALF_UP`; the contradictory screenshot values were reproduced as stored-grade versus current-template differences.
+- [x] Submitted-grade/current-template mismatch regression passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_shows_official_period_grade_by_default_without_release_restriction` (1 test).
+- [x] Full Faculty Portal assignment/grade workflow suite passed after the mismatch fix: `python manage.py test apps.faculty_portal.tests_assignment_acceptance` (97 tests).
+- [x] Grade computation and correction recomputation regressions passed after the mismatch fix: `python manage.py test apps.grading.tests.FinalGradeFormulaTests apps.grading.tests.CorrectionWorkflowTests.test_final_approval_recomputes_average_activity_detail_mode` (15 tests).
+- [x] `python manage.py check` passed after the mismatch fix.
+- [x] Focused `git diff --check` passed with only existing line-ending warnings.
+- [ ] Visual modal verification was attempted, but no in-app browser target was connected.
+- [x] Full Faculty Portal assignment/grade workflow suite passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance` (97 tests).
+- [x] Grade explanation and Faculty guide focused tests passed: `python manage.py test apps.faculty_portal.tests_help_guide apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_shows_official_period_grade_by_default_without_release_restriction` (3 tests).
+- [x] Grade computation and correction recomputation regressions passed: `python manage.py test apps.grading.tests.FinalGradeFormulaTests apps.grading.tests.CorrectionWorkflowTests.test_final_approval_recomputes_average_activity_detail_mode` (15 tests).
+- [x] Grade explanation, period summary, and guide templates loaded successfully through Django's template loader.
+- [x] `python manage.py check` and `python manage.py makemigrations --check --dry-run` passed; no migration is required.
+- [ ] Visual desktop/mobile modal smoke test was not completed because no in-app browser target was available.
+- [x] Revised Help Guide focused tests passed: `python manage.py test apps.admin_portal.tests_help_guide apps.faculty_portal.tests_help_guide` (6 tests).
+- [x] Configurable Features regression tests passed for rendering and saving existing settings (2 focused tests).
+- [x] Revised and legacy Admin/Faculty template selection was verified by Django client tests.
+- [x] Revised guide templates and Configuration Management template loaded successfully through Django's template loader.
+- [x] `python manage.py check` passed with no issues.
+- [x] `git diff --check` reported no whitespace errors; only existing line-ending warnings were shown.
+- [ ] Visual browser smoke test was attempted but not completed because the in-app browser target `iab` was unavailable.
+- [x] Admin password-reset branding and OTP email regressions - passed: `python manage.py test apps.accounts.tests_admin_password_reset` (6 tests).
+- [x] Django system check after Admin reset branding changes - passed: `python manage.py check`.
+- [ ] Browser visual smoke test was not completed because the in-app browser was unavailable; rendered Django response assertions covered the public and protected reset pages instead.
+- [x] Assignment-driven reopen governance and daily overdue notification suites - passed: `python manage.py test apps.admin_portal.tests_reopen_requests apps.notifications.tests` (19 tests).
+- [x] Configurable Features deadline policy save regression - passed: `python manage.py test apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_can_store_assignment_workflow_settings`.
+- [x] Migration drift check - passed: `python manage.py makemigrations --check --dry-run` reported no changes.
+- [x] Migration state check - passed: `python manage.py migrate` reported no migrations to apply.
+- [x] Django system check after governance changes - passed: `python manage.py check`.
+- [x] Deadline closure/reopen focused tests - passed: four tests covering deadline encoding closure, late submission blocking, scoped Admin queue visibility, and effective reviewer notification recipients.
+- [x] Notification service suite - passed: `python manage.py test apps.notifications.tests` (7 tests).
+- [x] Production scheduler audit - confirmed no `issue_submission_non_compliance_notices`, `queue_faculty_reminder_emails`, or `process_faculty_reminder_email_queue` entries exist under `ops`.
 - [x] Legacy logo authentication-page regressions - passed: `python manage.py test apps.faculty_portal.tests_public_login apps.accounts.tests_login_otp apps.accounts.tests_admin_password_reset` (15 tests).
 - [x] Final live-template legacy-logo scan - passed: no `egp_logo`, `edp_logo`, `edugrade`, or `teachermateplus_logo.png` references remain in template HTML/text files.
 - [x] Static deployment dry run after logo replacement - passed: `python manage.py collectstatic --noinput --dry-run`.
@@ -621,10 +774,10 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Exact Next Steps For Next Codex Session
 1. Read `AGENTS.md`, `TEACHERMATEPLUS_CONTEXT.md`, `CHANGE_LOG.md`, and this file.
-2. If the academic community approves the new behavior, configure selected subcomponents such as Participation/Output to `Average Activities` and recompute/verify sample gradebooks before live use.
-3. If preparing a release, decide whether to keep, park, or revert the paused DepEd working-tree changes.
-4. If server hardening proceeds, draft a production-safe step-by-step plan for partitioning, `MEDIA_ROOT` relocation, fstab mount options, Synology snapshots, backup credentials, ClamAV/Wazuh/CrowdSec/fail2ban/UFW, and restore testing before applying changes.
-5. For UI-facing changes, run `python manage.py check`, focused tests, and browser smoke tests when feasible.
+2. Visually review `/admin-portal/guide/` using Campus Admin and Superadmin accounts and confirm the topic difference.
+3. Visually review `/faculty/guide/` using a Faculty account and collect school-user wording feedback.
+4. Use `Tools -> Configuration Management -> Help Guide Version` to restore the original guides if the revised version is not accepted.
+5. If preparing a release, decide whether to keep, park, or revert the paused DepEd working-tree changes.
 
 ## Files To Inspect First Next Session
 - AGENTS.md

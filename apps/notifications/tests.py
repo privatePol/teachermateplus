@@ -342,7 +342,7 @@ class FacultyReminderServiceTests(TestCase):
         )
         SystemSettingService.set(
             FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
-            3,
+            1,
             tenant_id=self.tenant.id,
             value_type="INT",
             is_active=True,
@@ -372,6 +372,24 @@ class FacultyReminderServiceTests(TestCase):
             department=self.department,
             is_active=True,
         )
+        unaccepted_user = User.objects.create_user(
+            username="unaccepted_faculty",
+            email="unaccepted_faculty@ncba.edu.ph",
+            password="testpassword123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            is_active=True,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=unaccepted_user,
+            response_status=FacultyAssignment.ResponseStatus.PENDING,
+            is_primary=False,
+            is_active=True,
+        )
         lock = GradingPeriodLock.objects.create(
             tenant=self.tenant,
             campus=self.campus,
@@ -390,14 +408,25 @@ class FacultyReminderServiceTests(TestCase):
         first_notice = SubmissionNonComplianceNotice.objects.get()
         self.assertEqual(first_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.NOTICE)
         self.assertEqual(first_notice.recipient_emails_json, [self.user.email])
+        self.assertNotIn(unaccepted_user.email, first_notice.recipient_emails_json)
+        self.assertIn(self.offering.course.code, first_notice.message)
+        self.assertIn(self.offering.section.name, first_notice.message)
+        self.assertIn(self.period.name, first_notice.message)
+        self.assertIn("Course Gradebook Not Submitted", mail.outbox[0].subject)
 
-        second_run = first_run + timedelta(days=3, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(
+            now=first_run,
+            tenant_id=self.tenant.id,
+        )
+        self.assertEqual(result["issued"], 0)
+
+        second_run = first_run + timedelta(days=1, minutes=1)
         result = SubmissionNonComplianceNoticeService.issue_due_notices(now=second_run, tenant_id=self.tenant.id)
         self.assertEqual(result["issued"], 1)
         second_notice = SubmissionNonComplianceNotice.objects.order_by("issued_at", "id")[1]
         self.assertEqual(second_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.WARNING)
 
-        third_run = second_run + timedelta(days=3, minutes=1)
+        third_run = second_run + timedelta(days=1, minutes=1)
         result = SubmissionNonComplianceNoticeService.issue_due_notices(now=third_run, tenant_id=self.tenant.id)
         self.assertEqual(result["issued"], 1)
         third_notice = SubmissionNonComplianceNotice.objects.order_by("issued_at", "id")[2]

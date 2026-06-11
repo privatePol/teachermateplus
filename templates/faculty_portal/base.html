@@ -93,14 +93,14 @@
   .faculty-layout.sidebar-collapsed .sidebar-icon {
     margin-right: 0;
   }
-  .faculty-layout.privacy-consent-lock .faculty-sidebar {
+  .faculty-layout.navigation-lock .faculty-sidebar {
     pointer-events: none;
   }
-  .faculty-layout.privacy-consent-lock .sidebar-link,
-  .faculty-layout.privacy-consent-lock .faculty-nav-group-title {
+  .faculty-layout.navigation-lock .sidebar-link,
+  .faculty-layout.navigation-lock .faculty-nav-group-title {
     pointer-events: none;
   }
-  .faculty-consent-nav-lock {
+  .faculty-nav-lock-message {
     color: #4d6658;
     font-size: 0.78rem;
     line-height: 1.25;
@@ -366,7 +366,7 @@
   <nav class="navbar faculty-topbar px-2 px-md-3" data-tour-id="faculty-header">
     <div class="container-fluid">
       <div class="d-flex align-items-center gap-2">
-        <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar" data-tour-id="sidebar-toggle"{% if privacy_consent_pending %} disabled aria-disabled="true"{% endif %}>&#9776;</button>
+        <button class="btn btn-sm" id="faculty-sidebar-toggle" type="button" aria-label="Toggle sidebar" data-tour-id="sidebar-toggle"{% if privacy_consent_pending or password_change_required %} disabled aria-disabled="true"{% endif %}>&#9776;</button>
         <span class="d-inline-flex align-items-center">
           <img src="{% get_media_prefix %}logos/teachermate_logo_official.png" alt="TeacherMate+" class="faculty-logo" onerror="this.onerror=null;this.src='{% get_media_prefix %}logos/teachermate_logo_text_official.png';">
         </span>
@@ -388,7 +388,7 @@
       <div class="d-flex flex-column gap-1 align-items-end">
         <div class="small faculty-user">{{ request.user.full_name|default:request.user.username }}</div>
         <div class="d-flex flex-wrap justify-content-end gap-2">
-          {% if not privacy_consent_pending %}
+          {% if not privacy_consent_pending and not password_change_required %}
             <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_signature' %}">My Signature</a>
             <a class="btn btn-sm faculty-logout" href="{% url 'accounts:faculty_change_password' %}">Change Password</a>
           {% endif %}
@@ -397,12 +397,16 @@
       </div>
     </div>
   </nav>
-  <div class="faculty-layout{% if privacy_consent_pending %} sidebar-collapsed privacy-consent-lock{% endif %}" id="faculty-layout"{% if privacy_consent_pending %} data-privacy-consent-lock="1"{% endif %}>
-    <aside class="faculty-sidebar"{% if privacy_consent_pending %} aria-label="Navigation unavailable until privacy consent is accepted"{% endif %}>
+  <div class="faculty-layout{% if privacy_consent_pending or password_change_required %} sidebar-collapsed navigation-lock{% endif %}" id="faculty-layout"{% if privacy_consent_pending or password_change_required %} data-navigation-lock="1"{% endif %}>
+    <aside class="faculty-sidebar"{% if privacy_consent_pending %} aria-label="Navigation unavailable until privacy consent is accepted"{% elif password_change_required %} aria-label="Navigation unavailable until the required password change is completed"{% endif %}>
       <div class="faculty-sidebar-inner">
         {% if privacy_consent_pending %}
-          <div class="faculty-consent-nav-lock" aria-live="polite">
+          <div class="faculty-nav-lock-message" aria-live="polite">
             Navigation is locked until privacy consent is accepted.
+          </div>
+        {% elif password_change_required %}
+          <div class="faculty-nav-lock-message" aria-live="polite">
+            Navigation is locked until your password is changed.
           </div>
         {% else %}
         {% for group in portal_menu %}
@@ -479,7 +483,7 @@
     </main>
   </div>
 
-  {% if not privacy_consent_pending %}
+  {% if not privacy_consent_pending and not password_change_required %}
     <a class="help-fab" href="{% url 'faculty_portal:guide' %}" aria-label="Open Faculty User Guide" title="Open Faculty User Guide" data-tour-id="user-guide">?</a>
   {% endif %}
   <a
@@ -497,7 +501,7 @@
     </svg>
     <span>Data Privacy Notice</span>
   </a>
-  {% if faculty_quick_tour_enabled and not request.user.faculty_quick_tour_disabled %}
+  {% if faculty_quick_tour_enabled and not request.user.faculty_quick_tour_disabled and not privacy_consent_pending and not password_change_required %}
   <div class="faculty-tour-backdrop" id="faculty-tour-backdrop" aria-hidden="true"></div>
   <div class="faculty-tour-card" id="faculty-tour-card" role="dialog" aria-live="polite" aria-label="Faculty Portal quick tour">
     <div class="faculty-tour-title" id="faculty-tour-title"></div>
@@ -541,14 +545,14 @@
     const layout = document.getElementById("faculty-layout");
     const toggleBtn = document.getElementById("faculty-sidebar-toggle");
     const storageKey = "TeacherMate+_faculty_sidebar_collapsed";
-    const privacyConsentLocked = layout && layout.dataset.privacyConsentLock === "1";
+    const navigationLocked = layout && layout.dataset.navigationLock === "1";
     if (layout && toggleBtn) {
-      const savedCollapsed = privacyConsentLocked || localStorage.getItem(storageKey) === "1";
+      const savedCollapsed = navigationLocked || localStorage.getItem(storageKey) === "1";
       if (savedCollapsed) {
         layout.classList.add("sidebar-collapsed");
       }
       toggleBtn.addEventListener("click", function () {
-        if (privacyConsentLocked) {
+        if (navigationLocked) {
           return;
         }
         layout.classList.toggle("sidebar-collapsed");

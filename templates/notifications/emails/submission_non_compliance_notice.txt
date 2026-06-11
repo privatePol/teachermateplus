@@ -2,8 +2,8 @@ TeacherMatePlus Notice
 
 {{ notice.title }}
 Faculty: {{ notice.faculty_user.full_name }}
-Class: {{ notice.offering.course.title }} ({{ notice.offering.course.code }}) / {{ notice.offering.section.code }}
-Period: {{ notice.template_period.name }}
+Unsubmitted Course Gradebook: {{ notice.offering.course.title }} ({{ notice.offering.course.code }}) / {{ notice.offering.section.name|default:notice.offering.section.code }}
+Grading Period: {{ notice.template_period.name }}
 Deadline: {{ notice.deadline_at|date:"F j, Y g:i A" }}
 Notice Level: {{ notice.get_notice_level_display }}
 

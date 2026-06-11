@@ -612,6 +612,7 @@ def faculty_password_reset_complete_view(request):
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def faculty_change_password_view(request):
+    password_change_required = bool(request.user.must_change_password)
     form = FacultySelfChangePasswordForm(user=request.user, data=request.POST or None)
     if request.method == "POST" and form.is_valid():
         updated_user = form.save()
@@ -632,7 +633,14 @@ def faculty_change_password_view(request):
         if security_redirect:
             return redirect(security_redirect)
         return redirect("faculty_portal:dashboard")
-    return render(request, "faculty_portal/password_change.html", {"form": form})
+    return render(
+        request,
+        "faculty_portal/password_change.html",
+        {
+            "form": form,
+            "password_change_required": password_change_required,
+        },
+    )
 
 
 @portal_required("ADMIN")

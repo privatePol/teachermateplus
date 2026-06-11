@@ -2564,22 +2564,30 @@ class DocumentPrintSettingForm(forms.Form):
 
 
 class ConfigurableFeatureSettingForm(forms.Form):
+    role_based_help_guide_enabled = forms.BooleanField(
+        required=False,
+        label="Use the revised role-based Help Guide",
+        help_text=(
+            "Shows practical guide topics based on the user's portal permissions. "
+            "Turn this off to restore the previous Admin and Faculty guide pages."
+        ),
+    )
     grade_deadline_enforcement_policy = forms.ChoiceField(
         required=True,
         label="Grade deadline enforcement",
         choices=[
             (
-                FeatureSettingsService.GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY,
-                "Option 1: Require reopen after deadline + monitor non-compliance",
+                FeatureSettingsService.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN,
+                "Enabled: Close encoding and require assigned reviewer approval after deadline",
             ),
             (
-                FeatureSettingsService.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN,
-                "Option 2: Require reopen after deadline + reopen request workflow",
+                FeatureSettingsService.GRADE_DEADLINE_POLICY_DISABLED,
+                "Disabled: Do not close encoding automatically at the deadline",
             ),
         ],
         help_text=(
-            "After the deadline, faculty may still submit a complete gradebook, but additional encoding requires a reopen request. "
-            "Use this setting to keep the tenant's preferred monitoring/reopen workflow label."
+            "When enabled, both encoding and submission close at the deadline for unsubmitted gradebooks. "
+            "Faculty must request reopening, and only a reviewer explicitly assigned by the Superadmin for that scope can approve it."
         ),
     )
     student_portal_enabled = forms.BooleanField(
@@ -2698,8 +2706,10 @@ class ConfigurableFeatureSettingForm(forms.Form):
     submission_non_compliance_notice_interval_days = forms.IntegerField(
         required=True,
         min_value=1,
-        label="Notice repeat interval (days)",
-        help_text="How many days TeacherMate+ waits before sending the next follow-up while the period is still overdue and unsubmitted.",
+        max_value=1,
+        initial=1,
+        label="Notice repeat interval",
+        help_text="Daily. TeacherMate+ sends a follow-up each day while the course gradebook remains overdue and unsubmitted.",
     )
     submission_non_compliance_head_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
@@ -3084,6 +3094,7 @@ class ConfigurableFeatureSettingForm(forms.Form):
             cleaned["faculty_quick_tour_enabled"] = False
         if not cleaned.get("submission_non_compliance_notice_enabled"):
             cleaned["submission_non_compliance_notice_enabled"] = False
+        cleaned["submission_non_compliance_notice_interval_days"] = 1
         grade_distribution_defaults = {
             "grade_distribution_high_grade_band_min": 90,
             "grade_distribution_high_grade_band_max": 100,

@@ -40,6 +40,7 @@ from apps.grading.models import (
     TemplateHotfixRequest,
     TenantGradingProfile,
 )
+from apps.grading.explanations import GradeExplanationService
 from apps.notifications.models import FacultyMemo, FacultyReminder, SubmissionNonComplianceNotice
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
@@ -2036,6 +2037,70 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         student_row = table_html.split("2025-DEFAULT-001", 1)[1].split("</tr>", 1)[0]
         self.assertNotIn("status-active-label", student_row)
         self.assertNotIn(">ACTIVE<", student_row)
+        self.assertContains(response, 'id="gradeExplanationPrivacyShield"', html=False)
+        self.assertContains(response, "grade-explanation-privacy-shield")
+        self.assertContains(response, 'modalEl.addEventListener("show.bs.modal"', html=False)
+
+        explanation_response = self.client.get(
+            reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": self.offering.id,
+                    "period_id": self.prelim.id,
+                    "student_id": student.id,
+                    "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+                },
+            )
+        )
+        self.assertEqual(explanation_response.status_code, 200)
+        self.assertContains(explanation_response, "Prelim Grade Summary")
+        self.assertContains(explanation_response, "Contribution to Period Grade")
+        self.assertContains(explanation_response, "Class Standing Breakdown")
+        self.assertContains(explanation_response, "Activity Details")
+        self.assertContains(explanation_response, "Exam Details")
+        self.assertContains(explanation_response, "View full computation details")
+        self.assertNotContains(explanation_response, "Show Detailed Computation")
+        self.assertNotContains(explanation_response, "Official rounded grade")
+
+        stored_period_grade = StudentPeriodGrade.objects.get(
+            offering=self.offering,
+            template_period=self.prelim,
+            student=student,
+        )
+        stored_period_grade.class_standing_grade = Decimal("78")
+        stored_period_grade.exam_grade = Decimal("60")
+        stored_period_grade.period_grade = Decimal("71")
+        stored_period_grade.save(
+            update_fields=[
+                "class_standing_grade",
+                "exam_grade",
+                "period_grade",
+                "updated_at",
+            ]
+        )
+
+        changed_setup_response = self.client.get(
+            reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": self.offering.id,
+                    "period_id": self.prelim.id,
+                    "student_id": student.id,
+                    "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+                },
+            )
+        )
+        self.assertEqual(changed_setup_response.status_code, 200)
+        self.assertContains(changed_setup_response, "Official Submitted Grade")
+        self.assertContains(changed_setup_response, "Official Prelim Grade")
+        self.assertContains(changed_setup_response, "71.00")
+        self.assertContains(changed_setup_response, "Current Grading Setup Check")
+        self.assertContains(changed_setup_response, "Current setup calculation:")
+        self.assertContains(
+            changed_setup_response,
+            "The grading setup or source records changed after this grade was submitted.",
+        )
+        self.assertNotContains(changed_setup_response, "Official rounded grade")
 
     def test_period_summary_average_activities_display_matches_detail_computation_mode(self):
         self._accept_assignment()
@@ -2140,6 +2205,18 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertEqual(response.context["summary_layout"]["class_standing_blocks"][0]["sections"][1]["avg_label"], "P/O AVE")
         self.assertContains(response, "P/O AVE")
         self.assertContains(response, "CS AVE")
+        quizzes_layout = response.context["summary_layout"]["class_standing_blocks"][0]["sections"][0]
+        participation_layout = response.context["summary_layout"]["class_standing_blocks"][0]["sections"][1]
+        self.assertEqual(quizzes_layout["color_class"], "summary-group-quizzes")
+        self.assertEqual(participation_layout["color_class"], "summary-group-participation")
+        self.assertContains(
+            response,
+            '<th rowspan="3" class="metric-col summary-group-class-standing-total">CS AVE</th>',
+            html=True,
+        )
+        self.assertContains(response, "summary-group-quizzes")
+        self.assertContains(response, "summary-group-participation")
+        self.assertContains(response, "summary-group-class-standing-total")
         refreshed = StudentPeriodGrade.objects.get(offering=self.offering, template_period=self.prelim, student=student)
         self.assertEqual(refreshed.class_standing_grade, Decimal("88"))
 

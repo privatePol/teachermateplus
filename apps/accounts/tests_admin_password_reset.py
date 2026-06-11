@@ -70,10 +70,24 @@ class AdminPasswordResetTests(TestCase):
         self.assertEqual(response.url, reverse("accounts:admin_password_reset_otp"))
         self.assertEqual(LoginOtpChallenge.objects.count(), 1)
         self.assertEqual(mail.outbox[0].subject, "NCBA | TeacherMatePlus: Admin Password Reset Code")
+        self.assertIn("NCBA | TeacherMate+", mail.outbox[0].body)
+        html_body = mail.outbox[0].alternatives[0].content
+        self.assertIn("NCBA | TeacherMate+", html_body)
+        self.assertNotIn("<img", html_body.lower())
+        self.assertEqual(len(mail.outbox[0].attachments), 0)
         otp_page = self.client.get(reverse("accounts:admin_password_reset_otp"))
         self.assertContains(otp_page, "logos/teachermate_logo_text_official.png", status_code=200)
         self.assertNotContains(otp_page, "logos/egp_logo_official.png")
         self.assertNotContains(otp_page, "logos/edp_logo.png")
+
+    def test_admin_password_reset_public_pages_use_official_text_logo(self):
+        for route_name in [
+            "accounts:admin_forgot_password",
+            "accounts:admin_forgot_password_done",
+            "accounts:admin_password_reset_complete",
+        ]:
+            response = self.client.get(reverse(route_name))
+            self.assertContains(response, "logos/teachermate_logo_text_official.png", status_code=200)
 
     def test_admin_forgot_password_does_not_send_otp_for_faculty_only_user(self):
         response = self.client.post(
@@ -119,6 +133,8 @@ class AdminPasswordResetTests(TestCase):
         verify_response = self.client.post(reverse("accounts:admin_password_reset_otp"), {"otp_code": code})
         self.assertEqual(verify_response.status_code, 302)
         self.assertEqual(verify_response.url, reverse("accounts:admin_password_reset_confirm"))
+        confirm_page = self.client.get(reverse("accounts:admin_password_reset_confirm"))
+        self.assertContains(confirm_page, "logos/teachermate_logo_text_official.png", status_code=200)
 
         reset_response = self.client.post(
             reverse("accounts:admin_password_reset_confirm"),

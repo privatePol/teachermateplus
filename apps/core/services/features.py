@@ -54,7 +54,9 @@ class FeatureSettingsService:
     STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION_KEY = "FEATURE_STUDENT_PORTAL_FINAL_GRADES_AFTER_SUBMISSION"
     STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY = "FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED"
     SIS_PERIODIC_GRADES_API_ENABLED_KEY = "FEATURE_SIS_PERIODIC_GRADES_API_ENABLED"
+    ROLE_BASED_HELP_GUIDE_ENABLED_KEY = "FEATURE_ROLE_BASED_HELP_GUIDE_ENABLED"
     GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY = "COMPLIANCE_ONLY"
+    GRADE_DEADLINE_POLICY_DISABLED = "DISABLED"
     GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN = "AUTO_CLOSE_REQUIRES_REOPEN"
 
     @staticmethod
@@ -645,17 +647,10 @@ class FeatureSettingsService:
         cls,
         *,
         tenant_id: int | None,
-        default: int = 3,
+        default: int = 1,
     ) -> int:
-        return cls._positive_int(
-            SystemSettingService.get(
-                cls.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
-                tenant_id=tenant_id,
-                default=default,
-            ),
-            default=default,
-            minimum=1,
-        )
+        # Notices are institutionally required every day until submission.
+        return 1
 
     @classmethod
     def get_submission_non_compliance_head_role_codes(
@@ -692,7 +687,7 @@ class FeatureSettingsService:
         cls,
         *,
         tenant_id: int | None,
-        default: str = GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY,
+        default: str = GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN,
     ) -> str:
         value = str(
             SystemSettingService.get(
@@ -702,17 +697,28 @@ class FeatureSettingsService:
             )
             or default
         ).strip().upper()
+        if value == cls.GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY:
+            return cls.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN
         allowed = {
-            cls.GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY,
+            cls.GRADE_DEADLINE_POLICY_DISABLED,
             cls.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN,
         }
         return value if value in allowed else default
 
     @classmethod
     def is_grade_deadline_auto_close_enabled(cls, *, tenant_id: int | None) -> bool:
-        return (
-            cls.get_grade_deadline_enforcement_policy(tenant_id=tenant_id)
-            == cls.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN
+        return cls.get_grade_deadline_enforcement_policy(
+            tenant_id=tenant_id
+        ) == cls.GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN
+
+    @classmethod
+    def is_role_based_help_guide_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.ROLE_BASED_HELP_GUIDE_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
         )
 
     @classmethod

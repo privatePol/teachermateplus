@@ -39,8 +39,8 @@
       <div class="body">
         <div class="badge">{{ notice.get_notice_level_display }}</div>
         <div class="row"><strong>Faculty:</strong> {{ notice.faculty_user.full_name }}</div>
-        <div class="row"><strong>Class:</strong> {{ notice.offering.course.title }} ({{ notice.offering.course.code }}) / {{ notice.offering.section.code }}</div>
-        <div class="row"><strong>Period:</strong> {{ notice.template_period.name }}</div>
+        <div class="row"><strong>Unsubmitted Course Gradebook:</strong> {{ notice.offering.course.title }} ({{ notice.offering.course.code }}) / {{ notice.offering.section.name|default:notice.offering.section.code }}</div>
+        <div class="row"><strong>Grading Period:</strong> {{ notice.template_period.name }}</div>
         <div class="row"><strong>Original Deadline:</strong> {{ notice.deadline_at|date:"F j, Y g:i A" }}</div>
         <div class="message">{{ notice.message }}</div>
         <div class="actions">

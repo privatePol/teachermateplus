@@ -176,6 +176,35 @@
     background: #fbfdf9;
     color: #4c6556;
   }
+  .class-record-table thead th.summary-group-quizzes {
+    background: #edf6e3;
+    color: #315322;
+  }
+  .class-record-table tbody td.summary-group-quizzes {
+    background: #f6faef;
+  }
+  .class-record-table thead th.summary-group-participation {
+    background: #e8f3f7;
+    color: #244f60;
+  }
+  .class-record-table tbody td.summary-group-participation {
+    background: #f2f8fa;
+  }
+  .class-record-table thead th.summary-group-class-standing-total {
+    background: #fff2cf;
+    color: #674f0d;
+    border-left: 2px solid #dfbd58;
+  }
+  .class-record-table tbody td.summary-group-class-standing-total {
+    background: #fff8e7;
+  }
+  .class-record-table thead th.summary-group-standard {
+    background: #f3f5f1;
+    color: #425348;
+  }
+  .class-record-table tbody td.summary-group-standard {
+    background: #f8faf7;
+  }
   .class-record-table .band-exam {
     background: linear-gradient(180deg, #fbf6de 0%, #f4e7ad 100%);
     color: #5b4a14;
@@ -195,6 +224,18 @@
   }
   .class-record-table .perfect-score-row .metric-col {
     background: #edf3ed;
+  }
+  .class-record-table .perfect-score-row td.summary-group-quizzes {
+    background: #f0f7e7;
+  }
+  .class-record-table .perfect-score-row td.summary-group-participation {
+    background: #eaf4f7;
+  }
+  .class-record-table .perfect-score-row td.summary-group-standard {
+    background: #f3f6f1;
+  }
+  .class-record-table .perfect-score-row td.summary-group-class-standing-total {
+    background: #fff2cf;
   }
   .class-record-table .row-number-cell {
     text-align: center;
@@ -830,9 +871,9 @@
         <tr>
           {% for block in summary_layout.class_standing_blocks %}
             {% for section in block.sections %}
-              <th colspan="{{ section.colspan }}" class="band-section">{{ section.label }}</th>
+              <th colspan="{{ section.colspan }}" class="band-section {{ section.color_class }}">{{ section.label }}</th>
             {% endfor %}
-            <th class="metric-col"></th>
+            <th rowspan="3" class="metric-col summary-group-class-standing-total">{{ block.total_label }}</th>
           {% endfor %}
         </tr>
         <tr>
@@ -840,14 +881,13 @@
             {% for section in block.sections %}
               {% if section.uses_nested %}
                 {% for group in section.groups %}
-                  <th colspan="{{ group.colspan }}" class="band-subsection">{{ group.label }}</th>
+                  <th colspan="{{ group.colspan }}" class="band-subsection {{ section.color_class }}">{{ group.label }}</th>
                 {% endfor %}
-                <th class="metric-col"></th>
+                <th class="metric-col {{ section.color_class }}"></th>
               {% else %}
-                <th colspan="{{ section.colspan }}" class="band-subsection"></th>
+                <th colspan="{{ section.colspan }}" class="band-subsection {{ section.color_class }}"></th>
               {% endif %}
             {% endfor %}
-            <th class="metric-col"></th>
           {% endfor %}
         </tr>
         <tr>
@@ -856,19 +896,18 @@
               {% if section.uses_nested %}
                 {% for group in section.groups %}
                   {% for column in group.activity_columns %}
-                    <th>{{ column.label }}</th>
+                    <th class="{{ section.color_class }}">{{ column.label }}</th>
                   {% endfor %}
-                  <th class="metric-col">{{ group.avg_label }}</th>
+                  <th class="metric-col {{ section.color_class }}">{{ group.avg_label }}</th>
                 {% endfor %}
-                <th class="metric-col">{{ section.avg_label }}</th>
+                <th class="metric-col {{ section.color_class }}">{{ section.avg_label }}</th>
               {% else %}
                 {% for column in section.activity_columns %}
-                  <th>{{ column.label }}</th>
+                  <th class="{{ section.color_class }}">{{ column.label }}</th>
                 {% endfor %}
-                <th class="metric-col">{{ section.avg_label }}</th>
+                <th class="metric-col {{ section.color_class }}">{{ section.avg_label }}</th>
               {% endif %}
             {% endfor %}
-            <th class="metric-col">{{ block.total_label }}</th>
           {% endfor %}
         </tr>
       </thead>
@@ -892,19 +931,19 @@
             {% if section.uses_nested %}
               {% for group in section.groups %}
                 {% for column in group.activity_columns %}
-                  <td>{{ column.total_score|default:"" }}</td>
+                  <td class="{{ section.color_class }}">{{ column.total_score|default:"" }}</td>
                 {% endfor %}
-                <td class="metric-col"></td>
+                <td class="metric-col {{ section.color_class }}"></td>
               {% endfor %}
-              <td class="metric-col"></td>
+              <td class="metric-col {{ section.color_class }}"></td>
             {% else %}
               {% for column in section.activity_columns %}
-                <td>{{ column.total_score|default:"" }}</td>
+                <td class="{{ section.color_class }}">{{ column.total_score|default:"" }}</td>
               {% endfor %}
-              <td class="metric-col"></td>
+              <td class="metric-col {{ section.color_class }}"></td>
             {% endif %}
           {% endfor %}
-          <td class="metric-col"></td>
+          <td class="metric-col summary-group-class-standing-total"></td>
         {% endfor %}
         {% for exam in visible_exam_components %}
           <td class="metric-col metric-final">
@@ -948,19 +987,19 @@
               {% if section.uses_nested %}
                 {% for group in section.groups %}
                   {% for value in group.activity_values %}
-                    <td>{{ value|default:"" }}</td>
+                    <td class="{{ section.color_class }}">{{ value|default:"" }}</td>
                   {% endfor %}
-                  <td class="metric-col">{{ group.average|default:"" }}</td>
+                  <td class="metric-col {{ section.color_class }}">{{ group.average|default:"" }}</td>
                 {% endfor %}
-                <td class="metric-col">{{ section.average|default:"" }}</td>
+                <td class="metric-col {{ section.color_class }}">{{ section.average|default:"" }}</td>
               {% else %}
                 {% for value in section.activity_values %}
-                  <td>{{ value|default:"" }}</td>
+                  <td class="{{ section.color_class }}">{{ value|default:"" }}</td>
                 {% endfor %}
-                <td class="metric-col">{{ section.average|default:"" }}</td>
+                <td class="metric-col {{ section.color_class }}">{{ section.average|default:"" }}</td>
               {% endif %}
             {% endfor %}
-            <td class="metric-col"><strong>{{ block.total|default:"" }}</strong></td>
+            <td class="metric-col summary-group-class-standing-total"><strong>{{ block.total|default:"" }}</strong></td>
           {% endfor %}
           {% for value in row.exam_values %}
             <td class="metric-col metric-final">{{ value|default:"" }}</td>
@@ -985,7 +1024,8 @@
 {% endif %}
 {% endif %}
 
-<div class="modal fade" id="gradeExplanationModal" tabindex="-1" aria-labelledby="gradeExplanationTitle" aria-hidden="true">
+<div class="grade-explanation-privacy-shield" id="gradeExplanationPrivacyShield" aria-hidden="true"></div>
+<div class="modal fade grade-explanation-modal" id="gradeExplanationModal" tabindex="-1" aria-labelledby="gradeExplanationTitle" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
@@ -999,9 +1039,45 @@
   </div>
 </div>
 
+<style>
+  .grade-explanation-privacy-shield {
+    position: fixed;
+    inset: 0;
+    z-index: 1055;
+    background: rgba(4, 20, 12, 0.94);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 150ms ease, visibility 150ms ease;
+  }
+  .grade-explanation-privacy-shield.is-active {
+    opacity: 1;
+    visibility: visible;
+  }
+  .grade-explanation-modal {
+    z-index: 1065;
+  }
+  .grade-explanation-modal .modal-content {
+    border: 0;
+    border-radius: 8px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+  }
+  .grade-explanation-modal .modal-header {
+    border-bottom-color: #dbe6dd;
+  }
+  @media (max-width: 575.98px) {
+    .grade-explanation-modal .modal-dialog {
+      margin: .5rem;
+    }
+  }
+</style>
+
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const modalEl = document.getElementById("gradeExplanationModal");
+    const privacyShield = document.getElementById("gradeExplanationPrivacyShield");
     if (!modalEl || !window.bootstrap) return;
     const modal = new bootstrap.Modal(modalEl);
     const body = modalEl.querySelector("[data-grade-explain-body]");
@@ -1016,6 +1092,13 @@
             body.innerHTML = '<div class="alert alert-danger mb-0">Unable to load the grade explanation.</div>';
           });
       });
+    });
+    modalEl.addEventListener("show.bs.modal", function () {
+      if (privacyShield) privacyShield.classList.add("is-active");
+    });
+    modalEl.addEventListener("hidden.bs.modal", function () {
+      if (privacyShield) privacyShield.classList.remove("is-active");
+      body.innerHTML = '<div class="text-muted">Loading explanation...</div>';
     });
   });
 </script>

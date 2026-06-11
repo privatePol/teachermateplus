@@ -742,6 +742,14 @@ Current scheduled jobs:
 - `auto_lock_period_deadlines`
 - `auto_lapse_correction_windows`
 - `queue_period_reminders`
+- `issue_submission_non_compliance_notices` (daily at 7:15 AM server time until each overdue course gradebook is submitted)
+
+The repository cron file is not installed automatically by `git pull`. After deployment, reinstall it and verify:
+
+```bash
+sudo -u teachermateplus crontab /opt/teachermateplus/ops/cron/teachermateplus.cron
+sudo -u teachermateplus crontab -l
+```
 
 ### Staging
 

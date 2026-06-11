@@ -14,6 +14,7 @@ from apps.academics.models import CourseOffering, FacultyAssignment
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.core.services.scope import ScopeService
 from apps.core.services.features import FeatureSettingsService
+from apps.core.services.permissions import PermissionService
 from apps.core.services.settings import SystemSettingService
 from apps.core.services.audit import AuditService
 from apps.enrollment.models import Enrollment
@@ -2915,6 +2916,8 @@ class GradingGovernanceService:
             return False
         if cls.get_active_approved_reopen_request(offering=offering, template_period=template_period):
             return False
+        if not FeatureSettingsService.is_grade_deadline_auto_close_enabled(tenant_id=offering.tenant_id):
+            return False
         deadline = cls.resolve_submission_deadline(offering=offering, template_period=template_period)
         return bool(deadline and (now or timezone.now()) > deadline)
 
@@ -2942,6 +2945,17 @@ class GradingGovernanceService:
             template_period=submission.template_period,
         )
         return bool(deadline and timezone.now() <= deadline)
+
+    @classmethod
+    def is_assigned_reopen_reviewer(cls, *, user, tenant_id: int, campus_id: int) -> bool:
+        if not user or not getattr(user, "is_authenticated", False) or not getattr(user, "is_active", False):
+            return False
+        return PermissionService.has_assigned_permission(
+            user,
+            "reopen_requests.review",
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+        )
 
     @classmethod
     def is_auto_locked_reopened_after_deadline(cls, *, offering, template_period: GradingTemplatePeriod):
@@ -3289,6 +3303,14 @@ class GradingGovernanceService:
     ):
         if request_obj.status != GradeSubmissionReopenRequest.Status.PENDING:
             raise ValidationError("Only pending reopen requests can be reviewed.")
+        if not cls.is_assigned_reopen_reviewer(
+            user=reviewer,
+            tenant_id=request_obj.tenant_id,
+            campus_id=request_obj.campus_id,
+        ):
+            raise ValidationError(
+                "Only a user explicitly assigned to review reopen requests for this campus can approve or reject it."
+            )
 
         request_obj.reviewed_by_user = reviewer
         request_obj.reviewed_at = timezone.now()
