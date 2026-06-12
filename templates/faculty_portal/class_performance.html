@@ -1,0 +1,130 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block title %}Class Performance | TeacherMate+{% endblock %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .performance-head { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+  .performance-subtitle { color: #607568; margin: 0.2rem 0 0; }
+  .performance-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.85rem; }
+  .performance-metric { border: 1px solid #d7e2d5; border-radius: 8px; background: #fff; padding: 1rem; }
+  .performance-metric-label { color: #607568; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; }
+  .performance-metric-value { color: #153e26; font-size: 1.65rem; font-weight: 800; margin-top: 0.2rem; }
+  .trend-badge { display: inline-block; border-radius: 999px; padding: 0.28rem 0.55rem; font-size: 0.72rem; font-weight: 800; }
+  .trend-AT_RISK { background: #f8d7da; color: #842029; }
+  .trend-INCOMPLETE { background: #fff3cd; color: #664d03; }
+  .trend-DECLINING { background: #fde2c8; color: #7a3500; }
+  .performance-grade-cell { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+  .grade-explain-btn {
+    --bs-btn-padding-y: 0.12rem;
+    --bs-btn-padding-x: 0.45rem;
+    --bs-btn-font-size: 0.72rem;
+    border-color: #0f7a4a;
+    color: #0f7a4a;
+    background: #f7fff9;
+  }
+  .grade-explain-btn:hover { background: #0f7a4a; color: #fff; }
+  @media (max-width: 900px) { .performance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 540px) { .performance-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="performance-head mb-3">
+  <div>
+    <h1 class="h4 mb-0">Class Performance | {{ offering.course.code }} | {{ period.name }}</h1>
+    <p class="performance-subtitle">{{ offering.course.title }} / {{ offering.section.code }}</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+    <a class="btn btn-sm btn-outline-success" href="{% url 'faculty_portal:parallel_section_comparison' %}?academic_term={{ offering.term_id }}&course_code={{ offering.course.code|urlencode }}&period_code={{ period.code|urlencode }}">Compare Sections</a>
+  </div>
+</div>
+
+{% if snapshot.message %}
+<div class="alert alert-info">{{ snapshot.message }}</div>
+{% endif %}
+{% if snapshot.has_performance_data and not snapshot.previous_period %}
+<div class="alert alert-light border">
+  No previous grading period is available. Trend labels will appear after another grading period has data.
+</div>
+{% endif %}
+
+<section class="performance-grid mb-4" aria-label="Class performance snapshot">
+  <div class="performance-metric">
+    <div class="performance-metric-label">Class Average</div>
+    <div class="performance-metric-value">{% if snapshot.class_average is not None %}{{ snapshot.class_average|floatformat:2 }}{% else %}-{% endif %}</div>
+  </div>
+  <div class="performance-metric">
+    <div class="performance-metric-label">At-Risk Students</div>
+    <div class="performance-metric-value">{{ snapshot.at_risk_count }}</div>
+  </div>
+  <div class="performance-metric">
+    <div class="performance-metric-label">Missing Outputs</div>
+    <div class="performance-metric-value">{{ snapshot.missing_output_count }}</div>
+  </div>
+  <div class="performance-metric">
+    <div class="performance-metric-label">Weakest Component</div>
+    <div class="performance-metric-value" style="font-size:1.1rem;">
+      {% if snapshot.weakest_component %}
+        {{ snapshot.weakest_component.name }}
+        <div class="small text-muted fw-normal mt-1">{{ snapshot.weakest_component.average|floatformat:2 }}</div>
+      {% else %}-{% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header bg-white">
+    <h2 class="h6 mb-1">Students Requiring Attention</h2>
+    <p class="small text-muted mb-0">Only students who are at risk, incomplete, or declining appear here.</p>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Student</th>
+          <th>Current Grade</th>
+          <th>Missing Outputs</th>
+          <th>Trend</th>
+          <th>Primary Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in attention_rows %}
+        <tr>
+          <td>
+            <a class="link-success fw-bold" href="{% url 'faculty_portal:student_performance_consultation' offering.id period.id row.student_id %}">{{ row.student_name }}</a>
+            <div class="small text-muted">{{ row.student_no }}</div>
+          </td>
+          <td>
+            <div class="performance-grade-cell">
+              <span>{% if row.current_grade is not None %}{{ row.current_grade|floatformat:2 }}{% else %}-{% endif %}</span>
+              {% if row.current_grade is not None and row.explain_url %}
+              <button type="button" class="btn btn-sm grade-explain-btn" data-grade-explain-url="{{ row.explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
+              {% endif %}
+            </div>
+          </td>
+          <td>{{ row.missing_output_count }}</td>
+          <td><span class="trend-badge trend-{{ row.trend_label }}">{{ row.trend_display }}</span></td>
+          <td>{{ row.primary_reason }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5" class="text-center text-muted py-4">
+            {% if not snapshot.has_performance_data %}
+              No student attention list is available until scores are encoded.
+            {% else %}
+              No students currently require attention for this period.
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% include "faculty_portal/partials/grade_explanation_modal.html" %}
+{% endblock %}

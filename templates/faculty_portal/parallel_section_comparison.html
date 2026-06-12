@@ -1,0 +1,107 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block title %}Parallel Section Comparison | TeacherMate+{% endblock %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .comparison-filter { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 0.75rem; align-items: end; }
+  .comparison-summary { border: 1px solid #cfe0cf; border-left: 5px solid #1d7a46; border-radius: 8px; background: #f6fbf6; padding: 1rem; }
+  .comparison-bar { min-width: 110px; height: 8px; border-radius: 999px; background: #e7eee7; overflow: hidden; margin-top: 0.35rem; }
+  .comparison-bar > span { display: block; height: 100%; background: #2d8b57; border-radius: inherit; }
+  .comparison-bar.risk > span { background: #cf5b62; }
+  .comparison-bar.missing > span { background: #d6a326; }
+  @media (max-width: 850px) { .comparison-filter { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 540px) { .comparison-filter { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between gap-3 align-items-start flex-wrap mb-3">
+  <div>
+    <h1 class="h4 mb-1">Parallel Section Comparison</h1>
+    <p class="text-muted mb-0">Compare only sections of the same course handled by you in the same academic term.</p>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:dashboard' %}">Back to Dashboard</a>
+</div>
+
+<form method="get" class="card card-body comparison-filter mb-3">
+  <div>
+    <label class="form-label" for="academic_term">Academic Term</label>
+    <select class="form-select" id="academic_term" name="academic_term">
+      {% for term in term_options %}
+      <option value="{{ term.id }}" {% if term.id == selected_term_id %}selected{% endif %}>{{ term.academic_year.code }} / {{ term.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="form-label" for="course_code">Course Code</label>
+    <select class="form-select" id="course_code" name="course_code">
+      {% for course in course_options %}
+      <option value="{{ course.code }}" {% if course.code == selected_course_code %}selected{% endif %}>{{ course.code }} - {{ course.title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="form-label" for="period_code">Grading Period</label>
+    <select class="form-select" id="period_code" name="period_code">
+      {% for period in period_options %}
+      <option value="{{ period.code }}" {% if period.code == selected_period_code %}selected{% endif %}>{{ period.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-success" type="submit">Compare</button>
+</form>
+
+<div class="comparison-summary mb-3">
+  <strong>What the comparison shows</strong>
+  <div class="mt-1">{{ interpretation }}</div>
+</div>
+
+<section class="card">
+  <div class="card-header bg-white">
+    <h2 class="h6 mb-1">Section Comparison</h2>
+    <p class="small text-muted mb-0">Bars are a visual aid. Exact values remain available in the table.</p>
+  </div>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Section</th>
+          <th>Class Average</th>
+          <th>At-Risk Students</th>
+          <th>Missing Outputs</th>
+          <th>Weakest Component</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in comparison_rows %}
+        <tr>
+          <td><strong>{{ row.section_name }}</strong></td>
+          <td>
+            {% if row.class_average is not None %}{{ row.class_average|floatformat:2 }}{% else %}-{% endif %}
+            <div class="comparison-bar"><span style="width: {{ row.average_bar_width }}%;"></span></div>
+          </td>
+          <td>
+            {{ row.at_risk_count }}
+            <div class="comparison-bar risk"><span style="width: {{ row.at_risk_bar_width }}%;"></span></div>
+          </td>
+          <td>
+            {{ row.missing_output_count }}
+            <div class="comparison-bar missing"><span style="width: {{ row.missing_bar_width }}%;"></span></div>
+          </td>
+          <td>
+            {% if row.weakest_component %}
+              {{ row.weakest_component.name }}
+              <div class="small text-muted">{{ row.weakest_component.average|floatformat:2 }}</div>
+            {% else %}-{% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-center text-muted py-4">No assigned classes are available for this comparison.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

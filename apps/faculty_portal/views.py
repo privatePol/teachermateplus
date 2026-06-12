@@ -37,7 +37,7 @@ from apps.faculty_portal.forms import (
     GradeActivityForm,
     GradeCorrectionRequestForm,
 )
-from apps.faculty_portal.services import StudentInterventionService
+from apps.faculty_portal.services import FacultyPerformanceService, StudentInterventionService
 from apps.faculty_portal.help_guide import FACULTY_HELP_SECTIONS
 from apps.grading.models import (
     CourseTemplateAssignment,
@@ -1552,18 +1552,159 @@ def dashboard_view(request):
         now=dashboard_now,
     )
     active_grading_period_rows = _build_active_grading_period_rows(active_offerings, now=dashboard_now)
-    at_risk_preview = StudentInterventionService.build_at_risk_students_preview(
-        user=request.user,
-        active_offerings=active_offerings,
-        tenant_id=tenant_id,
-        limit=5,
-    )
-    priority_actions = StudentInterventionService.build_priority_actions(
-        user=request.user,
-        active_offerings=active_offerings,
-        now=dashboard_now,
-        at_risk_total=at_risk_preview["total_count"] if at_risk_preview["enabled"] else 0,
-    )
+    grade_status_rows = []
+    pending_grade_issues = []
+    for offering in active_offerings:
+        period = None
+        try:
+            template = FacultyGradingService.resolve_template_for_offering(offering)
+            periods = list(FacultyGradingService.get_template_periods(template))
+            active_period_setting = AcademicGovernanceService.resolve_active_grading_period(
+                tenant_id=offering.tenant_id,
+                campus_id=offering.campus_id,
+                term_id=offering.term_id,
+                now=dashboard_now,
+            )
+            period = next(
+                (
+                    candidate
+                    for candidate in periods
+                    if AcademicGovernanceService.template_period_matches_active_period(
+                        template_period=candidate,
+                        active_period_setting=active_period_setting,
+                    )
+                ),
+                None,
+            )
+            if period is None:
+                period = next(
+                    (
+                        candidate
+                        for candidate in periods
+                        if not GradingGovernanceService.is_submitted(
+                            offering=offering,
+                            template_period=candidate,
+                        )
+                    ),
+                    periods[0] if periods else None,
+                )
+        except ValidationError as exc:
+            template = None
+            periods = []
+            pending_grade_issues.append(
+                {
+                    "class_label": f"{offering.course.code} / {offering.section.code}",
+                    "period_name": "",
+                    "message": str(exc),
+                    "url": reverse("faculty_portal:offering_grading_template", args=[offering.id]),
+                }
+            )
+
+        status = "Invalid Setup"
+        status_class = "danger"
+        action_label = "Open Class"
+        action_url = reverse("faculty_portal:offering_periods", args=[offering.id])
+        issue_count = 1 if not template else 0
+        if template and period:
+            readiness = GradingGovernanceService.evaluate_submission_readiness(
+                offering=offering,
+                template_period=period,
+            )
+            submission = GradingGovernanceService.get_submission(
+                offering=offering,
+                template_period=period,
+            )
+            lock = GradingGovernanceService.resolve_lock(
+                offering=offering,
+                template_period=period,
+            )
+            is_submitted = bool(submission and submission.status == GradeSubmission.Status.SUBMITTED)
+            if lock and lock.is_locked:
+                status, status_class = "Locked", "secondary"
+                action_label = "Review Grades"
+                action_url = reverse("faculty_portal:period_summary", args=[offering.id, period.id])
+            elif is_submitted:
+                status, status_class = "Submitted", "info"
+                action_label = "Review Grades"
+                action_url = reverse("faculty_portal:period_summary", args=[offering.id, period.id])
+            elif readiness["missing_template_bucket_count"]:
+                status, status_class = "Invalid Setup", "danger"
+                action_label = "Open Class"
+                action_url = reverse("faculty_portal:period_activities", args=[offering.id, period.id])
+            elif readiness["students_with_any_grade"] == 0:
+                status, status_class = "Not Started", "secondary"
+                action_label = "Continue Encoding"
+                action_url = reverse("faculty_portal:period_activities", args=[offering.id, period.id])
+            elif readiness["students_missing_any_grade"]:
+                status, status_class = "In Progress", "warning"
+                action_label = "Continue Encoding"
+                action_url = reverse("faculty_portal:period_activities", args=[offering.id, period.id])
+            else:
+                status, status_class = "Ready for Review", "success"
+                action_label = "Review / Submit Grades"
+                action_url = reverse("faculty_portal:period_summary", args=[offering.id, period.id])
+
+            if readiness["missing_template_bucket_count"]:
+                issue_count += readiness["missing_template_bucket_count"]
+                pending_grade_issues.append(
+                    {
+                        "class_label": f"{offering.course.code} / {offering.section.code}",
+                        "period_name": period.name,
+                        "message": (
+                            f"{readiness['missing_template_bucket_count']} required grading "
+                            f"item{'' if readiness['missing_template_bucket_count'] == 1 else 's'} "
+                            f"{'is' if readiness['missing_template_bucket_count'] == 1 else 'are'} missing."
+                        ),
+                        "url": reverse("faculty_portal:period_activities", args=[offering.id, period.id]),
+                    }
+                )
+            if readiness["students_missing_any_grade"]:
+                issue_count += readiness["students_missing_any_grade"]
+                pending_grade_issues.append(
+                    {
+                        "class_label": f"{offering.course.code} / {offering.section.code}",
+                        "period_name": period.name,
+                        "message": (
+                            f"{readiness['students_missing_any_grade']} student record"
+                            f"{'' if readiness['students_missing_any_grade'] == 1 else 's'} "
+                            "still has missing scores or attendance."
+                        ),
+                        "url": reverse("faculty_portal:period_activities", args=[offering.id, period.id]),
+                    }
+                )
+            if (
+                not is_submitted
+                and readiness["eligible_student_count"] > 0
+                and readiness["students_with_any_grade"] > 0
+                and not readiness["students_missing_any_grade"]
+                and not readiness["missing_template_bucket_count"]
+            ):
+                pending_grade_issues.append(
+                    {
+                        "class_label": f"{offering.course.code} / {offering.section.code}",
+                        "period_name": period.name,
+                        "message": "The gradebook is ready for review but has not been submitted.",
+                        "url": reverse("faculty_portal:period_summary", args=[offering.id, period.id]),
+                    }
+                )
+                issue_count += 1
+
+        grade_status_rows.append(
+            {
+                "offering": offering,
+                "period": period,
+                "status": status,
+                "status_class": status_class,
+                "issue_count": issue_count,
+                "action_label": action_label,
+                "action_url": action_url,
+                "performance_url": (
+                    reverse("faculty_portal:class_performance", args=[offering.id, period.id])
+                    if period
+                    else ""
+                ),
+            }
+        )
 
     stats = {
         "assigned_courses": len(active_offerings) + len(archived_offerings),
@@ -1584,8 +1725,8 @@ def dashboard_view(request):
         "classes_with_missing_grades": classes_with_missing_grades,
         "deadline_reminder": deadline_reminder,
         "active_grading_period_rows": active_grading_period_rows,
-        "priority_actions": priority_actions,
-        "at_risk_preview": at_risk_preview,
+        "grade_status_rows": grade_status_rows,
+        "pending_grade_issues": pending_grade_issues,
     }
     return render(request, "faculty_portal/dashboard.html", {"stats": stats})
 
@@ -3315,6 +3456,183 @@ def offering_periods_view(request, offering_id: int):
         ),
     }
     return render(request, "faculty_portal/offering_periods.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def class_performance_view(request, offering_id: int, period_id: int):
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
+    if not template or not period:
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    snapshot = FacultyPerformanceService.get_class_performance_snapshot(offering, period)
+    attention_rows = [
+        row
+        for row in snapshot["rows"]
+        if snapshot["has_performance_data"]
+        and row["trend_label"]
+        in {
+            FacultyPerformanceService.TREND_AT_RISK,
+            FacultyPerformanceService.TREND_INCOMPLETE,
+            FacultyPerformanceService.TREND_DECLINING,
+        }
+    ]
+    for row in attention_rows:
+        row["explain_url"] = reverse(
+            "faculty_portal:grade_explanation",
+            kwargs={
+                "offering_id": offering.id,
+                "period_id": period.id,
+                "student_id": row["student_id"],
+                "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+            },
+        )
+    return render(
+        request,
+        "faculty_portal/class_performance.html",
+        {
+            "offering": offering,
+            "period": period,
+            "snapshot": snapshot,
+            "attention_rows": attention_rows,
+        },
+    )
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def student_performance_consultation_view(request, offering_id: int, period_id: int, student_id: int):
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
+    if not template or not period:
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    enrollment = get_object_or_404(
+        Enrollment.objects.select_related("student")
+        .filter(
+            course_offering_id=offering.id,
+            student_id=student_id,
+            is_active=True,
+            student__is_active=True,
+        )
+        .exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES)
+    )
+    trend = FacultyPerformanceService.get_student_performance_trend(
+        enrollment.student,
+        offering,
+        period,
+    )
+    if not trend:
+        raise Http404("Student performance data is unavailable.")
+    trend_visualization = FacultyPerformanceService.get_student_trend_visualization(
+        enrollment.student,
+        offering,
+        period,
+    )
+    return render(
+        request,
+        "faculty_portal/student_performance_consultation.html",
+        {
+            "offering": offering,
+            "period": period,
+            "trend": trend,
+            "trend_visualization": trend_visualization,
+        },
+    )
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def parallel_section_comparison_view(request):
+    accepted_offering_ids = _faculty_assignment_queryset(request.user).filter(
+        accepted_at__isnull=False,
+        response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+    ).values_list("offering_id", flat=True)
+    scoped_offerings = list(
+        _faculty_offering_queryset(request.user)
+        .filter(id__in=accepted_offering_ids)
+        .distinct()
+    )
+    term_options = {}
+    course_options_by_term = defaultdict(dict)
+    for offering in scoped_offerings:
+        term_options[offering.term_id] = offering.term
+        course_options_by_term[offering.term_id][offering.course.code] = offering.course
+
+    selected_term_id = _safe_int(request.GET.get("academic_term"))
+    if selected_term_id not in term_options:
+        selected_term_id = scoped_offerings[0].term_id if scoped_offerings else None
+    selected_term = term_options.get(selected_term_id)
+
+    available_courses = list(course_options_by_term.get(selected_term_id, {}).values())
+    available_courses.sort(key=lambda course: course.code)
+    selected_course_code = (request.GET.get("course_code") or "").strip()
+    valid_course_codes = {course.code for course in available_courses}
+    if selected_course_code not in valid_course_codes:
+        selected_course_code = available_courses[0].code if available_courses else ""
+
+    matching_offerings = [
+        offering
+        for offering in scoped_offerings
+        if offering.term_id == selected_term_id and offering.course.code == selected_course_code
+    ]
+    period_options_by_code = {}
+    period_seed_by_code = {}
+    for offering in matching_offerings:
+        try:
+            template = FacultyGradingService.resolve_template_for_offering(offering)
+        except ValidationError:
+            continue
+        for period in FacultyGradingService.get_template_periods(template):
+            period_options_by_code.setdefault(period.code, period.name)
+            period_seed_by_code.setdefault(period.code, period)
+    selected_period_code = (request.GET.get("period_code") or "").strip()
+    if selected_period_code not in period_options_by_code:
+        selected_period_code = next(iter(period_options_by_code), "")
+    selected_period = period_seed_by_code.get(selected_period_code)
+
+    comparison_rows = []
+    if selected_term and selected_course_code and selected_period:
+        comparison_rows = FacultyPerformanceService.get_parallel_section_comparison(
+            request.user,
+            selected_course_code,
+            selected_term,
+            selected_period,
+        )
+    interpretation = FacultyPerformanceService.get_parallel_section_interpretation(comparison_rows)
+    chart_data = FacultyPerformanceService.get_chart_data_for_parallel_sections(comparison_rows)
+    return render(
+        request,
+        "faculty_portal/parallel_section_comparison.html",
+        {
+            "term_options": sorted(
+                term_options.values(),
+                key=lambda term: (term.academic_year.code, term.sequence_no, term.code),
+                reverse=True,
+            ),
+            "course_options": available_courses,
+            "period_options": [
+                {"code": code, "name": name}
+                for code, name in period_options_by_code.items()
+            ],
+            "selected_term_id": selected_term_id,
+            "selected_term": selected_term,
+            "selected_course_code": selected_course_code,
+            "selected_period_code": selected_period_code,
+            "comparison_rows": comparison_rows,
+            "interpretation": interpretation,
+            "chart_data": chart_data,
+        },
+    )
 
 
 @portal_required("FACULTY")

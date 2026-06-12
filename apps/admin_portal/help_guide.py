@@ -17,6 +17,13 @@ ADMIN_HELP_SECTIONS = [
                 "audience": "All Admin Portal users",
                 "permissions": ["dashboard.read", "admin_portal.access"],
                 "purpose": "Shows the records and alerts available for the selected school, campus, academic year, and term.",
+                "menu_path": "Admin Portal -> Dashboard",
+                "steps": [
+                    "Open Dashboard from the left navigation.",
+                    "Check the tenant and campus selectors in the top bar.",
+                    "Confirm the academic year, term, and active grading period shown on the page.",
+                    "Open the relevant alert or queue before taking action.",
+                ],
                 "check_first": [
                     "Confirm the tenant and campus shown at the top of the page.",
                     "Confirm the active academic year, term, and grading period.",
@@ -62,6 +69,17 @@ ADMIN_HELP_SECTIONS = [
                     "offerings.read",
                 ],
                 "purpose": "Builds the school structure used by enrollment, faculty assignments, grading, and reports.",
+                "menu_path": (
+                    "Admin Portal -> Organization, then Admin Portal -> Academics "
+                    "(Academic Years, Terms, Courses, Sections, and Course Offerings)"
+                ),
+                "steps": [
+                    "Set the correct tenant and campus in the top bar.",
+                    "Open Organization to verify the campus, department, and program records.",
+                    "Open Academics and complete Academic Years, Terms, Courses, and Sections.",
+                    "Open Academics -> Course Offerings to create the scheduled class.",
+                    "Review the saved offering before proceeding to enrollment and faculty assignment.",
+                ],
                 "check_first": [
                     "Check for an existing record before creating another one.",
                     "Confirm the campus, academic year, term, department, and program.",
@@ -99,6 +117,16 @@ ADMIN_HELP_SECTIONS = [
                     "student_enrollment_query.read",
                 ],
                 "purpose": "Places the correct students and faculty member in each scheduled class.",
+                "menu_path": (
+                    "Admin Portal -> Students -> Students; Admin Portal -> Enrollment -> Enrollment; "
+                    "Admin Portal -> Academics -> Faculty Assignments"
+                ),
+                "steps": [
+                    "Open Students -> Students and confirm that the student record exists.",
+                    "Open Enrollment -> Enrollment and link the student to the correct course offering.",
+                    "Open Academics -> Faculty Assignments and assign the correct faculty member.",
+                    "Confirm that the assignment is active and wait for the faculty member to accept it.",
+                ],
                 "check_first": [
                     "Confirm the student or faculty account belongs to the selected campus.",
                     "Confirm the class, section, academic year, and term.",
@@ -144,6 +172,18 @@ ADMIN_HELP_SECTIONS = [
                     "template_details.read",
                 ],
                 "purpose": "Defines grading periods, major components, subcomponents, activity types, score-entry rules, and weights.",
+                "menu_path": "Admin Portal -> Grading -> Grading Templates",
+                "steps": [
+                    "Open Grading -> Grading Templates from the left navigation.",
+                    "To create a new setup, click Add Template. To review an existing setup, find the template row.",
+                    "Click the Builder icon on the template row.",
+                    "Inside Builder, click Add Period, then add or edit the major Components for that period.",
+                    "Under each major component, add or edit Subcomponents such as Quizzes or Participation/Output.",
+                    "Under Participation/Output, add the allowed Detail Items and set Detail Computation to Average Activities when required by policy.",
+                    "Confirm that the major component weights total 100% for the period and that each lower level has a valid positive setup.",
+                    "Return to Grading Templates and click Test Calculator to verify sample results.",
+                    "When the draft is complete, use Submit for Approval, Review Approval, and Publish according to the configured governance route.",
+                ],
                 "check_first": [
                     "Confirm the template is for the correct program or course group.",
                     "Check that every required weight total is 100%.",
@@ -176,8 +216,83 @@ ADMIN_HELP_SECTIONS = [
                         "editable": "Published changes may require a hotfix or a new template version.",
                     },
                 ],
-                "avoid": "Do not confuse Direct Percentage with Raw Score Base-50. Inherited rules can still apply to an activity.",
+                "avoid": "Do not change a published template used by live classes without an approved impact review. TeacherMate+ uses Raw Score Base-50 for faculty score encoding.",
                 "next_step": "Assign the published template to the correct courses and term.",
+            },
+            {
+                "code": "template-hotfix",
+                "title": "Change a Published Template Using a Hotfix",
+                "audience": "Authorized template hotfix requesters, reviewers, and final approvers",
+                "permissions": [
+                    "template_hotfixes.read",
+                    "template_hotfixes.create",
+                    "template_hotfixes.review",
+                ],
+                "purpose": "Provides a governed route for an urgent change to a published grading template already used by classes.",
+                "menu_path": (
+                    "Admin Portal -> Grading -> Grading Templates -> Hotfix, then "
+                    "Admin Portal -> Grading -> Template Hotfix Requests"
+                ),
+                "steps": [
+                    "Before changing the template, export or record the current grade summaries and identify which gradebooks are Draft, Submitted, Reopened, or Locked.",
+                    "Open Grading -> Grading Templates and find the published template.",
+                    "Click the Hotfix icon on that template row.",
+                    "Choose the apply mode: Future Only, Active Not Submitted, Selected Offerings, or Requesting Faculty's Accepted Offerings.",
+                    "For Selected Offerings, select only the affected active classes.",
+                    "Enter a clear academic justification that describes the requested structure, weight, or computation change and its intended effective date.",
+                    "Click Create Hotfix Request.",
+                    "An authorized reviewer opens Grading -> Template Hotfix Requests, opens the request, and checks the impact preview and affected classes.",
+                    "Complete every configured review step. At the final apply step, enter the required decision reason and type APPLY HOTFIX.",
+                    "Review the Applied result, affected offering count, recomputed offering count, and any skipped classes.",
+                ],
+                "check_first": [
+                    "Confirm that the template is published and that you selected the correct tenant.",
+                    "Identify every course and class currently resolving to the shared template.",
+                    "Confirm whether any affected grading period has already been submitted or locked.",
+                    "Check that revised component weights and subcomponent settings remain valid.",
+                    "Decide whether the change is for future classes, all active unsubmitted classes, or selected offerings only.",
+                ],
+                "actions": [
+                    {
+                        "name": "Hotfix",
+                        "does": "Opens the request form for the selected published grading template.",
+                        "when": "Use it for an approved urgent correction that cannot wait for a future template version.",
+                        "avoid": "Do not use it merely to experiment with a live formula.",
+                        "result": "A pending governed hotfix request is created; no grade changes occur yet.",
+                        "editable": "The request is reviewed before final application.",
+                    },
+                    {
+                        "name": "Apply Mode",
+                        "does": "Controls which offerings are selected for immediate recomputation after final approval.",
+                        "when": "Choose the narrowest scope that satisfies the approved academic policy.",
+                        "avoid": "Do not choose a broad mode without reviewing every affected class.",
+                        "result": "The impact preview identifies the target offerings.",
+                        "editable": "The selected mode belongs to the submitted request and should be checked before approval.",
+                    },
+                    {
+                        "name": "Approve & Apply",
+                        "does": "Records the final approval and runs the approved recomputation for eligible target offerings.",
+                        "when": "Use it only after checking the impact preview, weights, submission states, and justification.",
+                        "avoid": "Do not apply when the request would improperly alter submitted grades.",
+                        "result": "Eligible unsubmitted offerings are recomputed; submitted offerings in restricted modes are skipped and reported.",
+                        "editable": "Submitted official grades still require the Correction of Grades workflow.",
+                    },
+                ],
+                "avoid": (
+                    "Do not assume Selected Offerings creates separate template structures. The template remains shared; "
+                    "the selected scope controls immediate recomputation. Never use a hotfix to silently replace official submitted grades."
+                ),
+                "next_step": (
+                    "Verify an affected faculty gradebook and its Explain This Grade result. Use Correction of Grades for any approved change to an already submitted official grade."
+                ),
+                "workflow": {
+                    "starts": "An authorized admin, CAO, or other configured requester creates the hotfix request.",
+                    "reviews": "The configured hotfix reviewer checks the academic reason, scope, and impact preview.",
+                    "approves": "The configured final hotfix approver applies the request using the required confirmation.",
+                    "receives": "Affected faculty and academic operations receive the implemented policy instructions through institutional communication.",
+                    "complete": "The request is Applied or Rejected, eligible offerings are processed, and skipped offerings are documented.",
+                    "records": "Request scope, justification, workflow decisions, reviewers, timestamps, affected offerings, recomputation results, skipped classes, and audit logs.",
+                },
             },
             {
                 "code": "grading-assignment",
@@ -189,6 +304,18 @@ ADMIN_HELP_SECTIONS = [
                     "tenant_grading_profiles.read",
                 ],
                 "purpose": "Connects an approved grade formula to the classes that faculty will use.",
+                "menu_path": (
+                    "Admin Portal -> Grading -> Course Template Assignments; "
+                    "Admin Portal -> Grading -> Tenant Grading Profiles"
+                ),
+                "steps": [
+                    "Open Grading -> Course Template Assignments.",
+                    "Click Bulk Assign Template.",
+                    "Choose the published grading template, the intended courses, and the effective term.",
+                    "Save the assignment and use the missing-template filters to confirm coverage.",
+                    "If institution-wide formula or final-grade behavior is needed, open Grading -> Tenant Grading Profiles and review the matching profile.",
+                    "Open a sample faculty class and confirm that it resolves to the intended template.",
+                ],
                 "check_first": [
                     "Confirm the template is approved and published.",
                     "Confirm the course, term, and campus coverage.",
@@ -229,6 +356,17 @@ ADMIN_HELP_SECTIONS = [
                 "audience": "Campus administrators and authorized academic reviewers",
                 "permissions": ["grade_submissions.read", "grading_periods.read"],
                 "purpose": "Shows whether each period gradebook is Draft, Submitted, or Reopened.",
+                "menu_path": (
+                    "Admin Portal -> Grading -> Submissions; "
+                    "Admin Portal -> Grading -> Period Locks"
+                ),
+                "steps": [
+                    "Open Grading -> Submissions.",
+                    "Set the campus, academic year, term, and grading period filters.",
+                    "Find the course and section, then open its gradebook review.",
+                    "For deadline or access questions, open Grading -> Period Locks and check the applicable rule.",
+                    "Use the overdue report for gradebooks that remain unsubmitted after the deadline.",
+                ],
                 "check_first": [
                     "Confirm the campus, term, and grading period.",
                     "Check the accepted faculty assignment and deadline.",
@@ -261,6 +399,14 @@ ADMIN_HELP_SECTIONS = [
                 "audience": "Reviewers explicitly assigned by the Superadmin for the affected scope",
                 "permissions": ["reopen_requests.read", "reopen_requests.review"],
                 "purpose": "Temporarily restores encoding or submission access to an eligible locked or overdue gradebook.",
+                "menu_path": "Admin Portal -> Grading -> Reopen Requests",
+                "steps": [
+                    "Open Grading -> Reopen Requests.",
+                    "Filter the queue to the affected campus and current request status.",
+                    "Open the request and verify the course, section, faculty member, period, deadline, and justification.",
+                    "Choose Approve or Reject and enter clear review remarks.",
+                    "After approval, monitor the class until the faculty member resubmits within the allowed window.",
+                ],
                 "check_first": [
                     "Confirm the request belongs to your assigned tenant and campus.",
                     "Read the faculty justification and verify the deadline and submission status.",
@@ -301,6 +447,17 @@ ADMIN_HELP_SECTIONS = [
                 "audience": "Faculty, assigned reviewers, academic approvers, and registrar staff",
                 "permissions": ["corrections.read", "corrections.review", "corrections.create_on_behalf"],
                 "purpose": "Handles audited changes to grades that have already been submitted.",
+                "menu_path": (
+                    "Admin Portal -> Grading -> Correction Queue; "
+                    "Admin Portal -> Grading -> Create Correction On Behalf"
+                ),
+                "steps": [
+                    "Open Grading -> Correction Queue to review an existing request.",
+                    "Open the request and compare the original value, requested value, student, grading item, reason, and attachment.",
+                    "Record the current approval-step decision with clear remarks.",
+                    "If authorized staff must start the request, open Grading -> Create Correction On Behalf.",
+                    "Complete the configured approval route and verify the recomputed official result after final approval.",
+                ],
                 "check_first": [
                     "Confirm the gradebook was submitted.",
                     "Check the original value, requested value, student, activity, and reason.",
@@ -362,6 +519,16 @@ ADMIN_HELP_SECTIONS = [
                     "audit_logs.read",
                 ],
                 "purpose": "Supports academic review, submission follow-up, clearance, audit, and printing.",
+                "menu_path": (
+                    "Admin Portal -> Grading -> Grading Analytics or Grade Distribution Monitor; "
+                    "Admin Portal -> Academics -> Faculty Final Clearance; Admin Portal -> Audit"
+                ),
+                "steps": [
+                    "Open the report or monitor that answers the operational question.",
+                    "Set the campus, academic year, term, period, course, or status filters before reviewing results.",
+                    "Open the underlying class or record when a count or warning needs confirmation.",
+                    "Generate, export, or print only after confirming that the source status is appropriate.",
+                ],
                 "check_first": [
                     "Confirm campus, academic year, term, period, and report date.",
                     "Confirm whether the source gradebook is Draft, Submitted, or Reopened.",
@@ -401,6 +568,13 @@ ADMIN_HELP_SECTIONS = [
                 "audience": "Authorized account administrators",
                 "permissions": ["users.read", "users.update"],
                 "purpose": "Maintains user identity, campus defaults, account state, passwords, and login lockouts.",
+                "menu_path": "Admin Portal -> Security -> Users or Admin Portal -> Security -> Login Lockouts",
+                "steps": [
+                    "Open Security -> Users and search by username, name, or email.",
+                    "Open the existing account before deciding to create a new one.",
+                    "Verify identity, email, default tenant, default campus, active status, and assigned roles.",
+                    "For a temporary login block, open Security -> Login Lockouts and verify the user before unlocking.",
+                ],
                 "check_first": [
                     "Search for the user before creating another account.",
                     "Confirm the registered email, campus, department, and active status.",
@@ -448,6 +622,15 @@ ADMIN_HELP_SECTIONS = [
                     "system_settings.update",
                 ],
                 "purpose": "Controls institution-wide access, navigation, configuration, and emergency operational tools.",
+                "menu_path": (
+                    "Admin Portal -> Security, Navigation, Tools, or Organization, depending on the approved system task"
+                ),
+                "steps": [
+                    "Confirm the exact institution-wide change and its approved scope.",
+                    "Open the relevant Superadmin-only page from Security, Navigation, Tools, or Organization.",
+                    "Review affected roles, permissions, tenants, campuses, and active users before saving.",
+                    "After saving, test the result using a scoped non-Superadmin account and review the audit log.",
+                ],
                 "check_first": [
                     "Confirm the tenant and intended impact.",
                     "Review affected users, roles, campuses, and records.",

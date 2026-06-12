@@ -1,17 +1,144 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-06-11
+Last updated by Codex: 2026-06-12
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
-- Date: 2026-06-11
-- Session focus: Implemented reversible, role-based practical Help Guides for Admin and Faculty users.
+- Date: 2026-06-12
+- Session focus: Improved the role-based Admin Help Guide with exact menu routes, practical click-by-click instructions, and complete published-template hotfix guidance, while retaining the prior grading and Faculty Help Guide work.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
+- Practical/full Admin guide navigation:
+  - Added `Open Full Admin Guide` to the role-based practical guide.
+  - Added `Back to Practical Guide` to the legacy/full Admin guide.
+  - Added explicit `?view=full` and `?view=practical` rendering overrides without changing the saved tenant-level default-guide setting.
+  - Confirmed Campus Admin users may open the full general guide but still cannot see the Superadmin-only Production Incident Response section.
+  - Added regressions for practical-to-full navigation, full-to-practical navigation, practical override when the tenant default is legacy, and Superadmin incident-section isolation.
+- Admin Help Guide operational instructions:
+  - Confirmed the active guide is generated from `apps/admin_portal/help_guide.py` and rendered by `templates/admin_portal/guide_role_based.html`.
+  - Added a visible `Where to start` block and numbered `How to open and use this page` instructions for every major role-based Admin guide topic.
+  - Grade Formula Setup now directs authorized users to `Admin Portal -> Grading -> Grading Templates` and names the actual `Add Template`, `Builder`, `Add Period`, component, subcomponent, detail, `Test Calculator`, approval, and publish actions.
+  - Added Participation/Output setup guidance that directs admins to set the subcomponent's Detail Computation to `Average Activities` when required by policy.
+  - Removed the stale Direct Percentage warning from the active Admin guide and retained Raw Score Base-50 wording.
+  - Added a dedicated permission-filtered `Change a Published Template Using a Hotfix` topic.
+  - Hotfix guidance covers `Grading Templates -> Hotfix`, `Template Hotfix Requests`, all four apply modes, Selected Offerings, academic justification, impact preview, configured review steps, the typed `APPLY HOTFIX` confirmation, affected/recomputed counts, and skipped offerings.
+  - Clarified that selected hotfix scope controls immediate recomputation but does not create a separate per-offering copy of the shared template.
+  - Clarified that eligible unsubmitted offerings may be recomputed while official submitted grades require Correction of Grades.
+  - Added guide regressions for exact menu paths, Builder/Average Activities instructions, removal of Direct Percentage wording, hotfix content visibility with permission, and hotfix content isolation without permission.
+
+### Admin Help Guide Manual Test
+1. Log in as an Admin Portal user with `grading_templates.read`.
+2. Open `/admin-portal/guide/`.
+3. Click `Open Full Admin Guide` and confirm the URL includes `?view=full`.
+4. Click `Back to Practical Guide` and confirm the URL includes `?view=practical`.
+5. Open `Grading Setup -> Grade Formula Setup`.
+6. Confirm `Where to start` shows `Admin Portal -> Grading -> Grading Templates`.
+7. Confirm the numbered steps name Add Template, Builder, Add Period, components, subcomponents, details, Average Activities, Test Calculator, approval, and publish.
+8. Log in as a user with effective template hotfix permission.
+9. Confirm `Change a Published Template Using a Hotfix` is visible and names the Hotfix icon and Template Hotfix Requests menu.
+10. Confirm the topic explains apply modes, impact review, `APPLY HOTFIX`, skipped submitted offerings, and Correction of Grades.
+11. Log in as an Admin user without any template hotfix permission and confirm the hotfix topic is hidden.
+12. Open `?view=full` as Campus Admin and confirm `Production Incident Response` is absent.
+13. Check both guide views at desktop and mobile widths for wrapping and horizontal action-table scrolling.
+
+- Participation/Output Average Activities submission policy:
+  - Confirmed the central readiness gate is `GradingGovernanceService.evaluate_submission_readiness()` and its `_template_activity_requirements()` helper in `apps/grading/services.py`.
+  - Changed only template-coverage validation for Participation/Output subcomponents using `Average Activities`.
+  - Such a subcomponent now requires at least one active faculty-created activity anywhere under its active detail rows; unused detail rows no longer create separate blockers.
+  - Review correction: active activities linked to inactive component/subcomponent/detail rows are excluded so readiness matches the official computation service's active-template filtering.
+  - TeacherMate+ has no separate activity `selected` field. For this policy, a selected/usable item is an active `GradeActivity` linked to the relevant offering, period, active Participation/Output hierarchy, and active detail.
+  - Preserved the existing strict per-detail coverage policy for `Weighted Details` and for non-Participation/Output subcomponents, even if they use the same computation-mode value.
+  - Preserved student-level completeness checks for every active activity, attendance requirements, deadline/lock checks, and all unrelated submission blockers.
+  - Confirmed encoded raw score `0.00` is recognized as an existing score record and is not treated as blank.
+  - Confirmed invalid zero-total detail weights remain blocked by existing grading-template publication validation; this readiness change does not replace template governance.
+  - Added regressions for zero active averaging items, inactive activities/details, one active averaging item with an unused detail, actual successful submission, weighted missing/valid/zero-score behavior, invalid zero-total weighted setup, non-Participation/Output strictness, blank student records, read-only readiness, accepted-assignment access, cross-faculty denial, and unchanged averaging computation.
+
+### Participation/Output Submission Policy Manual Test
+1. Log in with a Faculty account and open an accepted assigned class.
+2. Open a period whose Participation/Output subcomponent uses `Average Activities`.
+3. Leave all Participation/Output activities absent or inactive and confirm submission readiness reports the Participation/Output requirement as missing.
+4. Create one valid active Participation/Output activity under an active detail and encode all required student scores.
+5. Confirm the Participation/Output template-coverage blocker clears.
+6. Leave other configured Participation/Output detail rows unused and confirm they do not block averaging-mode submission.
+7. Encode a saved raw score of `0` for one student and confirm it is not reported as blank.
+8. Leave another ACTIVE student's score blank for the active activity and confirm submission remains blocked by the existing missing-score rule.
+9. Deactivate the only Participation/Output activity, or its detail row, and confirm it no longer qualifies for readiness.
+10. Open a class using `Weighted Details` for Participation/Output and confirm every required active detail still needs its activity setup.
+11. Confirm a weighted active activity with a missing student score still blocks, while a complete weighted setup including a saved zero can submit.
+12. Confirm missing exam/component activities, attendance gaps, locks, deadlines, submitted status, and unaccepted faculty assignments still block through their existing rules.
+13. Compare the computed grade before and after this deployment using the same scores and confirm the computation result is unchanged.
+- Faculty Help Guide readability redesign:
+  - Kept the Daily Faculty Workflow visible and renamed it `Start Here: Daily Faculty Workflow`.
+  - Added a six-item `Top Faculty Tasks` strip for My Classes, score encoding, pending issues, computed-grade review, submission, and Student Consultation.
+  - Converted the five existing detailed content families into accessible Bootstrap accordion groups without removing topic content or breaking existing topic anchors.
+  - Kept the first accordion group open by default and collapsed the other four.
+  - Added deep-link handling so topic and navigation links open the correct accordion group.
+  - Restyled topic sections with stronger deep-green headings, neon-green accents, controlled gold callouts, better spacing, and responsive single-column behavior.
+  - Restyled action tables with deep-green headers, green/cream row bands, highlighted action and editability columns, stronger borders, row hover, semantic scopes, and narrow-screen horizontal scrolling.
+  - Added focused Student Consultation guidance for Current Grade, Trend, Missing Outputs, Weakest Component, Performance Trend, Component Average Trend, and Current Period Breakdown.
+  - Added focused Parallel Section Comparison guidance for lowest average, missing outputs, at-risk count, weakest component, comparison tables, lightweight bars, and rule-based interpretation.
+  - Used the Bootstrap 5.3 accordion already loaded by the Faculty Portal; no frontend dependency or grading behavior changed.
+- Faculty Help Guide and Full Faculty Manual:
+  - Added a visible `Open Full Faculty Manual` action to the active role-based guide at `/faculty/guide/`.
+  - Added a dedicated `Recommended Daily Faculty Workflow` section to `/faculty/guide/` using `media/imahe/faculty_workflow.png`, with responsive image sizing and a caption clarifying blank scores and pre-submission checks.
+  - Expanded `/faculty/guide/manual/` with current guidance for Gradebook Essentials, checking and explaining grades, Class Performance, selected-student consultation trends, and Parallel Section Comparison.
+  - Documented blank versus zero scores, Raw Score Base-50, equal Participation/Output item averaging, Summary abbreviations, privacy shielding, official rounded grades, and read-only analytics.
+  - Removed Direct Percentage and individual Participation/Output detail-weight guidance from the active guide, reversible legacy guide, and Full Faculty Manual.
+  - Clarified with a concrete example that Recitation 1, Recitation 2, Assignment 1, Assignment 2, Seatwork 1, and Seatwork 2 each count equally in the Participation/Output average; parent component and period weights still apply.
+  - Corrected stale manual wording that said blank scores were saved as zero.
+  - Corrected stale deadline wording so an overdue locked unsubmitted gradebook directs faculty to `Request Gradebook Reopen` and wait for approval.
+  - Added focused tests for the manual link, workflow image, and updated Full Faculty Manual content.
+- Student Consultation graph post-implementation review:
+  - Verified the graph is rendered only by `templates/faculty_portal/student_performance_consultation.html` at the selected-student consultation URL.
+  - Confirmed `Performance Trend` appears after Current Grade, Trend, Missing Outputs, and Weakest Component, and before Primary Reason and Current Period Breakdown.
+  - Confirmed Period Grade Trend includes the current period and earlier periods from the same offering/template, while periods after the selected period are not queried or displayed.
+  - Confirmed component, subcomponent, and configured detail labels come from the active grading template rather than a hard-coded category list.
+  - Confirmed mismatched components between periods and missing values are represented as gaps or `No data` without breaking the page.
+  - Added an exact-value Period Grade table fallback below the inline SVG; component values continue to use their responsive table plus inline SVG sparklines.
+  - Added a regression proving the graph does not render on the Faculty Dashboard or all-student Class Performance page.
+  - Reconfirmed accepted-assignment scoping, active-enrollment scoping, selected-student privacy, deterministic interpretation, and standard 404 handling for another faculty member.
+  - Reconfirmed graph generation is read-only and calls `FacultyGradingService.build_period_grade_detail_for_student()` for every included period without persisting recalculation results.
+  - Confirmed no Chart.js, Recharts, ApexCharts, AI, external API, analytics model, or frontend chart dependency is used.
+- Class Performance grade explanation and Student Consultation graphs:
+  - Added `Explain` beside each available Current Grade without adding an extra attention-table column.
+  - Reused the existing privacy-protected `Explain This Grade` modal through a shared Faculty template partial.
+  - Added a `Performance Trend` section below the four consultation summary cards and before Primary Reason.
+  - Added a responsive inline SVG Period Grade Trend and compact inline SVG component/subcomponent/detail sparklines.
+  - Used actual period, component, subcomponent, and configured detail names from the assigned grading template; no grading category names are hard-coded.
+  - Added deterministic selected-student interpretation and friendly states for one period, no computed grade, missing period values, and unavailable component data.
+  - Added `get_student_period_grade_trend()`, `get_student_component_trend()`, `get_student_trend_interpretation()`, and `get_student_trend_visualization()` plus private SVG-data helpers under `FacultyPerformanceService`.
+  - Reused `FacultyGradingService.build_period_grade_detail_for_student()` for every available period through the selected period.
+  - Confirmed the feature is read-only: it does not create, update, submit, unlock, or persist grade, score, attendance, submission, or lock records.
+  - Added focused tests for Explain/modal rendering, official-service reuse, actual template labels, selected-student privacy, inline SVG output, one-period and missing-component states, access isolation, and no grade mutation.
+  - Updated the Faculty Help Guide, CHANGE_LOG, project context, and this handoff.
+- Faculty Performance post-implementation review:
+  - Verified the main dashboard contains no student names, individual alerts, follow-up lists, rankings, or student comparisons.
+  - Removed the retired hidden dashboard markup so Students Needing Follow-up, Student Support, and Priority Actions no longer remain as dead template UI.
+  - Limited the Class Performance attention table to Student, Current Grade, Missing Outputs, Trend, and Primary Reason. The student name now opens Consultation View without an extra Action column.
+  - Limited Parallel Section Comparison to Section, Class Average, At-Risk Students, Missing Outputs, and Weakest Component; removed its extra Action column.
+  - Tightened comparison filter choices to explicitly accepted assignments and excluded sections that do not contain the selected grading-period code.
+  - Corrected raw-score base-50 empty handling so a completely unencoded class shows no performance data instead of a misleading floor average or at-risk count.
+  - Added friendly states for no active students, no encoded scores, incomplete grading setup, no previous grading period, and one-section comparison.
+  - Counted missing activity-score records as Missing Outputs without relabeling attendance gaps as outputs.
+  - Confirmed trend priority and configured passing-threshold reuse, private consultation isolation, cross-term/course/faculty exclusion, and submitted/locked read-only safety.
+  - Expanded `apps/faculty_portal/tests_performance.py` from 10 to 19 focused regressions.
+- Faculty Dashboard and performance trends:
+  - Replaced the rendered duplicate shortcut/action-card layout with one Grade Encoding Status table and one Pending Grade Issues panel.
+  - Removed the rendered Students Needing Follow-up card/panel, Student Support shortcut, incomplete-student KPI, and at-risk priority action from the main dashboard.
+  - Kept student names and student-level attention details off the dashboard.
+  - Added read-only `FacultyPerformanceService` functions for class snapshots, student trends, students requiring attention, parallel-section discovery/comparison, interpretation, and JSON-ready chart data.
+  - Reused `FacultyGradingService.build_period_grade_detail_for_student()` for current and previous-period values; no grading formula was copied.
+  - Applied trend precedence `AT_RISK`, `INCOMPLETE`, `NO_BASELINE`, `IMPROVING`, `DECLINING`, `STABLE`.
+  - Added Class Performance, Student Consultation, and Parallel Section Comparison pages and routes.
+  - Added same-faculty/same-course/same-term/same-period ownership filters and existing accepted-assignment access checks.
+  - Added table fallback, lightweight CSS bars, and deterministic comparison messages; no chart library or external dependency was added.
+  - Updated period-card navigation, sidebar navigation, quick tour text, revised/legacy Faculty guides, CHANGE_LOG, and project context.
+  - Added 10 focused performance tests and updated dashboard regressions to the approved privacy-focused behavior.
+  - Confirmed analytics GET requests do not create/update `StudentPeriodGrade` or `StudentActivityScore` records.
 - Faculty forced-password-change navigation lock:
   - Added a server-driven `password_change_required` state to `/faculty/change-password/`.
   - Collapsed and locked the left Faculty navigation while `must_change_password` remains active.
@@ -55,7 +182,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Added server-side Admin topic filtering using effective tenant/campus permissions.
   - Added a second Superadmin identity check for the sensitive system-control section; Campus Admin users cannot see that section even if they hold an unusually broad system permission.
   - Rewrote guide coverage around real user questions: page purpose, audience, first checks, actions, when to use/avoid them, result, editability, next step, workflow ownership, completion, and records updated.
-  - Added Faculty explanations for blank versus zero, Raw Score Base-50, Direct Percentage, Weighted Details, Average Activities, `Q.AVE`, `R.AVE`, `P/O AVE`, `CS AVE`, submission, reopening, corrections, reports, and privacy.
+  - Added Faculty explanations for blank versus zero, Raw Score Base-50, equal Participation/Output item averaging, `Q.AVE`, `R.AVE`, `P/O AVE`, `CS AVE`, submission, reopening, corrections, reports, and privacy.
   - Kept ordinary gradebook states accurate as `Draft`, `Submitted`, and `Reopened`; the guide does not invent ordinary approval or posting states.
   - Added focused Admin and Faculty regression tests for visibility, content, and legacy fallback.
 - Admin password-recovery branding:
@@ -462,6 +589,27 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Ransomware protection strategy should not rely on antivirus alone. The preferred server-side approach is least privilege, separated upload storage, no-execute mounts, restricted backup credentials, and Synology snapshots/immutability with tested restore procedures.
 
 ## Changed Files This Session
+- `templates/faculty_portal/guide_role_based.html`
+- `templates/faculty_portal/guide_manual.html`
+- `apps/faculty_portal/tests_help_guide.py`
+- `templates/faculty_portal/partials/grade_explanation_modal.html`
+- `apps/faculty_portal/services.py`
+- `apps/faculty_portal/views.py`
+- `apps/faculty_portal/urls.py`
+- `apps/faculty_portal/help_guide.py`
+- `apps/faculty_portal/tests_performance.py`
+- `apps/faculty_portal/tests_assignment_acceptance.py`
+- `templates/faculty_portal/dashboard.html`
+- `templates/faculty_portal/base.html`
+- `templates/faculty_portal/offering_periods.html`
+- `templates/faculty_portal/class_performance.html`
+- `templates/faculty_portal/student_performance_consultation.html`
+- `templates/faculty_portal/parallel_section_comparison.html`
+- `templates/faculty_portal/guide.html`
+- `templates/faculty_portal/guide_manual.html`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `HANDOFF.md`
 - `apps/accounts/views.py`
 - `apps/accounts/tests_privacy_consent.py`
 - `apps/grading/explanations.py`
@@ -542,6 +690,13 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - `logs/system.log` changed from dev-server logging during the session.
 
 ## Pending Work
+- Manually review `/admin-portal/guide/` at desktop and mobile widths with representative grading-admin and hotfix-reviewer accounts. Confirm the new `Where to start` cards, numbered steps, long menu paths, and action tables wrap cleanly.
+- Manually review the redesigned `/faculty/guide/` at desktop, tablet, and mobile widths when a browser target is available. Confirm accordion animation/focus, deep-link expansion, workflow image sizing, Top Faculty Tasks wrapping, and table horizontal scrolling.
+- Manually review `/faculty/guide/` and `/faculty/guide/manual/` at desktop and mobile widths when a browser target is available, especially the portrait workflow image and hero action wrapping.
+- Manually review the new Class Performance Explain modal and Student Consultation SVG graphs at desktop and mobile widths when a browser target is available.
+- Perform the 15-step Student Consultation browser checklist below with a production-like Faculty account after deployment.
+- Perform a manual desktop/mobile browser review of the Faculty Dashboard, Class Performance, Student Consultation, and Parallel Section Comparison pages when the in-app browser target is available.
+- Investigate the existing Admin Portal regression failures in configurable-feature saves and Faculty Final Clearance assignment snapshots before requiring the repository-wide suite to be fully green.
 - Consider expanding the submission snapshot in a future migration so it freezes the exact template weights, component decimals, detail rules, and computed contributions used at submission. Current snapshots preserve the official stored result but cannot always reconstruct the complete historical decimal trail after setup changes.
 - Perform a manual visual review of the redesigned `Explain This Grade` modal at desktop and mobile sizes when a browser target is available, confirming the privacy shield fully blocks the background and the cards stack cleanly.
 - Perform a manual browser review of both revised guide pages using representative Campus Admin, academic reviewer, Registrar, Superadmin, and Faculty accounts when the in-app browser is available.
@@ -560,6 +715,22 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Open governance/design topics remain in the context document, including expanded grading methodology options, active AY/Term governance, correction/reopen policy finalization, passing-threshold management, and configurable feature governance.
 
 ## Known Issues / Risks
+- The hotfix apply mode limits which offerings are immediately recomputed, but it does not create an offering-specific copy of the shared grading template. Admins must review all courses resolving to the template before changing its structure.
+- Visual browser validation of the new Admin guide menu-path and hotfix sections could not run because the in-app browser target `iab` was unavailable. Focused rendering and role-filtering tests passed.
+- Participation/Output `Average Activities` is configured on `GradingTemplateSubcomponent`; there is no equivalent computation-mode field directly on a top-level component. A Participation/Output top-level component is covered when its detail-bearing child subcomponent carries `Average Activities`.
+- TeacherMate+ has no separate selected/unselected activity flag. Faculty inclusion is represented by an active `GradeActivity`; deleting/deactivating the activity excludes it. Readiness also requires its referenced template hierarchy to remain active.
+- Existing template validation requires component weights to total 100, but subcomponent/detail weight totals only need to be greater than zero and are normalized by the computation service. This review preserved that existing weighted-mode rule; changing it to require an exact 100 total would be a separate grading-governance change.
+- Browser screenshot validation of the redesigned Faculty Help Guide could not be completed because the in-app browser target was unavailable. Django template rendering, accordion markup, responsive classes, and all Faculty Portal regressions passed.
+- Browser screenshot validation of the updated Faculty Help Guide and Full Faculty Manual could not be completed because the in-app browser target was unavailable. Focused Django rendering tests and responsive CSS review passed.
+- Student Consultation uses live official computation against the current grading template and source records. It does not provide an immutable historical computation snapshot if an old submitted template was later changed.
+- Components renamed between grading periods appear as separate actual-label trend rows; TeacherMate+ deliberately does not guess that differently named template items are equivalent.
+- Browser screenshot validation of the Period Grade SVG, component sparklines, responsive stacking, and table fallback could not be completed because the in-app browser target was unavailable. Django rendering and behavior assertions passed.
+- The completed 453-test repository suite still has five failures and one error in existing untouched Admin Portal tests: configurable-feature saves and Faculty Final Clearance assignment snapshots. The same Admin failures predate and are unrelated to the Student Consultation graph review.
+- Inline SVG component series use the actual label in each grading period. If an institution renames the same conceptual component between periods, the renamed labels appear as separate series instead of being guessed as equivalent.
+- The complete `python manage.py test` run currently has five failures and one error in existing untouched Admin Portal tests: three configurable-feature save tests and two Faculty Final Clearance tests. The same failures reproduce when those Admin tests are run independently.
+- No browser screenshot verification was completed for the new Faculty performance pages because the in-app browser target `iab` was unavailable. Django-rendered templates and access/privacy assertions passed.
+- Phase 1 intentionally has no chart library. Parallel comparison uses an exact-value table, CSS bars, and deterministic text; there is no median, ranking, percentile, prediction, or cross-faculty comparison.
+- Performance values are computed live and read-only. Large sections or many parallel sections may benefit from caching or further query profiling in a later phase, but no analytics table was introduced.
 - Historical grade submissions do not contain a complete immutable computation snapshot. The explanation now clearly separates the official stored grade from a current-template comparison, but exact old decimal contributions may be unavailable after template or source-record changes.
 - The grade-explanation redesign passed template rendering and the full Faculty Portal regression suite, but visual screenshot verification could not be completed because no in-app browser target was connected.
 - The revised guides passed server-side rendering and role-visibility tests, but a visual browser smoke test could not be completed because the local in-app browser target `iab` was unavailable.
@@ -612,7 +783,112 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - `TEACHERMATEPLUS_CONTEXT.md` now exists under the expected filename; the working tree still shows the rename from `TEACHERMATEPLUS_CONTEXT.md` as an uncommitted delete/add.
 - The ransomware/partitioning discussion was advisory only. No server partition, mount, Synology, antivirus, or Django `MEDIA_ROOT` configuration changes were applied in this workspace.
 
+## Manual Test Steps
+### Faculty Help Guide Browser Check
+1. Log in as Faculty and open `/faculty/guide/`.
+2. Confirm the hero shows `Full Guide Manual` and `Back to Faculty Portal`.
+3. Confirm `Start Here: Daily Faculty Workflow` and the workflow image remain immediately visible.
+4. Confirm all six Top Faculty Tasks display cleanly at desktop, tablet, and mobile widths.
+5. Confirm the first Detailed Faculty Reference accordion is open and the remaining four are collapsed.
+6. Expand each accordion by mouse, keyboard, and touch; confirm only the selected group remains open.
+7. Use the topic navigation and a deep link such as `#guide-submission`; confirm the owning accordion opens.
+8. Confirm action tables have deep-green headers, alternating green/cream rows, clear hover feedback, and readable borders.
+9. At mobile width, confirm action tables scroll horizontally without shrinking text or breaking the page.
+10. Expand the performance group and confirm the Student Consultation and Parallel Section Comparison callouts are readable and stack vertically on narrow screens.
+
+### Student Consultation Browser Check
+1. Log in as a Faculty user.
+2. Open the Faculty Dashboard and confirm no student performance graph or student list appears.
+3. Open an accepted assigned class.
+4. Open `Class Performance` and confirm the page shows its class snapshot without all-student trend graphs.
+5. Select one student from Students Requiring Attention.
+6. Confirm Student Consultation opens at `/faculty/my-courses/<offering>/periods/<period>/performance/students/<student>/`.
+7. Confirm `Performance Trend` appears below the four summary cards and above Primary Reason.
+8. Confirm Period Grade Trend shows the selected student's available period-to-period movement and the exact-value period table matches the plotted values.
+9. Confirm Component Average Trend shows actual component, subcomponent, and configured detail labels with exact values and sparklines.
+10. Confirm the identity header, graphs, interpretation, missing outputs, and breakdown belong only to the selected student.
+11. Confirm no other student name, grade, class average, ranking, comparison, or background class table is visible.
+12. Open a one-period-only case and confirm `Trend graph will appear after another grading period is available.`
+13. Open a case with missing period/component data and confirm `No data`, `No computed grade trend is available yet.`, or `Component trend is not available for this period.` appears as appropriate.
+14. Change the URL to another faculty member's offering/student and confirm the standard 404 or permission-denied response.
+15. Record grade, activity-score, attendance, submission, and lock counts/timestamps before and after opening the consultation page; confirm none changed.
+
 ## Validation Completed
+- [x] Practical/full Admin guide navigation and role-isolation suite passed: `python manage.py test apps.admin_portal.tests_help_guide` (10 tests).
+- [x] Explicit `?view=full` and `?view=practical` guide overrides passed without changing the configured tenant default.
+- [x] Campus Admin full-guide regression confirmed the Superadmin-only Production Incident Response section and link remain hidden.
+- [x] `python manage.py check` passed after the practical/full Admin guide navigation update.
+- [x] Role-based Admin Help Guide focused suite passed: `python manage.py test apps.admin_portal.tests_help_guide` (7 tests).
+- [x] Admin Help Guide tests confirmed the exact Grade Formula Setup menu path, Builder and Average Activities instructions, removal of Direct Percentage wording, hotfix visibility with permission, and hotfix isolation without permission.
+- [x] `python manage.py check` passed after the Admin Help Guide update.
+- [x] Python syntax compilation passed for `apps/admin_portal/help_guide.py` and `apps/admin_portal/tests_help_guide.py`.
+- [ ] Admin Help Guide desktop/mobile visual browser QA was attempted but could not run because the in-app browser target `iab` was unavailable.
+- [x] Chief Academic Officer Participation/Output policy review suite passed: 14 focused tests covering averaging zero/one activity, inactive activity/detail exclusion, unused details, weighted missing/valid/zero behavior, invalid zero-total weighted setup, non-Participation/Output strictness, blank scores, read-only evaluation, assignment access, and unchanged computation.
+- [x] Cross-faculty submission endpoint regression passed: another Faculty account receives the standard 404 and creates no submission record.
+- [x] Full Faculty assignment/grade workflow suite passed after the policy review correction: `python manage.py test apps.faculty_portal.tests_assignment_acceptance -v 1` (110 tests).
+- [x] Full grading-engine suite passed after the policy review correction: `python manage.py test apps.grading.tests -v 1` (48 tests).
+- [x] `python manage.py check` passed after the policy review correction.
+- [x] `python manage.py makemigrations --check --dry-run` reported no model changes.
+- [x] Repository-wide suite completed after the policy review: `python manage.py test -v 1` found 468 tests and reproduced only the same five failures plus one error in the pre-existing Admin configurable-feature/Faculty Final Clearance tests.
+- [x] Participation/Output submission-policy focused suite passed: 7 tests covering zero/one active averaging items, unused details, weighted-mode strictness, non-Participation/Output strictness, encoded zero, blank student records, and unchanged averaging computation.
+- [x] Full Faculty assignment/grade workflow suite passed after the readiness change: `python manage.py test apps.faculty_portal.tests_assignment_acceptance -v 1` (103 tests).
+- [x] Full grading-engine suite passed after the readiness change: `python manage.py test apps.grading.tests -v 1` (48 tests).
+- [x] `python manage.py check` passed after the readiness change.
+- [x] `python manage.py makemigrations --check --dry-run` reported no model changes.
+- [x] Repository-wide suite completed after the readiness change: `python manage.py test -v 1` found 460 tests and reproduced the same five failures plus one error in the pre-existing Admin configurable-feature/Faculty Final Clearance tests; the new readiness tests, full Faculty assignment suite, and full grading suite passed.
+- [x] Redesigned Faculty Help Guide focused suite passed: `python manage.py test apps.faculty_portal.tests_help_guide` (3 tests).
+- [x] Full Faculty Portal regression suite passed after the guide redesign: `python manage.py test apps.faculty_portal -v 1` (137 tests).
+- [x] Repository-wide suite completed after the guide redesign: `python manage.py test -v 1` found 454 tests and finished with the same five failures plus one error in existing Admin configurable-feature/Faculty Final Clearance tests; all Faculty tests passed.
+- [x] `python manage.py check` passed after the guide redesign.
+- [x] No new frontend dependency was added; the page uses the Bootstrap 5.3 accordion and bundle already loaded by the Faculty Portal base template.
+- [ ] Redesigned Faculty Help Guide desktop/mobile browser QA was attempted but could not run because the in-app browser target was unavailable.
+- [x] Faculty documentation policy scan confirmed `Direct Percentage` and `Weighted Details` no longer appear in the active guide, fallback guide, or Full Faculty Manual.
+- [x] Faculty Help Guide focused suite passed after the Base-50/equal-averaging revision: `python manage.py test apps.faculty_portal.tests_help_guide` (3 tests).
+- [x] Required `python manage.py check` passed after the Base-50/equal-averaging documentation revision.
+- [x] Faculty Help Guide focused suite passed: `python manage.py test apps.faculty_portal.tests_help_guide` (3 tests).
+- [x] Faculty Help Guide/full-manual `git diff --check` completed with no whitespace errors; only existing line-ending warnings were reported.
+- [x] Required `python manage.py check` passed with no issues after the guide/manual update.
+- [ ] Faculty Help Guide browser visual smoke test was attempted but could not run because the in-app browser target was unavailable.
+- [x] Student Consultation review focused suite passed: `python manage.py test apps.faculty_portal.tests_performance -v 2` (26 tests).
+- [x] Full Faculty Portal regression suite passed: `python manage.py test apps.faculty_portal -v 1` (136 tests).
+- [x] Repository-wide suite completed: `python manage.py test -v 1` found 453 tests and finished with the same five failures plus one error in existing Admin Portal configurable-feature/Faculty Final Clearance tests; all Faculty performance tests passed.
+- [x] `python manage.py check` passed with no issues.
+- [x] `python manage.py makemigrations --check --dry-run` reported no changes.
+- [x] Source scan confirmed no Chart.js, Recharts, ApexCharts, or other frontend chart library was added.
+- [x] Template regressions confirm the graph appears only on selected-student consultation and not on Dashboard or Class Performance.
+- [ ] Browser visual smoke test was attempted but could not run because the in-app browser target was unavailable.
+- [x] Focused Faculty performance suite passed: `python manage.py test apps.faculty_portal.tests_performance -v 2` (25 tests).
+- [x] Full Faculty Portal suite passed: `python manage.py test apps.faculty_portal -v 1` (135 tests).
+- [x] Non-Admin/non-Faculty app suites passed: `python manage.py test apps.academics apps.accounts apps.core apps.grading apps.imports apps.notifications apps.predictions apps.student_portal -v 1` (144 tests).
+- [x] Admin Portal suite completed: `python manage.py test apps.admin_portal -v 1` (173 tests; existing five failures and one error reproduced).
+- [x] `python manage.py check` passed with no issues.
+- [x] `python manage.py makemigrations --check --dry-run` reported no model changes.
+- [x] `git diff --check` reported no whitespace errors; only existing line-ending warnings.
+- [ ] Browser visual review could not run because the in-app browser target was unavailable.
+- [x] Post-review focused performance suite passed: `python manage.py test apps.faculty_portal.tests_performance -v 1` (19 tests after the final no-baseline case).
+- [x] Post-review full Faculty Portal suite passed: `python manage.py test apps.faculty_portal -v 1` (129 tests after the final no-baseline case).
+- [x] Post-review `python manage.py check` passed with no issues.
+- [x] Post-review `python manage.py makemigrations --check --dry-run` reported no changes.
+- [x] Repository-wide suite executed: `python manage.py test -v 1` found 445 tests and completed with five failures plus one error in the pre-existing Admin Portal configurable-feature/Faculty Final Clearance tests. The Faculty Portal suite is fully green.
+- [x] The Admin Portal test class was rerun independently and reproduced the same five failures plus one error:
+  - configurable enrollment ownership mode was not saved
+  - class master-list override was not saved
+  - official grade release POST returned 200 instead of 302
+  - final-clearance preview omitted the course
+  - final-clearance verification snapshot omitted the course
+  - zero-active-student final-clearance preview returned no row
+- [x] Template scan confirmed no rendered or dead Dashboard references to Students Needing Follow-up, Student Support, or Priority Actions remain.
+- [x] Dependency scan confirmed no Chart.js, Recharts, ApexCharts, or other chart library was introduced.
+- [ ] Browser visual smoke test was attempted again but could not run because the in-app browser target was unavailable.
+- [x] New Faculty performance suite passed: `python manage.py test apps.faculty_portal.tests_performance` (10 tests).
+- [x] Full Faculty Portal suite passed: `python manage.py test apps.faculty_portal` (120 tests).
+- [x] Faculty performance plus Help Guide focused suite passed: `python manage.py test apps.faculty_portal.tests_performance apps.faculty_portal.tests_help_guide` (12 tests before the final interpretation test was added; the final full Faculty suite includes all 120 tests).
+- [x] `python manage.py check` passed after implementation and documentation updates.
+- [x] `git diff --check` reported no whitespace errors; only repository line-ending warnings were shown.
+- [x] Read-only regression confirmed Class Performance and Parallel Comparison GET requests do not create or update stored period grades or activity scores.
+- [x] Full project suite executed: `python manage.py test` found 437 tests. Result: 431 passed; five failures and one error remain in existing untouched Admin Portal tests.
+- [x] The five affected Admin tests were rerun independently and reproduced the same failures, confirming they are not caused by test ordering from the new Faculty suite.
+- [ ] Browser visual smoke test was attempted but could not run because the in-app browser target was unavailable.
 - [x] Broader account-security regression suite passed: `python manage.py test apps.accounts.tests_admin_password_reset apps.accounts.tests_faculty_password_reset apps.accounts.tests_login_lockout apps.accounts.tests_login_otp apps.accounts.tests_privacy_consent apps.accounts.tests_signatures` (32 tests). The logged SMTP rejection is an intentional tested failure path.
 - [x] Revised Faculty Help Guide tests passed after the forced-change wording update: `python manage.py test apps.faculty_portal.tests_help_guide` (2 tests).
 - [x] Faculty forced-password-change and related account regressions passed: `python manage.py test apps.accounts.tests_privacy_consent apps.accounts.tests_login_otp apps.accounts.tests_signatures` (15 tests).
@@ -774,10 +1050,10 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Exact Next Steps For Next Codex Session
 1. Read `AGENTS.md`, `TEACHERMATEPLUS_CONTEXT.md`, `CHANGE_LOG.md`, and this file.
-2. Visually review `/admin-portal/guide/` using Campus Admin and Superadmin accounts and confirm the topic difference.
-3. Visually review `/faculty/guide/` using a Faculty account and collect school-user wording feedback.
-4. Use `Tools -> Configuration Management -> Help Guide Version` to restore the original guides if the revised version is not accepted.
-5. If preparing a release, decide whether to keep, park, or revert the paused DepEd working-tree changes.
+2. Run the 15-step Student Consultation browser checklist above at desktop and mobile widths, including the new Period Grade exact-value fallback.
+3. Verify a production-like faculty account can see only accepted assigned classes and cannot open another faculty member's performance URL.
+4. Investigate the independently reproducible Admin configurable-feature and Faculty Final Clearance test failures before release gating on the full suite.
+5. Review Phase 1 faculty feedback before considering caching, Chart.js, academic-head views, or comparisons across faculty.
 
 ## Files To Inspect First Next Session
 - AGENTS.md

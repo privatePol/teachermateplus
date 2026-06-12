@@ -2255,7 +2255,20 @@ class GradingGovernanceService:
                 offering_id=offering.id,
                 template_period_id=template_period.id,
                 is_active=True,
-            ).values_list("template_component_id", "template_subcomponent_id", "template_detail_id")
+                template_component__is_active=True,
+            )
+            .filter(
+                Q(template_subcomponent__isnull=True, template_detail__isnull=True)
+                | Q(
+                    template_subcomponent__is_active=True,
+                    template_detail__isnull=True,
+                )
+                | Q(
+                    template_subcomponent__is_active=True,
+                    template_detail__is_active=True,
+                )
+            )
+            .values_list("template_component_id", "template_subcomponent_id", "template_detail_id")
         )
         required_items = []
         missing_items = []
@@ -2294,6 +2307,43 @@ class GradingGovernanceService:
                 details = list(subcomponent.details.all())
                 label_prefix = f"{component.name or component.code} > {subcomponent.name or subcomponent.code}"
                 if subcomponent.is_attendance_component:
+                    continue
+                normalized_activity_scope = " ".join(
+                    "".join(
+                        character if character.isalnum() else " "
+                        for character in (
+                            f"{component.code} {component.name} "
+                            f"{subcomponent.code} {subcomponent.name}"
+                        ).lower()
+                    ).split()
+                )
+                is_participation_output = (
+                    "participation" in normalized_activity_scope
+                    and "output" in normalized_activity_scope
+                )
+                if (
+                    details
+                    and is_participation_output
+                    and subcomponent.detail_computation_mode == DetailComputationMode.AVERAGE_ACTIVITIES
+                ):
+                    item = {
+                        "level": "subcomponent",
+                        "label": label_prefix,
+                        "component_id": component.id,
+                        "subcomponent_id": subcomponent.id,
+                        "detail_id": None,
+                        "expected_record_type": "activity",
+                    }
+                    required_items.append(item)
+                    active_detail_ids = {detail.id for detail in details}
+                    has_active_activity = any(
+                        bucket_component_id == component.id
+                        and bucket_subcomponent_id == subcomponent.id
+                        and bucket_detail_id in active_detail_ids
+                        for bucket_component_id, bucket_subcomponent_id, bucket_detail_id in activity_buckets
+                    )
+                    if not has_active_activity:
+                        missing_items.append(item)
                     continue
                 if not details:
                     item = {

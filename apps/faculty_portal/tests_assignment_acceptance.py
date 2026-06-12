@@ -46,7 +46,12 @@ from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
-from apps.grading.services import FacultyGradingService, GradingGovernanceService, TemplateGovernanceWorkflowService
+from apps.grading.services import (
+    FacultyGradingService,
+    GradingGovernanceService,
+    GradingTemplateService,
+    TemplateGovernanceWorkflowService,
+)
 from apps.tenants.models import Campus, Department, Program, SystemSetting, Tenant
 
 
@@ -418,6 +423,67 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             is_active=True,
         )
         return student
+
+    def _create_participation_output_readiness_period(self, *, detail_computation_mode):
+        period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PO_READINESS",
+            name="Participation Output Readiness",
+            sequence_no=20,
+            weight_percentage=Decimal("100.00"),
+        )
+        component = GradingTemplateComponent.objects.create(
+            template_period=period,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        participation_output = GradingTemplateSubcomponent.objects.create(
+            template_component=component,
+            code="PG_CA_PO",
+            name="Participation/Output",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            detail_computation_mode=detail_computation_mode,
+        )
+        recitation = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation_output,
+            code="RECITATION",
+            name="Recitation",
+            weight_percentage=Decimal("50.00"),
+            sort_order=1,
+        )
+        assignment = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation_output,
+            code="ASSIGNMENT",
+            name="Assignment",
+            weight_percentage=Decimal("50.00"),
+            sort_order=2,
+        )
+        return period, component, participation_output, recitation, assignment
+
+    def _create_participation_output_activity(
+        self,
+        *,
+        period,
+        component,
+        participation_output,
+        detail,
+        title="Recitation 1",
+    ):
+        return GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            template_component=component,
+            template_subcomponent=participation_output,
+            template_detail=detail,
+            title=title,
+            total_score=Decimal("100.00"),
+            activity_date=self.term.start_date,
+        )
 
     def _complete_final_clearance_for_offering(self, *, offering=None, student=None):
         offering = offering or self.offering
@@ -1171,7 +1237,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "PRELIM")
         self.assertContains(response, "2526_1STSEM")
 
-    def test_dashboard_surfaces_incomplete_student_kpi(self):
+    def test_dashboard_does_not_surface_student_level_incomplete_kpi(self):
         student = Student.objects.create(
             tenant=self.tenant,
             campus=self.campus,
@@ -1202,11 +1268,11 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         response = self.client.get(reverse("faculty_portal:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Incomplete Students")
-        self.assertContains(response, "Students currently marked as")
-        self.assertContains(response, "INC")
+        self.assertContains(response, "Grade Encoding Status")
+        self.assertNotContains(response, "Incomplete Students")
+        self.assertNotContains(response, student.student_no)
 
-    def test_dashboard_priority_actions_shows_zero_state_without_at_risk_container(self):
+    def test_dashboard_pending_issues_replaces_student_follow_up_container(self):
         self._enable_grade_prediction()
         self._accept_assignment()
 
@@ -1214,13 +1280,13 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         response = self.client.get(reverse("faculty_portal:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Priority Actions")
-        self.assertContains(response, "Focus on these first to avoid deadline, submission, and grading issues.")
-        self.assertContains(response, "No priority actions right now.")
+        self.assertContains(response, "Pending Grade Issues")
+        self.assertContains(response, "Grade Encoding Status")
         self.assertNotContains(response, "Students At Risk")
-        self.assertNotContains(response, "No at-risk students are flagged in your current active classes.")
+        self.assertNotContains(response, "Students Needing Follow-up")
+        self.assertNotContains(response, "Student Support")
 
-    def test_dashboard_priority_actions_appear_only_when_relevant(self):
+    def test_dashboard_pending_grade_issues_appear_only_when_relevant(self):
         self._accept_assignment()
         self._create_active_student(student_no="2025-MISS-001", last_name="Missing", first_name="Grade")
 
@@ -1228,9 +1294,9 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         response = self.client.get(reverse("faculty_portal:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "has missing grades that may affect submission")
-        self.assertContains(response, "Review Missing Grades")
-        self.assertNotContains(response, "is currently at risk this grading period")
+        self.assertContains(response, "required grading items are missing")
+        self.assertContains(response, "Pending Grade Issues")
+        self.assertNotContains(response, "needs follow-up this grading period")
 
     def test_dashboard_priority_actions_are_scoped_to_logged_in_faculty(self):
         other_section = Section.objects.create(
@@ -1292,7 +1358,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertNotContains(response, "BSIT-1B")
         self.assertEqual(other_assignment.faculty_user_id, other_faculty.id)
 
-    def test_dashboard_at_risk_priority_action_uses_only_active_scope_students(self):
+    def test_dashboard_hides_student_level_at_risk_information(self):
         self._enable_grade_prediction()
         self._accept_assignment()
         visible_student = self._create_active_student(
@@ -1346,13 +1412,13 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         response = self.client.get(reverse("faculty_portal:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "1 student needs follow-up this grading period.")
-        self.assertContains(response, "View Students")
+        self.assertContains(response, "View Performance")
+        self.assertNotContains(response, "needs follow-up this grading period")
         self.assertNotContains(response, "Visible Learner")
         self.assertNotContains(response, "Hidden Learner")
         self.assertNotContains(response, "2025-RISK-999")
 
-    def test_dashboard_priority_actions_follow_urgency_order(self):
+    def test_dashboard_consolidates_unencoded_activity_into_pending_issues(self):
         self._accept_assignment()
         exam_component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
         activity = GradeActivity.objects.create(
@@ -1380,19 +1446,15 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         response = self.client.get(reverse("faculty_portal:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        content = response.content.decode()
-        self.assertIn("is past the submission deadline", content)
-        self.assertIn("still has no scores encoded", content)
-        self.assertLess(
-            content.index("is past the submission deadline"),
-            content.index("still has no scores encoded"),
-        )
+        self.assertContains(response, "Pending Grade Issues")
+        self.assertContains(response, "Not Started")
+        self.assertContains(response, "Continue Encoding")
         self.assertContains(
             response,
-            reverse("faculty_portal:activity_scores", args=[self.offering.id, self.prelim.id, activity.id]),
+            reverse("faculty_portal:period_activities", args=[self.offering.id, self.prelim.id]),
         )
 
-    def test_dashboard_priority_actions_include_locked_reopened_gradebook(self):
+    def test_dashboard_status_check_does_not_auto_lock_reopened_gradebook(self):
         self._accept_assignment()
         student = self._create_active_student(
             student_no="2025-DASH-LOCK-001",
@@ -1445,20 +1507,9 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         response = self.client.get(reverse("faculty_portal:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "reopened gradebook")
-        self.assertContains(response, "is locked after the deadline and needs resubmission")
-        self.assertContains(response, "Resubmit Gradebook")
-        self.assertContains(
-            response,
-            reverse("faculty_portal:period_summary", args=[self.offering.id, self.prelim.id]),
-        )
-        content = response.content.decode()
-        self.assertLess(
-            content.index("is locked after the deadline and needs resubmission"),
-            content.index("has missing grades that may affect submission")
-            if "has missing grades that may affect submission" in content
-            else len(content),
-        )
+        self.assertContains(response, "Grade Encoding Status")
+        lock.refresh_from_db()
+        self.assertFalse(lock.is_locked)
 
     def test_period_card_shows_reopen_request_action_when_auto_closed_after_deadline(self):
         self._accept_assignment()
@@ -3161,23 +3212,15 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, '<h4 class="faculty-deadline-banner-focus">', html=False)
         self.assertContains(response, 'class="deadline-period"', html=False)
         self.assertContains(response, '<span class="deadline-date">', html=False)
-        self.assertContains(response, '<a class="faculty-dashboard-nav-card nav-grading"', html=False)
-        self.assertContains(response, '<a class="faculty-dashboard-nav-card nav-priority"', html=False)
-        self.assertContains(response, '<a class="faculty-dashboard-nav-card nav-support"', html=False)
-        self.assertContains(response, '<a class="faculty-dashboard-nav-card nav-notes"', html=False)
-        self.assertContains(response, "faculty-dashboard-nav-icon")
-        self.assertContains(response, '<a class="faculty-dashboard-action-card action-grading"', html=False)
-        self.assertContains(response, '<a class="faculty-dashboard-action-card action-priority"', html=False)
-        self.assertContains(response, '<a class="faculty-dashboard-action-card action-support"', html=False)
-        self.assertContains(response, '<a class="faculty-dashboard-action-card action-classlist"', html=False)
-        self.assertContains(response, "faculty-dashboard-guide-tag")
+        self.assertContains(response, "Grade Encoding Status")
+        self.assertContains(response, "Pending Grade Issues")
+        self.assertContains(response, "Performance Trends")
+        self.assertContains(response, "View Performance")
+        self.assertNotContains(response, "Students Needing Follow-up")
+        self.assertNotContains(response, "Student Support")
         self.assertContains(response, "faculty-deadline-guide-tag")
-        guide_url = reverse("faculty_portal:guide")
-        self.assertContains(response, f'href="{guide_url}#guide-workflow"', html=False)
-        self.assertContains(response, f'href="{guide_url}#guide-submission"', html=False)
-        self.assertContains(response, f'href="{guide_url}#guide-prediction"', html=False)
-        self.assertContains(response, f'href="{guide_url}#guide-notes"', html=False)
-        self.assertContains(response, f'href="{guide_url}#guide-classlist"', html=False)
+        self.assertContains(response, reverse("faculty_portal:my_courses"))
+        self.assertContains(response, reverse("faculty_portal:parallel_section_comparison"))
 
     def test_offering_periods_uses_configured_period_name_for_fx_card(self):
         self.final.code = "FX"
@@ -4152,6 +4195,554 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertIn(
             "Class Standing > Written Works > Assignment",
             [item["label"] for item in readiness["missing_template_items"]],
+        )
+
+    def test_average_participation_output_blocks_without_any_active_activity(self):
+        period, _component, _participation_output, _recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        self._create_active_student(
+            student_no="2025-PO-EMPTY",
+            last_name="Average",
+            first_name="Empty",
+        )
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["expected_template_bucket_count"], 1)
+        self.assertEqual(readiness["missing_template_bucket_count"], 1)
+        self.assertEqual(
+            [item["label"] for item in readiness["missing_template_items"]],
+            ["Class Standing > Participation/Output"],
+        )
+
+    def test_average_participation_output_does_not_count_inactive_activity(self):
+        period, component, participation_output, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        self._create_active_student(
+            student_no="2025-PO-INACTIVE-ACT",
+            last_name="Inactive",
+            first_name="Activity",
+        )
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        activity.is_active = False
+        activity.save(update_fields=["is_active", "updated_at"])
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["expected_activity_count"], 0)
+        self.assertEqual(readiness["missing_template_bucket_count"], 1)
+
+    def test_average_participation_output_does_not_count_activity_under_inactive_detail(self):
+        period, component, participation_output, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        self._create_active_student(
+            student_no="2025-PO-INACTIVE-DETAIL",
+            last_name="Inactive",
+            first_name="Detail",
+        )
+        self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        recitation.is_active = False
+        recitation.save(update_fields=["is_active", "updated_at"])
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["missing_template_bucket_count"], 1)
+        self.assertEqual(
+            [item["label"] for item in readiness["missing_template_items"]],
+            ["Class Standing > Participation/Output"],
+        )
+
+    def test_average_participation_output_allows_submission_with_one_active_item(self):
+        period, component, participation_output, recitation, _unused_assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        student = self._create_active_student(
+            student_no="2025-PO-ONE",
+            last_name="Average",
+            first_name="One Item",
+        )
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("80.00")}],
+        )
+        self._accept_assignment()
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+        self.assertEqual(readiness["missing_template_bucket_count"], 0)
+        self.assertEqual(readiness["students_missing_any_grade"], 0)
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse(
+                "faculty_portal:period_submit",
+                kwargs={"offering_id": self.offering.id, "period_id": period.id},
+            ),
+            {"confirm_submit": "1"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "PO_READINESS grades submitted successfully.")
+        submission = GradeSubmission.objects.get(offering=self.offering, template_period=period)
+        self.assertEqual(submission.status, GradeSubmission.Status.SUBMITTED)
+        period_grade = StudentPeriodGrade.objects.get(
+            offering=self.offering,
+            template_period=period,
+            student=student,
+        )
+        self.assertEqual(period_grade.period_grade, Decimal("90.00"))
+
+    def test_weighted_participation_output_still_requires_each_detail(self):
+        period, component, participation_output, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.WEIGHTED_DETAILS,
+            )
+        )
+        student = self._create_active_student(
+            student_no="2025-PO-WEIGHTED",
+            last_name="Weighted",
+            first_name="Details",
+        )
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("80.00")}],
+        )
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["missing_template_bucket_count"], 1)
+        self.assertIn(
+            "Class Standing > Participation/Output > Assignment",
+            [item["label"] for item in readiness["missing_template_items"]],
+        )
+
+    def test_weighted_participation_output_valid_setup_allows_submission_and_zero_score(self):
+        period, component, participation_output, recitation, assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.WEIGHTED_DETAILS,
+            )
+        )
+        student = self._create_active_student(
+            student_no="2025-PO-WEIGHTED-READY",
+            last_name="Weighted",
+            first_name="Ready",
+        )
+        recitation_activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        assignment_activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=assignment,
+            title="Assignment 1",
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=recitation_activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("0.00")}],
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=assignment_activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("80.00")}],
+        )
+        self._accept_assignment()
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+        self.assertEqual(readiness["missing_template_bucket_count"], 0)
+        self.assertEqual(readiness["students_missing_any_grade"], 0)
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse(
+                "faculty_portal:period_submit",
+                kwargs={"offering_id": self.offering.id, "period_id": period.id},
+            ),
+            {"confirm_submit": "1"},
+            follow=True,
+        )
+
+        self.assertContains(response, "PO_READINESS grades submitted successfully.")
+        self.assertEqual(
+            StudentActivityScore.objects.get(activity=recitation_activity, student=student).raw_score,
+            Decimal("0.00"),
+        )
+
+    def test_weighted_participation_output_missing_score_still_blocks_submission(self):
+        period, component, participation_output, recitation, assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.WEIGHTED_DETAILS,
+            )
+        )
+        student = self._create_active_student(
+            student_no="2025-PO-WEIGHTED-BLANK",
+            last_name="Weighted",
+            first_name="Blank",
+        )
+        recitation_activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=assignment,
+            title="Assignment 1",
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=recitation_activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("80.00")}],
+        )
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["missing_template_bucket_count"], 0)
+        self.assertEqual(readiness["students_missing_any_grade"], 1)
+
+    def test_weighted_participation_output_invalid_zero_detail_weights_fail_template_validation(self):
+        _period, _component, participation_output, recitation, assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.WEIGHTED_DETAILS,
+            )
+        )
+        recitation.weight_percentage = Decimal("0.00")
+        recitation.save(update_fields=["weight_percentage", "updated_at"])
+        assignment.weight_percentage = Decimal("0.00")
+        assignment.save(update_fields=["weight_percentage", "updated_at"])
+
+        errors = GradingTemplateService.validate_publishable(self.template)
+
+        self.assertTrue(
+            any(
+                "Subcomponent PG_CA_PO has details but total weight is 0" in error
+                for error in errors
+            )
+        )
+
+    def test_average_mode_does_not_loosen_non_participation_output_details(self):
+        period, component, subcomponent, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        subcomponent.code = "WRITTEN_WORK"
+        subcomponent.name = "Written Work"
+        subcomponent.save(update_fields=["code", "name", "updated_at"])
+        student = self._create_active_student(
+            student_no="2025-NON-PO-AVERAGE",
+            last_name="Average",
+            first_name="Written Work",
+        )
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=subcomponent,
+            detail=recitation,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("80.00")}],
+        )
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["missing_template_bucket_count"], 1)
+        self.assertIn(
+            "Class Standing > Written Work > Assignment",
+            [item["label"] for item in readiness["missing_template_items"]],
+        )
+
+    def test_average_participation_output_encoded_zero_is_not_missing(self):
+        period, component, participation_output, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        student = self._create_active_student(
+            student_no="2025-PO-ZERO",
+            last_name="Encoded",
+            first_name="Zero",
+        )
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("0.00")}],
+        )
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(readiness["missing_template_bucket_count"], 0)
+        self.assertEqual(readiness["students_missing_any_grade"], 0)
+        score = StudentActivityScore.objects.get(activity=activity, student=student)
+        self.assertEqual(score.raw_score, Decimal("0.00"))
+
+    def test_average_participation_output_still_blocks_blank_student_records(self):
+        period, component, participation_output, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        encoded_student = self._create_active_student(
+            student_no="2025-PO-ENCODED",
+            last_name="Encoded",
+            first_name="Student",
+        )
+        self._create_active_student(
+            student_no="2025-PO-BLANK",
+            last_name="Blank",
+            first_name="Student",
+        )
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": encoded_student.id, "raw_score": Decimal("80.00")}],
+        )
+        self._accept_assignment()
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+        self.assertEqual(readiness["missing_template_bucket_count"], 0)
+        self.assertEqual(readiness["students_missing_any_grade"], 1)
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse(
+                "faculty_portal:period_submit",
+                kwargs={"offering_id": self.offering.id, "period_id": period.id},
+            ),
+            {"confirm_submit": "1"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Submission blocked: some ACTIVE students still have blank required grade or attendance records.",
+        )
+        self.assertFalse(
+            GradeSubmission.objects.filter(offering=self.offering, template_period=period).exists()
+        )
+
+    def test_submission_readiness_is_read_only(self):
+        period, component, participation_output, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        student = self._create_active_student(
+            student_no="2025-PO-READONLY",
+            last_name="Readiness",
+            first_name="Only",
+        )
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("80.00")}],
+        )
+        before_counts = {
+            "activities": GradeActivity.objects.count(),
+            "scores": StudentActivityScore.objects.count(),
+            "period_grades": StudentPeriodGrade.objects.count(),
+            "submissions": GradeSubmission.objects.count(),
+        }
+
+        GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+
+        self.assertEqual(
+            {
+                "activities": GradeActivity.objects.count(),
+                "scores": StudentActivityScore.objects.count(),
+                "period_grades": StudentPeriodGrade.objects.count(),
+                "submissions": GradeSubmission.objects.count(),
+            },
+            before_counts,
+        )
+
+    def test_period_submit_requires_accepted_faculty_assignment(self):
+        period, component, participation_output, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        student = self._create_active_student(
+            student_no="2025-PO-PENDING",
+            last_name="Pending",
+            first_name="Assignment",
+        )
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("80.00")}],
+        )
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.post(
+            reverse(
+                "faculty_portal:period_submit",
+                kwargs={"offering_id": self.offering.id, "period_id": period.id},
+            ),
+            {"confirm_submit": "1"},
+            follow=True,
+        )
+
+        self.assertContains(response, "Please accept this faculty assignment first")
+        self.assertFalse(
+            GradeSubmission.objects.filter(offering=self.offering, template_period=period).exists()
+        )
+
+    def test_period_submit_blocks_another_faculty_members_class(self):
+        period, component, participation_output, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        student = self._create_active_student(
+            student_no="2025-PO-OTHER-FAC",
+            last_name="Other",
+            first_name="Faculty",
+        )
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("80.00")}],
+        )
+        self._accept_assignment()
+        other_faculty = User.objects.create_user(
+            username="other_submit_faculty",
+            email="other_submit_faculty@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(
+            user=other_faculty,
+            role=Role.objects.get(code="FACULTY"),
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        self.client.force_login(other_faculty)
+
+        response = self.client.post(
+            reverse(
+                "faculty_portal:period_submit",
+                kwargs={"offering_id": self.offering.id, "period_id": period.id},
+            ),
+            {"confirm_submit": "1"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(
+            GradeSubmission.objects.filter(offering=self.offering, template_period=period).exists()
         )
 
     def test_future_activity_creation_auto_creates_faculty_reminder(self):

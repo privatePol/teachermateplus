@@ -1,5 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 
+{% block title %}Full Faculty Manual | TeacherMate+{% endblock %}
+
 {% block extra_head %}
 {{ block.super }}
 <style>
@@ -79,7 +81,7 @@
   }
   .manual-topic-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
     gap: 0.85rem;
   }
   .manual-topic-item {
@@ -278,8 +280,8 @@
       <div class="manual-eyebrow">Faculty Manual</div>
       <div class="manual-title">TeacherMate+ Faculty Portal Guide</div>
       <p class="manual-subtitle">
-        This guide explains the Faculty Portal in simple terms: what each feature is for, when to use it, and what rules
-        affect grading, submission, corrections, and student status.
+        This full manual explains the Faculty Portal in simple terms: what each page is for, what to check, when to use
+        each action, and what happens to grades after submission.
       </p>
       <div class="manual-actions">
         <a class="manual-primary" href="{% url 'faculty_portal:guide' %}">Back to Faculty Help Center</a>
@@ -304,17 +306,20 @@
         </div>
         <div class="manual-topic-item">
           <strong>Grades and Submission</strong>
-          <p>Use these for submission rules, correction rules, and sample computation.</p>
+          <p>Use these for score rules, grade checking, submission, correction, and sample computation.</p>
           <div class="manual-topic-links">
+            <a href="#manual-gradebook">Gradebook</a>
+            <a href="#manual-grade-check">Check Grades</a>
             <a href="#manual-submission">Submission</a>
             <a href="#manual-corrections">Corrections</a>
             <a href="#manual-sample-computation">Computation</a>
           </div>
         </div>
         <div class="manual-topic-item">
-          <strong>Prediction and Support</strong>
-          <p>Use these for prediction, student intervention monitoring, reminders, and private notes.</p>
+          <strong>Performance and Support</strong>
+          <p>Use these for class performance, private student consultation, prediction, reminders, and notes.</p>
           <div class="manual-topic-links">
+            <a href="#manual-performance">Performance</a>
             <a href="#manual-prediction">Prediction</a>
             <a href="#manual-at-risk">Intervention</a>
             <a href="#manual-reminders">Reminders</a>
@@ -345,6 +350,7 @@
           <li>You only see classes assigned to you.</li>
           <li>The portal is for grading work, not full student-record management.</li>
           <li>Deadlines, reopen rules, and correction rules follow the settings configured by the school.</li>
+          <li>Performance and consultation pages are read-only. They explain saved grades but do not change them.</li>
         </ul>
       </div>
     </div>
@@ -472,6 +478,71 @@
     </div>
   </div>
 
+  <div class="manual-grid-2 mb-4" id="manual-gradebook">
+    <div class="card manual-section-card">
+      <div class="card-body">
+        <div class="manual-section-title">5.1 Gradebook Essentials</div>
+        <div class="manual-rule-grid">
+          <div class="manual-rule">
+            <strong>Create Activities Under the Correct Area</strong>
+            <p>Choose the correct grading period, component, subcomponent, or detail. Use short, clear labels such as Q1, R1, or ASSIGN-1 so the Summary remains readable.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Blank Is Missing; Zero Is a Score</strong>
+            <p>A blank score is still unencoded and may block submission. Enter 0 only when the student earned zero or did not comply and school policy requires a zero.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Raw Score Base-50</strong>
+            <p>Enter the actual raw score. TeacherMate+ converts it using the assigned Base-50 rule. For example, 15 out of 20 becomes 87.50.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Participation/Output Detail Averaging</strong>
+            <p>Every faculty-created Participation/Output item is averaged equally. For example, Recitation 1, Recitation 2, Assignment 1, Assignment 2, Seatwork 1, and Seatwork 2 each have one equal place in the average. Faculty do not assign a separate percentage weight to each detail.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Only Created Details Are Included</strong>
+            <p>If a Participation/Output detail has no faculty-created activity, it is omitted from the Summary and does not lower the average. Create only the details and activities that should be part of the period grade.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Component Weights Still Apply</strong>
+            <p>Equal averaging replaces only the percentage weights of the Participation/Output details. The configured Participation/Output weight inside Class Standing and the other component or period weights still apply.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card manual-section-card" id="manual-grade-check">
+      <div class="card-body">
+        <div class="manual-section-title">5.2 Check and Explain Grades</div>
+        <div class="manual-rule-grid">
+          <div class="manual-rule">
+            <strong>Review the Summary</strong>
+            <p>Check the highest possible scores, activity values, averages, student statuses, and final period-grade column before submission.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Know the Average Labels</strong>
+            <p>Q.AVE is Quiz Average, R.AVE is Recitation Average, P/O AVE is Participation/Output Average, and CS AVE is the weighted Class Standing Average.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Use Explain for One Student</strong>
+            <p>The Explain action shows the selected student's period summary, component contributions, activity details, and exam details. Full computation rows remain available when a deeper audit is needed.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Protect Student Privacy</strong>
+            <p>When the grade explanation opens, the grade table behind it is visually blocked. Close the explanation before moving to another student or allowing someone else to use the device.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Official Rounded Grade</strong>
+            <p>The computed decimal grade and the official rounded grade may be different. Passing or failing follows the official grading rule used by TeacherMate+, not visual guesswork.</p>
+          </div>
+          <div class="manual-rule">
+            <strong>Correct the Source Record</strong>
+            <p>The Summary and explanation are read-only. Correct an activity, score, attendance record, or allowed student status, then return to Summary to review the updated result.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="manual-grid-2 mb-4" id="manual-submission">
     <div class="card manual-section-card">
       <div class="card-body">
@@ -530,8 +601,8 @@
               <p>The Faculty Dashboard, My Classes, and class period page show the current active grading period and submission deadline. If a deadline does not match the faculty member's campus, term, or class template period, the banner explains why it does not apply.</p>
             </div>
             <div class="manual-rule">
-              <strong>Dashboard Priority Actions</strong>
-              <p>Priority Actions shows urgent work near the top of the Dashboard, such as deadlines, missing grades, score entry, corrections, resubmissions, and intervention follow-ups.</p>
+              <strong>Dashboard Grade Status and Issues</strong>
+              <p>Grade Encoding Status shows the current period status for each accepted class. Pending Grade Issues combines missing setup, missing score or attendance records, and unsubmitted gradebooks without displaying student names. Open View Performance inside a selected class for student-level attention.</p>
             </div>
             <div class="manual-rule">
               <strong>Pinnacle Periodic Grade Summary</strong>
@@ -568,7 +639,7 @@
         <div class="manual-rule-grid">
           <div class="manual-rule">
             <strong>After Deadline</strong>
-            <p>If the period is not yet submitted, keep encoding and submit as soon as possible. If it was already submitted and needs changes, use the correction workflow.</p>
+            <p>If an unsubmitted gradebook is locked after the deadline, use Request Gradebook Reopen and wait for approval before continuing. If it was already submitted and needs changes after the deadline, use Correction of Grades.</p>
           </div>
           <div class="manual-rule">
             <strong>Audit Trail</strong>
@@ -602,7 +673,7 @@
         </div>
         <div class="manual-rule">
           <strong>Blank Score Entry</strong>
-          <p>When scores are saved, blank active-student score cells are saved as 0.</p>
+          <p>A blank score remains missing and can block submission. A saved 0 is a completed score and is included in computation.</p>
         </div>
         <div class="manual-rule">
           <strong>Template Coverage Before Submission</strong>
@@ -737,6 +808,46 @@
       </table>
       <div class="manual-note">
         Summer computation depends on the grading profile matched to the class. If the Summer profile uses selected weighted periods, Prelim is excluded by not including it in the weight list.
+      </div>
+    </div>
+  </div>
+
+  <div class="card manual-section-card mb-4" id="manual-performance">
+    <div class="card-body">
+      <div class="manual-section-title">7.2 Class Performance and Student Consultation</div>
+      <div class="manual-rule-grid">
+        <div class="manual-rule">
+          <strong>Class Performance Snapshot</strong>
+          <p>Open View Performance from a selected class to see the class average, at-risk student count, missing output count, and weakest component for the chosen period.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Students Requiring Attention</strong>
+          <p>The class page lists only students who are at risk, incomplete, or declining. It shows the current grade, missing outputs, trend, and primary reason without ranking students.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Explain the Current Grade</strong>
+          <p>Use Explain beside Current Grade to open the same private grade explanation used in the Summary. It does not edit or save any grade.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Private Consultation View</strong>
+          <p>Open the student's name to view only that student's current grade, trend, missing outputs, weakest component, and current-period breakdown. No classmates appear on this page.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Performance Trend</strong>
+          <p>The consultation page uses simple line graphs and exact-value tables to show available period grades and component or subcomponent scores. If only one period is available, TeacherMate+ explains that another period is needed for a trend.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Trend Labels</strong>
+          <p>AT RISK takes priority for a below-passing grade. INCOMPLETE means the student is not below passing but still has missing required outputs. Other labels are NO BASELINE, IMPROVING, DECLINING, and STABLE.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Parallel Section Comparison</strong>
+          <p>Performance Trends compares only sections of the same course, academic term, and grading period handled by you. It shows section averages, risk counts, missing outputs, and weakest components using a table, simple bars, and a short rule-based message.</p>
+        </div>
+        <div class="manual-rule">
+          <strong>Read-Only and Private</strong>
+          <p>Performance pages use the official grade computation service but do not create, update, submit, unlock, or store grade changes. They must not be used as a class ranking tool.</p>
+        </div>
       </div>
     </div>
   </div>

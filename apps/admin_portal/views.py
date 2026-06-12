@@ -2732,9 +2732,19 @@ def grade_distribution_monitor_view(request):
 @portal_required("ADMIN")
 def admin_guide_view(request):
     tenant_id = getattr(request, "scope", {}).get("tenant_id") or getattr(request.user, "default_tenant_id", None)
-    if not FeatureSettingsService.is_role_based_help_guide_enabled(tenant_id=tenant_id, default=True):
+    requested_view = (request.GET.get("view") or "").strip().lower()
+    use_role_based_guide = FeatureSettingsService.is_role_based_help_guide_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
+    if requested_view == "full":
+        use_role_based_guide = False
+    elif requested_view == "practical":
+        use_role_based_guide = True
+
+    if not use_role_based_guide:
         context = {
-            "title": "Admin Portal User Guide",
+            "title": "Full Admin Portal Guide",
             "show_production_incident_response": _user_has_role_code(request.user, "SUPER_ADMIN")
             or request.user.is_superuser,
         }

@@ -553,6 +553,14 @@
               >
                 &#128202;
               </a>
+              <a
+                class="btn btn-sm btn-outline-success"
+                href="{% url 'faculty_portal:class_performance' offering.id item.period.id %}"
+                title="Class Performance"
+                aria-label="Class Performance"
+              >
+                &#9650;
+              </a>
               {% if grade_prediction_enabled %}
                 <span
                   class="btn btn-sm btn-outline-primary btn-disabled"
@@ -594,6 +602,14 @@
                 aria-label="Summary"
               >
                 &#128202;
+              </a>
+              <a
+                class="btn btn-sm btn-outline-success"
+                href="{% url 'faculty_portal:class_performance' offering.id item.period.id %}"
+                title="Class Performance"
+                aria-label="Class Performance"
+              >
+                &#9650;
               </a>
               {% if grade_prediction_enabled %}
                 <a

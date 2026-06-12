@@ -1,0 +1,78 @@
+<div class="grade-explanation-privacy-shield" id="gradeExplanationPrivacyShield" aria-hidden="true"></div>
+<div class="modal fade grade-explanation-modal" id="gradeExplanationModal" tabindex="-1" aria-labelledby="gradeExplanationTitle" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="gradeExplanationTitle">Explain This Grade</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" data-grade-explain-body>
+        <div class="text-muted">Loading explanation...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .grade-explanation-privacy-shield {
+    position: fixed;
+    inset: 0;
+    z-index: 1055;
+    background: rgba(4, 20, 12, 0.94);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 150ms ease, visibility 150ms ease;
+  }
+  .grade-explanation-privacy-shield.is-active {
+    opacity: 1;
+    visibility: visible;
+  }
+  .grade-explanation-modal {
+    z-index: 1065;
+  }
+  .grade-explanation-modal .modal-content {
+    border: 0;
+    border-radius: 8px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+  }
+  .grade-explanation-modal .modal-header {
+    border-bottom-color: #dbe6dd;
+  }
+  @media (max-width: 575.98px) {
+    .grade-explanation-modal .modal-dialog {
+      margin: .5rem;
+    }
+  }
+</style>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const modalEl = document.getElementById("gradeExplanationModal");
+    const privacyShield = document.getElementById("gradeExplanationPrivacyShield");
+    if (!modalEl || !window.bootstrap) return;
+    const modal = new bootstrap.Modal(modalEl);
+    const body = modalEl.querySelector("[data-grade-explain-body]");
+    document.querySelectorAll("[data-grade-explain-url]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        body.innerHTML = '<div class="text-muted">Loading explanation...</div>';
+        modal.show();
+        fetch(button.dataset.gradeExplainUrl, {headers: {"X-Requested-With": "XMLHttpRequest"}})
+          .then(function (response) { return response.text(); })
+          .then(function (html) { body.innerHTML = html; })
+          .catch(function () {
+            body.innerHTML = '<div class="alert alert-danger mb-0">Unable to load the grade explanation.</div>';
+          });
+      });
+    });
+    modalEl.addEventListener("show.bs.modal", function () {
+      if (privacyShield) privacyShield.classList.add("is-active");
+    });
+    modalEl.addEventListener("hidden.bs.modal", function () {
+      if (privacyShield) privacyShield.classList.remove("is-active");
+      body.innerHTML = '<div class="text-muted">Loading explanation...</div>';
+    });
+  });
+</script>

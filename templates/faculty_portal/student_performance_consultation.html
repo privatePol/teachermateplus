@@ -1,0 +1,246 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block title %}Student Consultation | TeacherMate+{% endblock %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .consultation-shell { max-width: 980px; margin: 0 auto; }
+  .consultation-identity { border-left: 5px solid #1d7a46; background: #fff; border-radius: 8px; padding: 1rem 1.1rem; }
+  .consultation-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.8rem; }
+  .consultation-metric { border: 1px solid #d7e2d5; border-radius: 8px; background: #fff; padding: 0.9rem; }
+  .consultation-label { color: #607568; font-size: 0.76rem; font-weight: 700; text-transform: uppercase; }
+  .consultation-value { color: #153e26; font-size: 1.25rem; font-weight: 800; margin-top: 0.2rem; overflow-wrap: anywhere; }
+  .consultation-reason { background: #f5f8f4; border: 1px solid #d7e2d5; border-radius: 8px; padding: 1rem; }
+  .trend-panel { border: 1px solid #d7e2d5; border-radius: 8px; background: #fff; overflow: hidden; }
+  .trend-panel-head { padding: 1rem 1.1rem; border-bottom: 1px solid #e3ebe4; }
+  .trend-panel-body { padding: 1rem 1.1rem; }
+  .trend-chart-wrap { width: 100%; overflow-x: auto; }
+  .trend-chart { width: 100%; min-width: 560px; height: auto; display: block; }
+  .trend-grid-line { stroke: #dfe8e1; stroke-width: 1; }
+  .trend-axis-label { fill: #617568; font-size: 12px; }
+  .trend-period-label { fill: #344f3e; font-size: 12px; font-weight: 700; }
+  .trend-line { fill: none; stroke: #1b7a46; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+  .trend-point { fill: #f4c542; stroke: #155d37; stroke-width: 3; }
+  .trend-point-label { fill: #17462d; font-size: 12px; font-weight: 800; }
+  .trend-missing-label { fill: #8a978e; font-size: 11px; }
+  .trend-interpretation { border-left: 4px solid #8ba63b; border-radius: 4px; background: #f7faf5; padding: 0.8rem 0.9rem; color: #3d5846; }
+  .component-sparkline { width: 200px; height: 60px; display: block; }
+  .component-sparkline-line { fill: none; stroke: #277c50; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .component-sparkline-point { fill: #f4c542; stroke: #1b6740; stroke-width: 2; }
+  .component-table th, .component-table td { vertical-align: middle; }
+  @media (max-width: 760px) { .consultation-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 480px) { .consultation-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="consultation-shell">
+  <div class="d-flex justify-content-between gap-3 align-items-start flex-wrap mb-3">
+    <div>
+      <h1 class="h4 mb-1">Student Consultation View</h1>
+      <p class="text-muted mb-0">{{ offering.course.code }} / {{ offering.section.code }} / {{ period.name }}</p>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:class_performance' offering.id period.id %}">Back to Class Performance</a>
+  </div>
+
+  <section class="consultation-identity mb-3">
+    <div class="small text-muted">Selected student</div>
+    <h2 class="h5 mb-1">{{ trend.student_name }}</h2>
+    <div class="text-muted">{{ trend.student_no }}</div>
+  </section>
+
+  <section class="consultation-grid mb-3">
+    <div class="consultation-metric">
+      <div class="consultation-label">Current Grade</div>
+      <div class="consultation-value">{% if trend.current_grade is not None %}{{ trend.current_grade|floatformat:2 }}{% else %}-{% endif %}</div>
+    </div>
+    <div class="consultation-metric">
+      <div class="consultation-label">Trend</div>
+      <div class="consultation-value">{{ trend.trend_display }}</div>
+    </div>
+    <div class="consultation-metric">
+      <div class="consultation-label">Missing Outputs</div>
+      <div class="consultation-value">{{ trend.missing_output_count }}</div>
+    </div>
+    <div class="consultation-metric">
+      <div class="consultation-label">Weakest Component</div>
+      <div class="consultation-value">{% if trend.weakest_component %}{{ trend.weakest_component.name }}{% else %}-{% endif %}</div>
+    </div>
+  </section>
+
+  <section class="trend-panel mb-3" aria-labelledby="performance-trend-title">
+    <div class="trend-panel-head">
+      <h2 class="h6 mb-1" id="performance-trend-title">Performance Trend</h2>
+      <p class="small text-muted mb-0">Computed only from this selected student's available grading records.</p>
+    </div>
+    <div class="trend-panel-body">
+      <h3 class="h6">Period Grade Trend</h3>
+      {% if trend_visualization.period_chart.period_count <= 1 %}
+      <div class="alert alert-light border mb-3">Trend graph will appear after another grading period is available.</div>
+      {% elif trend_visualization.period_chart.grade_point_count == 0 %}
+      <div class="alert alert-light border mb-3">No computed grade trend is available yet.</div>
+      {% else %}
+      <div class="trend-chart-wrap mb-3">
+        <svg class="trend-chart" viewBox="0 0 740 250" role="img" aria-label="Selected student period grade trend">
+          <line class="trend-grid-line" x1="56" y1="24" x2="684" y2="24"></line>
+          <line class="trend-grid-line" x1="56" y1="69" x2="684" y2="69"></line>
+          <line class="trend-grid-line" x1="56" y1="114" x2="684" y2="114"></line>
+          <line class="trend-grid-line" x1="56" y1="159" x2="684" y2="159"></line>
+          <line class="trend-grid-line" x1="56" y1="204" x2="684" y2="204"></line>
+          <text class="trend-axis-label" x="18" y="28">100</text>
+          <text class="trend-axis-label" x="25" y="73">75</text>
+          <text class="trend-axis-label" x="25" y="118">50</text>
+          <text class="trend-axis-label" x="25" y="163">25</text>
+          <text class="trend-axis-label" x="32" y="208">0</text>
+          {% for segment in trend_visualization.period_chart.segments %}
+          <polyline class="trend-line" points="{{ segment }}"></polyline>
+          {% endfor %}
+          {% for point in trend_visualization.period_chart.points %}
+            {% if point.y is not None %}
+            <circle class="trend-point" cx="{{ point.x }}" cy="{{ point.y }}" r="6">
+              <title>{{ point.period_label }}: {{ point.grade|floatformat:2 }}</title>
+            </circle>
+            <text class="trend-point-label" x="{{ point.x }}" y="{{ point.y|add:'-12' }}" text-anchor="middle">{{ point.grade|floatformat:2 }}</text>
+            {% else %}
+            <text class="trend-missing-label" x="{{ point.x }}" y="184" text-anchor="middle">No data</text>
+            {% endif %}
+            <text class="trend-period-label" x="{{ point.x }}" y="232" text-anchor="middle">{{ point.period_label }}</text>
+          {% endfor %}
+        </svg>
+      </div>
+      {% endif %}
+      {% if trend_visualization.period_trend %}
+      <div class="table-responsive mb-3">
+        <table class="table table-sm mb-0">
+          <caption class="caption-top small text-muted pt-0">Period grade values</caption>
+          <thead class="table-light">
+            <tr>
+              <th>Grading Period</th>
+              <th>Computed Grade</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for period_row in trend_visualization.period_trend %}
+            <tr>
+              <td>{{ period_row.period_label }}</td>
+              <td>
+                {% if period_row.grade is not None %}
+                  {{ period_row.grade|floatformat:2 }}
+                {% else %}
+                  <span class="text-muted">No data</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      <div class="trend-interpretation mb-4">{{ trend_visualization.interpretation }}</div>
+
+      <h3 class="h6">Component Average Trend</h3>
+      {% if trend_visualization.has_component_data %}
+      <div class="table-responsive">
+        <table class="table table-sm component-table mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Component</th>
+              {% for period_row in trend_visualization.component_trend %}
+              <th>{{ period_row.period_label }}</th>
+              {% endfor %}
+              <th>Visual Trend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for series in trend_visualization.component_series %}
+              {% if series.has_data %}
+              <tr>
+                <td><strong>{{ series.label }}</strong></td>
+                {% for value in series.values %}
+                <td>{% if value is not None %}{{ value|floatformat:2 }}{% else %}<span class="text-muted">-</span>{% endif %}</td>
+                {% endfor %}
+                <td>
+                  <svg class="component-sparkline" viewBox="0 0 200 60" role="img" aria-label="{{ series.label }} trend">
+                    <line x1="8" y1="54" x2="192" y2="54" stroke="#e0e8e2" stroke-width="1"></line>
+                    {% for segment in series.segments %}
+                    <polyline class="component-sparkline-line" points="{{ segment }}"></polyline>
+                    {% endfor %}
+                    {% for point in series.points %}
+                      {% if point.y is not None %}
+                      <circle class="component-sparkline-point" cx="{{ point.x }}" cy="{{ point.y }}" r="4">
+                        <title>{{ series.label }}: {{ point.value|floatformat:2 }}</title>
+                      </circle>
+                      {% endif %}
+                    {% endfor %}
+                  </svg>
+                </td>
+              </tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="alert alert-light border mb-0">Component trend is not available for this period.</div>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="consultation-reason mb-3">
+    <strong>Primary reason:</strong> {{ trend.primary_reason }}
+    {% if trend.previous_grade is not None %}
+    <div class="small text-muted mt-1">Previous period: {{ trend.previous_grade|floatformat:2 }}{% if trend.delta is not None %} | Change: {{ trend.delta|floatformat:2 }}{% endif %}</div>
+    {% else %}
+    <div class="small text-muted mt-1">No previous grading period is available. Trend will appear after another grading period is available.</div>
+    {% endif %}
+  </div>
+
+  {% if trend.missing_outputs %}
+  <section class="card mb-3">
+    <div class="card-header bg-white"><h2 class="h6 mb-0">Missing Outputs</h2></div>
+    <ul class="list-group list-group-flush">
+      {% for output in trend.missing_outputs %}
+      <li class="list-group-item">{{ output }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <div class="card-header bg-white"><h2 class="h6 mb-0">Current Period Breakdown</h2></div>
+    <div class="card-body">
+      <div class="row g-3">
+        {% for component in trend.detail.component_breakdown %}
+        <div class="col-md-6">
+          <div class="border rounded-2 p-3 h-100">
+            <div class="d-flex justify-content-between gap-3">
+              <strong>{{ component.name }}</strong>
+              <span>{% if component.score is not None %}{{ component.score|floatformat:2 }}{% else %}-{% endif %}</span>
+            </div>
+            <div class="small text-muted">Weight: {{ component.weight|floatformat:2 }}%</div>
+            {% for subcomponent in component.subcomponents %}
+            <div class="border-top mt-2 pt-2">
+              <div class="d-flex justify-content-between gap-3 small">
+                <span>{{ subcomponent.name }}</span>
+                <strong>{% if subcomponent.score is not None %}{{ subcomponent.score|floatformat:2 }}{% else %}-{% endif %}</strong>
+              </div>
+              {% for detail in subcomponent.details %}
+              <div class="small text-muted d-flex justify-content-between gap-3 mt-1">
+                <span>{{ detail.name }}</span>
+                <span>{% if detail.score is not None %}{{ detail.score|floatformat:2 }}{% else %}No score{% endif %}</span>
+              </div>
+              {% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% empty %}
+        <div class="col-12 text-muted">No component data is available yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

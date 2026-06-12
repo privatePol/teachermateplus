@@ -1,38 +1,105 @@
 {% extends "faculty_portal/base.html" %}
+{% load static %}
 
 {% block title %}Faculty Help Guide | TeacherMate+{% endblock %}
 
 {% block extra_head %}
 {{ block.super }}
 <style>
-  .faculty-help { max-width: 1160px; margin: 0 auto; padding-bottom: 4rem; }
-  .faculty-help-hero { padding: 1.5rem; border-radius: 8px; color: #fff; background: linear-gradient(120deg, #125232, #32804b 66%, #b6a91d); }
+  .faculty-help {
+    --help-deep-green: #123f28;
+    --help-green: #1f6b3d;
+    --help-neon: #8bcf21;
+    --help-gold: #e4bd28;
+    --help-cream: #fff9e8;
+    --help-border: #c9d9cd;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding-bottom: 4rem;
+  }
+  .faculty-help-hero { padding: 1.65rem; border-radius: 8px; color: #fff; background: linear-gradient(120deg, #103e27, #277448 66%, #b5a61b); box-shadow: 0 14px 30px rgba(18,63,40,.16); }
   .faculty-help-hero-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
   .faculty-help-hero h1 { font-size: 1.85rem; margin-bottom: .4rem; }
   .faculty-help-hero p { margin: 0; color: rgba(255,255,255,.88); }
-  .faculty-help-back { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.62); border-radius: 6px; padding: .5rem .75rem; color: #fff; text-decoration: none; font-weight: 700; background: rgba(255,255,255,.12); }
+  .faculty-help-hero-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .55rem; }
+  .faculty-help-back { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.62); border-radius: 6px; padding: .55rem .8rem; color: #fff; text-decoration: none; font-weight: 700; background: rgba(255,255,255,.12); }
   .faculty-help-back:hover { color: #173f29; background: #fff; }
+  .faculty-help-manual-link { color: #173f29; background: #fff; }
+  .faculty-help-manual-link:hover { color: #173f29; background: #fff5cf; }
   .faculty-help-nav { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
-  .faculty-help-nav a { border: 1px solid #cadbce; border-radius: 6px; padding: .45rem .7rem; color: #22553a; background: #fff; text-decoration: none; font-weight: 700; font-size: .88rem; }
-  .faculty-help-section { scroll-margin-top: 5rem; margin-top: 1.2rem; }
-  .faculty-help-section > h2 { color: #173f29; font-size: 1.3rem; border-bottom: 2px solid #d0b921; padding-bottom: .5rem; }
-  .faculty-help-topic { border: 1px solid #d9e4dc; border-radius: 8px; background: #fff; margin: .85rem 0; overflow: hidden; }
-  .faculty-help-topic h3 { margin: 0; padding: .85rem 1rem; color: #204b32; font-size: 1.08rem; background: #f3f8f4; border-bottom: 1px solid #d9e4dc; }
+  .faculty-help-nav a { border: 1px solid #b9cebe; border-radius: 6px; padding: .48rem .72rem; color: #18472d; background: #fff; text-decoration: none; font-weight: 700; font-size: .88rem; box-shadow: 0 3px 8px rgba(18,63,40,.05); }
+  .faculty-help-nav a:hover { border-color: var(--help-neon); background: #f4fae8; }
+  .faculty-help-visual { scroll-margin-top: 5rem; margin: 1.2rem 0; padding: 1.25rem; border: 1px solid var(--help-border); border-top: 5px solid var(--help-neon); border-radius: 8px; background: #fff; box-shadow: 0 10px 22px rgba(18,63,40,.07); }
+  .faculty-help-visual-copy { max-width: 820px; margin-bottom: 1rem; }
+  .faculty-help-visual-copy h2 { margin: 0 0 .35rem; color: var(--help-deep-green); font-size: 1.35rem; font-weight: 800; }
+  .faculty-help-visual-copy p { margin: 0; color: #526a5a; }
+  .faculty-help-visual figure { margin: 0; text-align: center; }
+  .faculty-help-visual img { display: block; width: min(100%, 760px); height: auto; margin: 0 auto; border: 1px solid #d4e1d7; border-radius: 8px; background: #fff; }
+  .faculty-help-visual figcaption { max-width: 760px; margin: .75rem auto 0; color: #566d5e; font-size: .88rem; text-align: left; }
+  .faculty-help-tasks { margin: 1.25rem 0 1.5rem; padding: 1.25rem; border: 1px solid #d9cf93; border-radius: 8px; background: linear-gradient(135deg, #fffdf5, #fff7d8); box-shadow: 0 9px 20px rgba(99,80,10,.07); }
+  .faculty-help-tasks h2 { color: var(--help-deep-green); font-size: 1.25rem; font-weight: 800; margin: 0 0 .25rem; }
+  .faculty-help-tasks > p { color: #627064; margin: 0 0 1rem; }
+  .faculty-help-task-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: .7rem; }
+  .faculty-help-task { display: flex; align-items: center; gap: .7rem; min-height: 68px; padding: .75rem; border: 1px solid #d7e2d9; border-radius: 7px; background: #fff; color: #284936; font-weight: 700; box-shadow: 0 5px 12px rgba(18,63,40,.05); }
+  .faculty-help-task-number { display: inline-flex; flex: 0 0 32px; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: 50%; color: #123f28; background: var(--help-neon); font-weight: 900; }
+  .faculty-help-reference-heading { margin: 1.5rem 0 .85rem; }
+  .faculty-help-reference-heading h2 { color: var(--help-deep-green); font-size: 1.35rem; font-weight: 800; margin: 0 0 .25rem; }
+  .faculty-help-reference-heading p { color: #627064; margin: 0; }
+  .faculty-help-accordion { display: grid; gap: .75rem; }
+  .faculty-help-accordion .accordion-item { scroll-margin-top: 5rem; border: 1px solid #bcd0c1; border-radius: 8px; overflow: hidden; box-shadow: 0 8px 18px rgba(18,63,40,.06); }
+  .faculty-help-accordion .accordion-button { min-height: 64px; gap: .8rem; padding: .85rem 1rem; color: var(--help-deep-green); background: #f8fbf8; font-weight: 800; box-shadow: none; }
+  .faculty-help-accordion .accordion-button:not(.collapsed) { color: #fff; background: linear-gradient(90deg, var(--help-deep-green), var(--help-green)); }
+  .faculty-help-accordion .accordion-button:focus { border-color: var(--help-neon); box-shadow: inset 0 0 0 3px rgba(139,207,33,.35); }
+  .faculty-help-accordion .accordion-button::after { flex: 0 0 auto; }
+  .faculty-help-accordion .accordion-button:not(.collapsed)::after { filter: brightness(0) invert(1); }
+  .faculty-help-section-number { display: inline-flex; flex: 0 0 34px; width: 34px; height: 34px; align-items: center; justify-content: center; border-radius: 50%; color: #173f29; background: var(--help-gold); font-weight: 900; }
+  .faculty-help-accordion .accordion-body { padding: 1rem; background: #f5f8f5; }
+  .faculty-help-topic { border: 1px solid #cddcd0; border-left: 5px solid var(--help-green); border-radius: 8px; background: #fff; margin: 0 0 1rem; overflow: hidden; box-shadow: 0 6px 14px rgba(18,63,40,.05); }
+  .faculty-help-topic:last-child { margin-bottom: 0; }
+  .faculty-help-topic h3 { margin: 0; padding: .85rem 1rem; color: #fff; font-size: 1.08rem; font-weight: 800; background: var(--help-deep-green); border-bottom: 3px solid var(--help-neon); }
   .faculty-help-body { padding: 1rem; }
   .faculty-help-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .8rem; }
-  .faculty-help-block { border-left: 3px solid #7ca13b; padding-left: .75rem; }
-  .faculty-help-block h4 { color: #284f38; font-size: .92rem; margin: 0 0 .35rem; }
+  .faculty-help-block { border: 1px solid #d8e3da; border-top: 4px solid #6ea33a; border-radius: 6px; padding: .75rem; background: #fbfdfb; }
+  .faculty-help-block:nth-child(2n) { border-top-color: var(--help-gold); background: var(--help-cream); }
+  .faculty-help-block h4 { color: #214a31; font-size: .92rem; font-weight: 800; margin: 0 0 .35rem; }
   .faculty-help-block p, .faculty-help-block li { color: #526a5a; font-size: .9rem; }
   .faculty-help-block ul { margin: 0; padding-left: 1.05rem; }
-  .faculty-help-actions { width: 100%; border-collapse: collapse; margin-top: .9rem; font-size: .86rem; }
-  .faculty-help-actions th, .faculty-help-actions td { border: 1px solid #dbe5de; padding: .55rem; vertical-align: top; }
-  .faculty-help-actions th { background: #edf5ef; color: #264d36; }
-  .faculty-help-workflow { margin-top: .85rem; padding: .8rem; border-radius: 6px; border: 1px solid #eadb91; background: #fff9df; color: #625b3b; font-size: .88rem; }
+  .faculty-help-table-wrap { margin-top: 1rem; border: 1px solid #9fb7a5; border-radius: 7px; overflow-x: auto; }
+  .faculty-help-actions { width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0; margin: 0; font-size: .86rem; }
+  .faculty-help-actions th, .faculty-help-actions td { border-right: 1px solid #b8cbbd; border-bottom: 1px solid #c9d8cc; padding: .72rem; vertical-align: top; }
+  .faculty-help-actions tr > :last-child { border-right: 0; }
+  .faculty-help-actions tbody tr:last-child > * { border-bottom: 0; }
+  .faculty-help-actions thead th { color: #fff; background: var(--help-deep-green); font-weight: 800; }
+  .faculty-help-actions tbody tr:nth-child(odd) > * { background: #f5faf5; }
+  .faculty-help-actions tbody tr:nth-child(even) > * { background: var(--help-cream); }
+  .faculty-help-actions tbody th { color: #153f28; background: #e5f2de !important; font-weight: 800; }
+  .faculty-help-actions tbody td:last-child { background: #fff2bd !important; font-weight: 700; color: #594a13; }
+  .faculty-help-actions tbody tr:hover > * { background: #edf8cf !important; }
+  .faculty-help-workflow { margin-top: 1rem; padding: .9rem; border-radius: 7px; border: 1px solid #d3bd4e; border-left: 5px solid var(--help-gold); background: #fff8d9; color: #5c5431; font-size: .88rem; }
   .faculty-help-workflow-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .4rem .8rem; margin-top: .4rem; }
+  .faculty-help-feature-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .8rem; margin-top: 1rem; }
+  .faculty-help-feature { padding: .9rem; border: 1px solid #c8dacb; border-radius: 7px; background: #f7fbf7; }
+  .faculty-help-feature:nth-child(2) { border-color: #dac96f; background: #fff9e2; }
+  .faculty-help-feature h4 { color: var(--help-deep-green); font-size: 1rem; font-weight: 800; margin: 0 0 .4rem; }
+  .faculty-help-feature p, .faculty-help-feature li { color: #526a5a; font-size: .9rem; }
+  .faculty-help-feature ul { margin: .45rem 0 0; padding-left: 1.1rem; }
+  .faculty-help-feature-label { display: inline-block; margin-bottom: .45rem; padding: .25rem .5rem; border-radius: 999px; color: #163f27; background: #dff2b6; font-size: .75rem; font-weight: 800; }
+  .faculty-help-phase { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .65rem; }
+  .faculty-help-phase span { padding: .28rem .5rem; border-radius: 999px; color: #fff; background: #276f43; font-size: .76rem; font-weight: 700; }
   @media (max-width: 800px) {
     .faculty-help-hero-row { flex-direction: column; }
-    .faculty-help-grid, .faculty-help-workflow-grid { grid-template-columns: 1fr; }
-    .faculty-help-actions { display: block; overflow-x: auto; }
+    .faculty-help-hero-actions { justify-content: flex-start; }
+    .faculty-help-task-grid, .faculty-help-grid, .faculty-help-workflow-grid, .faculty-help-feature-grid { grid-template-columns: 1fr; }
+    .faculty-help-accordion .accordion-button { align-items: flex-start; }
+  }
+  @media (max-width: 575.98px) {
+    .faculty-help-hero, .faculty-help-visual, .faculty-help-tasks { padding: 1rem; }
+    .faculty-help-hero-actions { width: 100%; }
+    .faculty-help-back { width: 100%; text-align: center; }
+    .faculty-help-nav { display: grid; grid-template-columns: 1fr; }
+    .faculty-help-nav a { text-align: center; }
+    .faculty-help-accordion .accordion-body { padding: .65rem; }
+    .faculty-help-topic h3, .faculty-help-body { padding: .75rem; }
   }
 </style>
 {% endblock %}
@@ -45,73 +112,199 @@
         <h1>Faculty Help Guide</h1>
         <p>Short, practical answers for accepting classes, encoding grades, checking computations, submitting, reopening, and correcting grades.</p>
       </div>
-      <a class="faculty-help-back" href="{% url 'faculty_portal:dashboard' %}">&larr; Back to Dashboard</a>
+      <div class="faculty-help-hero-actions">
+        <a class="faculty-help-back faculty-help-manual-link" href="{% url 'faculty_portal:guide_manual' %}">Full Guide Manual</a>
+        <a class="faculty-help-back" href="{% url 'faculty_portal:dashboard' %}">&larr; Back to Faculty Portal</a>
+      </div>
     </div>
   </header>
-  <span id="guide-workflow"></span>
 
   <nav class="faculty-help-nav" aria-label="Faculty help topics">
-    {% for section in help_sections %}<a href="#faculty-help-{{ section.code }}">{{ section.title }}</a>{% endfor %}
+    <a href="#guide-workflow">Start Here</a>
+    <a href="#faculty-help-top-tasks">Top Tasks</a>
+    {% for section in help_sections %}
+    <a href="#faculty-help-{{ section.code }}" data-help-collapse="#faculty-help-collapse-{{ section.code }}">{{ section.title }}</a>
+    {% endfor %}
   </nav>
 
-  {% for section in help_sections %}
-  <section class="faculty-help-section" id="faculty-help-{{ section.code }}">
-    <h2>{{ section.title }}</h2>
-    {% for topic in section.topics %}
-    {% if topic.code == "assignments" %}<span id="guide-archived"></span>{% endif %}
-    {% if topic.code == "login" %}<span id="guide-password"></span><span id="guide-first-login"></span>{% endif %}
-    {% if topic.code == "attendance" %}<span id="guide-attendance-summary"></span>{% endif %}
-    {% if topic.code == "support-security" %}<span id="guide-privacy"></span>{% endif %}
-    <article class="faculty-help-topic" id="guide-{{ topic.code }}">
-      <h3>{{ topic.title }}</h3>
-      <div class="faculty-help-body">
-        <div class="faculty-help-grid">
-          <section class="faculty-help-block">
-            <h4>What is this page for?</h4>
-            <p>{{ topic.purpose }}</p>
-          </section>
-          <section class="faculty-help-block">
-            <h4>What should I check first?</h4>
-            <ul>{% for item in topic.check_first %}<li>{{ item }}</li>{% endfor %}</ul>
-          </section>
-          <section class="faculty-help-block">
-            <h4>What should I avoid?</h4>
-            <p>{{ topic.avoid }}</p>
-          </section>
-          <section class="faculty-help-block">
-            <h4>What is the next step?</h4>
-            <p>{{ topic.next_step }}</p>
-          </section>
-        </div>
-
-        {% if topic.actions %}
-        <table class="faculty-help-actions">
-          <thead><tr><th>Action</th><th>What it does</th><th>When to click</th><th>When not to click</th><th>What happens</th><th>Can it be edited?</th></tr></thead>
-          <tbody>
-            {% for action in topic.actions %}
-            <tr><th>{{ action.name }}</th><td>{{ action.does }}</td><td>{{ action.when }}</td><td>{{ action.avoid }}</td><td>{{ action.result }}</td><td>{{ action.editable }}</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        {% endif %}
-
-        {% if topic.workflow %}
-        <section class="faculty-help-workflow">
-          <strong>Complete workflow</strong>
-          <div class="faculty-help-workflow-grid">
-            <div><strong>Who starts:</strong> {{ topic.workflow.starts }}</div>
-            <div><strong>Who reviews:</strong> {{ topic.workflow.reviews }}</div>
-            <div><strong>Who approves:</strong> {{ topic.workflow.approves }}</div>
-            <div><strong>Who receives the result:</strong> {{ topic.workflow.receives }}</div>
-            <div><strong>When complete:</strong> {{ topic.workflow.complete }}</div>
-            <div><strong>Records updated:</strong> {{ topic.workflow.records }}</div>
-          </div>
-        </section>
-        {% endif %}
-      </div>
-    </article>
-    {% endfor %}
+  <section class="faculty-help-visual" id="guide-workflow" aria-labelledby="faculty-workflow-title">
+    <div class="faculty-help-visual-copy">
+      <h2 id="faculty-workflow-title">Start Here: Daily Faculty Workflow</h2>
+      <p>Follow these six steps for each class and grading period. The most important habit is to review the Summary before final submission.</p>
+    </div>
+    <figure>
+      <img src="{% get_media_prefix %}imahe/faculty_workflow.png" alt="Six-step recommended faculty workflow from opening My Classes through final grade submission">
+      <figcaption>
+        Blank score fields remain missing until a value is saved. Submit only after checking the activity setup, encoded scores,
+        attendance, class-list status, and computed Summary.
+      </figcaption>
+    </figure>
   </section>
-  {% endfor %}
+
+  <section class="faculty-help-tasks" id="faculty-help-top-tasks" aria-labelledby="faculty-help-top-tasks-title">
+    <h2 id="faculty-help-top-tasks-title">Top Faculty Tasks</h2>
+    <p>Use this short sequence when you need to get back to work quickly.</p>
+    <div class="faculty-help-task-grid">
+      <div class="faculty-help-task"><span class="faculty-help-task-number">1</span><span>Open My Classes</span></div>
+      <div class="faculty-help-task"><span class="faculty-help-task-number">2</span><span>Continue encoding scores</span></div>
+      <div class="faculty-help-task"><span class="faculty-help-task-number">3</span><span>Check pending grade issues</span></div>
+      <div class="faculty-help-task"><span class="faculty-help-task-number">4</span><span>Review computed grades</span></div>
+      <div class="faculty-help-task"><span class="faculty-help-task-number">5</span><span>Submit grades when complete</span></div>
+      <div class="faculty-help-task"><span class="faculty-help-task-number">6</span><span>Open Student Consultation View for one student</span></div>
+    </div>
+  </section>
+
+  <div class="faculty-help-reference-heading">
+    <h2>Detailed Faculty Reference</h2>
+    <p>Open only the section you need. The first group is expanded to help new faculty get started.</p>
+  </div>
+
+  <div class="accordion faculty-help-accordion" id="facultyHelpAccordion">
+    {% for section in help_sections %}
+    <section class="accordion-item" id="faculty-help-{{ section.code }}">
+      <h2 class="accordion-header" id="faculty-help-heading-{{ section.code }}">
+        <button
+          class="accordion-button{% if not forloop.first %} collapsed{% endif %}"
+          type="button"
+          data-bs-toggle="collapse"
+          data-bs-target="#faculty-help-collapse-{{ section.code }}"
+          aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}"
+          aria-controls="faculty-help-collapse-{{ section.code }}"
+        >
+          <span class="faculty-help-section-number">{{ forloop.counter }}</span>
+          <span>{{ section.title }}</span>
+        </button>
+      </h2>
+      <div
+        id="faculty-help-collapse-{{ section.code }}"
+        class="accordion-collapse collapse{% if forloop.first %} show{% endif %}"
+        aria-labelledby="faculty-help-heading-{{ section.code }}"
+        data-bs-parent="#facultyHelpAccordion"
+      >
+        <div class="accordion-body">
+          {% for topic in section.topics %}
+          {% if topic.code == "assignments" %}<span id="guide-archived"></span>{% endif %}
+          {% if topic.code == "login" %}<span id="guide-password"></span><span id="guide-first-login"></span>{% endif %}
+          {% if topic.code == "attendance" %}<span id="guide-attendance-summary"></span>{% endif %}
+          {% if topic.code == "support-security" %}<span id="guide-privacy"></span>{% endif %}
+          <article class="faculty-help-topic" id="guide-{{ topic.code }}">
+            <h3>{{ topic.title }}</h3>
+            <div class="faculty-help-body">
+              <div class="faculty-help-grid">
+                <section class="faculty-help-block">
+                  <h4>What is this page for?</h4>
+                  <p>{{ topic.purpose }}</p>
+                </section>
+                <section class="faculty-help-block">
+                  <h4>What should I check first?</h4>
+                  <ul>{% for item in topic.check_first %}<li>{{ item }}</li>{% endfor %}</ul>
+                </section>
+                <section class="faculty-help-block">
+                  <h4>What should I avoid?</h4>
+                  <p>{{ topic.avoid }}</p>
+                </section>
+                <section class="faculty-help-block">
+                  <h4>What is the next step?</h4>
+                  <p>{{ topic.next_step }}</p>
+                </section>
+              </div>
+
+              {% if topic.code == "performance" %}
+              <div class="faculty-help-feature-grid">
+                <section class="faculty-help-feature">
+                  <span class="faculty-help-feature-label">Student Consultation View</span>
+                  <h4>Focus on one student's performance</h4>
+                  <p>Use this page to discuss the selected student's current standing and the records behind it.</p>
+                  <ul>
+                    <li>Current Grade</li>
+                    <li>Trend</li>
+                    <li>Missing Outputs</li>
+                    <li>Weakest Component</li>
+                    <li>Performance Trend graph</li>
+                    <li>Component Average Trend</li>
+                    <li>Current Period Breakdown</li>
+                  </ul>
+                </section>
+                <section class="faculty-help-feature">
+                  <span class="faculty-help-feature-label">Parallel Section Comparison</span>
+                  <h4>Compare similar sections you handle</h4>
+                  <p>TeacherMate+ compares sections with the same course code and grading period handled by the same faculty member.</p>
+                  <ul>
+                    <li>Which section has the lowest class average?</li>
+                    <li>Which section has the most missing outputs?</li>
+                    <li>Which section has the most at-risk students?</li>
+                    <li>Which component appears weakest?</li>
+                  </ul>
+                  <div class="faculty-help-phase" aria-label="Phase 1 comparison tools">
+                    <span>Comparison table</span>
+                    <span>Lightweight bars</span>
+                    <span>Rule-based interpretation</span>
+                  </div>
+                </section>
+              </div>
+              {% endif %}
+
+              {% if topic.actions %}
+              <div class="table-responsive faculty-help-table-wrap">
+                <table class="faculty-help-actions">
+                  <thead><tr><th scope="col">Action</th><th scope="col">What it does</th><th scope="col">When to click</th><th scope="col">When not to click</th><th scope="col">What happens</th><th scope="col">Can it be edited?</th></tr></thead>
+                  <tbody>
+                    {% for action in topic.actions %}
+                    <tr><th scope="row">{{ action.name }}</th><td>{{ action.does }}</td><td>{{ action.when }}</td><td>{{ action.avoid }}</td><td>{{ action.result }}</td><td>{{ action.editable }}</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% endif %}
+
+              {% if topic.workflow %}
+              <section class="faculty-help-workflow">
+                <strong>Complete workflow</strong>
+                <div class="faculty-help-workflow-grid">
+                  <div><strong>Who starts:</strong> {{ topic.workflow.starts }}</div>
+                  <div><strong>Who reviews:</strong> {{ topic.workflow.reviews }}</div>
+                  <div><strong>Who approves:</strong> {{ topic.workflow.approves }}</div>
+                  <div><strong>Who receives the result:</strong> {{ topic.workflow.receives }}</div>
+                  <div><strong>When complete:</strong> {{ topic.workflow.complete }}</div>
+                  <div><strong>Records updated:</strong> {{ topic.workflow.records }}</div>
+                </div>
+              </section>
+              {% endif %}
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+    {% endfor %}
+  </div>
 </main>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    function openHelpSection(targetSelector, scrollTarget) {
+      const target = document.querySelector(targetSelector);
+      if (!target || typeof bootstrap === "undefined") return;
+      if (scrollTarget && !target.classList.contains("show")) {
+        target.addEventListener("shown.bs.collapse", function handleShown() {
+          scrollTarget.scrollIntoView({ block: "start" });
+        }, { once: true });
+      }
+      bootstrap.Collapse.getOrCreateInstance(target, { toggle: false }).show();
+    }
+
+    document.querySelectorAll("[data-help-collapse]").forEach(function (link) {
+      link.addEventListener("click", function () {
+        openHelpSection(link.dataset.helpCollapse);
+      });
+    });
+
+    if (window.location.hash) {
+      const target = document.querySelector(window.location.hash);
+      const parentCollapse = target && target.closest(".accordion-collapse");
+      if (parentCollapse) {
+        openHelpSection("#" + parentCollapse.id, target);
+      }
+    }
+  });
+</script>
 {% endblock %}

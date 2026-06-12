@@ -432,6 +432,15 @@
           <span class="sidebar-icon">&#127891;</span>
           <span class="sidebar-label">My Classes</span>
         </a>
+        <a
+          href="{% url 'faculty_portal:parallel_section_comparison' %}"
+          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:parallel_section_comparison' %}active{% endif %}"
+          title="Performance Trends"
+          data-tour-id="performance-trends"
+        >
+          <span class="sidebar-icon">&#9650;</span>
+          <span class="sidebar-label">Performance Trends</span>
+        </a>
         {% if faculty_at_risk_monitor_enabled %}
           <a
             href="{% url 'faculty_portal:student_at_risk_monitor' %}"
@@ -566,9 +575,8 @@
       const allSteps = [
         { id: "faculty-header", title: "Faculty Portal Header", text: "Use this area to confirm you are in the Faculty Portal, manage your signature, change your password, or log out." },
         { id: "sidebar-toggle", title: "Navigation Menu", text: "Collapse or expand the sidebar when you need more space while encoding grades." },
-        { id: "priority-actions", title: "Priority Actions", text: "Start here to see the most urgent grading, submission, and deadline items." },
         { id: "my-classes", title: "My Classes", text: "Open your assigned classes, grading periods, activities, score sheets, summaries, and submissions." },
-        { id: "at-risk-monitor", title: "Student Intervention Monitor", text: "Open the monitor when you need a broader view of students who may need follow-up." },
+        { id: "performance-trends", title: "Performance Trends", text: "Compare parallel sections you handle and open a selected class to review students who need attention." },
         { id: "reminders", title: "Reminders", text: "Check portal reminders and notices related to deadlines and grading tasks." },
         { id: "user-guide", title: "Faculty Guide", text: "Open the guide when you need a step-by-step reference for faculty workflows." },
         { id: "privacy-notice", title: "Data Privacy Notice", text: "The privacy notice is always available for faculty reference." }

@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     activity_scores_view,
     analytics_view,
+    class_performance_view,
     dashboard_view,
     faculty_assignment_accept_view,
     faculty_assignment_response_view,
@@ -43,6 +44,8 @@ from .views import (
     period_self_reopen_view,
     period_submit_view,
     period_summary_view,
+    parallel_section_comparison_view,
+    student_performance_consultation_view,
 )
 
 app_name = "faculty_portal"
@@ -55,6 +58,11 @@ urlpatterns = [
     path("faculty/quick-tour/disable/", quick_tour_disable_view, name="quick_tour_disable"),
     path("faculty/dashboard/", dashboard_view, name="dashboard"),
     path("faculty/analytics/", analytics_view, name="analytics"),
+    path(
+        "faculty/performance/parallel-sections/",
+        parallel_section_comparison_view,
+        name="parallel_section_comparison",
+    ),
     path("faculty/reminders/", reminder_center_view, name="reminder_center"),
     path("faculty/notes/", memo_center_view, name="memo_center"),
     path("faculty/notes/<int:memo_id>/edit/", memo_edit_view, name="memo_edit"),
@@ -140,6 +148,16 @@ urlpatterns = [
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/summary/",
         period_summary_view,
         name="period_summary",
+    ),
+    path(
+        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/performance/",
+        class_performance_view,
+        name="class_performance",
+    ),
+    path(
+        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/performance/students/<int:student_id>/",
+        student_performance_consultation_view,
+        name="student_performance_consultation",
     ),
     path(
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/summary/explain/<int:student_id>/<str:grade_type>/",

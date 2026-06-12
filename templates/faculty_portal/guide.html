@@ -599,7 +599,7 @@
           <div class="card-body">
             <div class="guide-icon-badge">SC</div>
             <div class="guide-highlight-title">Check Scores Closely</div>
-            <p class="guide-highlight-copy">Saved scores are used in computation. Direct percentage and raw-score items follow different rules.</p>
+            <p class="guide-highlight-copy">Saved raw scores are computed using Base-50. Blank scores remain missing, while a saved zero is an intentional score.</p>
           </div>
         </div>
         <div class="card guide-highlight-card">
@@ -752,12 +752,13 @@
             <li>Choose the <strong>Component</strong> first. Subcomponent and detail fields appear only when needed.</li>
             <li>Use short activity titles so the summary and printout stay easy to read.</li>
             <li>Use the <strong>Date</strong> field to keep activities in proper order.</li>
-            <li>For <strong>Raw Score</strong>, the score cannot be higher than the activity total.</li>
-            <li>For <strong>Direct Percentage</strong>, enter a value from 0 to 100.</li>
-            <li>Saved blank active-student scores are treated as 0.</li>
+            <li>Enter each student's actual <strong>Raw Score</strong>. The score cannot be higher than the activity total.</li>
+            <li>TeacherMate+ converts raw scores using the Base-50 formula.</li>
+            <li>A blank score remains missing. Enter 0 only when zero is the student's actual recorded score.</li>
+            <li>All created Participation/Output items are averaged equally. Recitations, assignments, seatwork, activities, and presentations do not use individual detail percentage weights.</li>
           </ul>
           <div class="guide-mini-note">
-            Tip: if you save the score sheet, blank active-student cells become 0. Review before saving.
+            Tip: review every value before saving. A blank is still missing; a saved 0 is complete and is included in computation.
           </div>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Create Grade Activity</h6>
           <ol class="guide-list">
@@ -769,14 +770,14 @@
             <li>Select <strong>Subcomponent</strong> only if the selected component requires it.</li>
             <li>Select <strong>Detail</strong> only if the selected subcomponent requires it.</li>
             <li>Enter a short <strong>Activity Title</strong> (ex: Q1, R1, A1, AC1).</li>
-            <li>Enter <strong>Total Score</strong>. For direct percentage items, the system uses 100.</li>
+            <li>Enter the activity's correct <strong>Total Score</strong>.</li>
             <li>Set <strong>Date</strong> using the date picker.</li>
             <li>Click <strong>Save Activity</strong>.</li>
           </ol>
           <h6 class="mt-3 mb-2 fw-bold text-success">Step-by-Step: Encode Scores</h6>
           <ol class="guide-list">
             <li>From the Activities table, click <strong>Encode Scores</strong> on the target activity.</li>
-            <li>Enter score values for the activity. Blank active-student cells save as <strong>0</strong>.</li>
+            <li>Enter the actual raw score for each student. Leave the field blank only when the score is still missing.</li>
             <li>Click <strong>Save Scores</strong>.</li>
             <li>Check the <strong>Encoded</strong> count on the Activities list.</li>
           </ol>
@@ -796,7 +797,7 @@
           <h6 class="mt-3 mb-2 fw-bold text-success">Guardrails (Activities and Scores)</h6>
           <ul class="guide-list">
             <li>You cannot save scores above the allowed maximum.</li>
-            <li>Saved blank scores count as zero-score records.</li>
+            <li>Blank scores remain missing and may block submission. A saved zero counts as a completed score.</li>
             <li>Submission is blocked until every required non-attendance grading area has at least one activity.</li>
             <li>Use the <strong>Quick Jump</strong> strip to move to Attendance, Summary, or Who Viewed.</li>
             <li>If the period is <strong>Submitted</strong> or <strong>Locked</strong>, normal editing is blocked.</li>
@@ -825,11 +826,18 @@
           <ol class="guide-list">
             <li>Open the period card and click <strong>Summary</strong>.</li>
             <li>Review component grades and the period grade.</li>
-            <li>Use <strong>Explain</strong> beside a visible grade to review the detailed computation table.</li>
+            <li>Use <strong>Explain</strong> beside a visible grade in Summary or Class Performance to review the selected student's detailed computation.</li>
             <li>Check readiness cards for coverage and missing records.</li>
             <li>Use <strong>Print Grade Book</strong> for review after submission.</li>
             <li>Submit only when ready.</li>
           </ol>
+          <h6 class="mt-3 mb-2 fw-bold text-success">Private Student Consultation</h6>
+          <ul class="guide-list">
+            <li>Open a student from <strong>Class Performance</strong> to show only that student's information.</li>
+            <li>The <strong>Performance Trend</strong> section shows available period grades and component scores through the selected period.</li>
+            <li>A trend graph needs at least two grading periods. Missing records appear as unavailable values instead of invented scores.</li>
+            <li>The graphs are read-only and do not change, submit, or unlock grades.</li>
+          </ul>
           <h6 class="mt-3 mb-2 fw-bold text-success">Guardrails (Attendance and Summary)</h6>
             <ul class="guide-list">
               <li>Submitted or locked periods are read-only for normal attendance and summary work.</li>
@@ -921,7 +929,8 @@
             <li>After the deadline or period lock, submit a <strong>Request Gradebook Reopen</strong> and wait for admin approval before encoding or submitting an unsubmitted gradebook.</li>
             <li>After admin approval, the reopen window is only 24 hours. Submit or resubmit within that window, or the gradebook locks again and you must send a new request.</li>
             <li>If the gradebook is already submitted and the deadline has passed, use <strong>Correction of Grades</strong> for any needed changes.</li>
-            <li>Priority Actions on the Dashboard shows urgent work such as deadlines, missing scores, corrections, resubmission, and intervention tasks.</li>
+            <li>Grade Encoding Status shows where each accepted class stands. Pending Grade Issues combines setup, encoding, and submission blockers without showing student names.</li>
+            <li>Use <strong>View Performance</strong> inside a selected class for class average, missing outputs, weakest component, and students requiring attention.</li>
             <li>Always review the on-screen Summary or printed sheet before finalizing.</li>
           </ul>
           <div class="guide-image-card mt-3">
