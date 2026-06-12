@@ -35,3 +35,7 @@ backups/
 # IDE
 .vscode/
 .idea/
+
+# Runtime logs
+logs/*.log
+*.log
