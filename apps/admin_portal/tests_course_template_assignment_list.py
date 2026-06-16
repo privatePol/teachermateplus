@@ -184,3 +184,45 @@ class CourseTemplateAssignmentListTests(TestCase):
         inactive_rows = list(response.context["inactive_page_obj"].object_list)
         self.assertEqual([row.course_id for row in active_rows], [self.course_with_template.id])
         self.assertEqual([row.course_id for row in inactive_rows], [self.inactive_course.id])
+
+    def test_course_lists_are_sorted_by_title_then_code(self):
+        course_z = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="A099",
+            title="Zulu Course",
+        )
+        course_a = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="A200",
+            title="Alpha Course",
+        )
+        template = GradingTemplate.objects.get(code="TMP1")
+        CourseTemplateAssignment.objects.create(
+            course=course_z,
+            grading_template=template,
+            effective_from_term=self.term,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=course_a,
+            grading_template=template,
+            effective_from_term=self.term,
+            is_active=True,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("admin_portal:course_template_assignment_list"))
+
+        active_titles = [
+            row.course.title for row in response.context["active_page_obj"].object_list
+        ]
+        self.assertEqual(
+            active_titles,
+            ["Alpha Course", "Course With Template", "Zulu Course"],
+        )
+        filter_titles = [course.title for course in response.context["courses"]]
+        self.assertEqual(filter_titles, sorted(filter_titles))

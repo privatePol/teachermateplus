@@ -525,6 +525,15 @@ ADMIN_HELP_SECTIONS = [
                 ),
                 "steps": [
                     "Open the report or monitor that answers the operational question.",
+                    (
+                        "For Grading Analytics and Grade Distribution Monitor, TeacherMate+ starts with the "
+                        "faculty members you supervise, then includes their accepted teaching assignments. "
+                        "A shared course does not need a separate copy for every campus or department."
+                    ),
+                    (
+                        "An Area Chair sees faculty in the chair's assigned department. A College Dean sees "
+                        "faculty through the Area Chairs assigned within the Dean's campuses and departments."
+                    ),
                     "Set the campus, academic year, term, period, course, or status filters before reviewing results.",
                     "Open the underlying class or record when a count or warning needs confirmation.",
                     "Generate, export, or print only after confirming that the source status is appropriate.",

@@ -41,6 +41,7 @@ from apps.faculty_portal.services import FacultyPerformanceService, StudentInter
 from apps.faculty_portal.help_guide import FACULTY_HELP_SECTIONS
 from apps.grading.models import (
     CourseTemplateAssignment,
+    DetailComputationMode,
     FacultyFinalClearanceReport,
     GradeCorrectionAttachment,
     GradeCorrectionRequest,
@@ -67,6 +68,7 @@ from apps.grading.reporting import (
 )
 from apps.grading.services import (
     FacultyGradingService,
+    GradeEncodingAccessService,
     GradingGovernanceService,
     GradingTemplateTestingCalculatorService,
     TemplateGovernanceWorkflowService,
@@ -451,20 +453,6 @@ def _find_faculty_assignment(user, offering_id: int):
     return _faculty_assignment_queryset(user).filter(offering_id=offering_id).first()
 
 
-def _faculty_assignment_started_work(assignment) -> bool:
-    offering_id = assignment.offering_id
-    return (
-        GradeActivity.objects.filter(offering_id=offering_id, is_active=True).exists()
-        or AttendanceSession.objects.filter(offering_id=offering_id, is_active=True).exists()
-        or GradeSubmission.objects.filter(offering_id=offering_id).exists()
-        or Enrollment.objects.filter(
-            course_offering_id=offering_id,
-            encoded_by_user=assignment.faculty_user,
-            encoded_via_portal=Enrollment.SourcePortal.FACULTY,
-        ).exists()
-    )
-
-
 def _apply_assignment_response(*, request, assignment, response_status: str, success_message: str, faculty_note: str = ""):
     before_data = {
         "response_status": assignment.response_status,
@@ -663,6 +651,12 @@ def _period_edit_state(offering, period):
     )
     correction_mode = GradingGovernanceService.get_correction_mode(tenant_id=offering.tenant_id)
     system_correction_enabled = correction_mode == GradingGovernanceService.CORRECTION_MODE_SYSTEM_REQUEST
+    encoding_control = GradeEncodingAccessService.get_closed_control(offering=offering, template_period=period)
+    encoding_control_message = GradeEncodingAccessService.build_block_notice(
+        encoding_control,
+        offering=offering,
+        template_period=period,
+    )
     return {
         "faculty_scope_state": scope_state,
         "is_read_only_class": scope_state["read_only"],
@@ -699,8 +693,10 @@ def _period_edit_state(offering, period):
         "can_request_late_completion": False,
         "is_correction_active": is_correction_active,
         "active_correction_request": active_correction_request,
-        "is_editable": is_editable and not scope_state["read_only"],
-        "can_submit_period": can_submit_period and not scope_state["read_only"],
+        "encoding_control_closed": bool(encoding_control),
+        "encoding_control_message": encoding_control_message,
+        "is_editable": is_editable and not scope_state["read_only"] and not encoding_control,
+        "can_submit_period": can_submit_period and not scope_state["read_only"] and not encoding_control,
         "is_auto_locked_reopened_after_deadline": is_auto_locked_reopened_after_deadline,
         "can_self_reopen": can_self_reopen and not scope_state["read_only"],
         "governance_state": governance_state,
@@ -1081,6 +1077,8 @@ def _build_faculty_template_preview(template):
                                 template_subcomponent=subcomponent,
                             )
                         ),
+                        "detail_computation_mode": subcomponent.detail_computation_mode,
+                        "detail_computation_mode_label": subcomponent.get_detail_computation_mode_display(),
                         "details": detail_rows,
                     }
                 )
@@ -1618,8 +1616,13 @@ def dashboard_view(request):
                 offering=offering,
                 template_period=period,
             )
+            encoding_control = GradeEncodingAccessService.get_closed_control(offering=offering, template_period=period)
             is_submitted = bool(submission and submission.status == GradeSubmission.Status.SUBMITTED)
-            if lock and lock.is_locked:
+            if encoding_control:
+                status, status_class = "Encoding Closed", "danger"
+                action_label = "View Class"
+                action_url = reverse("faculty_portal:period_summary", args=[offering.id, period.id])
+            elif lock and lock.is_locked:
                 status, status_class = "Locked", "secondary"
                 action_label = "Review Grades"
                 action_url = reverse("faculty_portal:period_summary", args=[offering.id, period.id])
@@ -2999,7 +3002,7 @@ def my_courses_view(request):
                     offering__enrollments__enrollment_status=Enrollment.Status.ACTIVE,
                 ),
                 distinct=True,
-            )
+            ),
         )
         .distinct()
         .order_by(
@@ -3033,7 +3036,6 @@ def my_courses_view(request):
         offering = _attach_faculty_offering_scope_state(assignment.offering)
         offering.assignment = assignment
         offering.enrollment_count = assignment.enrollment_count
-        offering.can_undo_acceptance = assignment.is_accepted and not _faculty_assignment_started_work(assignment)
         offering.has_course_template_assignment = _has_active_published_course_template_assignment(offering)
         offering.template_assignment_warning = (
             "No grading template is assigned to this course offering yet. Please coordinate with the MIS Department."
@@ -3215,46 +3217,25 @@ def faculty_assignment_undo_accept_view(request, assignment_id: int):
         return redirect("faculty_portal:my_courses")
 
     assignment = _require_accepted_faculty_assignment_or_404(request, assignment_id)
-    if _faculty_assignment_started_work(assignment):
-        messages.error(
-            request,
-            "Acceptance cannot be undone because grading, attendance, submission, or class-list work already exists.",
-        )
-        return redirect("faculty_portal:my_courses")
-
-    before = model_before_after(assignment)
-    FacultyAssignmentWorkflowService.reset_response_window(assignment)
-    assignment.save(
-        update_fields=[
-            "assignment_note",
-            "accepted_at",
-            "accepted_by",
-            "response_status",
-            "faculty_response_note",
-            "responded_at",
-            "response_due_at",
-            "last_reminded_at",
-            "reminder_count",
-            "updated_at",
-        ]
-    )
     AuditService.log_event(
-        action="UNDO_ACCEPTANCE",
+        action="UNDO_ACCEPTANCE_BLOCKED",
         portal="FACULTY",
         entity_type="FacultyAssignment",
         entity_id=assignment.id,
         actor=request.user,
         tenant=assignment.tenant,
         campus=assignment.campus,
-        before_data=before,
-        after_data=model_before_after(assignment),
         metadata={
-            "event": "faculty_assignment_acceptance_undone",
+            "event": "faculty_assignment_acceptance_undo_blocked",
             "offering_id": assignment.offering_id,
+            "reason": "Faculty cannot undo accepted assignments. Admin or assigned academic office must unassign.",
         },
         request=request,
     )
-    messages.success(request, "Assignment acceptance undone. The class is back under Pending Faculty Assignments.")
+    messages.error(
+        request,
+        "Accepted assignments cannot be undone from the Faculty Portal. Please contact the assigning admin or academic office if the load must be unassigned.",
+    )
     return redirect("faculty_portal:my_courses")
 
 
@@ -4172,6 +4153,13 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         {
             "id": str(detail.id),
             "name": detail.name,
+            "display_name": (
+                detail.name
+                if detail.template_subcomponent.detail_computation_mode == "AVERAGE_ACTIVITIES"
+                else f"{detail.name} ({detail.weight_percentage}% configured weight)"
+            ),
+            "weight_percentage": str(detail.weight_percentage),
+            "detail_computation_mode": detail.template_subcomponent.detail_computation_mode,
             "subcomponent_id": str(detail.template_subcomponent_id),
         }
         for detail in details
@@ -4179,7 +4167,10 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
 
     if request.method == "POST" and form.is_valid():
         if not state["is_editable"]:
-            messages.error(request, "This period is locked or already submitted.")
+            messages.error(
+                request,
+                state["encoding_control_message"] if state["encoding_control_closed"] else "This period is locked or already submitted.",
+            )
             return redirect("faculty_portal:period_activities", offering_id=offering.id, period_id=period.id)
         if state["is_correction_active"] and editing_activity is None:
             messages.error(request, "New activities cannot be created inside a correction window.")
@@ -4287,12 +4278,19 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         row.resolved_score_input_mode_label = FacultyGradingService.score_input_mode_label(
             row.resolved_score_input_mode
         )
+    show_detail_weight_column = any(
+        row.template_detail
+        and row.template_subcomponent
+        and row.template_subcomponent.detail_computation_mode != "AVERAGE_ACTIVITIES"
+        for row in activities
+    )
     context = {
         "offering": offering,
         "template": template,
         "period": period,
         "form": form,
         "activities": activities,
+        "show_detail_weight_column": show_detail_weight_column,
         "is_locked": state["is_locked"],
         "is_submitted": state["is_submitted"],
         "submission_status": state["submission_status"],
@@ -4302,6 +4300,8 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         "is_auto_locked_reopened_after_deadline": state["is_auto_locked_reopened_after_deadline"],
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
+        "encoding_control_closed": state["encoding_control_closed"],
+        "encoding_control_message": state["encoding_control_message"],
         "is_editable": state["is_editable"],
         "system_correction_enabled": state["system_correction_enabled"],
         "completion_grace_until": state["completion_grace_until"],
@@ -4315,7 +4315,7 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         "pending_late_completion_request": state["pending_late_completion_request"],
         "active_late_completion_request": state["active_late_completion_request"],
         "can_request_late_completion": state["can_request_late_completion"],
-        "can_create_activity": not state["is_locked"] and not state["is_submitted"],
+        "can_create_activity": state["is_editable"],
         "editing_activity": editing_activity,
         "component_option_data": component_option_data,
         "subcomponent_option_data": subcomponent_option_data,
@@ -4507,6 +4507,8 @@ def activity_scores_view(request, offering_id: int, period_id: int, activity_id:
         "is_submitted": state["is_submitted"],
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
+        "encoding_control_closed": state["encoding_control_closed"],
+        "encoding_control_message": state["encoding_control_message"],
         "is_editable": state["is_editable"],
         "submission_status": state["submission_status"],
         "is_auto_locked_reopened_after_deadline": state["is_auto_locked_reopened_after_deadline"],
@@ -4654,6 +4656,8 @@ def period_attendance_view(request, offering_id: int, period_id: int):
         "is_submitted": state["is_submitted"],
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
+        "encoding_control_closed": state["encoding_control_closed"],
+        "encoding_control_message": state["encoding_control_message"],
         "is_editable": state["is_editable"],
         "submission_status": state["submission_status"],
         "is_auto_locked_reopened_after_deadline": state["is_auto_locked_reopened_after_deadline"],
@@ -4672,8 +4676,7 @@ def period_attendance_view(request, offering_id: int, period_id: int):
         "active_approved_reopen_expires_at": state["active_approved_reopen_expires_at"],
         "can_request_deadline_reopen": state["can_request_deadline_reopen"],
         "can_manage_sessions": (
-            not state["is_locked"]
-            and not state["is_submitted"]
+            state["is_editable"]
             and not state["is_auto_closed_after_deadline"]
             and not state["is_governance_closed"]
             and not state["is_read_only_class"]
@@ -4799,6 +4802,12 @@ def period_summary_view(request, offering_id: int, period_id: int):
             activity__is_active=True,
         )
     }
+    encoded_zero_score_count = StudentActivityScore.objects.filter(
+        activity_id__in=[activity.id for activity in activities],
+        is_active=True,
+        activity__is_active=True,
+        raw_score=0,
+    ).count()
 
     q = request.GET.get("q", "").strip()
     rows = summary["rows"]
@@ -5013,6 +5022,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "is_auto_closed_after_deadline": state["is_auto_closed_after_deadline"],
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
+        "encoding_control_closed": state["encoding_control_closed"],
+        "encoding_control_message": state["encoding_control_message"],
         "submission_status": state["submission_status"],
         "correction_mode": state["correction_mode"],
         "system_correction_enabled": state["system_correction_enabled"],
@@ -5040,6 +5051,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "summary_status_counts": status_counts,
         "summary_passed_count": passed_count,
         "summary_failed_count": failed_count,
+        "encoded_zero_score_count": encoded_zero_score_count,
     }
     context["readiness_cards"] = [
         {
@@ -5053,6 +5065,12 @@ def period_summary_view(request, offering_id: int, period_id: int):
             "value": submit_readiness.get("missing_template_bucket_count", 0),
             "tone": "danger" if submit_readiness.get("missing_template_bucket_count", 0) > 0 else "success",
             "description": "Required parts with no activity yet.",
+        },
+        {
+            "label": "Encoded Zero Scores",
+            "value": encoded_zero_score_count,
+            "tone": "warning" if encoded_zero_score_count > 0 else "success",
+            "description": "Saved raw scores of 0. Review these before submission; 0 is valid and not missing.",
         },
         {
             "label": "DRP",
@@ -6095,6 +6113,17 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                 "component_name": activity.template_component.name,
                 "subcomponent_name": activity.template_subcomponent.name if activity.template_subcomponent else "-",
                 "detail_name": activity.template_detail.name if activity.template_detail else "-",
+                "detail_weight": (
+                    _format_decimal_display(activity.template_detail.weight_percentage)
+                    if activity.template_detail
+                    else "-"
+                ),
+                "detail_weight_reference_only": bool(
+                    activity.template_detail
+                    and activity.template_subcomponent
+                    and activity.template_subcomponent.detail_computation_mode
+                    == DetailComputationMode.AVERAGE_ACTIVITIES
+                ),
                 "entry_method_label": FacultyGradingService.score_input_mode_label(
                     FacultyGradingService.resolve_score_input_mode(
                         template_component=activity.template_component,

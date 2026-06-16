@@ -1,6 +1,19 @@
 from django.contrib import admin
+from django import forms
 
 from .models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.grading.services import CourseOfferingSafetyService
+
+
+class CourseOfferingAdminForm(forms.ModelForm):
+    class Meta:
+        model = CourseOffering
+        fields = "__all__"
+
+    def clean(self):
+        cleaned = super().clean()
+        CourseOfferingSafetyService.validate_changes_allowed(offering=self.instance, cleaned_data=cleaned)
+        return cleaned
 
 
 @admin.register(AcademicYear)
@@ -37,6 +50,7 @@ class SectionAdmin(admin.ModelAdmin):
 
 @admin.register(CourseOffering)
 class CourseOfferingAdmin(admin.ModelAdmin):
+    form = CourseOfferingAdminForm
     list_display = ("tenant", "campus", "department", "term", "course", "section", "status", "is_active")
     search_fields = ("course__code", "section__code")
     list_filter = ("tenant", "campus", "department", "term", "status", "is_active")

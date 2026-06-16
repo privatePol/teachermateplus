@@ -3,9 +3,14 @@
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Course Base Value Overrides</h2>
-  {% if "course_base_overrides.create" in effective_permissions %}
-  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:course_base_override_create' %}">Add Override</a>
-  {% endif %}
+  <div class="d-flex gap-2">
+    {% if "grading_templates.read" in effective_permissions %}
+    <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:grading_setup_guide' %}#base-overrides">Setup Guide</a>
+    {% endif %}
+    {% if "course_base_overrides.create" in effective_permissions %}
+    <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:course_base_override_create' %}">Add Override</a>
+    {% endif %}
+  </div>
 </div>
 <form class="row g-2 mb-3">
   <div class="col-md-2">

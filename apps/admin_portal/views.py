@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import csv
+import json
 import re
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -46,10 +47,13 @@ from apps.admin_portal.forms import (
     GradingTemplateTestingCalculatorForm,
     DocumentPrintSettingForm,
     DepartmentForm,
+    EnrollmentAdjustmentForm,
     FacultyAssignmentForm,
+    FacultyAssignmentReplacementForm,
     FacultyDeactivationScheduleForm,
     GradeCorrectionOnBehalfSetupForm,
     GradeCorrectionReviewForm,
+    GradeEncodingControlForm,
     GradeSubmissionReopenRequestForm,
     GradeSubmissionReopenReviewForm,
     GradingTemplateComponentForm,
@@ -83,8 +87,13 @@ from apps.admin_portal.forms import (
     UserUpdateForm,
 )
 from apps.faculty_portal.forms import GradeCorrectionRequestForm
-from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
+from apps.academics.services import (
+    AcademicGovernanceService,
+    FacultyAssignmentSafetyService,
+    FacultyAssignmentWorkflowService,
+)
 from apps.admin_portal.data_reset import ActualDataResetService
+from apps.admin_portal.academic_performance import AcademicPerformanceInsightService
 from apps.admin_portal.services import AdminScopeService, model_before_after
 from apps.admin_portal.grade_distribution import GradeDistributionMonitorService
 from apps.admin_portal.help_guide import build_admin_help_sections
@@ -94,6 +103,7 @@ from apps.academics.models import (
     Course,
     CourseOffering,
     FacultyAssignment,
+    FacultyAssignmentReplacementLog,
     Section,
     TenantTermGradingPeriod,
     Term,
@@ -107,8 +117,8 @@ from apps.core.services.permissions import PermissionService
 from apps.core.services.scope import ScopeService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.forms import EnrollmentForm
-from apps.enrollment.models import Enrollment
-from apps.enrollment.services import EnrollmentService
+from apps.enrollment.models import Enrollment, EnrollmentAdjustmentLog
+from apps.enrollment.services import EnrollmentAdjustmentService, EnrollmentService
 from apps.faculty_portal.views import _build_summary_layout, _build_summary_row_values, _period_edit_state
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
@@ -116,6 +126,7 @@ from apps.grading.models import (
     CourseTemplateAssignment,
     DetailComputationMode,
     FacultyFinalClearanceReport,
+    GradeEncodingControl,
     GradeActivity,
     GradeCorrectionAttachment,
     GradeCorrectionApprovalStep,
@@ -140,6 +151,9 @@ from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService
 from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
 from apps.grading.services import (
+    CourseOfferingSafetyService,
+    CourseTemplateAssignmentSafetyService,
+    EnrollmentSafetyService,
     FacultyGradingService,
     GradingGovernanceService,
     GradingTemplateTestingCalculatorService,
@@ -980,7 +994,8 @@ def _should_mask_gradebook_student_identity(user, *, tenant_id=None, campus_id=N
         ).values_list("role__code", flat=True)
     }
     return (
-        "DEAN" in active_role_codes
+        "COLLEGE_DEAN" in active_role_codes
+        or "DEAN" in active_role_codes
         or "CAO" in active_role_codes
         or "AC" in active_role_codes
         or any(code.endswith("_AC") for code in active_role_codes)
@@ -2002,12 +2017,18 @@ def faculty_activity_monitor_view(request):
 @portal_required("ADMIN")
 @permission_required("grading_analytics.read")
 def grading_analytics_view(request):
-    offerings_qs = AdminScopeService.scoped_course_offerings(request)
+    campus_filter_value = (request.GET.get("campus_id") or "").strip().lower()
+    all_campuses_selected = campus_filter_value == "all"
+    offerings_qs = AdminScopeService.scoped_monitoring_course_offerings(
+        request,
+        include_all_campuses=all_campuses_selected,
+    )
     campus_options = AdminScopeService.active_scoped_campuses(request).order_by("code")
     academic_year_options = AdminScopeService.active_scoped_academic_years(request).order_by("-start_date")
     term_options = AdminScopeService.active_scoped_terms(request).order_by("-academic_year__start_date", "sequence_no")
 
-    selected_campus_id = _safe_int(request.GET.get("campus_id"))
+    scope_campus_id = getattr(request, "scope", {}).get("campus_id")
+    selected_campus_id = None if all_campuses_selected else (_safe_int(request.GET.get("campus_id")) or scope_campus_id)
     selected_ay_id = _safe_int(request.GET.get("academic_year_id"))
     selected_term_id = _safe_int(request.GET.get("term_id"))
 
@@ -2419,6 +2440,8 @@ def grading_analytics_view(request):
                                         "subcomponent_name": sub.name,
                                         "subcomponent_sort": sub.sort_order,
                                         "detail_name": detail.name,
+                                        "detail_weight": detail.weight_percentage,
+                                        "detail_computation_mode": sub.detail_computation_mode,
                                         "detail_sort": detail.sort_order,
                                         "graded": 0,
                                         "failed": 0,
@@ -2648,11 +2671,169 @@ def grading_analytics_view(request):
         "academic_year_options": academic_year_options,
         "term_options": term_options,
         "selected_campus_id": selected_campus_id,
+        "all_campuses_selected": all_campuses_selected,
         "selected_ay_id": selected_ay_id,
         "selected_term_id": selected_term_id,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/analytics.html", context)
+
+
+def _require_academic_performance_insights(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    if not tenant_id or not FeatureSettingsService.is_academic_performance_insights_enabled(
+        tenant_id=tenant_id,
+        default=False,
+    ):
+        raise Http404("Academic Performance Insights is not enabled.")
+
+
+@portal_required("ADMIN")
+@permission_required("grading_analytics.read")
+def academic_performance_insights_view(request):
+    _require_academic_performance_insights(request)
+    filters = AcademicPerformanceInsightService.selected_filters(request)
+    filter_options = AcademicPerformanceInsightService.get_filter_options(request, filters)
+    comparison = AcademicPerformanceInsightService.get_course_section_comparison(request, filters)
+    rows = comparison["rows"]
+    grades = [Decimal(row["class_average"]) for row in rows if row["class_average"] is not None]
+    summary = {
+        "sections": len(rows),
+        "overall_average": (
+            GradingGovernanceService._round(sum(grades, Decimal("0")) / Decimal(len(grades)))
+            if grades
+            else None
+        ),
+        "at_risk_count": sum(row["at_risk_count"] for row in rows),
+        "missing_output_count": sum(row["missing_output_count"] for row in rows),
+    }
+    paginator = Paginator(rows, 25)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+    context = {
+        "filters": filters,
+        "filter_options": filter_options,
+        "required_filters_present": AcademicPerformanceInsightService.required_filters_present(filters),
+        "summary": summary,
+        "rows": page_obj.object_list,
+        "page_obj": page_obj,
+        "page_query": page_query.urlencode(),
+        "interpretation": AcademicPerformanceInsightService.get_report_interpretation(rows),
+        "attention_panel": AcademicPerformanceInsightService.get_attention_panel(rows),
+        "campus_rows": (
+            AcademicPerformanceInsightService.get_campus_risk_summary(rows)
+            if filter_options["role_scope"]["can_compare_campuses"]
+            else []
+        ),
+        "limited": comparison["limited"],
+        "selected_all_campuses": (request.GET.get("campus_id") or "").strip().lower() == "all",
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/academic_performance_insights.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grading_analytics.read")
+def academic_activity_consistency_view(request):
+    _require_academic_performance_insights(request)
+    filters = AcademicPerformanceInsightService.selected_filters(request)
+    filter_options = AcademicPerformanceInsightService.get_filter_options(request, filters)
+    comparison = AcademicPerformanceInsightService.get_activity_consistency_comparison(request, filters)
+    rows = comparison["rows"]
+    paginator = Paginator(rows, 25)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+    context = {
+        "filters": filters,
+        "filter_options": filter_options,
+        "required_filters_present": AcademicPerformanceInsightService.required_filters_present(filters),
+        "rows": page_obj.object_list,
+        "page_obj": page_obj,
+        "page_query": page_query.urlencode(),
+        "interpretation": AcademicPerformanceInsightService.get_activity_interpretation(
+            rows,
+            has_unmatched_sections=comparison.get("has_unmatched_sections", False),
+        ),
+        "limited": comparison["limited"],
+        "selected_all_campuses": (request.GET.get("campus_id") or "").strip().lower() == "all",
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/academic_activity_consistency.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grading_analytics.read")
+def academic_performance_section_detail_view(request, offering_id, period_code):
+    _require_academic_performance_insights(request)
+    filters = AcademicPerformanceInsightService.selected_filters(request)
+    filters["academic_year_id"] = None
+    filters["term_id"] = None
+    filters["period_code"] = period_code
+    offering = get_object_or_404(
+        AcademicPerformanceInsightService.get_scoped_offerings(
+            request,
+            filters,
+            apply_required_filters=False,
+        ),
+        id=offering_id,
+    )
+    period = AcademicPerformanceInsightService._period_for_offering(offering, period_code)
+    if not period:
+        raise Http404("The grading period is not available for this class.")
+    comparison_filters = {
+        "academic_year_id": offering.academic_year_id,
+        "term_id": offering.term_id,
+        "period_code": period.code,
+        "campus_id": offering.campus_id,
+        "department_id": offering.department_id,
+        "course_code": offering.course.code,
+        "faculty_id": None,
+    }
+    comparison = AcademicPerformanceInsightService.get_course_section_comparison(
+        request,
+        comparison_filters,
+    )
+    context = AcademicPerformanceInsightService.get_section_detail(
+        offering,
+        period,
+        comparison["rows"],
+    )
+    next_url = (request.GET.get("next") or "").strip()
+    insights_url = reverse("admin_portal:academic_performance_insights")
+    activity_consistency_base_url = reverse("admin_portal:academic_activity_consistency")
+    allowed_return_paths = (insights_url, activity_consistency_base_url)
+    if not (
+        next_url
+        and url_has_allowed_host_and_scheme(
+            url=next_url,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        )
+        and next_url.startswith(allowed_return_paths)
+    ):
+        next_url = insights_url
+    consistency_query = urlencode(
+        {
+            "academic_year_id": offering.academic_year_id,
+            "term_id": offering.term_id,
+            "period_code": period.code,
+            "campus_id": offering.campus_id,
+            "department_id": offering.department_id,
+            "course_code": offering.course.code,
+        }
+    )
+    context.update(
+        {
+            "back_url": next_url,
+            "activity_consistency_url": (
+                f"{activity_consistency_base_url}?{consistency_query}"
+            ),
+        }
+    )
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/academic_performance_section_detail.html", context)
 
 
 @portal_required("ADMIN")
@@ -2683,10 +2864,6 @@ def grade_distribution_monitor_view(request):
                 "Exact 100 %",
                 "Highest",
                 "Lowest",
-                "Spread",
-                "Department Average",
-                "Subject Average",
-                "Flags",
             ]
         )
         for row in context["rows"]:
@@ -2710,10 +2887,6 @@ def grade_distribution_monitor_view(request):
                     row["exact_100_pct"],
                     row["highest"] or "",
                     row["lowest"] or "",
-                    row["spread"] or "",
-                    row["department_average"] or "",
-                    row["subject_average"] or "",
-                    ", ".join(flag["label"] for flag in row["flags"]),
                 ]
             )
         return response
@@ -2753,7 +2926,7 @@ def admin_guide_view(request):
 
     campus_id = getattr(request, "scope", {}).get("campus_id") or getattr(request.user, "default_campus_id", None)
     context = {
-        "title": "Admin Portal Help Guide",
+        "title": "Admin Portal Practical Guide",
         "help_sections": build_admin_help_sections(
             user=request.user,
             tenant_id=tenant_id,
@@ -2762,6 +2935,16 @@ def admin_guide_view(request):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/guide_role_based.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grading_templates.read")
+def grading_setup_guide_view(request):
+    context = {
+        "title": "Grading Template Setup Guide",
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/grading_setup_guide.html", context)
 
 
 @portal_required("ADMIN")
@@ -3489,6 +3672,24 @@ def configurable_features_settings_view(request):
             default=1,
         )
     )
+    current_submission_non_compliance_first_notice_after_days = (
+        FeatureSettingsService.get_submission_non_compliance_first_notice_after_days(
+            tenant_id=tenant_id,
+            default=1,
+        )
+    )
+    current_submission_non_compliance_level_interval_days = (
+        FeatureSettingsService.get_submission_non_compliance_level_interval_days(
+            tenant_id=tenant_id,
+            default=1,
+        )
+    )
+    current_submission_non_compliance_max_notice_count = (
+        FeatureSettingsService.get_submission_non_compliance_max_notice_count(
+            tenant_id=tenant_id,
+            default=3,
+        )
+    )
     current_submission_non_compliance_head_role_codes = (
         FeatureSettingsService.get_submission_non_compliance_head_role_codes(tenant_id=tenant_id)
     )
@@ -3644,10 +3845,17 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default=True,
     )
+    current_academic_performance_insights_enabled = (
+        FeatureSettingsService.is_academic_performance_insights_enabled(
+            tenant_id=tenant_id,
+            default=False,
+        )
+    )
 
     form = ConfigurableFeatureSettingForm(
         request.POST or None,
         initial={
+            "academic_performance_insights_enabled": current_academic_performance_insights_enabled,
             "role_based_help_guide_enabled": current_role_based_help_guide_enabled,
             "student_portal_enabled": current_student_portal_enabled,
             "student_portal_period_grades_after_submission": current_student_portal_period_grades_after_submission,
@@ -3672,6 +3880,9 @@ def configurable_features_settings_view(request):
             "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
             "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
             "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
+            "submission_non_compliance_first_notice_after_days": current_submission_non_compliance_first_notice_after_days,
+            "submission_non_compliance_level_interval_days": current_submission_non_compliance_level_interval_days,
+            "submission_non_compliance_max_notice_count": current_submission_non_compliance_max_notice_count,
             "submission_non_compliance_head_roles": role_queryset.filter(
                 code__in=current_submission_non_compliance_head_role_codes
             ),
@@ -3728,6 +3939,8 @@ def configurable_features_settings_view(request):
         offering_queryset=offering_queryset,
     )
     _style_form(form)
+    if not request.user.is_superuser:
+        form.fields["academic_performance_insights_enabled"].disabled = True
     form.fields["class_master_list_offering"].label_from_instance = lambda obj: offering_labels.get(obj.id, obj.course.code)
 
     if request.method == "POST" and form.is_valid():
@@ -3763,6 +3976,13 @@ def configurable_features_settings_view(request):
             else:
                 updated_enrollment_override_map.pop(override_key, None)
 
+        SystemSettingService.set(
+            FeatureSettingsService.ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY,
+            bool(form.cleaned_data["academic_performance_insights_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
         SystemSettingService.set(
             FeatureSettingsService.ROLE_BASED_HELP_GUIDE_ENABLED_KEY,
             bool(form.cleaned_data["role_based_help_guide_enabled"]),
@@ -3934,6 +4154,27 @@ def configurable_features_settings_view(request):
         SystemSettingService.set(
             FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
             int(form.cleaned_data["submission_non_compliance_notice_interval_days"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_FIRST_NOTICE_AFTER_DAYS_KEY,
+            int(form.cleaned_data["submission_non_compliance_first_notice_after_days"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_LEVEL_INTERVAL_DAYS_KEY,
+            int(form.cleaned_data["submission_non_compliance_level_interval_days"]),
+            tenant_id=tenant_id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_MAX_NOTICE_COUNT_KEY,
+            int(form.cleaned_data["submission_non_compliance_max_notice_count"]),
             tenant_id=tenant_id,
             value_type="INT",
             is_active=True,
@@ -4200,6 +4441,7 @@ def configurable_features_settings_view(request):
             tenant=tenant_id,
             campus=getattr(request, "scope", {}).get("campus_id"),
             before_data={
+                "academic_performance_insights_enabled": current_academic_performance_insights_enabled,
                 "role_based_help_guide_enabled": current_role_based_help_guide_enabled,
                 "correction_official_report_enabled": current_report_enabled,
                 "user_signatures_enabled": current_user_signatures_enabled,
@@ -4220,6 +4462,9 @@ def configurable_features_settings_view(request):
                 "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
                 "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
                 "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
+                "submission_non_compliance_first_notice_after_days": current_submission_non_compliance_first_notice_after_days,
+                "submission_non_compliance_level_interval_days": current_submission_non_compliance_level_interval_days,
+                "submission_non_compliance_max_notice_count": current_submission_non_compliance_max_notice_count,
                 "submission_non_compliance_head_role_codes": current_submission_non_compliance_head_role_codes,
                 "submission_non_compliance_hr_recipients": current_submission_non_compliance_hr_recipients,
                 "grade_deadline_enforcement_policy": current_grade_deadline_enforcement_policy,
@@ -4258,6 +4503,9 @@ def configurable_features_settings_view(request):
                 "sis_periodic_grades_api_enabled": current_sis_periodic_grades_api_enabled,
             },
             after_data={
+                "academic_performance_insights_enabled": bool(
+                    form.cleaned_data["academic_performance_insights_enabled"]
+                ),
                 "role_based_help_guide_enabled": bool(form.cleaned_data["role_based_help_guide_enabled"]),
                 "student_portal_enabled": bool(form.cleaned_data["student_portal_enabled"]),
                 "student_portal_period_grades_after_submission": bool(
@@ -4300,6 +4548,15 @@ def configurable_features_settings_view(request):
                 ),
                 "submission_non_compliance_notice_interval_days": int(
                     form.cleaned_data["submission_non_compliance_notice_interval_days"]
+                ),
+                "submission_non_compliance_first_notice_after_days": int(
+                    form.cleaned_data["submission_non_compliance_first_notice_after_days"]
+                ),
+                "submission_non_compliance_level_interval_days": int(
+                    form.cleaned_data["submission_non_compliance_level_interval_days"]
+                ),
+                "submission_non_compliance_max_notice_count": int(
+                    form.cleaned_data["submission_non_compliance_max_notice_count"]
                 ),
                 "submission_non_compliance_head_role_codes": selected_submission_non_compliance_head_role_codes,
                 "submission_non_compliance_hr_recipients": selected_submission_non_compliance_hr_recipients,
@@ -4926,6 +5183,37 @@ def _scoped_audit_queryset(request):
         (Q(tenant_id__in=tenant_ids) | Q(tenant__isnull=True))
         & (Q(campus_id__in=campus_ids) | Q(campus__isnull=True))
     )
+
+
+_SENSITIVE_AUDIT_KEY_PARTS = ("password", "otp", "token", "secret", "api_key")
+
+
+def _is_sensitive_audit_key(key):
+    normalized_key = str(key).strip().lower()
+    return any(part in normalized_key for part in _SENSITIVE_AUDIT_KEY_PARTS)
+
+
+def _safe_audit_payload(value):
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                "[REDACTED]"
+                if _is_sensitive_audit_key(key)
+                else _safe_audit_payload(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_safe_audit_payload(item) for item in value]
+    return value
+
+
+def _audit_display_value(value):
+    if value is None:
+        return "-"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, indent=2, sort_keys=True, default=str)
+    return str(value)
 
 
 def _active_user_activity_rows(request, limit=25):
@@ -6589,6 +6877,38 @@ def audit_log_list_view(request):
 
 @portal_required("ADMIN")
 @permission_required("audit_logs.read")
+def audit_log_detail_view(request, log_id: int):
+    log = get_object_or_404(_scoped_audit_queryset(request), id=log_id)
+    before_data = _safe_audit_payload(log.before_json or {})
+    after_data = _safe_audit_payload(log.after_json or {})
+    metadata = _safe_audit_payload(log.metadata_json or {})
+    changed_fields = []
+    if isinstance(before_data, dict) and isinstance(after_data, dict):
+        for field_name in sorted(set(before_data) | set(after_data)):
+            before_value = before_data.get(field_name)
+            after_value = after_data.get(field_name)
+            if before_value != after_value:
+                changed_fields.append(
+                    {
+                        "field": field_name,
+                        "before": _audit_display_value(before_value),
+                        "after": _audit_display_value(after_value),
+                    }
+                )
+
+    context = {
+        "log": log,
+        "changed_fields": changed_fields,
+        "before_json": json.dumps(before_data, indent=2, sort_keys=True, default=str),
+        "after_json": json.dumps(after_data, indent=2, sort_keys=True, default=str),
+        "metadata_json": json.dumps(metadata, indent=2, sort_keys=True, default=str),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/audit/audit_log_detail.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("audit_logs.read")
 def recent_critical_actions_view(request):
     queryset = _scoped_audit_queryset(request).filter(CRITICAL_AUDIT_FILTER)
     action = request.GET.get("action", "").strip()
@@ -6651,6 +6971,7 @@ def academic_year_create_view(request):
             entity_type="AcademicYear",
             entity_id=row.id,
             actor=request.user,
+            tenant=row.tenant,
             after_data=model_before_after(row),
             request=request,
         )
@@ -6680,6 +7001,7 @@ def academic_year_update_view(request, ay_id: int):
             entity_type="AcademicYear",
             entity_id=row.id,
             actor=request.user,
+            tenant=row.tenant,
             before_data=before,
             after_data=model_before_after(row),
             request=request,
@@ -7078,7 +7400,11 @@ def offering_update_view(request, offering_id: int):
         )
         messages.success(request, "Course offering updated.")
         return _redirect_back_or_default(request, "admin_portal:offering_list")
-    context = {"form": form, "title": f"Edit Offering #{row.id}"}
+    context = {
+        "form": form,
+        "title": f"Edit Offering #{row.id}",
+        "offering_usage_summary": CourseOfferingSafetyService.get_usage_summary(row),
+    }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
 
@@ -7137,7 +7463,10 @@ def faculty_assignment_list_view(request):
     if selected_faculty:
         selected_faculty_assignments = (
             AdminScopeService.scoped_faculty_assignments(request)
-            .filter(faculty_user_id=selected_faculty.id, is_active=True)
+            .filter(
+                faculty_user_id=selected_faculty.id,
+                is_active=True,
+            )
             .select_related(
                 "accepted_by",
                 "offering",
@@ -8344,6 +8673,104 @@ def faculty_assignment_unassign_view(request):
 
 
 @portal_required("ADMIN")
+@permission_required("faculty_replacement.view")
+def faculty_assignment_replace_view(request):
+    if request.method not in {"GET", "POST"}:
+        return HttpResponseForbidden("Invalid request method.")
+
+    selected_ids = []
+    source = request.POST if request.method == "POST" else request.GET
+    for raw in source.getlist("assignment_ids"):
+        val = _safe_int(raw)
+        if val:
+            selected_ids.append(val)
+    selected_ids = sorted(set(selected_ids))
+
+    if not selected_ids:
+        messages.error(request, "Select assigned offering(s) before opening Replace Faculty.")
+        return redirect("admin_portal:faculty_assignment_list")
+
+    assignment_queryset = (
+        AdminScopeService.scoped_faculty_assignments(request)
+        .filter(id__in=selected_ids, is_active=True)
+        .select_related("faculty_user", "offering", "offering__course", "offering__section", "offering__term")
+        .order_by("offering__course__code", "offering__section__code")
+    )
+    assignments = list(assignment_queryset)
+    if len(assignments) != len(selected_ids):
+        raise Http404("One or more selected assignments are not available in your scope.")
+
+    faculty_queryset = User.objects.filter(id__in=AdminScopeService.scoped_faculty_users(request), is_active=True).order_by(
+        "last_name", "first_name", "username"
+    )
+    can_process = PermissionService.has_permission(
+        request.user,
+        "faculty_replacement.process",
+        tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+        campus_id=getattr(request, "scope", {}).get("campus_id"),
+    )
+
+    form_data = request.POST if request.method == "POST" and "replacement_faculty" in request.POST else None
+    form = FacultyAssignmentReplacementForm(
+        form_data,
+        assignment_queryset=assignment_queryset,
+        faculty_queryset=faculty_queryset,
+        initial={"assignment_ids": [str(row.id) for row in assignments]},
+    )
+    _style_form(form)
+    impact_rows = [
+        {
+            "assignment": assignment,
+            "impact": FacultyAssignmentSafetyService.get_assignment_impact_summary(assignment),
+        }
+        for assignment in assignments
+    ]
+    has_academic_records = any(any(row["impact"].values()) for row in impact_rows)
+    recent_logs = (
+        FacultyAssignmentReplacementLog.objects.filter(old_assignment_id__in=selected_ids)
+        .select_related("source_faculty", "replacement_faculty", "offering", "offering__course", "offering__section")
+        .order_by("-processed_at")[:10]
+    )
+
+    if request.method == "POST" and "replacement_faculty" in request.POST and form.is_valid():
+        if not can_process:
+            raise PermissionDenied("You do not have permission to process faculty replacement.")
+        action = request.POST.get("replacement_action")
+        if action == "confirm":
+            if request.POST.get("confirm_impact") != "on":
+                form.add_error(None, "Please confirm that you reviewed the impact warning before processing.")
+            else:
+                logs = FacultyAssignmentSafetyService.process_replacement(
+                    assignments=assignments,
+                    replacement_faculty=form.cleaned_data["replacement_faculty"],
+                    replacement_type=form.cleaned_data["replacement_type"],
+                    reason_category=form.cleaned_data["reason_category"],
+                    remarks=form.cleaned_data["remarks"],
+                    processed_by_user=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f"Faculty replacement processed for {len(logs)} offering(s). Batch reference: {logs[0].batch_reference}.",
+                )
+                first_faculty_id = assignments[0].faculty_user_id
+                return redirect(f"{reverse('admin_portal:faculty_assignment_list')}?faculty_user_id={first_faculty_id}")
+        elif action == "preview":
+            messages.info(request, "Impact analysis refreshed. Review the warning and confirm when ready.")
+
+    context = {
+        "form": form,
+        "assignments": assignments,
+        "impact_rows": impact_rows,
+        "has_academic_records": has_academic_records,
+        "can_process": can_process,
+        "recent_logs": recent_logs,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/academics/faculty_assignment_replace.html", context)
+
+
+@portal_required("ADMIN")
 @permission_required("faculty_assignments.update")
 def faculty_assignment_toggle_primary_view(request):
     if request.method != "POST":
@@ -9145,7 +9572,11 @@ def enrollment_update_view(request, enrollment_id: int):
             )
         except (PermissionDenied, ValidationError) as exc:
             form.add_error(None, str(exc))
-            context = {"form": form, "title": f"Edit Enrollment #{enrollment.id}"}
+            context = {
+                "form": form,
+                "title": f"Edit Enrollment #{enrollment.id}",
+                "enrollment_usage_summary": EnrollmentSafetyService.get_usage_summary(enrollment),
+            }
             context.update(_scope_context(request))
             return render(request, "admin_portal/shared/form_page.html", context)
         enrollment.save(
@@ -9171,9 +9602,176 @@ def enrollment_update_view(request, enrollment_id: int):
         )
         messages.success(request, "Enrollment updated.")
         return _redirect_back_or_default(request, "admin_portal:enrollment_list")
-    context = {"form": form, "title": f"Edit Enrollment #{enrollment.id}"}
+    context = {
+        "form": form,
+        "title": f"Edit Enrollment #{enrollment.id}",
+        "enrollment_usage_summary": EnrollmentSafetyService.get_usage_summary(enrollment),
+    }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
+
+
+def _enrollment_adjustment_offering_label(offering):
+    return f"{offering.academic_year.code} / {offering.term.code} / {offering.campus.code} / {offering.course.code} / {offering.section.code}"
+
+
+def _enrollment_adjustment_form_context(request, *, data=None, initial=None):
+    source_offering_qs = AdminScopeService.scoped_course_offerings(request).order_by(
+        "academic_year__code",
+        "term__sequence_no",
+        "campus__code",
+        "course__code",
+        "section__code",
+    )
+    destination_offering_qs = AdminScopeService.scoped_course_offerings(request).order_by(
+        "academic_year__code",
+        "term__sequence_no",
+        "campus__code",
+        "course__code",
+        "section__code",
+    )
+    academic_year_id = (data or initial or {}).get("academic_year") or (data or initial or {}).get("academic_year_id")
+    term_id = (data or initial or {}).get("term") or (data or initial or {}).get("term_id")
+    campus_id = (data or initial or {}).get("campus") or (data or initial or {}).get("campus_id")
+    source_offering_id = (data or initial or {}).get("source_offering")
+    if academic_year_id:
+        source_offering_qs = source_offering_qs.filter(academic_year_id=academic_year_id)
+        destination_offering_qs = destination_offering_qs.filter(academic_year_id=academic_year_id)
+    if term_id:
+        source_offering_qs = source_offering_qs.filter(term_id=term_id)
+        destination_offering_qs = destination_offering_qs.filter(term_id=term_id)
+    if campus_id:
+        source_offering_qs = source_offering_qs.filter(campus_id=campus_id)
+
+    source_offering = None
+    enrollment_qs = Enrollment.objects.none()
+    if source_offering_id:
+        source_offering = get_object_or_404(AdminScopeService.scoped_course_offerings(request), id=source_offering_id)
+        enrollment_qs = EnrollmentAdjustmentService.get_active_source_enrollments(source_offering=source_offering)
+
+    form = EnrollmentAdjustmentForm(
+        data,
+        initial=initial,
+        academic_year_queryset=AdminScopeService.active_scoped_academic_years(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
+        campus_queryset=AdminScopeService.active_scoped_campuses(request),
+        source_offering_queryset=source_offering_qs,
+        destination_offering_queryset=destination_offering_qs,
+        enrollment_queryset=enrollment_qs,
+    )
+    form.fields["source_offering"].label_from_instance = _enrollment_adjustment_offering_label
+    form.fields["destination_offering"].label_from_instance = _enrollment_adjustment_offering_label
+    return form, source_offering, enrollment_qs
+
+
+@portal_required("ADMIN")
+@permission_required("enrollment_adjustment.view")
+def enrollment_adjustments_view(request):
+    selected_student_ids = []
+    analysis = None
+    process_result = None
+    can_process = PermissionService.has_permission(
+        request.user,
+        "enrollment_adjustment.process",
+        tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+        campus_id=getattr(request, "scope", {}).get("campus_id"),
+    )
+
+    if request.method == "POST":
+        form, source_offering, enrollment_qs = _enrollment_adjustment_form_context(request, data=request.POST)
+        if form.is_valid():
+            destination_offering = form.cleaned_data["destination_offering"]
+            if form.cleaned_data.get("transfer_entire_class"):
+                selected_student_ids = [str(row.student_id) for row in enrollment_qs]
+            else:
+                selected_student_ids = form.cleaned_data["selected_students"]
+            if request.POST.get("action") == "process":
+                if not can_process:
+                    raise PermissionDenied("You are not allowed to process enrollment adjustments.")
+                if not form.cleaned_data.get("reason"):
+                    form.add_error("reason", "Enter the official reason before processing.")
+                else:
+                    try:
+                        process_result = EnrollmentAdjustmentService.process(
+                            user=request.user,
+                            source_offering=source_offering,
+                            destination_offering=destination_offering,
+                            student_ids=selected_student_ids,
+                            reason=form.cleaned_data["reason"],
+                            confirm_warning=form.cleaned_data.get("confirm_warning", False),
+                        )
+                        messages.success(request, "Enrollment adjustment processing completed.")
+                    except ValidationError as exc:
+                        form.add_error(None, str(exc))
+            if source_offering and destination_offering and not process_result:
+                analysis = EnrollmentAdjustmentService.analyze(
+                    source_offering=source_offering,
+                    destination_offering=destination_offering,
+                    student_ids=selected_student_ids,
+                )
+    else:
+        initial = {
+            "academic_year": request.GET.get("academic_year") or request.GET.get("academic_year_id"),
+            "term": request.GET.get("term") or request.GET.get("term_id"),
+            "campus": request.GET.get("campus") or request.GET.get("campus_id"),
+            "source_offering": request.GET.get("source_offering"),
+            "destination_offering": request.GET.get("destination_offering"),
+        }
+        form, source_offering, enrollment_qs = _enrollment_adjustment_form_context(request, initial=initial)
+
+    scoped_offering_ids = AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True)
+    history = (
+        EnrollmentAdjustmentLog.objects.filter(
+            Q(source_offering_id__in=scoped_offering_ids) | Q(destination_offering_id__in=scoped_offering_ids)
+        )
+        .select_related(
+            "student",
+            "source_offering",
+            "source_offering__course",
+            "source_offering__section",
+            "destination_offering",
+            "destination_offering__course",
+            "destination_offering__section",
+            "processed_by",
+        )
+        .order_by("-processed_at", "-id")[:50]
+    )
+    context = {
+        "form": form,
+        "source_offering": source_offering,
+        "enrollments": list(enrollment_qs),
+        "analysis": analysis,
+        "process_result": process_result,
+        "selected_student_ids": selected_student_ids,
+        "can_process": can_process,
+        "history": history,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/enrollment/enrollment_adjustments.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("enrollment_adjustment.view")
+def enrollment_adjustment_detail_view(request, log_id: int):
+    scoped_offering_ids = AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True)
+    log = get_object_or_404(
+        EnrollmentAdjustmentLog.objects.filter(
+            Q(source_offering_id__in=scoped_offering_ids) | Q(destination_offering_id__in=scoped_offering_ids)
+        ).select_related(
+            "student",
+            "source_offering",
+            "source_offering__course",
+            "source_offering__section",
+            "destination_offering",
+            "destination_offering__course",
+            "destination_offering__section",
+            "processed_by",
+        ),
+        id=log_id,
+    )
+    context = {"log": log}
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/enrollment/enrollment_adjustment_detail.html", context)
 
 
 def _ensure_template_editable_or_forbidden(request, template):
@@ -9326,6 +9924,7 @@ def grading_template_structure_view(request, template_id: int):
         GradingTemplate.objects.filter(id=template.id)
         .select_related("tenant", "published_by")
         .prefetch_related(
+            "visible_departments",
             Prefetch(
                 "periods",
                 queryset=GradingTemplatePeriod.objects.filter(is_active=True)
@@ -9480,6 +10079,7 @@ def grading_template_builder_view(request, template_id: int):
         GradingTemplate.objects.filter(id=template.id)
         .select_related("tenant", "published_by", "approval_requested_by", "approval_reviewed_by")
         .prefetch_related(
+            "visible_departments",
             Prefetch(
                 "periods",
                 queryset=GradingTemplatePeriod.objects.order_by("sequence_no", "id").prefetch_related(
@@ -9539,6 +10139,7 @@ def grading_template_create_view(request):
     form = GradingTemplateForm(
         request.POST or None,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -9585,6 +10186,7 @@ def grading_template_update_view(request, template_id: int):
         request.POST or None,
         instance=row,
         tenant_queryset=AdminScopeService.scoped_tenants(request),
+        department_queryset=AdminScopeService.active_scoped_departments(request),
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
@@ -10780,8 +11382,24 @@ def tenant_grading_profile_duplicate_view(request, profile_id: int):
 @portal_required("ADMIN")
 @permission_required("course_template_assignments.read")
 def course_template_assignment_list_view(request):
-    courses_qs = AdminScopeService.active_scoped_courses(request).select_related("tenant", "campus", "department")
-    assignments_qs = AdminScopeService.maintenance_scoped_course_template_assignments(request)
+    courses_qs = (
+        AdminScopeService.active_scoped_courses(request)
+        .select_related("tenant", "campus", "department")
+        .order_by("title", "code", "id")
+    )
+    assignments_qs = AdminScopeService.maintenance_scoped_course_template_assignments(
+        request
+    ).order_by(
+        "course__title",
+        "course__code",
+        "effective_from_term__academic_year__start_date",
+        "effective_from_term__sequence_no",
+        "grading_template__name",
+        "id",
+    )
+    visible_template_ids = list(
+        AdminScopeService.maintenance_scoped_grading_templates(request).values_list("id", flat=True)
+    )
     tenant_id = request.GET.get("tenant_id")
     course_id = request.GET.get("course_id")
     term_id = request.GET.get("term_id")
@@ -10793,7 +11411,18 @@ def course_template_assignment_list_view(request):
     if course_id:
         courses_qs = courses_qs.filter(id=course_id)
         assignments_qs = assignments_qs.filter(course_id=course_id)
-    offerings_qs = AdminScopeService.scoped_course_offerings(request).filter(is_active=True)
+    offerings_qs = (
+        AdminScopeService.scoped_course_offerings(request)
+        .filter(is_active=True)
+        .order_by(
+            "course__title",
+            "course__code",
+            "section__code",
+            "academic_year__start_date",
+            "term__sequence_no",
+            "id",
+        )
+    )
     if tenant_id:
         offerings_qs = offerings_qs.filter(tenant_id=tenant_id)
     if course_id:
@@ -10858,6 +11487,7 @@ def course_template_assignment_list_view(request):
     ):
         has_course_template_assignment = CourseTemplateAssignment.objects.filter(
             course_id=offering.course_id,
+            grading_template_id__in=visible_template_ids,
             is_active=True,
             grading_template__is_active=True,
             grading_template__is_published=True,
@@ -10933,7 +11563,11 @@ def course_template_assignment_list_view(request):
         context.update(_active_inactive_pages(request, assignments_qs))
         _with_inactive_record_metadata(request, context, model_key="course_template_assignment")
     context.update(_scope_context(request))
-    context["courses"] = AdminScopeService.active_scoped_courses(request)
+    context["courses"] = AdminScopeService.active_scoped_courses(request).order_by(
+        "title",
+        "code",
+        "id",
+    )
     context["terms"] = AdminScopeService.active_scoped_terms(request)
     return render(request, "admin_portal/grading/course_template_assignment_list.html", context)
 
@@ -10941,10 +11575,17 @@ def course_template_assignment_list_view(request):
 @portal_required("ADMIN")
 @permission_required("course_template_assignments.create")
 def course_template_assignment_create_view(request):
+    visible_template_ids = set(
+        AdminScopeService.scoped_grading_templates(request).values_list("id", flat=True)
+    )
     form = BulkCourseTemplateAssignmentForm(
         request.POST or None,
         course_queryset=AdminScopeService.active_scoped_courses(request),
-        template_queryset=AdminScopeService.scoped_grading_templates(request).filter(is_published=True, is_active=True),
+        template_queryset=GradingTemplate.objects.filter(
+            id__in=visible_template_ids,
+            is_published=True,
+            is_active=True,
+        ),
         term_queryset=AdminScopeService.active_scoped_terms(request),
     )
     _style_form(form)
@@ -10990,7 +11631,15 @@ def course_template_assignment_create_view(request):
                     continue
 
                 skipped_courses.append(
-                    f"{course.title} ({course.code}) already has prior assignment {prior_assignment.grading_template.name} for {term_scope_label}."
+                    (
+                        f"{course.title} ({course.code}) already has prior assignment "
+                        f"{prior_assignment.grading_template.name} for {term_scope_label}."
+                        if prior_assignment.grading_template_id in visible_template_ids
+                        else (
+                            f"{course.title} ({course.code}) already has a prior grading template assignment "
+                            f"for {term_scope_label}."
+                        )
+                    )
                 )
                 continue
 
@@ -11047,6 +11696,7 @@ def course_template_assignment_create_view(request):
 def course_template_assignment_update_view(request, assignment_id: int):
     row = get_object_or_404(AdminScopeService.scoped_course_template_assignments(request), id=assignment_id)
     before = model_before_after(row)
+    usage_summary = CourseTemplateAssignmentSafetyService.get_usage_summary(row)
     template_queryset = AdminScopeService.scoped_grading_templates(request).filter(
         Q(is_published=True, is_active=True) | Q(id=row.grading_template_id)
     )
@@ -11074,7 +11724,11 @@ def course_template_assignment_update_view(request, assignment_id: int):
         )
         messages.success(request, "Course template assignment updated.")
         return _redirect_back_or_default(request, "admin_portal:course_template_assignment_list")
-    context = {"form": form, "title": f"Edit Course Template Assignment #{row.id}"}
+    context = {
+        "form": form,
+        "title": f"Edit Course Template Assignment #{row.id}",
+        "assignment_usage_summary": usage_summary,
+    }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
 
@@ -11345,6 +11999,169 @@ def grading_period_lock_reopen_view(request, lock_id: int):
 
 
 @portal_required("ADMIN")
+@permission_required("grading_encoding_control.manage")
+def grade_encoding_control_list_view(request):
+    queryset = AdminScopeService.maintenance_scoped_grade_encoding_controls(request)
+    if request.GET.get("campus_id"):
+        queryset = queryset.filter(campus_id=request.GET.get("campus_id"))
+    if request.GET.get("term_id"):
+        queryset = queryset.filter(term_id=request.GET.get("term_id"))
+    if request.GET.get("status"):
+        queryset = queryset.filter(status=request.GET.get("status"))
+    if request.GET.get("period_code"):
+        queryset = queryset.filter(period_code__iexact=request.GET.get("period_code"))
+    q = request.GET.get("q", "").strip()
+    if q:
+        queryset = queryset.filter(
+            Q(period_code__icontains=q)
+            | Q(course_offering__course__code__icontains=q)
+            | Q(course_offering__course__title__icontains=q)
+            | Q(course_offering__section__code__icontains=q)
+            | Q(reason__icontains=q)
+            | Q(notice_to_faculty__icontains=q)
+        )
+    context = {
+        "q": q,
+        "terms": AdminScopeService.active_scoped_terms(request),
+        "campuses": AdminScopeService.active_scoped_campuses(request),
+        "status_choices": GradeEncodingControl.Status.choices,
+    }
+    context.update(_active_inactive_pages(request, queryset))
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/grade_encoding_control_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grading_encoding_control.manage")
+def grade_encoding_control_create_view(request):
+    form = GradeEncodingControlForm(
+        request.POST or None,
+        tenant_queryset=AdminScopeService.scoped_tenants(request),
+        campus_queryset=AdminScopeService.scoped_campuses(request),
+        academic_year_queryset=AdminScopeService.active_scoped_academic_years(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
+        offering_queryset=AdminScopeService.scoped_course_offerings(request),
+    )
+    _style_form(form)
+    if request.method == "POST" and form.is_valid():
+        row = form.save(commit=False)
+        row.created_by = request.user
+        row.updated_by = request.user
+        row.full_clean()
+        row.save()
+        AuditService.log_event(
+            action="CLOSE" if row.status == GradeEncodingControl.Status.CLOSED else "OPEN",
+            portal="ADMIN",
+            entity_type="GradeEncodingControl",
+            entity_id=row.id,
+            actor=request.user,
+            tenant=row.tenant,
+            campus=row.campus,
+            after_data=model_before_after(row),
+            request=request,
+        )
+        messages.success(request, "Grade encoding access control saved.")
+        return _redirect_back_or_default(request, "admin_portal:grade_encoding_control_list")
+    context = {"form": form, "title": "Create Grade Encoding Access Control"}
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/shared/form_page.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grading_encoding_control.manage")
+def grade_encoding_control_update_view(request, control_id: int):
+    row = get_object_or_404(AdminScopeService.scoped_grade_encoding_controls(request), id=control_id)
+    before = model_before_after(row)
+    form = GradeEncodingControlForm(
+        request.POST or None,
+        instance=row,
+        tenant_queryset=AdminScopeService.scoped_tenants(request),
+        campus_queryset=AdminScopeService.scoped_campuses(request),
+        academic_year_queryset=AdminScopeService.active_scoped_academic_years(request),
+        term_queryset=AdminScopeService.active_scoped_terms(request),
+        offering_queryset=AdminScopeService.scoped_course_offerings(request),
+    )
+    _style_form(form)
+    if request.method == "POST" and form.is_valid():
+        row = form.save(commit=False)
+        row.updated_by = request.user
+        row.full_clean()
+        row.save()
+        AuditService.log_event(
+            action="CLOSE" if row.status == GradeEncodingControl.Status.CLOSED else "OPEN",
+            portal="ADMIN",
+            entity_type="GradeEncodingControl",
+            entity_id=row.id,
+            actor=request.user,
+            tenant=row.tenant,
+            campus=row.campus,
+            before_data=before,
+            after_data=model_before_after(row),
+            request=request,
+        )
+        messages.success(request, "Grade encoding access control updated.")
+        return _redirect_back_or_default(request, "admin_portal:grade_encoding_control_list")
+    context = {"form": form, "title": f"Edit Grade Encoding Access Control #{row.id}"}
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/shared/form_page.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("grading_encoding_control.manage")
+def grade_encoding_control_open_view(request, control_id: int):
+    if request.method != "POST":
+        return HttpResponseForbidden("Invalid method.")
+    row = get_object_or_404(AdminScopeService.scoped_grade_encoding_controls(request), id=control_id)
+    before = model_before_after(row)
+    row.status = GradeEncodingControl.Status.OPEN
+    row.updated_by = request.user
+    row.save(update_fields=["status", "updated_by", "updated_at"])
+    AuditService.log_event(
+        action="OPEN",
+        portal="ADMIN",
+        entity_type="GradeEncodingControl",
+        entity_id=row.id,
+        actor=request.user,
+        tenant=row.tenant,
+        campus=row.campus,
+        before_data=before,
+        after_data=model_before_after(row),
+        request=request,
+    )
+    messages.success(request, "Grade encoding opened for the selected scope.")
+    return _redirect_back_or_default(request, "admin_portal:grade_encoding_control_list")
+
+
+@portal_required("ADMIN")
+@permission_required("grading_encoding_control.manage")
+def grade_encoding_control_close_view(request, control_id: int):
+    if request.method != "POST":
+        return HttpResponseForbidden("Invalid method.")
+    row = get_object_or_404(AdminScopeService.scoped_grade_encoding_controls(request), id=control_id)
+    if not (row.reason or "").strip() or not (row.notice_to_faculty or "").strip():
+        messages.error(request, "Enter a reason and faculty notice before closing this control.")
+        return _redirect_back_or_default(request, "admin_portal:grade_encoding_control_list")
+    before = model_before_after(row)
+    row.status = GradeEncodingControl.Status.CLOSED
+    row.updated_by = request.user
+    row.save(update_fields=["status", "updated_by", "updated_at"])
+    AuditService.log_event(
+        action="CLOSE",
+        portal="ADMIN",
+        entity_type="GradeEncodingControl",
+        entity_id=row.id,
+        actor=request.user,
+        tenant=row.tenant,
+        campus=row.campus,
+        before_data=before,
+        after_data=model_before_after(row),
+        request=request,
+    )
+    messages.success(request, "Grade encoding closed for the selected scope.")
+    return _redirect_back_or_default(request, "admin_portal:grade_encoding_control_list")
+
+
+@portal_required("ADMIN")
 @permission_required("grade_submissions.read")
 def overdue_unsubmitted_report_view(request):
     now = timezone.now()
@@ -11399,7 +12216,7 @@ def overdue_unsubmitted_report_view(request):
         )
         if scope_key not in offerings_by_scope:
             offerings_by_scope[scope_key] = list(
-                AdminScopeService.scoped_course_offerings(request).filter(
+                AdminScopeService.scoped_monitoring_course_offerings(request).filter(
                     tenant_id=lock.tenant_id,
                     campus_id=lock.campus_id,
                     academic_year_id=lock.academic_year_id,
@@ -11415,7 +12232,7 @@ def overdue_unsubmitted_report_view(request):
     if lock_targets:
         offering_ids = {offering_id for offering_id, _ in lock_targets.keys()}
         offerings = list(
-            AdminScopeService.scoped_course_offerings(request)
+            AdminScopeService.scoped_monitoring_course_offerings(request)
             .filter(id__in=offering_ids, **accepted_assignment_filter)
             .select_related("tenant", "campus", "academic_year", "term", "course", "section")
             .distinct()
@@ -11569,7 +12386,7 @@ def overdue_unsubmitted_report_view(request):
     page_period_ids = {row["template_period_id"] for row in page_obj.object_list if row.get("template_period_id")}
     page_offerings = {
         offering.id: offering
-        for offering in AdminScopeService.scoped_course_offerings(request)
+        for offering in AdminScopeService.scoped_monitoring_course_offerings(request)
         .filter(id__in=page_offering_ids)
         .select_related("tenant", "campus", "academic_year", "term", "course", "section")
     }
@@ -12227,6 +13044,17 @@ def grade_correction_request_create_on_behalf_view(request):
                 "component_name": activity.template_component.name,
                 "subcomponent_name": activity.template_subcomponent.name if activity.template_subcomponent else "-",
                 "detail_name": activity.template_detail.name if activity.template_detail else "-",
+                "detail_weight": (
+                    _format_decimal_display(activity.template_detail.weight_percentage)
+                    if activity.template_detail
+                    else "-"
+                ),
+                "detail_weight_reference_only": bool(
+                    activity.template_detail
+                    and activity.template_subcomponent
+                    and activity.template_subcomponent.detail_computation_mode
+                    == DetailComputationMode.AVERAGE_ACTIVITIES
+                ),
                 "entry_method_label": FacultyGradingService.score_input_mode_label(
                     FacultyGradingService.resolve_score_input_mode(
                         template_component=activity.template_component,

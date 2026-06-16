@@ -10,7 +10,12 @@
 
 {% include "faculty_portal/partials/period_quick_nav.html" with nav_current="activities" %}
 
-{% if is_correction_active %}
+{% if encoding_control_closed %}
+<div class="alert alert-danger">
+  Encoding is currently closed for this class. You may view the class, but activity setup and score encoding are disabled.
+  {% if encoding_control_message %}<div class="small mt-1">{{ encoding_control_message }}</div>{% endif %}
+</div>
+{% elif is_correction_active %}
 <div class="alert alert-warning">
   A governed manual correction window is active. Only scoped correction items can be edited here.
   {% if "corrections.create" in effective_permissions and system_correction_enabled %}
@@ -82,7 +87,7 @@
       <div class="col-md-4">
         <label class="form-label">Detail (optional)</label>
         {{ form.template_detail }}
-        <div class="form-text">This opens only when the chosen subcomponent breaks down into detail items, such as Recitation, Assignment, or Activity.</div>
+        <div class="form-text">This opens only when the chosen subcomponent has detail items. Detail weights are shown only when the subcomponent uses Weighted Details.</div>
         {% for e in form.template_detail.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
       </div>
       <div class="col-md-4">
@@ -133,6 +138,9 @@
           <th>Component</th>
           <th>Subcomponent</th>
           <th>Detail</th>
+          {% if show_detail_weight_column %}
+          <th>Detail Weight</th>
+          {% endif %}
           <th>Entry Method</th>
           <th>Total</th>
           <th>Encoded</th>
@@ -147,6 +155,13 @@
           <td>{{ row.template_component.name }}</td>
           <td>{{ row.template_subcomponent.name|default:"-" }}</td>
           <td>{{ row.template_detail.name|default:"-" }}</td>
+          {% if show_detail_weight_column %}
+          <td>
+            {% if row.template_detail and row.template_subcomponent.detail_computation_mode != "AVERAGE_ACTIVITIES" %}
+            <strong>{{ row.template_detail.weight_percentage }}%</strong>
+            {% else %}-{% endif %}
+          </td>
+          {% endif %}
           <td>
             <span class="badge text-bg-light border">{{ row.resolved_score_input_mode_label }}</span>
           </td>
@@ -170,7 +185,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="9" class="text-center text-muted py-4">No activities yet.</td></tr>
+        <tr><td colspan="{% if show_detail_weight_column %}10{% else %}9{% endif %}" class="text-center text-muted py-4">No activities yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -206,7 +221,7 @@
       options.forEach((optionData) => {
         const option = document.createElement("option");
         option.value = optionData.id;
-        option.textContent = optionData.name;
+        option.textContent = optionData.display_name || optionData.name;
         if (selectedValue && String(selectedValue) === String(optionData.id)) {
           option.selected = true;
         }

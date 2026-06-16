@@ -402,6 +402,9 @@ class FacultyReminderService:
 
 class SubmissionNonComplianceNoticeService:
     FACULTY_PORTAL_REFERENCE_TYPE = "SUBMISSION_NON_COMPLIANCE_NOTICE"
+    SUPPORTED_MAX_NOTICE_SEQUENCE = 3
+    AREA_CHAIR_ROLE_CODES = {"AC", "AREA_CHAIR", "AREA_CHAIRPERSON", "AREA_CHAIRMAN"}
+    CAO_ROLE_CODES = {"CAO", "CHIEF_ACADEMIC_OFFICER"}
 
     @classmethod
     def _portal_url(cls, path_name: str) -> str:
@@ -439,6 +442,50 @@ class SubmissionNonComplianceNoticeService:
             .order_by("-issued_at", "-id")
             .first()
         )
+
+    @classmethod
+    def _open_notice_count(cls, *, offering, template_period, faculty_user) -> int:
+        return SubmissionNonComplianceNotice.objects.filter(
+            offering=offering,
+            template_period=template_period,
+            faculty_user=faculty_user,
+            status=SubmissionNonComplianceNotice.Status.OPEN,
+        ).count()
+
+    @classmethod
+    def _days_overdue(cls, *, now, deadline_at) -> int:
+        return max(0, (timezone.localdate(now) - timezone.localdate(deadline_at)).days)
+
+    @classmethod
+    def _notice_schedule_settings(cls, *, tenant_id: int | None):
+        return {
+            "first_notice_after_days": FeatureSettingsService.get_submission_non_compliance_first_notice_after_days(
+                tenant_id=tenant_id,
+                default=1,
+            ),
+            "notice_interval_days": FeatureSettingsService.get_submission_non_compliance_level_interval_days(
+                tenant_id=tenant_id,
+                default=1,
+            ),
+            "max_notice_count": FeatureSettingsService.get_submission_non_compliance_max_notice_count(
+                tenant_id=tenant_id,
+                default=3,
+            ),
+        }
+
+    @classmethod
+    def _required_days_overdue(cls, *, sequence_no: int, first_notice_after_days: int, notice_interval_days: int) -> int:
+        return first_notice_after_days + ((sequence_no - 1) * notice_interval_days)
+
+    @classmethod
+    def _level_for_sequence(cls, sequence_no: int) -> str | None:
+        if sequence_no == 1:
+            return SubmissionNonComplianceNotice.NoticeLevel.NOTICE
+        if sequence_no == 2:
+            return SubmissionNonComplianceNotice.NoticeLevel.WARNING
+        if sequence_no == 3:
+            return SubmissionNonComplianceNotice.NoticeLevel.ESCALATION
+        return None
 
     @classmethod
     def _title_for_level(cls, level: str) -> str:
@@ -634,10 +681,7 @@ class SubmissionNonComplianceNoticeService:
         return resolved
 
     @classmethod
-    def _resolve_head_users(cls, *, offering):
-        role_codes = FeatureSettingsService.get_submission_non_compliance_head_role_codes(
-            tenant_id=offering.tenant_id
-        )
+    def _resolve_scoped_role_users(cls, *, offering, role_codes):
         if not role_codes:
             return []
         department_scope_ids = ScopeService.department_ancestor_ids(offering.department_id, include_self=True)
@@ -663,24 +707,43 @@ class SubmissionNonComplianceNoticeService:
         return result
 
     @classmethod
+    def _resolve_area_chair_users(cls, *, offering):
+        return cls._resolve_scoped_role_users(offering=offering, role_codes=cls.AREA_CHAIR_ROLE_CODES)
+
+    @classmethod
+    def _resolve_cao_users(cls, *, offering):
+        return cls._resolve_scoped_role_users(offering=offering, role_codes=cls.CAO_ROLE_CODES)
+
+    @classmethod
     def _recipient_payload(cls, *, level: str, offering, faculty_user):
         faculty_emails = [email for email in [(faculty_user.email or "").strip()] if email]
-        head_users = cls._resolve_head_users(offering=offering)
-        head_emails = sorted({(user.email or "").strip() for user in head_users if (user.email or "").strip()})
-        hr_emails = FeatureSettingsService.get_submission_non_compliance_hr_recipients(
-            tenant_id=offering.tenant_id
-        )
         recipient_emails = list(faculty_emails)
         recipient_roles = ["FACULTY"]
+        if level in {
+            SubmissionNonComplianceNotice.NoticeLevel.WARNING,
+            SubmissionNonComplianceNotice.NoticeLevel.ESCALATION,
+        }:
+            area_chair_emails = sorted(
+                {
+                    (user.email or "").strip()
+                    for user in cls._resolve_area_chair_users(offering=offering)
+                    if (user.email or "").strip()
+                }
+            )
+            recipient_emails.extend([email for email in area_chair_emails if email not in recipient_emails])
+            if area_chair_emails:
+                recipient_roles.append("AREA_CHAIR")
         if level == SubmissionNonComplianceNotice.NoticeLevel.ESCALATION:
-            recipient_emails.extend([email for email in head_emails if email not in recipient_emails])
-            recipient_emails.extend([email for email in hr_emails if email not in recipient_emails])
-            if head_emails:
-                recipient_roles.extend(
-                    FeatureSettingsService.get_submission_non_compliance_head_role_codes(tenant_id=offering.tenant_id)
-                )
-            if hr_emails:
-                recipient_roles.append("HR")
+            cao_emails = sorted(
+                {
+                    (user.email or "").strip()
+                    for user in cls._resolve_cao_users(offering=offering)
+                    if (user.email or "").strip()
+                }
+            )
+            recipient_emails.extend([email for email in cao_emails if email not in recipient_emails])
+            if cao_emails:
+                recipient_roles.append("CAO")
         return {
             "emails": recipient_emails,
             "roles": recipient_roles,
@@ -787,15 +850,26 @@ class SubmissionNonComplianceNoticeService:
             )
             if latest_notice and timezone.localdate(now) <= timezone.localdate(latest_notice.issued_at):
                 continue
-            if latest_notice is None:
-                level = SubmissionNonComplianceNotice.NoticeLevel.NOTICE
-                sequence_no = 1
-            elif latest_notice.notice_level == SubmissionNonComplianceNotice.NoticeLevel.NOTICE:
-                level = SubmissionNonComplianceNotice.NoticeLevel.WARNING
-                sequence_no = latest_notice.sequence_no + 1
-            else:
-                level = SubmissionNonComplianceNotice.NoticeLevel.ESCALATION
-                sequence_no = latest_notice.sequence_no + 1
+            schedule = cls._notice_schedule_settings(tenant_id=offering.tenant_id)
+            sequence_no = cls._open_notice_count(
+                offering=offering,
+                template_period=template_period,
+                faculty_user=faculty_user,
+            ) + 1
+            if sequence_no > schedule["max_notice_count"]:
+                continue
+            if sequence_no > cls.SUPPORTED_MAX_NOTICE_SEQUENCE:
+                continue
+            required_days_overdue = cls._required_days_overdue(
+                sequence_no=sequence_no,
+                first_notice_after_days=schedule["first_notice_after_days"],
+                notice_interval_days=schedule["notice_interval_days"],
+            )
+            if cls._days_overdue(now=now, deadline_at=target["deadline_at"]) < required_days_overdue:
+                continue
+            level = cls._level_for_sequence(sequence_no)
+            if level is None:
+                continue
 
             recipient_payload = cls._recipient_payload(
                 level=level,

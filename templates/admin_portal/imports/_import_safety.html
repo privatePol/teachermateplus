@@ -1,0 +1,27 @@
+{% if import_safety %}
+<div class="card border-success-subtle shadow-sm mb-3">
+  <div class="card-header bg-success-subtle text-success-emphasis fw-semibold">
+    Import Safety Measures
+  </div>
+  <div class="card-body">
+    {% if import_safety.duplicate_rule %}
+    <div class="mb-2">
+      <span class="badge text-bg-success me-1">Duplicate protection</span>
+      {{ import_safety.duplicate_rule }}
+    </div>
+    {% endif %}
+    {% if import_safety.change_warning %}
+    <div class="alert alert-warning py-2 mb-3">
+      <strong>Important:</strong> {{ import_safety.change_warning }}
+    </div>
+    {% endif %}
+    {% if import_safety.common_measures %}
+    <ul class="small mb-0">
+      {% for measure in import_safety.common_measures %}
+      <li class="mb-1">{{ measure }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

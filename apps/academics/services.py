@@ -2,19 +2,34 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from django.db import transaction
 from django.db.models import Q
+from django.forms.models import model_to_dict
+from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
+import json
 
 from apps.academics.models import (
     AcademicYear,
     ActiveGradingPeriodSetting,
     FacultyAssignment,
+    FacultyAssignmentReplacementLog,
     TenantTermGradingPeriod,
     Term,
 )
+from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
-from apps.grading.models import GradeSubmission, GradingPeriodLock
+from apps.grading.models import (
+    GradeActivity,
+    GradeCorrectionRequest,
+    GradeSubmission,
+    GradeSubmissionReopenRequest,
+    GradingPeriodLock,
+    StudentActivityScore,
+    StudentFinalGrade,
+    StudentPeriodGrade,
+)
 from apps.notifications.models import NotificationQueue
 
 
@@ -586,3 +601,200 @@ class FacultyAssignmentWorkflowService:
                 notification.scheduled_at = now
                 notification.save(update_fields=["status", "scheduled_at", "updated_at"])
         return created
+
+
+def _assignment_snapshot(instance):
+    payload = model_to_dict(instance, fields=[field.name for field in instance._meta.fields])
+    return json.loads(json.dumps(payload, cls=DjangoJSONEncoder))
+
+
+class FacultyAssignmentSafetyService:
+    KEEP_OLD_ASSIGNMENT_TYPES = {
+        FacultyAssignmentReplacementLog.ReplacementType.TEMPORARY,
+        FacultyAssignmentReplacementLog.ReplacementType.SECONDARY,
+    }
+
+    @classmethod
+    def get_assignment_impact_summary(cls, assignment: FacultyAssignment) -> dict:
+        offering = assignment.offering
+        relevant_locks = Q(course_offering=offering) | Q(
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            course_offering__isnull=True,
+            tenant_id=offering.tenant_id,
+            campus_id=offering.campus_id,
+            academic_year_id=offering.academic_year_id,
+            term_id=offering.term_id,
+        )
+        return {
+            "activities": GradeActivity.objects.filter(offering=offering, is_active=True).count(),
+            "scores": StudentActivityScore.objects.filter(activity__offering=offering, is_active=True).count(),
+            "submissions": GradeSubmission.objects.filter(offering=offering).count(),
+            "period_grades": StudentPeriodGrade.objects.filter(offering=offering).count(),
+            "final_grades": StudentFinalGrade.objects.filter(offering=offering).count(),
+            "correction_requests": GradeCorrectionRequest.objects.filter(offering=offering).count(),
+            "reopen_requests": GradeSubmissionReopenRequest.objects.filter(offering=offering).count(),
+            "grading_locks": GradingPeriodLock.objects.filter(relevant_locks, is_active=True, is_locked=True).count(),
+        }
+
+    @classmethod
+    def assignment_has_academic_dependencies(cls, assignment: FacultyAssignment) -> bool:
+        return any(cls.get_assignment_impact_summary(assignment).values())
+
+    @classmethod
+    def validate_direct_assignment_change(cls, *, assignment: FacultyAssignment, new_offering_id, new_faculty_user_id):
+        if not assignment.pk:
+            return
+        if int(new_offering_id) == assignment.offering_id and int(new_faculty_user_id) == assignment.faculty_user_id:
+            return
+        if cls.assignment_has_academic_dependencies(assignment):
+            raise ValueError(
+                "This faculty assignment is already in use. Use Replace Faculty so existing activities, scores, "
+                "submissions, locks, and audit history remain clear."
+            )
+
+    @classmethod
+    def generate_batch_reference(cls) -> str:
+        return f"FAR-{timezone.now():%Y%m%d%H%M%S%f}"[:40]
+
+    @classmethod
+    @transaction.atomic
+    def process_replacement(
+        cls,
+        *,
+        assignments,
+        replacement_faculty,
+        replacement_type,
+        reason_category,
+        remarks,
+        processed_by_user,
+        request=None,
+    ):
+        batch_reference = cls.generate_batch_reference()
+        keep_old = replacement_type in cls.KEEP_OLD_ASSIGNMENT_TYPES
+        logs = []
+        for assignment in assignments:
+            current = (
+                FacultyAssignment.objects.select_for_update()
+                .select_related("offering", "offering__course", "offering__section", "faculty_user")
+                .get(id=assignment.id)
+            )
+            old_before = _assignment_snapshot(current)
+
+            if keep_old:
+                old_after = _assignment_snapshot(current)
+            else:
+                current.is_active = False
+                current.is_primary = False
+                current.save(update_fields=["is_active", "is_primary", "updated_at"])
+                old_after = _assignment_snapshot(current)
+                AuditService.log_event(
+                    action="UPDATE",
+                    portal="ADMIN",
+                    entity_type="FacultyAssignment",
+                    entity_id=current.id,
+                    actor=processed_by_user,
+                    before_data=old_before,
+                    after_data=old_after,
+                    metadata={
+                        "event": "faculty_replacement_old_assignment_deactivated",
+                        "batch_reference": batch_reference,
+                    },
+                    request=request,
+                )
+
+            new_assignment = (
+                FacultyAssignment.objects.select_for_update()
+                .filter(offering=current.offering, faculty_user=replacement_faculty)
+                .first()
+            )
+            new_before = _assignment_snapshot(new_assignment) if new_assignment else None
+            if not new_assignment:
+                new_assignment = FacultyAssignment(
+                    tenant_id=current.offering.tenant_id,
+                    campus_id=current.offering.campus_id,
+                    offering=current.offering,
+                    faculty_user=replacement_faculty,
+                )
+            new_assignment.is_active = True
+            new_assignment.is_primary = not keep_old
+            FacultyAssignmentWorkflowService.reset_response_window(new_assignment, note=remarks)
+            new_assignment.save()
+
+            if new_assignment.is_primary:
+                other_primary_rows = (
+                    FacultyAssignment.objects.select_for_update()
+                    .filter(offering=current.offering, is_active=True, is_primary=True)
+                    .exclude(id=new_assignment.id)
+                )
+                for other in other_primary_rows:
+                    other_before = _assignment_snapshot(other)
+                    other.is_primary = False
+                    other.save(update_fields=["is_primary", "updated_at"])
+                    AuditService.log_event(
+                        action="UPDATE",
+                        portal="ADMIN",
+                        entity_type="FacultyAssignment",
+                        entity_id=other.id,
+                        actor=processed_by_user,
+                        before_data=other_before,
+                        after_data=_assignment_snapshot(other),
+                        metadata={
+                            "event": "faculty_replacement_primary_conflict_resolved",
+                            "batch_reference": batch_reference,
+                        },
+                        request=request,
+                    )
+
+            AuditService.log_event(
+                action="CREATE" if new_before is None else "UPDATE",
+                portal="ADMIN",
+                entity_type="FacultyAssignment",
+                entity_id=new_assignment.id,
+                actor=processed_by_user,
+                before_data=new_before,
+                after_data=_assignment_snapshot(new_assignment),
+                metadata={"event": "faculty_replacement_new_assignment", "batch_reference": batch_reference},
+                request=request,
+            )
+
+            log = FacultyAssignmentReplacementLog.objects.create(
+                batch_reference=batch_reference,
+                tenant_id=current.offering.tenant_id,
+                campus_id=current.offering.campus_id,
+                offering=current.offering,
+                source_faculty=current.faculty_user,
+                replacement_faculty=replacement_faculty,
+                old_assignment=current,
+                new_assignment=new_assignment,
+                replacement_type=replacement_type,
+                reason_category=reason_category,
+                remarks=remarks,
+                processed_by_user=processed_by_user,
+                processed_at=timezone.now(),
+                old_assignment_before_json=old_before,
+                old_assignment_after_json=old_after,
+                new_assignment_before_json=new_before,
+                new_assignment_after_json=_assignment_snapshot(new_assignment),
+                impact_snapshot_json=cls.get_assignment_impact_summary(current),
+            )
+            AuditService.log_event(
+                action="CREATE",
+                portal="ADMIN",
+                entity_type="FacultyAssignmentReplacementLog",
+                entity_id=log.id,
+                actor=processed_by_user,
+                after_data={
+                    "batch_reference": batch_reference,
+                    "source_faculty_id": current.faculty_user_id,
+                    "replacement_faculty_id": replacement_faculty.id,
+                    "offering_id": current.offering_id,
+                    "old_assignment_id": current.id,
+                    "new_assignment_id": new_assignment.id,
+                    "replacement_type": replacement_type,
+                    "reason_category": reason_category,
+                },
+                metadata={"event": "faculty_replacement_processed", "batch_reference": batch_reference},
+                request=request,
+            )
+            logs.append(log)
+        return logs

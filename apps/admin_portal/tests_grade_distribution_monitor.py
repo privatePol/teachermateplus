@@ -123,7 +123,6 @@ class GradeDistributionMonitorTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Accounting 101")
-        self.assertContains(response, "High Grade Concentration")
         self.assertContains(response, "80.0%")
         self.assertContains(response, 'id="gradeDistributionLoadingOverlay"')
         self.assertContains(response, 'id="gradeDistributionFilterForm"')
@@ -137,6 +136,32 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertContains(response, "T*** S***")
         self.assertNotContains(response, "ACC101-001")
         self.assertNotContains(response, "Student1")
+        self.assertNotContains(response, "Classes in Scope")
+        self.assertNotContains(response, "Rows Reviewed")
+        self.assertNotContains(response, "For Review")
+        self.assertNotContains(response, "High Grade Concentration")
+        self.assertNotContains(response, "High Perfect Score Rate")
+        self.assertNotContains(response, "<th>Spread</th>", html=True)
+        self.assertNotContains(response, "<th>Comparison</th>", html=True)
+        self.assertNotContains(response, "<th>Status</th>", html=True)
+
+    def test_period_filter_uses_templates_resolved_for_monitored_classes(self):
+        unrelated_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="OTHER-DEPT",
+            name="Other Department",
+        )
+        self.template.department_visibility = GradingTemplate.DepartmentVisibility.SELECTED
+        self.template.save(update_fields=["department_visibility", "updated_at"])
+        self.template.visible_departments.set([unrelated_department])
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'value="{self.period.id}"')
+        self.assertContains(response, "GENED / Prelim")
 
     def test_scope_does_not_leak_other_tenant_data(self):
         other_tenant = Tenant.objects.create(code="OTHER", name="Other School")
@@ -318,6 +343,87 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertContains(response, "MISMATCH101")
         self.assertContains(response, "Offering Department Mismatch")
 
+    def test_monitor_defaults_to_topbar_campus_and_supports_explicit_all_campuses(self):
+        second_campus = Campus.objects.create(
+            tenant=self.tenant,
+            code="CUB",
+            name="Cubao",
+        )
+        second_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            code="CUB-BSA",
+            name="Cubao Accountancy",
+        )
+        second_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            code="BSA-CUB",
+            name="BS Accountancy Cubao",
+        )
+        second_course = Course.objects.create(
+            tenant=self.tenant,
+            code="CUB101",
+            title="Cubao Accounting",
+        )
+        second_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            program=second_program,
+            code="CUB-BSA1A",
+            name="Cubao BSA 1A",
+        )
+        second_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            program=second_program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=second_course,
+            section=second_section,
+        )
+        admin_role = self.admin_user.user_roles.exclude(role__code="FACULTY").get().role
+        UserRole.objects.create(
+            user=self.admin_user,
+            role=admin_role,
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+        )
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=Role.objects.get(code="FACULTY"),
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            offering=second_offering,
+            faculty_user=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+            is_primary=True,
+        )
+        self._seed_grades(second_offering, [88, 89], period=self.period)
+        self.client.force_login(self.admin_user)
+
+        default_response = self.client.get(self.url)
+        all_campuses_response = self.client.get(self.url, {"campus_id": "all"})
+
+        self.assertEqual(default_response.status_code, 200)
+        self.assertEqual(default_response.context["summary"]["offerings"], 1)
+        self.assertNotContains(default_response, "Cubao Accounting")
+        self.assertEqual(all_campuses_response.status_code, 200)
+        self.assertTrue(all_campuses_response.context["selected"]["all_campuses"])
+        self.assertEqual(all_campuses_response.context["summary"]["offerings"], 2)
+        self.assertContains(all_campuses_response, "Cubao Accounting")
+
     def test_export_csv_uses_same_permission_and_scope(self):
         self.client.force_login(self.admin_user)
 
@@ -326,7 +432,11 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/csv")
         self.assertContains(response, "Accounting 101")
-        self.assertContains(response, "High Grade Concentration")
+        header = response.content.decode("utf-8").splitlines()[0]
+        self.assertNotIn("Spread", header)
+        self.assertNotIn("Department Average", header)
+        self.assertNotIn("Subject Average", header)
+        self.assertNotIn("Flags", header)
 
     def _user(self, username, first_name, last_name, tenant, campus, department):
         return User.objects.create_user(

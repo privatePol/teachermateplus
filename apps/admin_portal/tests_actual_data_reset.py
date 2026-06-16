@@ -157,9 +157,14 @@ class ActualDataResetTests(TestCase):
         self.assertTrue(Permission.objects.filter(code="system_settings.update").exists())
         self.assertTrue(Permission.objects.filter(code="actual_data_reset.run").exists())
         self.assertEqual(RolePermission.objects.filter(role=self.role).count(), 3)
-        self.assertEqual(MenuGroup.objects.count(), 1)
-        self.assertEqual(MenuItem.objects.count(), 1)
-        self.assertEqual(MenuItemPermission.objects.count(), 1)
+        self.assertTrue(MenuGroup.objects.filter(portal="ADMIN", code="IMPORTS").exists())
+        self.assertTrue(MenuItem.objects.filter(portal="ADMIN", code="ACTUAL_DATA_RESET").exists())
+        self.assertTrue(
+            MenuItemPermission.objects.filter(
+                menu_item__code="ACTUAL_DATA_RESET",
+                permission=self.actual_data_reset,
+            ).exists()
+        )
         self.admin.refresh_from_db()
         self.assertIsNone(self.admin.default_tenant_id)
         reset_log = AuditLog.objects.get(entity_type="ActualDataReset", action="RESET")

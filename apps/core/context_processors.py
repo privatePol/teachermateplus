@@ -61,6 +61,7 @@ def portal_menu(request):
         campus_id=scope.get("campus_id"),
         effective_codes=permissions,
     )
+    admin_academic_performance_insights_enabled = False
     faculty_quick_tour_enabled = False
     faculty_grade_prediction_enabled = False
     faculty_at_risk_monitor_enabled = False
@@ -104,6 +105,20 @@ def portal_menu(request):
         admin_active_academic_year, admin_active_term = AcademicGovernanceService.resolve_active_scope(
             tenant_id=scope.get("tenant_id")
         )
+        admin_academic_performance_insights_enabled = (
+            FeatureSettingsService.is_academic_performance_insights_enabled(
+                tenant_id=scope.get("tenant_id"),
+                default=False,
+            )
+        )
+        if not admin_academic_performance_insights_enabled:
+            for group in menu:
+                group["items"] = [
+                    node
+                    for node in group["items"]
+                    if node["item"].code != "ACADEMIC_PERFORMANCE_INSIGHTS"
+                ]
+            menu = [group for group in menu if group["items"]]
     if portal == "ADMIN":
         admin_user_role_label = _admin_role_label(
             request.user,
@@ -128,6 +143,7 @@ def portal_menu(request):
         "admin_active_academic_year": admin_active_academic_year,
         "admin_active_term": admin_active_term,
         "admin_user_role_label": admin_user_role_label,
+        "admin_academic_performance_insights_enabled": admin_academic_performance_insights_enabled,
         "faculty_active_academic_year": faculty_active_academic_year,
         "faculty_active_term": faculty_active_term,
     }

@@ -153,6 +153,94 @@ class FacultyReminderServiceTests(TestCase):
             is_active=True,
         )
 
+    def _enable_non_compliance_notices(
+        self,
+        *,
+        first_notice_after_days: int = 1,
+        notice_interval_days: int = 1,
+        max_notice_count: int = 3,
+    ):
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_FIRST_NOTICE_AFTER_DAYS_KEY,
+            first_notice_after_days,
+            tenant_id=self.tenant.id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_LEVEL_INTERVAL_DAYS_KEY,
+            notice_interval_days,
+            tenant_id=self.tenant.id,
+            value_type="INT",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_MAX_NOTICE_COUNT_KEY,
+            max_notice_count,
+            tenant_id=self.tenant.id,
+            value_type="INT",
+            is_active=True,
+        )
+
+    def _create_period_lock(self, *, deadline_at):
+        return GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code="PRELIM",
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            deadline_at=deadline_at,
+            is_locked=False,
+            is_active=True,
+        )
+
+    def _create_area_chair_and_cao(self):
+        area_chair_user = User.objects.create_user(
+            username="area_chair1",
+            email="area_chair1@ncba.edu.ph",
+            password="testpassword123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            is_active=True,
+        )
+        area_chair_role = Role.objects.create(code="AREA_CHAIR", name="Area Chairperson", is_active=True)
+        UserRole.objects.create(
+            user=area_chair_user,
+            role=area_chair_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            is_active=True,
+        )
+        cao_user = User.objects.create_user(
+            username="cao1",
+            email="cao1@ncba.edu.ph",
+            password="testpassword123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            is_active=True,
+        )
+        cao_role = Role.objects.create(code="CAO", name="Chief Academic Officer", is_active=True)
+        UserRole.objects.create(
+            user=cao_user,
+            role=cao_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            is_active=True,
+        )
+        return area_chair_user, cao_user
+
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@teachermateplus.local")
     def test_queue_and_process_faculty_reminder_email(self):
         reminder = FacultyReminder.objects.create(
@@ -333,45 +421,8 @@ class FacultyReminderServiceTests(TestCase):
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@teachermateplus.local")
     def test_submission_non_compliance_notice_progression_and_resolution(self):
-        SystemSettingService.set(
-            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY,
-            True,
-            tenant_id=self.tenant.id,
-            value_type="BOOL",
-            is_active=True,
-        )
-        SystemSettingService.set(
-            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
-            1,
-            tenant_id=self.tenant.id,
-            value_type="INT",
-            is_active=True,
-        )
-        SystemSettingService.set(
-            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY,
-            ["hr@ncba.edu.ph"],
-            tenant_id=self.tenant.id,
-            value_type="JSON",
-            is_active=True,
-        )
-        dean_user = User.objects.create_user(
-            username="dean1",
-            email="dean1@ncba.edu.ph",
-            password="testpassword123",
-            default_tenant=self.tenant,
-            default_campus=self.campus,
-            default_department=self.department,
-            is_active=True,
-        )
-        dean_role = Role.objects.create(code="DEAN", name="Dean", is_active=True)
-        UserRole.objects.create(
-            user=dean_user,
-            role=dean_role,
-            tenant=self.tenant,
-            campus=self.campus,
-            department=self.department,
-            is_active=True,
-        )
+        self._enable_non_compliance_notices()
+        area_chair_user, cao_user = self._create_area_chair_and_cao()
         unaccepted_user = User.objects.create_user(
             username="unaccepted_faculty",
             email="unaccepted_faculty@ncba.edu.ph",
@@ -390,19 +441,9 @@ class FacultyReminderServiceTests(TestCase):
             is_primary=False,
             is_active=True,
         )
-        lock = GradingPeriodLock.objects.create(
-            tenant=self.tenant,
-            campus=self.campus,
-            academic_year=self.academic_year,
-            term=self.term,
-            period_code="PRELIM",
-            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
-            deadline_at=timezone.now() - timedelta(days=1),
-            is_locked=False,
-            is_active=True,
-        )
+        first_run = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0)
+        self._create_period_lock(deadline_at=first_run - timedelta(days=1, minutes=1))
 
-        first_run = timezone.now()
         result = SubmissionNonComplianceNoticeService.issue_due_notices(now=first_run, tenant_id=self.tenant.id)
         self.assertEqual(result["issued"], 1)
         first_notice = SubmissionNonComplianceNotice.objects.get()
@@ -425,6 +466,10 @@ class FacultyReminderServiceTests(TestCase):
         self.assertEqual(result["issued"], 1)
         second_notice = SubmissionNonComplianceNotice.objects.order_by("issued_at", "id")[1]
         self.assertEqual(second_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.WARNING)
+        self.assertIn(self.user.email, second_notice.recipient_emails_json or [])
+        self.assertIn(area_chair_user.email, second_notice.recipient_emails_json or [])
+        self.assertNotIn(cao_user.email, second_notice.recipient_emails_json or [])
+        self.assertEqual(second_notice.recipient_roles_json, ["FACULTY", "AREA_CHAIR"])
 
         third_run = second_run + timedelta(days=1, minutes=1)
         result = SubmissionNonComplianceNoticeService.issue_due_notices(now=third_run, tenant_id=self.tenant.id)
@@ -432,8 +477,15 @@ class FacultyReminderServiceTests(TestCase):
         third_notice = SubmissionNonComplianceNotice.objects.order_by("issued_at", "id")[2]
         self.assertEqual(third_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.ESCALATION)
         self.assertIn(self.user.email, third_notice.recipient_emails_json or [])
-        self.assertIn(dean_user.email, third_notice.recipient_emails_json or [])
-        self.assertIn("hr@ncba.edu.ph", third_notice.recipient_emails_json or [])
+        self.assertIn(area_chair_user.email, third_notice.recipient_emails_json or [])
+        self.assertIn(cao_user.email, third_notice.recipient_emails_json or [])
+        self.assertEqual(third_notice.recipient_roles_json, ["FACULTY", "AREA_CHAIR", "CAO"])
+        self.assertEqual(len(mail.outbox), 3)
+
+        fourth_run = third_run + timedelta(days=1, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=fourth_run, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 0)
+        self.assertEqual(SubmissionNonComplianceNotice.objects.count(), 3)
         self.assertEqual(len(mail.outbox), 3)
 
         submission = GradeSubmission.objects.create(
@@ -459,7 +511,125 @@ class FacultyReminderServiceTests(TestCase):
             3,
         )
 
-    def test_submission_non_compliance_heads_include_parent_department_roles(self):
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@teachermateplus.local")
+    def test_submission_non_compliance_custom_notice_interval_schedule(self):
+        self._enable_non_compliance_notices(
+            first_notice_after_days=2,
+            notice_interval_days=2,
+            max_notice_count=3,
+        )
+        area_chair_user, cao_user = self._create_area_chair_and_cao()
+        base_run = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0)
+        self._create_period_lock(deadline_at=base_run)
+
+        day_1 = base_run + timedelta(days=1, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=day_1, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 0)
+
+        day_2 = base_run + timedelta(days=2, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=day_2, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 1)
+        first_notice = SubmissionNonComplianceNotice.objects.order_by("issued_at", "id")[0]
+        self.assertEqual(first_notice.sequence_no, 1)
+        self.assertEqual(first_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.NOTICE)
+        self.assertEqual(first_notice.recipient_emails_json, [self.user.email])
+
+        day_3 = base_run + timedelta(days=3, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=day_3, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 0)
+
+        day_4 = base_run + timedelta(days=4, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=day_4, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 1)
+        second_notice = SubmissionNonComplianceNotice.objects.order_by("issued_at", "id")[1]
+        self.assertEqual(second_notice.sequence_no, 2)
+        self.assertEqual(second_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.WARNING)
+        self.assertIn(area_chair_user.email, second_notice.recipient_emails_json or [])
+        self.assertNotIn(cao_user.email, second_notice.recipient_emails_json or [])
+
+        day_5 = base_run + timedelta(days=5, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=day_5, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 0)
+
+        day_6 = base_run + timedelta(days=6, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=day_6, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 1)
+        third_notice = SubmissionNonComplianceNotice.objects.order_by("issued_at", "id")[2]
+        self.assertEqual(third_notice.sequence_no, 3)
+        self.assertEqual(third_notice.notice_level, SubmissionNonComplianceNotice.NoticeLevel.ESCALATION)
+        self.assertIn(cao_user.email, third_notice.recipient_emails_json or [])
+
+        day_8 = base_run + timedelta(days=8, minutes=1)
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=day_8, tenant_id=self.tenant.id)
+        self.assertEqual(result["issued"], 0)
+        self.assertEqual(SubmissionNonComplianceNotice.objects.count(), 3)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@teachermateplus.local")
+    def test_submission_non_compliance_notice_feature_off_prevents_notices(self):
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        first_run = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0)
+        self._create_period_lock(deadline_at=first_run - timedelta(days=3, minutes=1))
+
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=first_run, tenant_id=self.tenant.id)
+
+        self.assertEqual(result["issued"], 0)
+        self.assertEqual(SubmissionNonComplianceNotice.objects.count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@teachermateplus.local")
+    def test_submission_non_compliance_missing_area_chair_cao_and_hr_recipients_do_not_crash(self):
+        self._enable_non_compliance_notices()
+        SystemSettingService.set(
+            FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY,
+            ["hr@ncba.edu.ph"],
+            tenant_id=self.tenant.id,
+            value_type="JSON",
+            is_active=True,
+        )
+        first_run = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0)
+        self._create_period_lock(deadline_at=first_run - timedelta(days=1, minutes=1))
+
+        for offset in (0, 1, 2):
+            result = SubmissionNonComplianceNoticeService.issue_due_notices(
+                now=first_run + timedelta(days=offset, minutes=offset),
+                tenant_id=self.tenant.id,
+            )
+            self.assertEqual(result["issued"], 1)
+
+        notices = list(SubmissionNonComplianceNotice.objects.order_by("sequence_no"))
+        self.assertEqual([notice.sequence_no for notice in notices], [1, 2, 3])
+        for notice in notices:
+            self.assertEqual(notice.recipient_emails_json, [self.user.email])
+            self.assertNotIn("hr@ncba.edu.ph", notice.recipient_emails_json or [])
+        self.assertEqual(notices[0].recipient_roles_json, ["FACULTY"])
+        self.assertEqual(notices[1].recipient_roles_json, ["FACULTY"])
+        self.assertEqual(notices[2].recipient_roles_json, ["FACULTY"])
+        self.assertEqual(len(mail.outbox), 3)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", DEFAULT_FROM_EMAIL="no-reply@teachermateplus.local")
+    def test_submission_non_compliance_missing_faculty_email_fails_safely(self):
+        self._enable_non_compliance_notices()
+        self.user.email = ""
+        self.user.save(update_fields=["email"])
+        first_run = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0)
+        self._create_period_lock(deadline_at=first_run - timedelta(days=1, minutes=1))
+
+        result = SubmissionNonComplianceNoticeService.issue_due_notices(now=first_run, tenant_id=self.tenant.id)
+
+        self.assertEqual(result["issued"], 1)
+        notice = SubmissionNonComplianceNotice.objects.get()
+        self.assertEqual(notice.recipient_emails_json, [])
+        self.assertEqual(notice.email_status, SubmissionNonComplianceNotice.Status.FAILED)
+        self.assertIn("No recipient emails", notice.email_error_message)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_submission_non_compliance_area_chairs_include_parent_department_roles(self):
         parent_department = Department.objects.create(
             tenant=self.tenant,
             campus=self.campus,
@@ -470,25 +640,25 @@ class FacultyReminderServiceTests(TestCase):
         )
         self.department.parent = parent_department
         self.department.save(update_fields=["parent", "updated_at"])
-        dean_user = User.objects.create_user(
-            username="parent_dean",
-            email="parent_dean@ncba.edu.ph",
+        area_chair_user = User.objects.create_user(
+            username="parent_area_chair",
+            email="parent_area_chair@ncba.edu.ph",
             password="testpassword123",
             default_tenant=self.tenant,
             default_campus=self.campus,
             default_department=parent_department,
             is_active=True,
         )
-        dean_role = Role.objects.create(code="DEAN", name="Dean", is_active=True)
+        area_chair_role = Role.objects.create(code="AREA_CHAIR", name="Area Chairperson", is_active=True)
         UserRole.objects.create(
-            user=dean_user,
-            role=dean_role,
+            user=area_chair_user,
+            role=area_chair_role,
             tenant=self.tenant,
             campus=self.campus,
             department=parent_department,
             is_active=True,
         )
 
-        head_users = SubmissionNonComplianceNoticeService._resolve_head_users(offering=self.offering)
+        head_users = SubmissionNonComplianceNoticeService._resolve_area_chair_users(offering=self.offering)
 
-        self.assertIn(dean_user, head_users)
+        self.assertIn(area_chair_user, head_users)

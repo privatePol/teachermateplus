@@ -18,6 +18,7 @@ from apps.core.services.permissions import PermissionService
 from apps.core.services.settings import SystemSettingService
 from apps.core.services.audit import AuditService
 from apps.enrollment.models import Enrollment
+from apps.grading.access import GradingTemplateAccessService
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
@@ -26,6 +27,7 @@ from apps.grading.models import (
     GradeCorrectionRequestItem,
     GradeCorrectionRequest,
     GradeCorrectionUnlockWindow,
+    GradeEncodingControl,
     GradeSubmission,
     GradeSubmissionReopenRequest,
     GradeActivity,
@@ -46,6 +48,331 @@ from apps.grading.models import (
     StudentPeriodGrade,
 )
 from apps.rbac.models import Role, UserRole
+
+
+class CourseOfferingSafetyService:
+    CHANGE_BLOCK_MESSAGE = (
+        "This course offering cannot be changed because it is already in use. "
+        "Existing enrollments, faculty assignments, activities, scores, submissions, or locks depend on this offering. "
+        "Only safe non-identity fields such as room or schedule may be edited."
+    )
+    PROTECTED_FIELDS = {
+        "tenant",
+        "campus",
+        "department",
+        "program",
+        "academic_year",
+        "term",
+        "course",
+        "section",
+        "status",
+        "is_active",
+    }
+
+    @classmethod
+    def get_usage_summary(cls, offering: CourseOffering | None) -> dict:
+        if not offering or not offering.pk:
+            return cls._empty_summary()
+
+        enrollments_count = Enrollment.objects.filter(course_offering=offering).count()
+        faculty_assignments_count = FacultyAssignment.objects.filter(offering=offering).count()
+        accepted_faculty_assignments_count = FacultyAssignment.objects.filter(
+            offering=offering,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+        ).count()
+        activities_count = GradeActivity.objects.filter(offering=offering).count()
+        scores_count = StudentActivityScore.objects.filter(activity__offering=offering).count()
+        period_grades_count = StudentPeriodGrade.objects.filter(offering=offering).count()
+        final_grades_count = StudentFinalGrade.objects.filter(offering=offering).count()
+        submissions_count = GradeSubmission.objects.filter(offering=offering).count()
+        correction_requests_count = GradeCorrectionRequest.objects.filter(offering=offering).count()
+        reopen_requests_count = GradeSubmissionReopenRequest.objects.filter(offering=offering).count()
+        period_locks_count = GradingPeriodLock.objects.filter(course_offering=offering).count()
+        attendance_sessions_count = AttendanceSession.objects.filter(offering=offering).count()
+        attendance_records_count = AttendanceRecord.objects.filter(session__offering=offering).count()
+        total_dependent_records = (
+            enrollments_count
+            + faculty_assignments_count
+            + activities_count
+            + scores_count
+            + period_grades_count
+            + final_grades_count
+            + submissions_count
+            + correction_requests_count
+            + reopen_requests_count
+            + period_locks_count
+            + attendance_sessions_count
+            + attendance_records_count
+        )
+        return {
+            "enrollments_count": enrollments_count,
+            "faculty_assignments_count": faculty_assignments_count,
+            "accepted_faculty_assignments_count": accepted_faculty_assignments_count,
+            "activities_count": activities_count,
+            "scores_count": scores_count,
+            "period_grades_count": period_grades_count,
+            "final_grades_count": final_grades_count,
+            "submissions_count": submissions_count,
+            "correction_requests_count": correction_requests_count,
+            "reopen_requests_count": reopen_requests_count,
+            "period_locks_count": period_locks_count,
+            "attendance_sessions_count": attendance_sessions_count,
+            "attendance_records_count": attendance_records_count,
+            "attendance_count": attendance_sessions_count + attendance_records_count,
+            "total_dependent_records": total_dependent_records,
+            "is_in_use": total_dependent_records > 0,
+        }
+
+    @classmethod
+    def _empty_summary(cls) -> dict:
+        return {
+            "enrollments_count": 0,
+            "faculty_assignments_count": 0,
+            "accepted_faculty_assignments_count": 0,
+            "activities_count": 0,
+            "scores_count": 0,
+            "period_grades_count": 0,
+            "final_grades_count": 0,
+            "submissions_count": 0,
+            "correction_requests_count": 0,
+            "reopen_requests_count": 0,
+            "period_locks_count": 0,
+            "attendance_sessions_count": 0,
+            "attendance_records_count": 0,
+            "attendance_count": 0,
+            "total_dependent_records": 0,
+            "is_in_use": False,
+        }
+
+    @classmethod
+    def changed_protected_fields(cls, *, offering: CourseOffering, cleaned_data: dict) -> list[str]:
+        if not offering or not offering.pk:
+            return []
+        original = CourseOffering.objects.get(pk=offering.pk)
+        changed = []
+        for field_name in cls.PROTECTED_FIELDS:
+            if field_name not in cleaned_data:
+                continue
+            new_value = cleaned_data.get(field_name)
+            if hasattr(new_value, "pk"):
+                new_value = new_value.pk
+            original_value = getattr(original, f"{field_name}_id", getattr(original, field_name, None))
+            if original_value != new_value:
+                changed.append(field_name)
+        return sorted(changed)
+
+    @classmethod
+    def validate_changes_allowed(cls, *, offering: CourseOffering, cleaned_data: dict):
+        changed = cls.changed_protected_fields(offering=offering, cleaned_data=cleaned_data)
+        if not changed:
+            return
+        usage = cls.get_usage_summary(offering)
+        if usage["is_in_use"]:
+            labels = ", ".join(field.replace("_", " ") for field in changed)
+            raise ValidationError(f"{cls.CHANGE_BLOCK_MESSAGE} Blocked field(s): {labels}.")
+
+
+class EnrollmentSafetyService:
+    TRANSFER_BLOCK_MESSAGE = (
+        "This enrollment cannot be moved or reassigned because grading records already exist for this student in this class. "
+        "You may update the enrollment status, but section/offering transfer requires academic review."
+    )
+    PROTECTED_FIELDS = {"student", "course_offering", "is_active"}
+
+    @classmethod
+    def get_usage_summary(cls, enrollment: Enrollment | None) -> dict:
+        if not enrollment or not enrollment.pk:
+            return cls._empty_summary()
+        offering_id = enrollment.course_offering_id
+        student_id = enrollment.student_id
+        scores_count = StudentActivityScore.objects.filter(
+            activity__offering_id=offering_id,
+            student_id=student_id,
+        ).count()
+        period_grades_count = StudentPeriodGrade.objects.filter(
+            offering_id=offering_id,
+            student_id=student_id,
+        ).count()
+        final_grades_count = StudentFinalGrade.objects.filter(
+            offering_id=offering_id,
+            student_id=student_id,
+        ).count()
+        submissions_count = GradeSubmission.objects.filter(offering_id=offering_id).count()
+        correction_requests_count = GradeCorrectionRequest.objects.filter(
+            offering_id=offering_id,
+            items__student_id=student_id,
+        ).distinct().count()
+        reopen_requests_count = GradeSubmissionReopenRequest.objects.filter(offering_id=offering_id).count()
+        period_locks_count = GradingPeriodLock.objects.filter(course_offering_id=offering_id).count()
+        attendance_records_count = AttendanceRecord.objects.filter(
+            session__offering_id=offering_id,
+            student_id=student_id,
+        ).count()
+        total_dependent_records = (
+            scores_count
+            + period_grades_count
+            + final_grades_count
+            + submissions_count
+            + correction_requests_count
+            + reopen_requests_count
+            + period_locks_count
+            + attendance_records_count
+        )
+        return {
+            "scores_count": scores_count,
+            "period_grades_count": period_grades_count,
+            "final_grades_count": final_grades_count,
+            "submissions_count": submissions_count,
+            "correction_requests_count": correction_requests_count,
+            "reopen_requests_count": reopen_requests_count,
+            "period_locks_count": period_locks_count,
+            "attendance_count": attendance_records_count,
+            "total_dependent_records": total_dependent_records,
+            "is_in_use": total_dependent_records > 0,
+        }
+
+    @classmethod
+    def _empty_summary(cls) -> dict:
+        return {
+            "scores_count": 0,
+            "period_grades_count": 0,
+            "final_grades_count": 0,
+            "submissions_count": 0,
+            "correction_requests_count": 0,
+            "reopen_requests_count": 0,
+            "period_locks_count": 0,
+            "attendance_count": 0,
+            "total_dependent_records": 0,
+            "is_in_use": False,
+        }
+
+    @classmethod
+    def changed_protected_fields(cls, *, enrollment: Enrollment, cleaned_data: dict) -> list[str]:
+        if not enrollment or not enrollment.pk:
+            return []
+        original = Enrollment.objects.get(pk=enrollment.pk)
+        changed = []
+        for field_name in cls.PROTECTED_FIELDS:
+            if field_name not in cleaned_data:
+                continue
+            new_value = cleaned_data.get(field_name)
+            if hasattr(new_value, "pk"):
+                new_value = new_value.pk
+            original_value = getattr(original, f"{field_name}_id", getattr(original, field_name, None))
+            if original_value != new_value:
+                changed.append(field_name)
+        return sorted(changed)
+
+    @classmethod
+    def validate_changes_allowed(cls, *, enrollment: Enrollment, cleaned_data: dict):
+        changed = cls.changed_protected_fields(enrollment=enrollment, cleaned_data=cleaned_data)
+        if not changed:
+            return
+        usage = cls.get_usage_summary(enrollment)
+        if usage["is_in_use"]:
+            labels = ", ".join(field.replace("_", " ") for field in changed)
+            raise ValidationError(f"{cls.TRANSFER_BLOCK_MESSAGE} Blocked field(s): {labels}.")
+
+
+class CourseTemplateAssignmentSafetyService:
+    TEMPLATE_REPLACEMENT_BLOCK_MESSAGE = (
+        "This grading template assignment cannot be replaced because it is already in use. "
+        "Existing activities, scores, period grades, or submissions were created using the current template. "
+        "To use a different template, create a new assignment for a future term with no encoded grades, "
+        "or create a separate test course."
+    )
+
+    @classmethod
+    def affected_offerings_queryset(cls, assignment: CourseTemplateAssignment):
+        queryset = CourseOffering.objects.filter(course_id=assignment.course_id)
+        if assignment.effective_from_term_id:
+            return queryset.filter(term_id=assignment.effective_from_term_id)
+
+        exact_term_assignment_term_ids = (
+            CourseTemplateAssignment.objects.filter(
+                course_id=assignment.course_id,
+                effective_from_term__isnull=False,
+                is_active=True,
+                grading_template__is_active=True,
+                grading_template__is_published=True,
+            )
+            .exclude(id=assignment.id)
+            .values_list("effective_from_term_id", flat=True)
+        )
+        return queryset.exclude(term_id__in=exact_term_assignment_term_ids)
+
+    @classmethod
+    def get_usage_summary(cls, assignment: CourseTemplateAssignment) -> dict:
+        if not assignment or not assignment.pk:
+            return {
+                "offering_count": 0,
+                "activities_count": 0,
+                "scores_count": 0,
+                "period_grades_count": 0,
+                "final_grades_count": 0,
+                "submissions_count": 0,
+                "correction_requests_count": 0,
+                "period_locks_count": 0,
+                "total_dependent_records": 0,
+                "is_in_use": False,
+            }
+
+        offering_ids = list(cls.affected_offerings_queryset(assignment).values_list("id", flat=True))
+        if not offering_ids:
+            return {
+                "offering_count": 0,
+                "activities_count": 0,
+                "scores_count": 0,
+                "period_grades_count": 0,
+                "final_grades_count": 0,
+                "submissions_count": 0,
+                "correction_requests_count": 0,
+                "period_locks_count": 0,
+                "total_dependent_records": 0,
+                "is_in_use": False,
+            }
+
+        activities_count = GradeActivity.objects.filter(offering_id__in=offering_ids).count()
+        scores_count = StudentActivityScore.objects.filter(activity__offering_id__in=offering_ids).count()
+        period_grades_count = StudentPeriodGrade.objects.filter(offering_id__in=offering_ids).count()
+        final_grades_count = StudentFinalGrade.objects.filter(offering_id__in=offering_ids).count()
+        submissions_count = GradeSubmission.objects.filter(offering_id__in=offering_ids).count()
+        correction_requests_count = GradeCorrectionRequest.objects.filter(offering_id__in=offering_ids).count()
+        period_locks_count = GradingPeriodLock.objects.filter(course_offering_id__in=offering_ids).count()
+        total_dependent_records = (
+            activities_count
+            + scores_count
+            + period_grades_count
+            + final_grades_count
+            + submissions_count
+            + correction_requests_count
+            + period_locks_count
+        )
+        return {
+            "offering_count": len(offering_ids),
+            "activities_count": activities_count,
+            "scores_count": scores_count,
+            "period_grades_count": period_grades_count,
+            "final_grades_count": final_grades_count,
+            "submissions_count": submissions_count,
+            "correction_requests_count": correction_requests_count,
+            "period_locks_count": period_locks_count,
+            "total_dependent_records": total_dependent_records,
+            "is_in_use": total_dependent_records > 0,
+        }
+
+    @classmethod
+    def is_in_use(cls, assignment: CourseTemplateAssignment) -> bool:
+        return bool(cls.get_usage_summary(assignment)["is_in_use"])
+
+    @classmethod
+    def validate_template_replacement_allowed(cls, *, assignment: CourseTemplateAssignment, new_template: GradingTemplate):
+        if not assignment or not assignment.pk or not new_template:
+            return
+        if assignment.grading_template_id == new_template.id:
+            return
+        if cls.is_in_use(assignment):
+            raise ValidationError(cls.TEMPLATE_REPLACEMENT_BLOCK_MESSAGE)
 
 
 class GradingTemplateService:
@@ -1598,6 +1925,12 @@ class TemplateGovernanceWorkflowService:
 
     @classmethod
     def user_can_take_approval_step(cls, *, template, actor):
+        if not GradingTemplateAccessService.user_can_govern_grading_template(
+            actor,
+            template,
+            permission_code="grading_templates.approve",
+        ):
+            return False
         step = cls.get_current_approval_step(template=template)
         if not step:
             return False
@@ -1625,6 +1958,12 @@ class TemplateGovernanceWorkflowService:
 
     @classmethod
     def ensure_can_review_template(cls, *, template, actor):
+        if not GradingTemplateAccessService.user_can_govern_grading_template(
+            actor,
+            template,
+            permission_code="grading_templates.approve",
+        ):
+            raise ValidationError("You do not have permission or department access to review this grading template.")
         step = cls.get_current_approval_step(template=template)
         if not step:
             raise ValidationError("There is no pending approval step for this template.")
@@ -1653,6 +1992,12 @@ class TemplateGovernanceWorkflowService:
 
     @classmethod
     def ensure_can_publish_template(cls, *, template, actor):
+        if not GradingTemplateAccessService.user_can_govern_grading_template(
+            actor,
+            template,
+            permission_code="grading_templates.publish",
+        ):
+            raise ValidationError("You do not have permission or department access to publish this grading template.")
         cls.ensure_user_can_perform_stage(
             user=actor,
             stage_code=cls.STAGE_PUBLISH,
@@ -1667,6 +2012,12 @@ class TemplateGovernanceWorkflowService:
 
     @classmethod
     def ensure_can_apply_hotfix(cls, *, hotfix_request: TemplateHotfixRequest, actor):
+        if not GradingTemplateAccessService.user_can_govern_grading_template(
+            actor,
+            hotfix_request.template,
+            permission_code="template_hotfixes.review",
+        ):
+            raise ValidationError("You do not have permission or department access to review this template hotfix.")
         step = cls.get_current_hotfix_step(hotfix_request=hotfix_request)
         if not step:
             raise ValidationError("There is no pending hotfix workflow step for this request.")
@@ -1700,6 +2051,12 @@ class TemplateGovernanceWorkflowService:
 
     @classmethod
     def user_can_take_hotfix_step(cls, *, hotfix_request, actor):
+        if not GradingTemplateAccessService.user_can_govern_grading_template(
+            actor,
+            hotfix_request.template,
+            permission_code="template_hotfixes.review",
+        ):
+            return False
         step = cls.get_current_hotfix_step(hotfix_request=hotfix_request)
         if not step:
             return False
@@ -1794,6 +2151,100 @@ class TemplateGovernanceWorkflowService:
             "approval_steps": cls.get_approval_step_definitions(tenant_id=tenant_id),
             "hotfix_steps": cls.get_hotfix_step_definitions(tenant_id=tenant_id),
         }
+
+
+class GradeEncodingAccessService:
+    BLOCK_MESSAGE = "Grade encoding is temporarily disabled."
+
+    @staticmethod
+    def _normalize_period_code(value: str | None) -> str:
+        return (value or "").strip().upper()
+
+    @classmethod
+    def applicable_controls_queryset(cls, *, offering: CourseOffering, template_period: GradingTemplatePeriod | None):
+        period_code = cls._normalize_period_code(getattr(template_period, "code", None))
+        return (
+            GradeEncodingControl.objects.filter(
+                tenant_id=offering.tenant_id,
+                academic_year_id=offering.academic_year_id,
+                term_id=offering.term_id,
+                is_active=True,
+            )
+            .filter(
+                Q(period_code__isnull=True) | Q(period_code="") | Q(period_code__iexact=period_code),
+                Q(campus__isnull=True) | Q(campus_id=offering.campus_id),
+                Q(course_offering__isnull=True) | Q(course_offering_id=offering.id),
+            )
+            .select_related(
+                "tenant",
+                "academic_year",
+                "term",
+                "campus",
+                "course_offering__course",
+                "course_offering__section",
+            )
+        )
+
+    @classmethod
+    def applicable_controls(cls, *, offering: CourseOffering, template_period: GradingTemplatePeriod | None):
+        controls = list(cls.applicable_controls_queryset(offering=offering, template_period=template_period))
+        controls.sort(
+            key=lambda row: (
+                1 if row.course_offering_id else 0,
+                1 if row.campus_id else 0,
+                1 if row.period_code else 0,
+                row.updated_at,
+            ),
+            reverse=True,
+        )
+        return controls
+
+    @classmethod
+    def get_closed_control(cls, *, offering: CourseOffering, template_period: GradingTemplatePeriod | None):
+        for control in cls.applicable_controls(offering=offering, template_period=template_period):
+            if control.status == GradeEncodingControl.Status.CLOSED:
+                return control
+        return None
+
+    @classmethod
+    def is_encoding_allowed(cls, *, offering: CourseOffering, template_period: GradingTemplatePeriod | None) -> bool:
+        return cls.get_closed_control(offering=offering, template_period=template_period) is None
+
+    @classmethod
+    def build_block_notice(cls, control: GradeEncodingControl | None, *, offering=None, template_period=None) -> str:
+        if not control:
+            return ""
+        scope_parts = [control.academic_year.code, control.term.code]
+        if control.period_code:
+            scope_parts.append(control.period_code)
+        if control.campus_id:
+            scope_parts.append(control.campus.code)
+        if control.course_offering_id:
+            course = getattr(control.course_offering, "course", None)
+            section = getattr(control.course_offering, "section", None)
+            course_label = getattr(course, "code", "") or str(control.course_offering_id)
+            section_label = getattr(section, "code", "") or getattr(section, "name", "")
+            scope_parts.append(f"{course_label} {section_label}".strip())
+        message = f"{cls.BLOCK_MESSAGE} Scope: {' / '.join(part for part in scope_parts if part)}."
+        reason = (control.reason or "").strip()
+        notice = (control.notice_to_faculty or "").strip()
+        if reason:
+            message = f"{message} Reason: {reason}."
+        if notice:
+            message = f"{message} {notice}"
+        return message
+
+    @classmethod
+    def get_encoding_block_reason(cls, *, offering: CourseOffering, template_period: GradingTemplatePeriod | None):
+        control = cls.get_closed_control(offering=offering, template_period=template_period)
+        return cls.build_block_notice(control, offering=offering, template_period=template_period)
+
+    @classmethod
+    def assert_encoding_allowed(cls, *, offering: CourseOffering, template_period: GradingTemplatePeriod | None):
+        control = cls.get_closed_control(offering=offering, template_period=template_period)
+        if control:
+            raise ValidationError(cls.build_block_notice(control, offering=offering, template_period=template_period))
+        return True
 
 
 class GradingGovernanceService:
@@ -3114,12 +3565,24 @@ class GradingGovernanceService:
         is_locked = cls.is_locked(offering=offering, template_period=template_period)
         is_submitted = cls.is_submitted(offering=offering, template_period=template_period)
         is_auto_closed = cls.is_auto_closed_after_deadline(offering=offering, template_period=template_period)
+        encoding_control_closed = GradeEncodingAccessService.get_closed_control(
+            offering=offering,
+            template_period=template_period,
+        )
         has_approved_deadline_reopen = bool(
             cls.get_active_approved_reopen_request(offering=offering, template_period=template_period)
         )
-        if has_approved_deadline_reopen and not is_submitted:
+        if has_approved_deadline_reopen and not is_submitted and not encoding_control_closed:
             return True
         if not is_locked and not is_submitted:
+            if encoding_control_closed:
+                raise ValidationError(
+                    GradeEncodingAccessService.build_block_notice(
+                        encoding_control_closed,
+                        offering=offering,
+                        template_period=template_period,
+                    )
+                )
             if is_auto_closed:
                 raise ValidationError(
                     f"{template_period.code} encoding is closed after the configured deadline. Request gradebook reopen."
@@ -3135,6 +3598,14 @@ class GradingGovernanceService:
                 requested_action=requested_action,
             )
             if allowed:
+                if encoding_control_closed:
+                    raise ValidationError(
+                        GradeEncodingAccessService.build_block_notice(
+                            encoding_control_closed,
+                            offering=offering,
+                            template_period=template_period,
+                        )
+                    )
                 return True
 
         if is_locked:
@@ -4703,6 +5174,8 @@ class FacultyGradingService:
                             "name": sub.name,
                             "weight": sub.weight_percentage,
                             "score": sub_score,
+                            "detail_computation_mode": sub.detail_computation_mode,
+                            "detail_computation_mode_label": sub.get_detail_computation_mode_display(),
                             "is_attendance_component": sub.is_attendance_component,
                             "details": detail_breakdown,
                             "activities": sub_activity_rows,

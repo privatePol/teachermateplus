@@ -219,6 +219,8 @@ class GradingTemplateCalculatorViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Participation/Output")
+        self.assertContains(response, "Recitation = 40.00%")
+        self.assertContains(response, "configured weight; reference only")
         self.assertContains(response, "Final Grade")
 
     def test_post_calculator_computes_periods_and_final_grade(self):

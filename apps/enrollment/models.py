@@ -56,3 +56,60 @@ class Enrollment(TimeStampedModel, ActivatableModel):
 
     def __str__(self):
         return f"{self.course_offering_id}:{self.student.student_no}"
+
+
+class EnrollmentAdjustmentLog(TimeStampedModel):
+    class Result(models.TextChoices):
+        COMPLETED = "completed", "Completed"
+        COMPLETED_WITH_WARNING = "completed_with_warning", "Completed with Warning"
+        BLOCKED = "blocked", "Blocked"
+        FAILED = "failed", "Failed"
+
+    student = models.ForeignKey(
+        "students.Student",
+        on_delete=models.PROTECT,
+        related_name="enrollment_adjustment_logs",
+    )
+    source_offering = models.ForeignKey(
+        "academics.CourseOffering",
+        on_delete=models.PROTECT,
+        related_name="source_enrollment_adjustment_logs",
+    )
+    destination_offering = models.ForeignKey(
+        "academics.CourseOffering",
+        on_delete=models.PROTECT,
+        related_name="destination_enrollment_adjustment_logs",
+    )
+    source_enrollment_id = models.PositiveBigIntegerField(blank=True, null=True)
+    destination_enrollment_id = models.PositiveBigIntegerField(blank=True, null=True)
+    source_previous_is_active = models.BooleanField(blank=True, null=True)
+    source_previous_status = models.CharField(max_length=16, blank=True, null=True)
+    destination_is_active = models.BooleanField(blank=True, null=True)
+    destination_status = models.CharField(max_length=16, blank=True, null=True)
+    batch_reference = models.CharField(max_length=40, blank=True, null=True)
+    reason = models.TextField()
+    processed_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="processed_enrollment_adjustments",
+    )
+    processed_at = models.DateTimeField()
+    result = models.CharField(max_length=32, choices=Result.choices)
+    warning_flags = models.JSONField(default=list, blank=True)
+    impact_snapshot = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "enrollment_adjustment_logs"
+        ordering = ["-processed_at", "-id"]
+        indexes = [
+            models.Index(fields=["source_offering", "processed_at"], name="idx_enradj_source_time"),
+            models.Index(fields=["destination_offering", "processed_at"], name="idx_enradj_dest_time"),
+            models.Index(fields=["student", "processed_at"], name="idx_enradj_student_time"),
+            models.Index(fields=["result", "processed_at"], name="idx_enradj_result_time"),
+            models.Index(fields=["batch_reference"], name="idx_enradj_batch_ref"),
+        ]
+
+    def __str__(self):
+        return f"{self.student_id}:{self.source_offering_id}->{self.destination_offering_id}:{self.result}"

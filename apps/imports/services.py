@@ -28,6 +28,56 @@ User = get_user_model()
 
 
 class ImportTemplateService:
+    COMMON_SAFETY_MEASURES = [
+        "Uploading a CSV only validates and stages the file. It does not create or change operational records.",
+        "TeacherMate+ checks the official headers, required references, tenant/campus scope, field formats, and duplicate rows before confirmation.",
+        "Only rows marked VALID are eligible when Confirm Import is clicked. Rows marked ERROR are not imported.",
+        "Each valid row is saved in its own protected database transaction. A failed row is rolled back without undoing other successful rows.",
+        "Every successful imported row and the batch confirmation are recorded in the audit trail.",
+        "A batch that is already confirmed cannot be confirmed again.",
+    ]
+
+    IMPORT_SAFETY_RULES = {
+        ImportBatch.ImportType.SECTIONS: {
+            "duplicate_rule": "Existing sections and repeated section rows are skipped instead of being created again.",
+            "change_warning": "This importer creates missing sections only. It does not update an existing section.",
+        },
+        ImportBatch.ImportType.COURSES: {
+            "duplicate_rule": "An existing course code for the same tenant is rejected as a duplicate.",
+            "change_warning": "This importer creates courses only. Edit an existing course through the Admin Portal.",
+        },
+        ImportBatch.ImportType.STUDENTS: {
+            "duplicate_rule": (
+                "CREATE rejects an existing student number; UPDATE requires an existing student; "
+                "UPSERT updates an existing student or creates a missing student."
+            ),
+            "change_warning": (
+                "UPDATE and UPSERT can intentionally change existing student information. "
+                "Review row_action and the staged rows carefully before confirmation."
+            ),
+        },
+        ImportBatch.ImportType.COURSE_OFFERINGS: {
+            "duplicate_rule": (
+                "An existing tenant/campus/department/term/course/section offering is rejected as a duplicate."
+            ),
+            "change_warning": (
+                "This importer creates course offerings only. Re-uploading existing offerings does not update "
+                "their room, schedule, status, or other details."
+            ),
+        },
+        ImportBatch.ImportType.FACULTY_ASSIGNMENTS: {
+            "duplicate_rule": "An existing assignment for the same offering and faculty user is rejected.",
+            "change_warning": "This importer creates faculty assignments only. It does not replace an existing assignment.",
+        },
+        ImportBatch.ImportType.ENROLLMENT: {
+            "duplicate_rule": "An existing enrollment for the same student and course offering is rejected.",
+            "change_warning": (
+                "When the tenant uses AUTO_CREATE, confirming the batch may create a missing student from the CSV. "
+                "STRICT_EXISTING never creates a missing student."
+            ),
+        },
+    }
+
     TEMPLATES = {
         ImportBatch.ImportType.SECTIONS: {
             "headers": [
@@ -94,7 +144,7 @@ class ImportTemplateService:
                 "MAIN",
                 "COLLEGE",
                 "BSIT",
-                "AY2526",
+                "2025-2026",
                 "1ST",
                 "IT101",
                 "BSIT-1A",
@@ -153,7 +203,7 @@ class ImportTemplateService:
             "sample_row": [
                 "DEMO",
                 "MAIN",
-                "AY2526",
+                "2025-2026",
                 "1ST",
                 "IT101",
                 "BSIT-1A",
@@ -180,7 +230,7 @@ class ImportTemplateService:
             "sample_row": [
                 "DEMO",
                 "MAIN",
-                "AY2526",
+                "2025-2026",
                 "1ST",
                 "20250001",
                 "DELA CRUZ",
@@ -221,7 +271,7 @@ class ImportTemplateService:
                 "course_code and section_code must already exist in master tables",
             ],
             "code_rules": [
-                "academic_year_code: use AY Code from Academic Years (e.g. AY2526) or exact AY Name if configured",
+                "academic_year_code: use the exact active Code shown in Admin Portal -> Academic Years (for example, 2025-2026)",
                 "term_code: use Term Code from Terms (e.g. 1ST, 2ND)",
                 "course_code: must match Courses.code",
                 "section_code: must match Sections.code",
@@ -302,6 +352,16 @@ class ImportTemplateService:
             "headers": cls.get_headers(import_type),
             "sample_row": cls.get_sample_row(import_type),
             "guide": cls.REFERENCE_GUIDES.get(import_type, {}),
+            "safety": cls.get_safety_guidance(import_type),
+        }
+
+    @classmethod
+    def get_safety_guidance(cls, import_type: str) -> dict:
+        if import_type not in cls.TEMPLATES:
+            raise ValidationError("Unsupported import type.")
+        return {
+            "common_measures": list(cls.COMMON_SAFETY_MEASURES),
+            **cls.IMPORT_SAFETY_RULES.get(import_type, {}),
         }
 
     @classmethod
@@ -432,6 +492,7 @@ class BulkImportService:
             "department_cache": {},
             "program_cache": {},
             "academic_year_cache": {},
+            "academic_year_code_options_cache": {},
             "term_cache": {},
             "course_cache": {},
             "section_cache": {},
@@ -678,7 +739,22 @@ class BulkImportService:
             runtime["academic_year_cache"][key] = academic_year
         academic_year = runtime["academic_year_cache"][key]
         if not academic_year:
-            errors.append(f"academic_year_code '{academic_year_code}' not found for tenant '{tenant.code}'.")
+            if tenant.id not in runtime["academic_year_code_options_cache"]:
+                runtime["academic_year_code_options_cache"][tenant.id] = list(
+                    AcademicYear.objects.filter(tenant=tenant, is_active=True)
+                    .order_by("-start_date", "code")
+                    .values_list("code", flat=True)[:10]
+                )
+            available_codes = runtime["academic_year_code_options_cache"][tenant.id]
+            available_text = (
+                f" Available active codes: {', '.join(available_codes)}."
+                if available_codes
+                else " No active Academic Year is configured for this tenant."
+            )
+            errors.append(
+                f"academic_year_code '{academic_year_code}' not found for tenant '{tenant.code}'."
+                f"{available_text}"
+            )
             return None
         return academic_year
 

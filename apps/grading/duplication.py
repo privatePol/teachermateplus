@@ -43,6 +43,7 @@ class GradingTemplateDuplicationService:
             description=source.description,
             default_base_value=source.default_base_value,
             passing_grade_threshold=source.passing_grade_threshold,
+            department_visibility=source.department_visibility,
             approval_status=GradingTemplate.ApprovalStatus.DRAFT,
             approval_requested_by=None,
             approval_requested_at=None,
@@ -54,6 +55,7 @@ class GradingTemplateDuplicationService:
             published_by=None,
             is_active=True,
         )
+        duplicate.visible_departments.set(source.visible_departments.all())
 
         counts = {"periods": 0, "components": 0, "subcomponents": 0, "details": 0}
         periods = source.periods.all().order_by("sequence_no", "id")

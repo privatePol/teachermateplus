@@ -86,6 +86,19 @@
   .faculty-help-feature-label { display: inline-block; margin-bottom: .45rem; padding: .25rem .5rem; border-radius: 999px; color: #163f27; background: #dff2b6; font-size: .75rem; font-weight: 800; }
   .faculty-help-phase { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .65rem; }
   .faculty-help-phase span { padding: .28rem .5rem; border-radius: 999px; color: #fff; background: #276f43; font-size: .76rem; font-weight: 700; }
+  .faculty-help-topic-title-row { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .85rem 1rem; color: #fff; background: var(--help-deep-green); border-bottom: 3px solid var(--help-neon); }
+  .faculty-help-topic-title-row h3 { margin: 0; padding: 0; background: transparent; border-bottom: 0; }
+  .faculty-help-shot-btn { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.72); border-radius: 999px; color: #fff; background: rgba(255,255,255,.12); width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; font-weight: 900; line-height: 1; }
+  .faculty-help-shot-btn:hover { color: #123f28; background: #fff; }
+  .faculty-help-howto { margin: 0 0 1rem; border: 1px solid #d8c86c; border-left: 5px solid var(--help-gold); border-radius: 7px; padding: .85rem 1rem; background: #fff9df; color: #564819; }
+  .faculty-help-howto h4 { margin: 0 0 .45rem; color: #4e4218; font-size: .94rem; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
+  .faculty-help-howto ol { margin: 0; padding-left: 1.25rem; }
+  .faculty-help-howto li { margin: .2rem 0; }
+  .faculty-help-workflow-card { border: 1px solid #bcd0c1; border-radius: 8px; overflow: hidden; box-shadow: 0 8px 18px rgba(18,63,40,.06); }
+  .faculty-help-workflow-card + .faculty-help-workflow-card { margin-top: .75rem; }
+  .faculty-help-workflow-card .accordion-body { background: #fff; }
+  .faculty-help-semester-img { display: block; max-width: 100%; height: auto; border: 1px solid #d7e2d9; border-radius: 8px; box-shadow: 0 10px 22px rgba(18,63,40,.08); }
+  .faculty-help-modal-img { display: block; max-width: 100%; height: auto; border: 1px solid #d7e2d9; border-radius: 8px; }
   @media (max-width: 800px) {
     .faculty-help-hero-row { flex-direction: column; }
     .faculty-help-hero-actions { justify-content: flex-start; }
@@ -120,37 +133,54 @@
   </header>
 
   <nav class="faculty-help-nav" aria-label="Faculty help topics">
-    <a href="#guide-workflow">Start Here</a>
-    <a href="#faculty-help-top-tasks">Top Tasks</a>
+    <a href="#guide-semester-workflow">Semester Workflow</a>
+    <a href="#guide-workflow">Daily Workflow</a>
     {% for section in help_sections %}
     <a href="#faculty-help-{{ section.code }}" data-help-collapse="#faculty-help-collapse-{{ section.code }}">{{ section.title }}</a>
     {% endfor %}
   </nav>
 
-  <section class="faculty-help-visual" id="guide-workflow" aria-labelledby="faculty-workflow-title">
-    <div class="faculty-help-visual-copy">
-      <h2 id="faculty-workflow-title">Start Here: Daily Faculty Workflow</h2>
-      <p>Follow these six steps for each class and grading period. The most important habit is to review the Summary before final submission.</p>
-    </div>
-    <figure>
-      <img src="{% get_media_prefix %}imahe/faculty_workflow.png" alt="Six-step recommended faculty workflow from opening My Classes through final grade submission">
-      <figcaption>
-        Blank score fields remain missing until a value is saved. Submit only after checking the activity setup, encoded scores,
-        attendance, class-list status, and computed Summary.
-      </figcaption>
-    </figure>
-  </section>
+  <div class="accordion faculty-help-accordion my-3" id="facultyWorkflowAccordion">
+    <section class="accordion-item faculty-help-workflow-card" id="guide-semester-workflow">
+      <h2 class="accordion-header" id="faculty-semester-workflow-heading">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faculty-semester-workflow-collapse" aria-expanded="false" aria-controls="faculty-semester-workflow-collapse">
+          Semester Faculty Workflow
+        </button>
+      </h2>
+      <div id="faculty-semester-workflow-collapse" class="accordion-collapse collapse" aria-labelledby="faculty-semester-workflow-heading">
+        <div class="accordion-body">
+          <figure class="mb-0">
+            <img class="faculty-help-semester-img" src="{% get_media_prefix %}portal-img/semester_workflow.png" alt="Semester faculty workflow from class checking through final submission and clearance">
+            <figcaption>
+              Use this semester workflow as the big-picture guide, then follow the detailed daily workflow for each class and grading period.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
 
-  <section class="faculty-help-tasks" id="faculty-help-top-tasks" aria-labelledby="faculty-help-top-tasks-title">
-    <h2 id="faculty-help-top-tasks-title">Top Faculty Tasks</h2>
-    <p>Use this short sequence when you need to get back to work quickly.</p>
-    <div class="faculty-help-task-grid">
-      <div class="faculty-help-task"><span class="faculty-help-task-number">1</span><span>Open My Classes</span></div>
-      <div class="faculty-help-task"><span class="faculty-help-task-number">2</span><span>Continue encoding scores</span></div>
-      <div class="faculty-help-task"><span class="faculty-help-task-number">3</span><span>Check pending grade issues</span></div>
-      <div class="faculty-help-task"><span class="faculty-help-task-number">4</span><span>Review computed grades</span></div>
-      <div class="faculty-help-task"><span class="faculty-help-task-number">5</span><span>Submit grades when complete</span></div>
-      <div class="faculty-help-task"><span class="faculty-help-task-number">6</span><span>Open Student Consultation View for one student</span></div>
+    <section class="accordion-item faculty-help-workflow-card" id="guide-workflow">
+      <h2 class="accordion-header" id="faculty-workflow-heading">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#faculty-workflow-collapse" aria-expanded="false" aria-controls="faculty-workflow-collapse">
+          Daily Faculty Workflow
+        </button>
+      </h2>
+      <div id="faculty-workflow-collapse" class="accordion-collapse collapse" aria-labelledby="faculty-workflow-heading">
+        <div class="accordion-body">
+          <div class="faculty-help-visual-copy">
+            <p>Follow these steps for each class and grading period. The most important habit is to review the Summary before final submission.</p>
+          </div>
+          <figure class="mb-0">
+            <img src="{% get_media_prefix %}imahe/faculty_workflow.png" alt="Six-step recommended faculty workflow from opening My Classes through final grade submission">
+            <figcaption>
+              Blank score fields remain missing until a value is saved. Submit only after checking the activity setup, encoded scores,
+              attendance, class-list status, and computed Summary.
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+  </div>
     </div>
   </section>
 
@@ -188,8 +218,32 @@
           {% if topic.code == "attendance" %}<span id="guide-attendance-summary"></span>{% endif %}
           {% if topic.code == "support-security" %}<span id="guide-privacy"></span>{% endif %}
           <article class="faculty-help-topic" id="guide-{{ topic.code }}">
-            <h3>{{ topic.title }}</h3>
+            <div class="faculty-help-topic-title-row">
+              <h3>{{ topic.title }}</h3>
+              {% if topic.screenshot %}
+              <button
+                class="faculty-help-shot-btn"
+                type="button"
+                data-bs-toggle="modal"
+                data-bs-target="#facultyHelpImageModal"
+                data-help-image-src="{% get_media_prefix %}{{ topic.screenshot }}"
+                data-help-image-title="{{ topic.title }}"
+                aria-label="View screenshot for {{ topic.title }}"
+                title="View screenshot"
+              >&#128247;</button>
+              {% endif %}
+            </div>
             <div class="faculty-help-body">
+              {% if topic.how_to_open %}
+              <section class="faculty-help-howto">
+                <h4>How to open</h4>
+                <ol>
+                  {% for step in topic.how_to_open %}
+                  <li>{{ step }}</li>
+                  {% endfor %}
+                </ol>
+              </section>
+              {% endif %}
               <div class="faculty-help-grid">
                 <section class="faculty-help-block">
                   <h4>What is this page for?</h4>
@@ -279,6 +333,21 @@
     {% endfor %}
   </div>
 </main>
+
+<div class="modal fade" id="facultyHelpImageModal" tabindex="-1" aria-labelledby="facultyHelpImageModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title fs-5" id="facultyHelpImageModalLabel">Faculty guide screenshot</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <img class="faculty-help-modal-img" id="facultyHelpImageModalImg" src="" alt="">
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     function openHelpSection(targetSelector, scrollTarget) {
@@ -297,6 +366,23 @@
         openHelpSection(link.dataset.helpCollapse);
       });
     });
+
+    const imageModal = document.getElementById("facultyHelpImageModal");
+    if (imageModal) {
+      imageModal.addEventListener("show.bs.modal", function (event) {
+        const trigger = event.relatedTarget;
+        if (!trigger) return;
+        const image = document.getElementById("facultyHelpImageModalImg");
+        const title = document.getElementById("facultyHelpImageModalLabel");
+        const imageTitle = trigger.getAttribute("data-help-image-title") || "Faculty guide screenshot";
+        const imageSrc = trigger.getAttribute("data-help-image-src") || "";
+        if (title) title.textContent = imageTitle;
+        if (image) {
+          image.src = imageSrc;
+          image.alt = imageTitle;
+        }
+      });
+    }
 
     if (window.location.hash) {
       const target = document.querySelector(window.location.hash);

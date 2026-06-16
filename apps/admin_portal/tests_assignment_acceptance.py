@@ -388,6 +388,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_assignment_first_reminder_days": 1,
                 "faculty_assignment_repeat_reminder_days": 1,
                 "submission_non_compliance_notice_interval_days": 1,
+                "grade_deadline_enforcement_policy": "AUTO_CLOSE_REQUIRES_REOPEN",
                 "grade_prediction_default_assumption": "IGNORE_MISSING",
             },
             follow=True,
@@ -426,6 +427,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_assignment_first_reminder_days": 1,
                 "faculty_assignment_repeat_reminder_days": 1,
                 "submission_non_compliance_notice_interval_days": 1,
+                "grade_deadline_enforcement_policy": "AUTO_CLOSE_REQUIRES_REOPEN",
                 "grade_prediction_default_assumption": "IGNORE_MISSING",
                 f"campus_recipient_{self.campus.id}": "",
             },
@@ -517,6 +519,9 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_assignment_first_reminder_days": "2",
                 "faculty_assignment_repeat_reminder_days": "1",
                 "submission_non_compliance_notice_interval_days": "1",
+                "submission_non_compliance_first_notice_after_days": "2",
+                "submission_non_compliance_level_interval_days": "2",
+                "submission_non_compliance_max_notice_count": "3",
                 "grade_prediction_enabled": "",
                 "grade_prediction_what_if_enabled": "",
                 "grade_prediction_at_risk_enabled": "",
@@ -549,6 +554,57 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertFalse(
             FeatureSettingsService.is_single_device_session_enforcement_enabled(tenant_id=self.tenant.id)
         )
+        self.assertEqual(
+            FeatureSettingsService.get_submission_non_compliance_first_notice_after_days(tenant_id=self.tenant.id),
+            2,
+        )
+        self.assertEqual(
+            FeatureSettingsService.get_submission_non_compliance_level_interval_days(tenant_id=self.tenant.id),
+            2,
+        )
+        self.assertEqual(
+            FeatureSettingsService.get_submission_non_compliance_max_notice_count(tenant_id=self.tenant.id),
+            3,
+        )
+
+    def test_configurable_features_rejects_invalid_non_compliance_notice_timing(self):
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            reverse("admin_portal:configurable_features_settings"),
+            {
+                "enrollment_ownership_mode": "ADMIN_ONLY",
+                "grade_deadline_enforcement_policy": "AUTO_CLOSE_REQUIRES_REOPEN",
+                "login_lockout_max_attempts": "5",
+                "login_lockout_window_minutes": "15",
+                "login_lockout_duration_minutes": "15",
+                "faculty_assignment_response_window_days": "5",
+                "faculty_assignment_first_reminder_days": "2",
+                "faculty_assignment_repeat_reminder_days": "1",
+                "submission_non_compliance_notice_interval_days": "1",
+                "submission_non_compliance_first_notice_after_days": "0",
+                "submission_non_compliance_level_interval_days": "0",
+                "submission_non_compliance_max_notice_count": "4",
+                "grade_prediction_default_assumption": "IGNORE_MISSING",
+                f"campus_recipient_{self.campus.id}": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response.context["form"],
+            "submission_non_compliance_first_notice_after_days",
+            "Ensure this value is greater than or equal to 1.",
+        )
+        self.assertFormError(
+            response.context["form"],
+            "submission_non_compliance_level_interval_days",
+            "Ensure this value is greater than or equal to 1.",
+        )
+        self.assertFormError(
+            response.context["form"],
+            "submission_non_compliance_max_notice_count",
+            "Ensure this value is less than or equal to 3.",
+        )
 
     def test_admin_can_enable_official_grade_release_to_faculty(self):
         self.client.force_login(self.admin_user)
@@ -563,6 +619,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_assignment_first_reminder_days": 1,
                 "faculty_assignment_repeat_reminder_days": 1,
                 "submission_non_compliance_notice_interval_days": 1,
+                "grade_deadline_enforcement_policy": "AUTO_CLOSE_REQUIRES_REOPEN",
                 "grade_prediction_default_assumption": "IGNORE_MISSING",
                 "faculty_official_period_grades_after_deadline": "on",
                 "faculty_official_period_grades_after_submission": "on",
@@ -583,6 +640,21 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         )
 
     def _build_final_clearance_fixture(self):
+        accepted_at = timezone.now()
+        for assignment, faculty_user in ((self.assignment, self.faculty_user),):
+            assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+            assignment.accepted_at = accepted_at
+            assignment.accepted_by = faculty_user
+            assignment.responded_at = accepted_at
+            assignment.save(
+                update_fields=[
+                    "response_status",
+                    "accepted_at",
+                    "accepted_by",
+                    "responded_at",
+                    "updated_at",
+                ]
+            )
         template = GradingTemplate.objects.create(
             tenant=self.tenant,
             code="GENED-TEMPLATE",
@@ -622,6 +694,10 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             offering=self.second_offering,
             faculty_user=self.faculty_user,
             is_primary=False,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=accepted_at,
+            accepted_by=self.faculty_user,
+            responded_at=accepted_at,
         )
 
         active_student_complete = Student.objects.create(
@@ -881,6 +957,20 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertContains(response, "No official NCBA faculty final clearance report matched")
 
     def test_faculty_final_clearance_marks_zero_active_students_as_incomplete(self):
+        accepted_at = timezone.now()
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.accepted_at = accepted_at
+        self.assignment.accepted_by = self.faculty_user
+        self.assignment.responded_at = accepted_at
+        self.assignment.save(
+            update_fields=[
+                "response_status",
+                "accepted_at",
+                "accepted_by",
+                "responded_at",
+                "updated_at",
+            ]
+        )
         template = GradingTemplate.objects.create(
             tenant=self.tenant,
             code="GENED-TEMPLATE-ZERO",
@@ -1103,6 +1193,15 @@ class AdminNonComplianceMonitorTests(TestCase):
             accepted_at=timezone.now(),
             accepted_by=self.faculty_user,
             response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+        )
+        faculty_role = Role.objects.create(code="FACULTY", name="Faculty", is_active=True)
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=faculty_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            is_active=True,
         )
         admin_role = Role.objects.create(code="CAMPUS_ADMIN", name="Campus Admin", is_active=True)
         for code, module, action in (

@@ -32,14 +32,126 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 - `Tools -> Configuration Management -> Student Portal` exposes the tenant-level Student Portal enable/disable toggle, student grade release toggles, and the attendance-detail visibility toggle. The portal default remains Off.
 
 ### Admin Portal
+- `Academics -> Faculty Assignments` now supports controlled faculty replacement within the existing assignment module:
+  - Users select current active assignment rows, open `Replace Faculty`, choose replacement faculty, replacement type, reason category, and remarks, then review impact counts before confirming.
+  - Replacement types are Permanent Replacement, Temporary Substitute, Secondary / Co-Faculty, Administrative Reassignment, and Wrong Faculty Assignment.
+  - Permanent, Administrative, and Wrong Faculty Assignment processing deactivates the old assignment and creates/reactivates the replacement assignment as primary. Temporary Substitute and Secondary / Co-Faculty keep the old assignment active and add/reactivate the new assignment as secondary.
+  - New replacement assignments follow the existing faculty acceptance workflow; replacement faculty must accept before opening the class in the Faculty Portal.
+  - Old faculty loses active access after permanent/administrative/wrong-assignment replacement because the old assignment is deactivated.
+  - The workflow is protected by `faculty_replacement.view` and `faculty_replacement.process`. Superadmin, Tenant Admin, Campus Admin, and Registrar get process by default; Area Chair, Dean, College Dean, and CAO are view-only unless explicitly granted process permission.
+  - `FacultyAssignmentReplacementLog` stores a batch reference, source/replacement faculty, offering, replacement type, reason category, remarks, processor, processed time, old/new assignment snapshots, and impact snapshot.
+  - Impact analysis counts active activities, scores, submissions, period grades, final grades, correction requests, reopen requests, and relevant course/campus grading locks.
+  - The replacement workflow does not rewrite activities, scores, attendance, submissions, period grades, final grades, correction requests, reopen requests, or locks. Historical authorship remains intact.
+  - Directly changing the faculty user or course offering on an in-use `FacultyAssignment` row is blocked. Admins should use the Replace Faculty workflow so the reason, warning, and audit trail are clear.
+- `Grading -> Grade Encoding Access Control` lets authorized academic/admin roles temporarily pause faculty grade encoding during enrollment or faculty-loading cleanup. Access requires `grading_encoding_control.manage`; data visibility is still scoped by the user's existing tenant, campus, and course-offering authorization.
+- Encoding controls are separate from official Period Locks and submission deadlines. Phase 1 supports Academic Year, Term, optional grading period code, optional Campus, and optional Course Offering. Department-level, course-code-level, and scheduled automation are future work.
+- A matching active `CLOSED` control blocks activity creation/edit/archive, score writes, attendance writes, and period submission through `GradingGovernanceService.assert_encoding_allowed()`. Any matching Closed control blocks encoding; a lower-scope Open control does not override a broader Closed control.
+- The gate is access-control only. It does not create, update, delete, recompute, unlock, submit, or migrate gradebook records.
+- Faculty dashboard uses a compact `Encoding Closed` status for affected class/period rows and does not repeat the full closure reason in the dashboard or Pending Grade Issues. Activities, Score Entry, Attendance, and Summary pages show the full closure reason and faculty notice, hide create/manage controls when encoding is closed, and blocked direct POST attempts return the faculty-facing closure notice after redirect. Faculty can still view assigned classes unless another existing rule already restricts access.
+- Faculty Portal Activities hides detail-weight presentation for subcomponents using `Average Activities`: detail dropdown options show only detail names, and the Activities table removes the `Detail Weight` column when those weights would only be reference values. Weighted Details still shows configured detail weights because those percentages affect computation.
+- Faculty Portal Summary `Period Snapshot` includes `Encoded Zero Scores`. This is an informational count of active saved activity-score records in the selected period where `raw_score = 0`. It reinforces the grading rule that zero is a valid encoded score and is not the same as blank/missing/no grade, and places the review beside the readiness cards before submission.
+- Faculty Portal Summary grade-table body rows use taller vertical padding to make the review table easier to scan before submission.
+- Faculty Portal authenticated pages show a floating `?` help button. It opens `/faculty/guide/` in a separate browser tab with `noopener noreferrer` so the faculty member does not lose the current gradebook or dashboard page.
+- `/faculty/guide/` is role-based and now starts with collapsed `Semester Faculty Workflow` and `Daily Faculty Workflow` accordions. The semester workflow uses `media/portal-img/semester_workflow.png`; the daily workflow continues to use `media/imahe/faculty_workflow.png`. The old `Top Faculty Tasks` strip was removed to reduce clutter. Detailed reference cards include practical `How to open` steps and screenshot modal buttons using images under `media/faculty_helpguide/` for My Classes, Dashboard, Activities, Score Encoding, Attendance, and Summary.
+- Faculty Portal no longer exposes an `Undo Acceptance` action after a faculty member accepts a course assignment. If an accepted load must be removed or corrected, the assigning admin or academic office must unassign or replace it through the Admin Portal Faculty Assignments workflow. Direct faculty POST attempts to the legacy undo URL are rejected and audited without changing assignment state.
+- `Grading -> Course Template Assignments` uses a consistent course-title then course-code order in its filter and all assignment/missing-template result views.
+- `Grading -> Course Template Assignments` now protects in-use course-template mappings. Replacing the assigned grading template is blocked when the affected course/term offerings already have gradebook-dependent records: GradeActivity, StudentActivityScore, StudentPeriodGrade, StudentFinalGrade, GradeSubmission, GradeCorrectionRequest, or course-offering GradingPeriodLock records. The edit page shows an `In use assignment` warning with counts. Safe alternatives are to assign the new template before faculty create activities/scores, create a future-term assignment, or create a separate test course. The safeguard does not change computations and does not migrate, delete, or alter existing activities, scores, submissions, locks, or grades.
+- Post-enrollment correction safety now protects course offerings and enrollments from unsafe edits after dependent records exist:
+  - `CourseOfferingSafetyService` treats an offering as in use when it has enrollments, faculty assignments, grade activities, student activity scores, period/final grades, submissions, correction requests, submission reopen requests, course-offering period locks, attendance sessions, or attendance records.
+  - In-use offerings block identity/scope/computation-field changes: tenant, campus, department, program, academic year, term, course, section, status, and active state. Safe room and schedule edits remain allowed.
+  - `EnrollmentSafetyService` treats an enrollment as in use when the student/offering has activity scores, period/final grades, submissions, correction requests, submission reopen requests, course-offering period locks, or attendance records.
+  - In-use enrollments block student changes, course-offering transfers, and active-state removal. Status-only updates such as ACTIVE to DRP/W/INC remain allowed when existing enrollment rules permit them.
+  - The Admin Portal Course Offering and Enrollment edit pages show warning panels with dependency counts. The same checks are also enforced in Django admin forms, so direct POST or alternate admin entry points cannot bypass the safety services.
+  - These safety checks do not change grade computation and do not create, update, delete, transfer, recompute, submit, reopen, or lock gradebook records. Grade Encoding Access Control remains the separate tool for temporarily pausing faculty writes during cleanup.
+  - Not yet implemented: Student Section Transfer Review Tool, Faculty Replacement Tool, Cancelled/Dissolved Class Workflow, and Post-Enrollment Change Log.
 - Security: users, roles, scoped permissions
+- Academic Year codes are stable external identifiers used by CSV imports and integrations. After an Academic Year is used by dependent academic records, its tenant and code are immutable through ordinary Django saves and the Admin edit form. The display name, dates, active state, and other non-identifier maintenance remain editable.
+- Audit Logs include a permission-protected Details page with changed-field comparison and full before/after payloads. Its Before, After, and Technical Metadata sections open by default. Credential-like values are redacted. New Academic Year audit events are explicitly scoped to the affected tenant.
+- Import validation requires the exact active Academic Year code. When a code is not found, the error lists available active codes for that tenant. Course offerings, courses, faculty assignments, and enrollments reject existing duplicates; sections skip existing records; student imports explicitly use CREATE, UPDATE, or UPSERT.
+- All bulk-import pages display safety guidance. Uploading only stages and validates; operational writes begin only after Confirm Import. Confirmation processes valid rows independently in per-row transactions, so a failed row rolls back without undoing successful rows. Successful row writes and batch confirmation are audited, and confirmed batches cannot be confirmed again. Importer-specific notices disclose whether duplicates are rejected or skipped and whether UPDATE/UPSERT or enrollment AUTO_CREATE can intentionally write additional data.
+- `Academic Performance Insights` is a configurable, read-only Admin Portal reporting area under Grading:
+  - Access requires `grading_analytics.read` and tenant setting `FEATURE_ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED`.
+  - The setting defaults Off and is editable only by a Django Superadmin on the Configurable Features page.
+  - Area Chairs see the active campus and their authorized department/course scope only.
+  - College Deans may use localized or cross-campus views only across assigned college/department scope.
+  - CAO users receive no automatic unrestricted visibility; existing tenant, campus, and department role assignments continue to define scope.
+  - Required broad-report filters are Academic Year, Term, and Grading Period.
+  - Phase 1 reports are Course Performance by Section, Activity Consistency, and Dean/CAO Campus Summary.
+  - Missing Outputs counts missing activity-score records only. Attendance is excluded and an encoded zero is not missing.
+  - Activity Consistency compares scoped sections with the same course code, academic year, term, and grading-period code. Count differences map to `Consistent` (0), `Minor Difference` (1), or `Needs Review` (2+); a required active component without an active activity is `Incomplete Setup`.
+  - All grade values are computed live through `FacultyPerformanceService`, which delegates student period computation to `FacultyGradingService.build_period_grade_detail_for_student()`.
+  - The reports create or update no grades, scores, attendance, submissions, locks, or analytics snapshots.
+  - Main reports remain aggregate-only: no student names, individual student grades, rankings, cross-faculty comparisons, or faculty-evaluation language.
+  - Visuals use lightweight CSS bars and exact-value table fallbacks. No chart library, external API, AI, or analytics table was added.
+  - Live report generation is capped at the first 100 authorized offerings; users should narrow filters when the warning appears.
+  - Approved performance statuses are `Normal`, `Needs Attention`, `High Risk`, and `Incomplete Data`.
+  - The main report includes a rule-based Needs Attention panel. It identifies incomplete or attention-needed sections using neutral wording and suggests a component/setup check without blaming faculty or students.
+  - CSS bars remain explanatory aids only: green represents class average, red represents at-risk count, and gray represents missing outputs. Exact values remain visible in the table.
+  - Section Performance Details includes What to Review, same-campus/department/course/period Comparison Context, Activity Setup Summary, Ready for Comparison, and a shortcut to the matching Activity Consistency report.
+  - Activity Setup is sorted by template component, subcomponent, activity date/title, and ID. Category totals use the actual template component/subcomponent labels.
+  - View Details uses a validated local `next` URL so Back to Report restores the originating Performance Insights or Activity Consistency filters and page. External return URLs are rejected.
+  - Activity comparison uses the active subcomponent/category label when available, falling back to the top-level component.
+  - Dean/CAO campus summaries are grouped by authorized campus and department and include courses needing attention.
+- Development/staging TEST data for Academic Performance Insights is available through:
+  - Seed: `python manage.py seed_academic_performance_insights_demo --confirm-demo-data --demo-password "<password>"`
+  - Cleanup: `python manage.py seed_academic_performance_insights_demo --confirm-demo-data --remove-demo-data`
+  - The command runs only when `DEBUG=True`; there is intentionally no production bypass.
+  - The seeder uses the tenant's configured active Academic Year and Term when both resolve successfully, allowing TEST faculty classes to appear as active in Faculty Portal. If no active scope is configured, it falls back to isolated `TEST-AY-2026 / TEST-TERM` records.
+  - It reuses the active NCBA Cubao, Fairview, and Taytay campuses and the official shared `A132-ITAPPS` and `A221-ACGN` courses without changing course names or assignments.
+  - It uses TEST-prefixed programs, sections, academic scope, grading template/profile, users, students, activities, and score remarks so reruns and cleanup remain deterministic.
+  - It creates one TEST Area Chair per campus, one cross-campus TEST College Dean, one scoped TEST CAO, and nine TEST faculty accounts named `test-faculty-01` through `test-faculty-09`. Demo users do not require a forced password change.
+  - `test-faculty-07`, `test-faculty-08`, and `test-faculty-09` each handle both target courses at Cubao, Fairview, and Taytay respectively. Their two classes each have three enrolled students with complete PRELIM through FINAL scores.
+  - The dedicated published TEST template contains PRELIM, MIDTERM, PRE-FINAL, and FINAL. Quizzes and Participation/Output use `Average Activities`; Participation/Output details are Recitation, Assignment/Activities, and Oral Presentation.
+  - Demo activities always use the template officially resolved for the offering. If an existing exact-term Course Template Assignment outranks the TEST profile, activities are attached to that operational template's periods without modifying the template itself. Period names are also matched so aliases such as `FX / FINAL` remain populated.
+  - Current seed size is 18 offerings, 138 synthetic students, 346 activities, and 2,616 saved scores. Counts are stable across repeated runs.
+  - The dataset deliberately produces all four academic performance statuses and all four activity consistency statuses. An encoded zero is included as a valid score, while selected records are left absent to test Missing Outputs.
+  - This command must never be run in production. Before promoting or copying a development database, remove the TEST dataset or exclude all TEST-prefixed records.
+- Grading templates support Admin-side Department Visibility:
+  - `All Departments` preserves existing tenant-wide visibility and is the default for existing templates.
+  - `Selected Departments` limits Admin list/detail/builder/calculator, maintenance, duplication, governance, hotfix, and template dropdown access to non-faculty users with an active role assignment covering one of the selected departments.
+  - Department matching follows the existing academic-unit hierarchy, so an active parent-department assignment covers active child departments.
+  - RBAC permission is still required; department membership does not grant an action by itself.
+  - Django superusers retain access to all templates.
+  - Central enforcement is provided by `GradingTemplateAccessService.get_user_active_department_ids()`, `filter_queryset_for_user()`, `user_can_access_grading_template()`, and `user_can_govern_grading_template()`.
+  - Hidden template IDs are rejected by form querysets and object querysets. Restricted template metadata is not exposed through Tenant Grading Profile period help text, Course Template Assignment warnings, coverage indicators, or governance queues.
+  - The `Visible Departments` multi-select identifies each option as `Campus Code - Campus Name | Department Code - Department Name`.
+  - No separate template AJAX/search endpoint currently exists; all current template selectors use server-rendered scoped querysets.
+  - This is an Admin visibility/governance control. It does not alter grade computation, existing course resolution, faculty score encoding, submitted grades, or locked gradebooks.
 - Admin guide navigation supports explicit views without changing tenant configuration:
   - `/admin-portal/guide/` follows the configured default and the practical guide links to `?view=full`.
   - `/admin-portal/guide/?view=full` opens the legacy/full Admin operations guide and links back to `?view=practical`.
   - `/admin-portal/guide/?view=practical` explicitly opens the permission-filtered practical guide.
   - The full guide continues to hide its Production Incident Response section unless the user is a Superadmin or Django superuser.
-- The active role-based Admin Help Guide at `/admin-portal/guide/` now provides exact sidebar menu paths and numbered opening/usage steps instead of concept-only descriptions. Grade Formula Setup begins at `Grading -> Grading Templates` and walks through `Add Template`, `Builder`, periods, components, subcomponents, details, `Average Activities`, testing, approval, and publication.
-- Published-template hotfix guidance is a separate permission-filtered Admin Help Guide topic. Only users with effective `template_hotfixes.read`, `template_hotfixes.create`, or `template_hotfixes.review` access see it. The guide explains request scope, apply modes, impact preview, configured review/final-apply stages, skipped submitted offerings, and the Correction of Grades boundary.
+- The active role-based Admin Portal Practical Guide at `/admin-portal/guide/` provides exact sidebar menu paths and numbered opening/usage steps instead of concept-only descriptions. Grade Formula Setup begins at `Grading -> Grading Templates` and walks through `Add Template`, `Builder`, periods, components, subcomponents, details, `Average Activities`, testing, approval, and publication.
+- The Admin Portal Practical Guide uses Bootstrap 5 accordion groups consistent with the Faculty Help Guide. Its scope notice and three-step usage overview remain visible, the first available group opens by default, later permission-filtered groups are collapsed, and existing shortcut/deep-link hashes open the correct owning group.
+- Admin Practical Guide action tables use deep-green headers, green/cream row banding, highlighted editability cells, hover feedback, stronger borders, and horizontal scrolling on narrow screens. No new frontend dependency or backend behavior was introduced.
+- Authorized grading administrators can open the dedicated Grading Template Setup Guide at `/admin-portal/guide/grading-template-setup/`. It is linked from both Admin guide versions and the main template/profile/base-override work pages, and requires `grading_templates.read`.
+- The Grading Template Setup Guide is written for non-technical academic administrators. Its eight sections use short steps and practical examples while preserving the actual grading rules. It explains:
+  - a MIDTERM -> Class Standing -> Participation/Output -> detail example
+  - Raw Score Base-50 using a 42/50 quiz example
+  - Direct Percentage as an approved already-final percentage
+  - Weighted Details as separate detail percentages totaling 100%
+  - Average Activities as equal averaging of active faculty-created activities
+  - the Participation/Output readiness rule, including valid zero scores and unused detail rows
+  - when a scoped Tenant Grading Profile is needed
+  - when a course-specific Base value exception is appropriate.
+- The setup guide documents the actual template hierarchy and decision rules:
+  - component weights describe contribution to a period
+  - subcomponent weights describe contribution to a component and still apply under `Average Activities`
+  - detail weights apply in `Weighted Details` but are ignored by `Average Activities`
+  - the required detail-weight form field should still contain a clean equal distribution for administrative clarity when averaging is selected
+  - Tenant Grading Profiles are created for distinct scope/formula rules, not automatically one per template
+  - the primary Tenant Grading Profile purpose is to control how period grades become the official final grade for the matched scope and term type
+  - when no active profile matches, final-grade computation falls back to averaging every active period in the resolved published template
+  - identical 1st/2nd Semester structures may share one four-period Regular template, while a three-period Summer term should use a separate Summer template so `Average All Active Template Periods` uses only Midterm, Pre-Final, and Final
+  - Base-50 resolution precedence is Course Base Override, matching Tenant Grading Profile, Course default, Template default, then system default 50.
+- Configured detail-item weight percentages are displayed throughout the relevant Admin and Faculty workflows:
+  - Admin detail maintenance, Template Builder, structure preview, test calculator, correction review/on-behalf correction, and detail-level analytics
+  - Faculty grading-template preview, activity selection/list, score entry, Summary detail headers, grade explanation, selected-student consultation, and correction requests
+  - `Average Activities` pages show the stored percentage with a reference-only note because the percentage is not used by equal activity averaging
+  - `Weighted Details` continues to use the configured detail percentages in computation
+  - this is a presentation/data-labeling change only; no grading formula, stored score, submission, or lock behavior changed.
+- Published-template hotfix guidance is a separate permission-filtered Admin Practical Guide topic. Only users with effective `template_hotfixes.read`, `template_hotfixes.create`, or `template_hotfixes.review` access see it. The guide explains request scope, apply modes, impact preview, configured review/final-apply stages, skipped submitted offerings, and the Correction of Grades boundary.
 - The public site root `/` redirects to `/faculty/`; Admin Portal access remains available directly under `/admin-portal/`.
 - The Faculty Portal public-page privacy seal section shows `“Grado Mo, Protektado Ko!”` beneath the NPC seal as a responsive two-tone Kaushan Script signature with integrated quotation marks and a custom two-color vector pen flourish.
 - The Faculty Portal public hero uses a production-friendly logo animation: the TeacherMate+ mark floats gently over a breathing green-gold aura and two counter-rotating orbital rings. The critical animation rules are included in the rendered landing template as well as the static stylesheet, and the stylesheet URL carries a cache version to avoid stale production CSS. The prior small-star field was removed after it proved unreliable in production, and `prefers-reduced-motion` disables all motion.
@@ -162,7 +274,16 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 - Correction steps that require the same department accept approvers whose default department covers the requesting faculty department through the hierarchy, such as a College Dean with `COLLEGE` default department reviewing a faculty member in `INFOSYS`.
 - Admin users with `corrections.create_on_behalf` can create a Petition for Correction of Grades for the original faculty member when that faculty member is inactive or unavailable. The request keeps the original faculty as the faculty of record, records the admin initiator separately, follows the original faculty/department correction route, and prevents the initiating admin from approving that same on-behalf petition unless the user is superadmin.
 - The Create Correction On Behalf flow uses the setup order Campus -> AY -> Term -> Faculty -> Section -> Course before grading-period selection. This supports AC users whose governance assignments span multiple campuses/departments, such as IS/CS coverage across Cubao, Fairview, and Taytay.
-- Submission non-compliance escalation recipients include configured academic-head roles assigned to the overdue offering's exact department or an ancestor department.
+- Submission non-compliance notices use the NCBA three-stage overdue cadence when enabled:
+  - first notice, one day after the deadline, emails the accepted faculty member only
+  - second notice, two days after the deadline, emails the faculty member and scoped Area Chair recipients
+  - third notice, three days after the deadline, emails the faculty member, scoped Area Chair recipients, and scoped CAO recipients
+  - automatic notices stop after the third notice; Area Chair and CAO follow-up continues outside the scheduler
+  - recipient lookup respects tenant, campus, and exact/ancestor department role scope for the overdue offering
+  - the configuration page's `Scheduler cadence` value remains the daily overdue-gradebook checker and does not directly set escalation timing
+  - Admin Portal settings now control first notice after deadline, notice interval, and maximum notices; defaults of 1, 1, and 3 preserve Notice 1/2/3 on Day 1/2/3
+  - alternate schedules use `first_notice_after_days + ((sequence_no - 1) * notice_interval_days)`, for example 2, 2, 3 sends notices on Day 2, Day 4, and Day 6
+  - maximum notices is limited to 3 until recipient rules beyond Faculty, Area Chair, and CAO are explicitly designed
   - Tenant Grading Profiles may be configured on a parent division to cover child-area offerings. When both parent and child profiles match, the child-area profile is more specific and wins before priority is compared.
   - Course offerings keep their own department because an offering can have a term/section-specific governance owner. The offering department can be inferred from the selected section or course when safe, while explicit override remains available for legitimate cross-area offering ownership.
   - Course Offering CSV import can auto-create a reusable Section master record when `section_code` does not yet exist, using the selected tenant/campus/department/program scope. Existing Sections are reused; inactive matching Sections must be reactivated instead of silently recreated.
@@ -193,7 +314,7 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 - Faculty Portal activity score encoding disables Enter-key form submission inside score inputs. Faculty must click `Save Scores`, reducing accidental saves while entering grades row by row.
 - Faculty Portal Grade Submission Deadline reminder banners show Period and Deadline first as a colored H4-style focus row, then the reminder message and helper text. Faculty Dashboard shortcut cards and Main Action Cards use distinct color treatments for faster scanning; the top shortcut cards are centered and include icons.
 - Faculty Portal Summary of Periodic Grades shows visible period/final grade columns immediately after the Status column. ACTIVE enrollment statuses are intentionally blank in the summary table; only non-active statuses such as DRP, W, and INC are printed in the Status column.
-- Faculty Portal Summary Period Snapshot is collapsed by default and simplified to fewer readiness cards. The summary deadline uses Month day, year formatting with a countdown label, and the gradebook caption shows the campus name instead of the campus code.
+- Faculty Portal Summary Period Snapshot is expanded by default and simplified to fewer readiness cards. The summary deadline uses Month day, year formatting with a countdown label, and the gradebook caption shows the campus name instead of the campus code.
 - Faculty Portal Grade Prediction and Student Intervention Monitor access both follow the Grade Prediction tenant configuration and allowed role list. If `FEATURE_GRADE_PREDICTION_ENABLED` is off, the user role is not included, or the intervention monitor flag is off, the related faculty links/pages are hidden or blocked.
 - Faculty Portal Student Intervention Monitor is the faculty-facing replacement for the old at-risk monitor wording. It still uses the existing prediction data source internally, but the default monitor shows only Student, Class / Period, Current Standing, Main Concern, Suggested Intervention, and Action. It uses softer intervention labels (`Needs Attention`, `Monitor`, `Missing Work`, `On Track`), treats missing attendance records as incomplete encoding, prioritizes missing score/attendance data before grade concerns, and keeps technical projection details on separate analytics/prediction pages.
 - Faculty Portal Grade Prediction is primarily a selected-period aid. The possible final-grade value remains secondary guidance only; faculty-facing labels avoid `Final At Risk` wording and the guide explains the page through a simple sample student record rather than technical formula sections.
@@ -255,8 +376,9 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
     - `is_locked` disables faculty score, activity, and attendance editing for the selected period rule scope
     - `scope_type` controls coverage: `CAMPUS` applies one rule to all matching offerings in the selected campus/term/period, while `COURSE` targets one specific offering and takes priority over the campus rule
     - inactive period-lock rows are ignored by faculty pages, deadline checks, and auto-lock processing; the Admin Period Locks maintenance page separates active and inactive rules into distinct cards for audit/review
-    - optional `Submission Non-Compliance Notices` can now be enabled per tenant so TeacherMate+ issues staged overdue communications every configured interval until submission
-    - the workflow supports `Notice`, `Warning`, and repeated `Escalation` stages, with HR escalation recipients configurable from `Tools -> Configuration Management`
+    - optional `Submission Non-Compliance Notices` can now be enabled per tenant so TeacherMate+ issues the three-stage overdue cadence after the deadline
+    - the workflow supports `Notice`, `Warning`, and one final `Escalation`: faculty only on day 1, faculty plus scoped Area Chair on day 2, and faculty plus scoped Area Chair plus scoped CAO on day 3
+    - automatic notices stop after the third notice; HR is not part of the current NCBA overdue-gradebook email cadence
     - faculty can review these communications from the `Faculty Reminder Center`, while admin/governance users can see the latest stage in the overdue non-compliance monitor
   - correction/reopen governance
   - correction route matrix by faculty department (tenant default + department overrides)
@@ -335,9 +457,9 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 - Grade correction remains reserved for already submitted grade books that need changes; overdue but unsubmitted grade books use the deadline policy rather than correction workflow.
 - Admin Portal now includes a read-only `Faculty Grade Distribution Monitor` for configured academic governance users with `grade_distribution_monitor.read`.
   - The monitor aggregates stored period grades or stored activity computed scores by scoped faculty/class/period/activity context.
-  - It uses neutral indicators only: `High Grade Concentration`, `High Perfect Score Rate`, `Low Grade Variation`, `Small Sample`, and `Incomplete Data`.
-  - Its thresholds are tenant-level settings exposed in `Configuration Management -> Faculty Grade Distribution Monitor`.
+  - The Area Chair page focuses on faculty, class, period, graded count, average, grade bands, below-passing percentage, and exact-100 percentage. Summary review cards and the `Spread`, `Comparison`, and `Status` columns are intentionally not shown.
   - Its visible filters are limited to data source, campus, department, academic year, term, faculty, and grading period to keep the monitor broad enough for governance review.
+  - Grading-period choices come from templates resolved for the supervised classes and from periods already used by their stored grades or activities. The filter does not depend on whether the reviewer can maintain that template.
   - It shows a progress/loading overlay while report filters or result pages are loading.
   - Clicking a row's Period / Level opens a modal with the underlying grade values for that exact distribution row; student numbers and names are masked before rendering for privacy.
   - It does not recalculate grades, change templates, expose student-level drilldown, or modify submissions/enrollments/assignments.
@@ -718,6 +840,28 @@ All business operations should respect these dimensions and permissions.
   - optional auto-advance moves to the next configured period after the current period deadline passes.
   - auto-advance is forward-only; changing that deadline later does not move the active period backward, so admin must manually reset the active period when needed.
 
+## 9A. Enrollment Adjustment Tool
+- TeacherMate+ is not the system of record for enrollment. Pinnacle SIS remains the source of truth for enrollment, section movement, class merging, dissolved classes, program/course changes, and other official enrollment corrections.
+- Admin Portal now has `Enrollment -> Enrollment Adjustments` for authorized post-enrollment academic adjustments.
+- The tool can move one student, multiple selected students, or all active students in a source offering to a destination offering inside the user's existing Admin Portal scope.
+- Source selection is filtered by Academic Year, Term, Campus, and Source Offering. Destination Offering is scoped to the admin's authorized offerings for the selected Academic Year and Term, but is not forced to the same campus.
+- The tool does not decide whether the correction is academically valid. It only protects records and audits the authorized adjustment.
+- The adjustment only changes enrollment rows:
+  - creates the destination `Enrollment`
+  - deactivates the source `Enrollment`
+  - preserves all source offering gradebook, attendance, submission, correction, reopen, and lock records
+  - does not create, edit, delete, submit, unlock, recompute, or migrate grade records
+- Impact analysis is per selected student and counts attendance records, source offering activities, activity scores, submissions, period grades, final grades, correction requests, reopen requests, and locked periods. The page labels which counts are student-specific and which are source-offering-wide.
+- Classification rules:
+  - `SAFE`: no academic records exist for the source offering/student impact.
+  - `WARNING`: academic records exist, including any existing final-grade record that is not submitted. Processing requires explicit confirmation and logs `completed_with_warning`.
+  - `BLOCKED`: source and destination are the same, a destination enrollment already exists, a final grade is already submitted, a course-offering period is locked, or a matching campus-level grading period lock is active.
+- Each processed or blocked row writes `EnrollmentAdjustmentLog` with student, source/destination offering, source/destination enrollment IDs where available, source previous active/status values, destination active/status values, batch reference, reason, processor, processed time, result, warning flags, and the impact snapshot.
+- Permissions:
+  - `enrollment_adjustment.view` allows the page, impact analysis, history, and audit details.
+  - `enrollment_adjustment.process` allows actual processing. Default process grants are limited to Superadmin, Tenant Admin, Campus Admin, and Registrar. Area Chair, Dean, College Dean, and CAO are view-only by default unless Superadmin explicitly grants processing permission.
+- Known limitation: when moving across campuses/programs, the destination enrollment stores the destination offering scope, but the student's master record is not automatically rewritten. Student master-data corrections should still come from the proper SIS/import workflow when Pinnacle changes the student's campus, department, or program.
+
 ## 10. Open Design/Governance Topics
 - Expanded tenant-specific grading methodology options beyond the current average-all-periods and weighted-period profile modes.
 - Global active AY/Term governance control and permissions.
@@ -776,3 +920,15 @@ Before changing anything:
   - Submission readiness for an `Average Activities` Participation/Output requires at least one active faculty-created activity under that subcomponent and attached to active component, subcomponent, and detail rows. TeacherMate+ has no separate activity-selection flag; active `GradeActivity` records are the usable selected items. Unused or inactive detail rows do not block submission in this mode, but every active usable activity must still have the required student score records. Encoded zero is a valid score record. `Weighted Details` and non-Participation/Output template coverage remain strict per detail.
   - Faculty Summary of Periodic Grades display and editable stored period rows honor `Average Activities`, so changing a live unsubmitted template subcomponent refreshes the gradebook summary without requiring faculty to re-save each activity. The summary table now shows a separate subcomponent average column for nested Participation/Output-style groups, labels Participation/Output as `P/O AVE`, labels the final weighted Class Standing total as `CS AVE`, and hides empty detail columns only when that subcomponent uses `Average Activities`.
   - Correction of Grades final approval uses the same recompute path, so approved score corrections also honor the selected detail-computation rule before updating official period and final grade records.
+- Admin academic monitoring uses faculty supervision for operational grade views:
+  - an Area Chair's monitored faculty are resolved from active `FACULTY` role assignments in the chair's exact selected campus and department
+  - monitored classes come from those faculty members' active, accepted `FacultyAssignment` records
+  - Grading Analytics defaults to the Admin Portal top-bar campus, preventing another accessible campus from appearing unintentionally
+  - Grading Analytics and Grade Distribution Monitor support an explicit `All Campuses` selection that preserves each campus/department supervision pair
+  - submission, correction, reopen, overdue, and grade-monitoring queues use the same accepted-assignment supervision path
+  - shared Courses may remain campus/department neutral and do not need one copy per campus
+  - Program, Section, and Course Offering department fields remain separate records; changing a Program department does not rewrite existing Sections or Course Offerings.
+- `COLLEGE_DEAN` is a seeded system role. Superadmin assigns one or more campus/department-scoped role rows. College Dean faculty monitoring begins with active Area Chair assignments inside the Dean's assigned scope, then follows those Area Chairs to supervised faculty and accepted teaching assignments.
+- The default `COLLEGE_DEAN` role is monitoring/read-only. It does not automatically grant assignment maintenance, template approval, hotfix approval, correction approval, reopen approval, or submission-revert actions. Superadmin may assign those permissions separately when governance policy requires them.
+- Course, Program, Section, Course Offering, Course Template Assignment, Course Base Override, and Period Lock setup remain master-data/governance pages. They do not become populated merely because an Area Chair or College Dean supervises a faculty member.
+- Setup pages such as Course Template Assignment and Course Base Overrides remain grading-governance views. They are not automatically populated merely because a faculty member is supervised; their rows still depend on actual setup records and template visibility.

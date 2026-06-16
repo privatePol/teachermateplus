@@ -12,6 +12,7 @@ TeacherMate+ separates grading setup into two related layers:
    - example: Financial Management, Marketing Management, All Lecture Courses, All Laboratory Courses
 
 2. **Tenant Grading Profiles**
+   - primarily define how grading-period grades are combined to compute the official final grade
    - define which grading rule applies to a course/offering scope
    - can apply by tenant, campus, department, program, course, course type, and term type
    - can define base value, passing threshold, and final grade formula
@@ -19,6 +20,13 @@ TeacherMate+ separates grading setup into two related layers:
 The template answers: **How is each period grade computed?**
 
 The profile answers: **Which template and final-grade rule should this offering use?**
+
+If no active Tenant Grading Profile matches an offering, TeacherMate+ still computes the final grade by averaging every active grading period in the resolved published template. For example:
+
+- a Regular template with Prelim, Midterm, Prefinal, and Final averages four period grades
+- a Summer template with Midterm, Prefinal, and Final averages three period grades
+
+Create separate Regular and Summer templates when their active grading periods are different. The same Regular template may be reused for both 1st and 2nd Semester when their grading structure is identical.
 
 ## Required Term Setup
 

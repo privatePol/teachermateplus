@@ -46,6 +46,9 @@ class FeatureSettingsService:
     USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY = "FEATURE_USER_SIGNATURES_CORRECTION_REPORT_ENABLED"
     SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED"
     SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS"
+    SUBMISSION_NON_COMPLIANCE_FIRST_NOTICE_AFTER_DAYS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_FIRST_NOTICE_AFTER_DAYS"
+    SUBMISSION_NON_COMPLIANCE_LEVEL_INTERVAL_DAYS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_LEVEL_INTERVAL_DAYS"
+    SUBMISSION_NON_COMPLIANCE_MAX_NOTICE_COUNT_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_MAX_NOTICE_COUNT"
     SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES"
     SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS"
     GRADE_DEADLINE_ENFORCEMENT_POLICY_KEY = "FEATURE_GRADE_DEADLINE_ENFORCEMENT_POLICY"
@@ -55,6 +58,7 @@ class FeatureSettingsService:
     STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED_KEY = "FEATURE_STUDENT_PORTAL_ATTENDANCE_DETAILS_ENABLED"
     SIS_PERIODIC_GRADES_API_ENABLED_KEY = "FEATURE_SIS_PERIODIC_GRADES_API_ENABLED"
     ROLE_BASED_HELP_GUIDE_ENABLED_KEY = "FEATURE_ROLE_BASED_HELP_GUIDE_ENABLED"
+    ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY = "FEATURE_ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED"
     GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY = "COMPLIANCE_ONLY"
     GRADE_DEADLINE_POLICY_DISABLED = "DISABLED"
     GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN = "AUTO_CLOSE_REQUIRES_REOPEN"
@@ -470,7 +474,8 @@ class FeatureSettingsService:
         value = SystemSettingService.get(
             cls.GRADE_PREDICTION_ROLE_CODES_KEY,
             tenant_id=tenant_id,
-            default=default or ["FACULTY", "DEAN", "REGISTRAR", "CAMPUS_ADMIN", "TENANT_ADMIN", "SUPER_ADMIN"],
+            default=default
+            or ["FACULTY", "DEAN", "COLLEGE_DEAN", "REGISTRAR", "CAMPUS_ADMIN", "TENANT_ADMIN", "SUPER_ADMIN"],
         )
         return cls._role_code_list(value)
 
@@ -649,8 +654,51 @@ class FeatureSettingsService:
         tenant_id: int | None,
         default: int = 1,
     ) -> int:
-        # Notices are institutionally required every day until submission.
+        # The scheduler is fixed to a daily check; the notice service caps the
+        # current NCBA policy at Day 1, Day 2, and Day 3.
         return 1
+
+    @classmethod
+    def get_submission_non_compliance_first_notice_after_days(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: int = 1,
+    ) -> int:
+        value = SystemSettingService.get(
+            cls.SUBMISSION_NON_COMPLIANCE_FIRST_NOTICE_AFTER_DAYS_KEY,
+            tenant_id=tenant_id,
+            default=default,
+        )
+        return cls._positive_int(value, default=default, minimum=1)
+
+    @classmethod
+    def get_submission_non_compliance_level_interval_days(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: int = 1,
+    ) -> int:
+        value = SystemSettingService.get(
+            cls.SUBMISSION_NON_COMPLIANCE_LEVEL_INTERVAL_DAYS_KEY,
+            tenant_id=tenant_id,
+            default=default,
+        )
+        return cls._positive_int(value, default=default, minimum=1)
+
+    @classmethod
+    def get_submission_non_compliance_max_notice_count(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: int = 3,
+    ) -> int:
+        value = SystemSettingService.get(
+            cls.SUBMISSION_NON_COMPLIANCE_MAX_NOTICE_COUNT_KEY,
+            tenant_id=tenant_id,
+            default=default,
+        )
+        return min(cls._positive_int(value, default=default, minimum=1), 3)
 
     @classmethod
     def get_submission_non_compliance_head_role_codes(
@@ -662,7 +710,7 @@ class FeatureSettingsService:
         value = SystemSettingService.get(
             cls.SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY,
             tenant_id=tenant_id,
-            default=default or ["CAO", "DEAN", "AC", "AREA_CHAIR", "AREA_CHAIRPERSON"],
+            default=default or ["CAO", "DEAN", "COLLEGE_DEAN", "AC", "AREA_CHAIR", "AREA_CHAIRPERSON"],
         )
         return cls._role_code_list(value)
 
@@ -716,6 +764,21 @@ class FeatureSettingsService:
         return bool(
             SystemSettingService.get(
                 cls.ROLE_BASED_HELP_GUIDE_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_academic_performance_insights_enabled(
+        cls,
+        *,
+        tenant_id: int | None,
+        default: bool = False,
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY,
                 tenant_id=tenant_id,
                 default=default,
             )

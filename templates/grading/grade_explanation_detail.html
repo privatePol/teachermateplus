@@ -223,7 +223,13 @@
             <div class="grade-explain-card-title">{{ sub.name }}</div>
             {% for detail in sub.details %}
             <div class="grade-explain-activity-group">
-              <div class="grade-explain-activity-title">{{ detail.name }}</div>
+              <div class="grade-explain-activity-title">
+                {{ detail.name }}
+                <span class="grade-explain-meta">
+                  Configured Detail Weight: {{ detail.weight|floatformat:2 }}%
+                  {% if sub.detail_computation_mode == "AVERAGE_ACTIVITIES" %}(reference only; not used in the average){% endif %}
+                </span>
+              </div>
               {% for activity in detail.activities %}
               <div class="grade-explain-activity-row">
                 <span>{{ activity.title }}</span>

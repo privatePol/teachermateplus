@@ -18,6 +18,21 @@
           <span class="text-muted">({{ hotfix.requested_by_user.username }})</span>
         {% endif %}
       </div>
+      <div class="col-12">
+        <strong>Department Visibility:</strong>
+        {{ hotfix.template.get_department_visibility_display }}
+        {% if hotfix.template.department_visibility == "SELECTED" %}
+          <span class="text-muted">
+            (
+            {% for department in hotfix.template.visible_departments.all %}
+              {{ department.code }}{% if not forloop.last %}, {% endif %}
+            {% empty %}
+              no department selected
+            {% endfor %}
+            )
+          </span>
+        {% endif %}
+      </div>
     </div>
     <div class="small text-muted mb-2">Requested at {{ hotfix.created_at|date:"Y-m-d H:i" }}</div>
     <div><strong>Justification:</strong></div>

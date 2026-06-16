@@ -38,6 +38,7 @@
           <th>Impact</th>
           <th>Flags</th>
           <th>Confirmation</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -76,9 +77,12 @@
               <span class="badge text-bg-light border text-dark">Not required</span>
             {% endif %}
           </td>
+          <td class="text-end">
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:audit_log_detail' log.id %}">Details</a>
+          </td>
         </tr>
       {% empty %}
-        <tr><td colspan="9" class="text-center text-muted py-4">No recent critical actions found.</td></tr>
+        <tr><td colspan="10" class="text-center text-muted py-4">No recent critical actions found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

@@ -204,7 +204,10 @@ class TenantGradingProfileFormTests(TestCase):
         department_ids = list(form.fields["department"].queryset.values_list("id", flat=True))
         self.assertEqual(department_ids, [self.department.id])
         self.assertNotIn(other_department.id, department_ids)
-        self.assertEqual(form.fields["department"].label_from_instance(self.department), "MAIN | CS - Computer Studies")
+        self.assertEqual(
+            form.fields["department"].label_from_instance(self.department),
+            "MAIN - Main Campus | CS - Computer Studies",
+        )
 
     def test_course_choices_are_sorted_by_title_then_code(self):
         accounting = Course.objects.create(

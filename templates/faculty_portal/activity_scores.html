@@ -78,7 +78,10 @@
   {% endif %}
   {% if activity.template_subcomponent %}
     | {{ activity.template_component.name }} / {{ activity.template_subcomponent.name }}
-    {% if activity.template_detail %} / {{ activity.template_detail.name }}{% endif %}
+    {% if activity.template_detail %}
+      / {{ activity.template_detail.name }}
+      (Configured Detail Weight: <strong>{{ activity.template_detail.weight_percentage }}%</strong>{% if activity.template_subcomponent.detail_computation_mode == "AVERAGE_ACTIVITIES" %}; reference only under Average Activities{% endif %})
+    {% endif %}
   {% else %}
     | {{ activity.template_component.name }}
   {% endif %}
@@ -91,7 +94,12 @@
 </div>
 {% endif %}
 
-{% if is_correction_active %}
+{% if encoding_control_closed %}
+<div class="alert alert-danger">
+  Encoding is currently closed for this class. You may view the scores, but score encoding is disabled.
+  {% if encoding_control_message %}<div class="small mt-1">{{ encoding_control_message }}</div>{% endif %}
+</div>
+{% elif is_correction_active %}
 <div class="alert alert-warning">
   Approved correction window is active. Only scoped students/activities can be edited.
   {% if "corrections.create" in effective_permissions and system_correction_enabled %}

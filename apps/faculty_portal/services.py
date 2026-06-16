@@ -370,6 +370,30 @@ class FacultyPerformanceService(FacultyDashboardService):
         return cls._analyze_class(offering=faculty_load, grading_period=grading_period)
 
     @classmethod
+    def get_class_component_breakdown(cls, faculty_load, grading_period):
+        analysis = cls._analyze_class(offering=faculty_load, grading_period=grading_period)
+        component_values = defaultdict(list)
+        component_labels = {}
+        for row in analysis["rows"]:
+            for component in row["detail"].get("component_breakdown", []):
+                score = component.get("score")
+                if score is None:
+                    continue
+                code = component.get("code") or str(component.get("id"))
+                component_labels[code] = component.get("name") or code
+                component_values[code].append(Decimal(score))
+        output = []
+        for code, values in component_values.items():
+            output.append(
+                {
+                    "code": code,
+                    "name": component_labels[code],
+                    "average": cls._round(sum(values, Decimal("0")) / Decimal(len(values))),
+                }
+            )
+        return sorted(output, key=lambda row: (row["average"], row["name"]))
+
+    @classmethod
     def get_student_performance_trend(cls, student, faculty_load, grading_period):
         analysis = cls._analyze_class(
             offering=faculty_load,

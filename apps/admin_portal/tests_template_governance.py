@@ -12,6 +12,7 @@ from apps.auditlog.models import AuditLog
 from apps.core.services.scope import ScopeService
 from apps.core.services.settings import SystemSettingService
 from apps.grading.models import (
+    DetailComputationMode,
     GradingTemplate,
     GradingTemplateComponent,
     GradingTemplateDetail,
@@ -309,13 +310,14 @@ class TemplateGovernanceWorkflowTests(TestCase):
             name="Quizzes",
             weight_percentage=Decimal("100.00"),
             sort_order=1,
+            detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
             is_active=True,
         )
         GradingTemplateDetail.objects.create(
             template_subcomponent=subcomponent,
             code="QUIZ_1",
             name="Quiz 1",
-            weight_percentage=Decimal("100.00"),
+            weight_percentage=Decimal("37.50"),
             sort_order=1,
             is_active=True,
         )
@@ -344,6 +346,21 @@ class TemplateGovernanceWorkflowTests(TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertContains(detail_response, f'href="{builder_url}"')
         self.assertContains(detail_response, "Builder")
+        self.assertContains(detail_response, "37.50%")
+        self.assertContains(detail_response, "Reference only; not used by Average Activities.")
+
+        builder_response = self.client.get(builder_url)
+        self.assertEqual(builder_response.status_code, 200)
+        self.assertContains(builder_response, "Configured Detail Weight")
+        self.assertContains(builder_response, "37.50%")
+        self.assertContains(builder_response, "Not used by Average Activities")
+
+        structure_response = self.client.get(
+            reverse("admin_portal:grading_template_structure", kwargs={"template_id": template.id})
+        )
+        self.assertEqual(structure_response.status_code, 200)
+        self.assertContains(structure_response, "37.50%")
+        self.assertContains(structure_response, "Reference only; not used in the average.")
 
     def test_requesting_faculty_offerings_scope_targets_only_requester_accepted_classes(self):
         template = self._make_template(

@@ -1,0 +1,333 @@
+{% extends "admin_portal/base.html" %}
+
+{% block title %}Grading Template Setup Guide | TeacherMate+{% endblock %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .grading-guide { max-width: 1180px; margin: 0 auto; padding-bottom: 4rem; color: #294535; }
+  .grading-guide-hero { border: 1px solid #cadbcf; border-radius: 8px; padding: 1.35rem; background: linear-gradient(120deg, #edf7ef, #fff8d8); }
+  .grading-guide-hero h1 { margin: 0 0 .45rem; color: #133f27; font-size: 1.75rem; }
+  .grading-guide-hero p { margin: 0; color: #476252; max-width: 850px; }
+  .grading-guide-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+  .grading-guide-nav { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1rem 0; }
+  .grading-guide-nav a { padding: .42rem .65rem; border: 1px solid #c9d9cd; border-radius: 6px; background: #fff; color: #1f5b37; font-weight: 700; text-decoration: none; font-size: .86rem; }
+  .grading-guide-section { scroll-margin-top: 5rem; margin-top: 1rem; border: 1px solid #d5e0d8; border-radius: 8px; background: #fff; overflow: hidden; }
+  .grading-guide-section > header { padding: .85rem 1rem; background: #174d2d; color: #fff; }
+  .grading-guide-section > header h2 { margin: 0; font-size: 1.15rem; color: #fff; }
+  .grading-guide-section > header p { margin: .2rem 0 0; color: #dcebe0; font-size: .88rem; }
+  .grading-guide-body { padding: 1rem; }
+  .guide-path { padding: .75rem .85rem; border-left: 5px solid #d5ad13; background: #fff8d8; color: #534711; margin-bottom: 1rem; }
+  .guide-path strong { color: #3b3209; }
+  .guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; }
+  .guide-card { border: 1px solid #dce6df; border-radius: 6px; padding: .9rem; background: #fbfdfb; }
+  .guide-card h3 { margin: 0 0 .45rem; color: #174d2d; font-size: 1rem; }
+  .guide-card p:last-child, .guide-card ul:last-child, .guide-card ol:last-child { margin-bottom: 0; }
+  .guide-callout { margin-top: .85rem; padding: .8rem .9rem; border: 1px solid #b9d8bf; border-radius: 6px; background: #eef8ef; }
+  .guide-callout.warning { border-color: #e4ca62; background: #fff8d8; color: #594b13; }
+  .guide-callout.danger { border-color: #e5b3ad; background: #fff2f0; color: #6a2d26; }
+  .guide-example { margin-top: .85rem; padding: .8rem .9rem; border: 1px solid #b8d4bd; border-left: 5px solid #63a341; border-radius: 6px; background: #f4faf2; }
+  .guide-example strong { color: #174d2d; }
+  .guide-example ul { margin: .45rem 0 0; padding-left: 1.15rem; }
+  .guide-table-wrap { overflow-x: auto; }
+  .guide-table { width: 100%; border-collapse: collapse; font-size: .89rem; }
+  .guide-table th, .guide-table td { padding: .65rem; border: 1px solid #d7e2da; vertical-align: top; }
+  .guide-table thead th { background: #174d2d; color: #fff; }
+  .guide-table tbody tr:nth-child(even) { background: #f5f9f5; }
+  .guide-table tbody tr:hover { background: #fff8d8; }
+  .guide-table th[scope="row"] { color: #174d2d; }
+  .guide-steps { margin: 0; padding-left: 1.25rem; }
+  .guide-steps li + li { margin-top: .45rem; }
+  .guide-decision { display: grid; grid-template-columns: 175px minmax(0, 1fr); gap: .65rem; padding: .7rem 0; border-bottom: 1px solid #e0e8e2; }
+  .guide-decision:last-child { border-bottom: 0; }
+  .guide-decision strong { color: #174d2d; }
+  .guide-hierarchy { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: .65rem 0; }
+  .guide-hierarchy span { padding: .45rem .65rem; border: 1px solid #bfd1c3; border-radius: 5px; background: #f3f8f4; font-weight: 700; }
+  .guide-hierarchy b { color: #8b720d; }
+  @media (max-width: 760px) {
+    .guide-grid { grid-template-columns: 1fr; }
+    .guide-decision { grid-template-columns: 1fr; gap: .2rem; }
+    .grading-guide-hero h1 { font-size: 1.4rem; }
+  }
+</style>
+{% endblock %}
+
+{% block admin_content %}
+<main class="grading-guide">
+  <header class="grading-guide-hero">
+    <h1>Grading Template Setup Guide</h1>
+    <p>Use this guide to create a grading template, choose how scores will be entered, and assign the finished setup to the correct courses.</p>
+    <div class="grading-guide-actions">
+      <a class="btn btn-sm btn-success" href="{% url 'admin_portal:grading_template_list' %}">Open Grading Templates</a>
+      <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:guide' %}">Back to Admin Practical Guide</a>
+      <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:guide' %}?view=full">Open Full Admin Guide</a>
+    </div>
+  </header>
+
+  <nav class="grading-guide-nav" aria-label="Grading setup guide sections">
+    <a href="#before-starting">Before Starting</a>
+    <a href="#build-structure">Build the Structure</a>
+    <a href="#score-entry">Score Entry Method</a>
+    <a href="#detail-computation">Detail Computation</a>
+    <a href="#after-template">After the Template</a>
+    <a href="#profiles">Tenant Profiles</a>
+    <a href="#base-overrides">Course Base Overrides</a>
+    <a href="#final-checklist">Final Checklist</a>
+  </nav>
+
+  <section class="grading-guide-section" id="before-starting">
+    <header>
+      <h2>1. Before You Start</h2>
+      <p>Prepare the approved grading formula before entering anything in TeacherMate+.</p>
+    </header>
+    <div class="grading-guide-body">
+      <div class="guide-path"><strong>Menu:</strong> Admin Portal &rarr; Grading &rarr; Grading Templates</div>
+      <div class="guide-grid">
+        <article class="guide-card">
+          <h3>Write down the approved grading setup</h3>
+          <ul>
+            <li>List the grading periods in the correct order.</li>
+            <li>List the main grading parts and their percentages for each period.</li>
+            <li>Mark which main part is the period exam.</li>
+            <li>List the activity groups faculty members may use.</li>
+            <li>Confirm whether Participation/Output uses percentage weights or equal averaging.</li>
+          </ul>
+        </article>
+        <article class="guide-card">
+          <h3>Choose Add Template or Duplicate</h3>
+          <p>Click <strong>Add Template</strong> when the grading setup is completely new.</p>
+          <p>Use <strong>Duplicate</strong> when an existing template is already close to what you need. The copy starts as a draft and keeps the source template's Department Visibility. It does not copy course assignments, faculty activities, grades, submissions, locks, corrections, or grading profiles.</p>
+        </article>
+      </div>
+      <div class="guide-callout">
+        <strong>Choose who can see and govern the template:</strong>
+        Use <strong>All Departments</strong> for a tenant-wide template. Use <strong>Selected Departments</strong> when only authorized admins assigned to specific departments should see, review, approve, publish, duplicate, calculate, or hotfix it. A selected-department template requires at least one department. Superadmin can still access every template.
+      </div>
+      <div class="guide-callout warning"><strong>Important:</strong> Finish and test the template before assigning it to courses. If faculty members are already using a published template, do not edit it directly. Use the approved Hotfix process for an urgent change.</div>
+    </div>
+  </section>
+
+  <section class="grading-guide-section" id="build-structure">
+    <header>
+      <h2>2. Build the Template Structure</h2>
+      <p>Build the grading setup from the period down to the activity type.</p>
+    </header>
+    <div class="grading-guide-body">
+      <div class="guide-hierarchy" aria-label="Grading template levels">
+        <span>Template</span><b>&rarr;</b><span>Period</span><b>&rarr;</b><span>Component</span><b>&rarr;</b><span>Subcomponent</span><b>&rarr;</b><span>Detail</span>
+      </div>
+      <ol class="guide-steps">
+        <li>Click <strong>Add Template</strong>. Enter a unique code and a clear name.</li>
+        <li>Enter the usual Base-50 value. Add a passing grade only when this template has its own approved passing rule.</li>
+        <li>Choose <strong>Department Visibility</strong>. If you choose Selected Departments, select every department allowed to view and govern this template.</li>
+        <li>Save the template, find it in the list, and click <strong>Builder</strong>.</li>
+        <li>Click <strong>Add Period</strong>. Add PRELIM, MIDTERM, PRE-FINAL, FINAL, or the approved periods used by your school. Use the sequence number to place them in the correct order.</li>
+        <li>Add the main <strong>Components</strong> inside each period. Examples are Class Standing and Period Exam. The component percentages for one period should total 100%.</li>
+        <li>Check <strong>Exam component</strong> only for the main exam part. TeacherMate+ uses this checkbox to identify the exam.</li>
+        <li>Add <strong>Subcomponents</strong> under a component. Examples are Quizzes and Participation/Output.</li>
+        <li>Add <strong>Details</strong> when faculty activities need smaller groups. Examples are Recitation, Assignment/Activities, and Oral Presentation.</li>
+        <li>Keep only approved and usable rows active. Faculty members cannot normally use inactive rows.</li>
+      </ol>
+      <div class="guide-example">
+        <strong>Example structure</strong>
+        <ul>
+          <li>Period: MIDTERM</li>
+          <li>Component: Class Standing</li>
+          <li>Subcomponent: Participation/Output</li>
+          <li>Details: Recitation, Assignment/Activities, Oral Presentation</li>
+        </ul>
+      </div>
+      <div class="guide-callout"><strong>How the percentages work:</strong> A component percentage shows its share of the period grade. A subcomponent percentage shows its share of the component. Detail percentages are used only when <strong>Weighted Details</strong> is selected.</div>
+    </div>
+  </section>
+
+  <section class="grading-guide-section" id="score-entry">
+    <header>
+      <h2>3. Choose the Score Entry Method</h2>
+      <p>This setting tells TeacherMate+ how to read the score entered by faculty.</p>
+    </header>
+    <div class="grading-guide-body">
+      <div class="guide-table-wrap">
+        <table class="guide-table">
+          <thead><tr><th>Method</th><th>Simple meaning</th><th>Example</th><th>When to use it</th></tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row">Inherit Parent Rule</th>
+              <td>Use the same score rule as the level above it.</td>
+              <td>If Class Standing uses Raw Score, a detail set to Inherit also uses Raw Score.</td>
+              <td>Use this for most subcomponents and details. Choose a different method only when the approved policy requires it.</td>
+            </tr>
+            <tr>
+              <th scope="row">Raw Score (Base-50)</th>
+              <td>Faculty enters the points earned and the highest possible score. TeacherMate+ applies the approved Base-50 formula.</td>
+              <td>For a 50-point quiz, faculty enters 42 out of 50. TeacherMate+ computes the grade.</td>
+              <td>Use this for the normal TeacherMate+ and NCBA grading process.</td>
+            </tr>
+            <tr>
+              <th scope="row">Direct Percentage</th>
+              <td>Faculty enters a percentage that is already final. TeacherMate+ uses it as entered and does not apply Base-50.</td>
+              <td>If an approved result is already 85%, faculty enters 85.</td>
+              <td>Use this only when the approved school policy specifically requires direct percentage entry. Do not select it only because an activity has a total of 100 points.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="guide-callout warning"><strong>Recommended setup:</strong> If your school uses Raw Score Base-50 for all activities, select it on the main component. Set the lower levels to <strong>Inherit Parent Rule</strong>. Do not mix methods unless the academic policy clearly requires it.</div>
+    </div>
+  </section>
+
+  <section class="grading-guide-section" id="detail-computation">
+    <header>
+      <h2>4. Choose Weighted Details or Average Activities</h2>
+      <p>This setting decides how activities under a subcomponent are combined.</p>
+    </header>
+    <div class="grading-guide-body">
+      <div class="guide-table-wrap">
+        <table class="guide-table">
+          <thead><tr><th>Setting</th><th>Simple meaning</th><th>Use of detail percentages</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row">Weighted Details</th>
+              <td>Each detail has its own percentage weight.</td>
+              <td>The detail percentages are used. They must follow the approved setup and total 100%.</td>
+              <td>Participation/Output is 60% of Class Standing. Inside it: Recitation 20%, Assignment 30%, and Oral Presentation 50%.</td>
+            </tr>
+            <tr>
+              <th scope="row">Average Activities</th>
+              <td>All active activities are averaged equally.</td>
+              <td>TeacherMate+ does not use the detail percentages in the calculation.</td>
+              <td>If faculty creates R1, R2, Assignment 1, Seatwork 1, and Oral 1, all five activities have an equal share in the average.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="guide-grid mt-3">
+        <article class="guide-card">
+          <h3>Should I enter a weight when using Average Activities?</h3>
+          <p><strong>Yes. The form still requires a number.</strong> Enter positive percentages that total 100% so the setup is complete and easy to review.</p>
+          <p>For three details, you may enter 33.34%, 33.33%, and 33.33%. TeacherMate+ will ignore these detail percentages while Average Activities is selected.</p>
+        </article>
+        <article class="guide-card">
+          <h3>Which weight still matters?</h3>
+          <p>The <strong>Participation/Output subcomponent percentage still matters</strong>. If Participation/Output is 60% of Class Standing, keep it at 60%. Only the activities below it are averaged equally.</p>
+        </article>
+      </div>
+      <div class="guide-callout warning"><strong>Participation/Output submission rule:</strong> When Average Activities is selected, faculty must create at least one active Participation/Output activity before submitting grades. Unused or inactive detail rows will not block submission. Scores required for active activities must still be completed. A saved score of zero is valid and is not treated as missing. When Weighted Details is selected, the existing strict checks for the weighted setup still apply.</div>
+      <div class="guide-callout danger"><strong>Do not change this after grading has started without approval.</strong> Switching between Weighted Details and Average Activities can change computed grades. For a published template already used by faculty, use the approved Hotfix process and review the affected unsubmitted gradebooks.</div>
+    </div>
+  </section>
+
+  <section class="grading-guide-section" id="after-template">
+    <header>
+      <h2>5. What to Do After Building the Template</h2>
+      <p>Test, approve, publish, and assign the template before faculty uses it.</p>
+    </header>
+    <div class="grading-guide-body">
+      <ol class="guide-steps">
+        <li>Open <strong>Builder</strong>. Check the periods, percentages, activity groups, score rules, active rows, and exam checkbox.</li>
+        <li>Return to <strong>Grading Templates</strong> and open <strong>Test Calculator</strong>. Try high, average, low, zero, and missing-score examples.</li>
+        <li>Submit the draft for approval. Complete the required review steps. Publish it only after approval.</li>
+        <li>Decide whether this template needs a <strong>Tenant Grading Profile</strong>. Its main purpose is to tell TeacherMate+ how the grading periods will be combined to compute the official final grade for a campus, department, program, course group, or other approved scope.</li>
+        <li>Open <strong>Grading &rarr; Course Template Assignments</strong>. Assign the published template to the correct courses and starting term.</li>
+        <li>Create a <strong>Course Base Value Override</strong> only when one course has an approved exception to the normal Base-50 rule.</li>
+        <li>Check that all courses have the correct template. Open one sample faculty class and confirm the setup before encoding begins.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="grading-guide-section" id="profiles">
+    <header>
+      <h2>6. When to Create a Tenant Grading Profile</h2>
+      <p>A Tenant Grading Profile controls how period grades are combined to compute the official final grade for a specific school group.</p>
+    </header>
+    <div class="grading-guide-body">
+      <div class="guide-path"><strong>Menu:</strong> Admin Portal &rarr; Grading &rarr; Tenant Grading Profiles</div>
+      <div class="guide-callout"><strong>Main purpose:</strong> The profile tells TeacherMate+ whether the official final grade should average all active grading periods or use approved percentage weights for selected periods. It may also provide the correct template, Base-50 default, passing grade, and period-grade rule for the same group.</div>
+      <div class="guide-decision"><strong>Create one when</strong><span>A campus, department, program, course group, course, or term type needs an explicit approved final-grade rule or another grading setting that differs from the general setup.</span></div>
+      <div class="guide-decision"><strong>Example</strong><span>Create a profile when the BSA program uses a specific published template and an approved final-grade formula for Regular or Summer terms.</span></div>
+      <div class="guide-decision"><strong>One per template?</strong><span>No. One broad profile may serve many courses when they use the same approved rules. Create another profile only when the school group or grading rule is different.</span></div>
+      <div class="guide-decision"><strong>Which profile is used?</strong><span>TeacherMate+ uses the closest matching active profile. For example, a profile for one course is more specific than a general campus profile.</span></div>
+      <div class="guide-decision"><strong>If no profile matches</strong><span>TeacherMate+ still computes the final grade. It averages every active grading period in the published template used by the course. This fallback is correct only when equal averaging is the approved school rule.</span></div>
+
+      <div class="guide-example">
+        <strong>Regular and Summer example:</strong>
+        <ul>
+          <li><strong>1st and 2nd Semester:</strong> If both use the same rules, one Regular template may contain PRELIM, MIDTERM, PRE-FINAL, and FINAL. The final grade is the average of the four period grades.</li>
+          <li><strong>Summer:</strong> Create a separate Summer template containing MIDTERM, PRE-FINAL, and FINAL. The final grade is the average of the three period grades.</li>
+          <li>Mark 1st and 2nd Semester terms as <strong>Regular</strong>. Mark the Summer term as <strong>Summer</strong>.</li>
+          <li>For explicit governance, create a Regular profile and a Summer profile for the department or other approved scope. Set both to <strong>Average All Active Template Periods</strong>.</li>
+          <li>Assign the correct published template to the correct courses and terms through <strong>Course Template Assignments</strong>. A course assignment for the exact term is checked before a profile is used to choose the template.</li>
+        </ul>
+      </div>
+      <div class="guide-callout warning"><strong>Important:</strong> Do not use the four-period Regular template for Summer if PRELIM must not be included. Average All Active Template Periods includes every active period in the template.</div>
+      <div class="guide-callout warning"><strong>Avoid conflicting profiles:</strong> Do not create several active profiles for the same group unless their purpose and priority are clear. After saving, test one actual class to confirm that it receives the correct profile and template.</div>
+    </div>
+  </section>
+
+  <section class="grading-guide-section" id="base-overrides">
+    <header>
+      <h2>7. When to Use Course Base Value Overrides</h2>
+      <p>Use this only when one course has an approved exception to the usual Base-50 rule.</p>
+    </header>
+    <div class="grading-guide-body">
+      <div class="guide-path"><strong>Menu:</strong> Admin Portal &rarr; Grading &rarr; Course Base Overrides</div>
+      <div class="guide-grid">
+        <article class="guide-card">
+          <h3>Use it when</h3>
+          <ul>
+            <li>A specific course has an approved base value different from the usual Base-50 value.</li>
+            <li>The approving academic office has recorded the reason.</li>
+            <li>You know whether the exception starts in one term or applies generally to that course.</li>
+          </ul>
+        </article>
+        <article class="guide-card">
+          <h3>Do not use an override for</h3>
+          <ul>
+            <li>Changing one student's score or grade.</li>
+            <li>Fixing an incorrect grading-template weight.</li>
+            <li>Choosing Weighted Details versus Average Activities.</li>
+            <li>A test, temporary change, or exception without approval.</li>
+          </ul>
+        </article>
+      </div>
+      <div class="guide-example"><strong>Example:</strong> Most courses use Base-50. One approved course must use Base-40. Create a Course Base Value Override for that course only.</div>
+      <div class="guide-callout"><strong>Which Base value is used first?</strong> TeacherMate+ checks the Course Base Value Override first. If none exists, it checks the matching Tenant Grading Profile, then the Course, then the Template. If none has a value, TeacherMate+ uses 50. Because the course override comes first, use it only for a real approved course exception.</div>
+    </div>
+  </section>
+
+  <section class="grading-guide-section" id="final-checklist">
+    <header>
+      <h2>8. Final Readiness Checklist</h2>
+      <p>Complete this checklist before faculty creates activities or enters scores.</p>
+    </header>
+    <div class="grading-guide-body">
+      <div class="guide-grid">
+        <article class="guide-card">
+          <h3>Check the template</h3>
+          <ul>
+            <li>The correct school, code, name, Base-50 value, and passing grade are shown.</li>
+            <li>The periods are in the correct order.</li>
+            <li>Only approved and usable rows are active.</li>
+            <li>Component weights total 100% per period.</li>
+            <li>Subcomponent weights match the approved grading formula.</li>
+            <li>The correct main component is marked as the exam.</li>
+            <li>Participation/Output uses the approved setting: Weighted Details or Average Activities.</li>
+          </ul>
+        </article>
+        <article class="guide-card">
+          <h3>Check before faculty use</h3>
+          <ul>
+            <li>The Test Calculator results match the approved sample grades.</li>
+            <li>The required approvals are complete and the template is published.</li>
+            <li>The final-grade rule is confirmed: TeacherMate+ will either use the matching Tenant Grading Profile or average all active periods when no profile matches.</li>
+            <li>Regular and Summer courses use templates with the correct active grading periods.</li>
+            <li>The correct courses and starting term are assigned.</li>
+            <li>A Course Base Value Override exists only for an approved exception.</li>
+            <li>One sample faculty class shows the expected grading setup.</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

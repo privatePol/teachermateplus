@@ -228,7 +228,10 @@
               </div>
               {% for detail in subcomponent.details %}
               <div class="small text-muted d-flex justify-content-between gap-3 mt-1">
-                <span>{{ detail.name }}</span>
+                <span>
+                  {{ detail.name }}
+                  <span class="d-block">Configured weight: {{ detail.weight|floatformat:2 }}%{% if subcomponent.detail_computation_mode == "AVERAGE_ACTIVITIES" %} (reference only){% endif %}</span>
+                </span>
                 <span>{% if detail.score is not None %}{{ detail.score|floatformat:2 }}{% else %}No score{% endif %}</span>
               </div>
               {% endfor %}

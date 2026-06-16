@@ -120,6 +120,8 @@
   }
   .class-record-table tbody td {
     white-space: nowrap;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
   }
   .class-record-table .sticky-col {
     position: sticky;
@@ -501,7 +503,12 @@
 
 {% include "faculty_portal/partials/period_quick_nav.html" with nav_current="summary" %}
 
-{% if is_correction_active %}
+{% if encoding_control_closed %}
+<div class="alert alert-danger no-print">
+  Encoding is currently closed for this class. You may view the gradebook, but score encoding and period submission are disabled.
+  {% if encoding_control_message %}<div class="small mt-1">{{ encoding_control_message }}</div>{% endif %}
+</div>
+{% elif is_correction_active %}
 <div class="alert alert-warning no-print">
   A governed manual correction window is active.
   {% if "corrections.create" in effective_permissions and system_correction_enabled %}
@@ -582,11 +589,11 @@
       <div class="small text-muted text-uppercase fw-semibold">Period Snapshot</div>
       <div class="small text-muted">Quick readiness check for this period.</div>
     </div>
-    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#periodSnapshotCollapse" aria-expanded="false" aria-controls="periodSnapshotCollapse">
-      Expand
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#periodSnapshotCollapse" aria-expanded="true" aria-controls="periodSnapshotCollapse">
+      Collapse
     </button>
   </div>
-  <div id="periodSnapshotCollapse" class="collapse">
+  <div id="periodSnapshotCollapse" class="collapse show">
   <div class="card-body">
     <div class="mb-3">
       <div class="readiness-card-grid mt-3">
@@ -881,7 +888,13 @@
             {% for section in block.sections %}
               {% if section.uses_nested %}
                 {% for group in section.groups %}
-                  <th colspan="{{ group.colspan }}" class="band-subsection {{ section.color_class }}">{{ group.label }}</th>
+                  <th colspan="{{ group.colspan }}" class="band-subsection {{ section.color_class }}">
+                    {{ group.label }}
+                    <span class="d-block small fw-normal">
+                      {{ group.weight_percentage }}%
+                      {% if section.detail_computation_mode == "AVERAGE_ACTIVITIES" %}configured; not used in average{% endif %}
+                    </span>
+                  </th>
                 {% endfor %}
                 <th class="metric-col {{ section.color_class }}"></th>
               {% else %}

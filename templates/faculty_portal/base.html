@@ -493,7 +493,15 @@
   </div>
 
   {% if not privacy_consent_pending and not password_change_required %}
-    <a class="help-fab" href="{% url 'faculty_portal:guide' %}" aria-label="Open Faculty User Guide" title="Open Faculty User Guide" data-tour-id="user-guide">?</a>
+    <a
+      class="help-fab"
+      href="{% url 'faculty_portal:guide' %}"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Open Faculty User Guide in a new tab"
+      title="Open Faculty User Guide in a new tab"
+      data-tour-id="user-guide"
+    >?</a>
   {% endif %}
   <a
     class="privacy-chip"

@@ -1,24 +1,1137 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-06-12
+Last updated by Codex: 2026-06-16
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
-- Date: 2026-06-12
-- Session focus: Improved the role-based Admin Help Guide with exact menu routes, practical click-by-click instructions, and complete published-template hotfix guidance, while retaining the prior grading and Faculty Help Guide work.
+- Date: 2026-06-16
+- Session focus: Moved encoded-zero review into the Faculty Summary `Period Snapshot`, refreshed `/faculty/guide/`, removed faculty-side assignment unacceptance, and changed overdue gradebook non-compliance notices to the NCBA three-notice escalation policy.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
+- Session ending update - configurable Submission Non-Compliance Notices:
+  - Implemented configurable notice timing through existing feature settings:
+    - `FEATURE_SUBMISSION_NON_COMPLIANCE_FIRST_NOTICE_AFTER_DAYS`
+    - `FEATURE_SUBMISSION_NON_COMPLIANCE_LEVEL_INTERVAL_DAYS`
+    - `FEATURE_SUBMISSION_NON_COMPLIANCE_MAX_NOTICE_COUNT`
+  - Kept the existing command and cron path:
+    - `python manage.py issue_submission_non_compliance_notices`
+    - `ops/cron/teachermateplus.cron` remains the daily production scheduler source.
+  - Preserved current NCBA defaults:
+    - first notice after deadline: `1`
+    - notice interval: `1`
+    - maximum notices: `3`
+    - resulting schedule: Notice 1 on Day 1, Notice 2 on Day 2, Notice 3 on Day 3.
+  - Added custom schedule support with formula:
+    - `required_days_overdue = first_notice_after_days + ((sequence_no - 1) * notice_interval_days)`
+    - example: `2, 2, 3` sends Notice 1 on Day 2, Notice 2 on Day 4, and Notice 3 on Day 6.
+  - Kept recipient rules fixed:
+    - Notice 1: faculty only
+    - Notice 2: faculty plus scoped Area Chair
+    - Notice 3: faculty plus scoped Area Chair plus scoped CAO
+  - Kept HR as a legacy/not-used configuration field under the current NCBA policy.
+  - Limited `Maximum notices` to `3` because recipient rules beyond Notice 3 are not defined yet.
+  - No new notification feature, no new cron command, no migration, and no grading/submission/lock/reopen/correction workflow changes were introduced.
+
+### Changed Files For This Ending Pass
+- `apps/core/services/features.py`
+- `apps/notifications/services.py`
+- `apps/notifications/tests.py`
+- `apps/admin_portal/forms.py`
+- `apps/admin_portal/views.py`
+- `apps/admin_portal/tests_assignment_acceptance.py`
+- `templates/admin_portal/tools/configurable_features.html`
+- `templates/admin_portal/guide.html`
+- `docs/DEPLOYMENT_UBUNTU.md`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `HANDOFF.md`
+
+### Pending Work / Known Issues / Risks
+- Recipient rules remain fixed by notice level. A full recipient schedule table was not implemented and should require separate approval.
+- `Maximum notices` is capped at `3`; values above 3 are intentionally rejected until recipient rules beyond CAO are designed.
+- Manual authenticated browser verification is still needed on the Configuration Management page to confirm the card layout, preview text, and validation errors render cleanly in the actual Admin Portal UI.
+- Production reminder: scoped Area Chair and CAO users must have active role assignments and valid email addresses, or those recipients will not receive the second/third notices.
+- Existing dirty worktree contains many unrelated files from prior session work. Do not assume every dirty file listed by `git diff --name-only` belongs only to the non-compliance notice change.
+
+### Validations Actually Executed For This Ending Pass
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.notifications.tests
+# 11 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_can_store_assignment_workflow_settings apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_rejects_invalid_non_compliance_notice_timing
+# 2 tests passed
+```
+
+### Exact Next Steps For Next Codex Session
+1. Read `AGENTS.md`, `TEACHERMATEPLUS_CONTEXT.md`, `CHANGE_LOG.md`, and this file before making changes.
+2. Smoke-test `Admin Portal -> Tools -> Configuration Management -> Submission Non-Compliance Notices` in a browser:
+   - confirm `Scheduler cadence` remains visible
+   - confirm the three timing fields render
+   - confirm default preview shows Day 1 / Day 2 / Day 3
+   - submit custom values `2 / 2 / 3` and confirm preview/state behavior
+   - try invalid values `0 / 0 / 4` and confirm validation errors are clear.
+3. On production deployment, pull changes, run `python manage.py check`, restart the app service, and keep the existing daily cron command.
+4. Verify production Area Chair and CAO role assignments and email addresses before enabling non-compliance notices.
+5. Do not expand to a full recipient schedule table unless explicitly approved.
+
+- Submission non-compliance notice escalation:
+  - Updated `SubmissionNonComplianceNoticeService.issue_due_notices()` so automatic overdue gradebook emails stop after three notices.
+  - New cadence:
+    - day 1 after deadline: faculty only
+    - day 2 after deadline: faculty plus scoped Area Chair
+    - day 3 after deadline: faculty plus scoped Area Chair plus scoped CAO
+  - The scheduler remains daily through `ops/cron/teachermateplus.cron`.
+  - Recipient lookup uses active role assignments scoped to the overdue offering's tenant, campus, and exact/ancestor department.
+  - HR recipients are no longer used by the current NCBA overdue-gradebook email cadence.
+  - Updated Admin Configuration help text, Configurable Features summary text, Admin Portal guide wording, project context, and changelog.
+  - Added notification regression coverage for second-stage Area Chair recipients, third-stage CAO recipients, parent-department Area Chair scope, and no fourth automatic notice.
+  - Follow-up cleanup clarified the live `Submission Non-Compliance Notices` configuration card so it no longer says Notice 3 continues repeatedly. The card now names the daily scheduler command, Day 1/2/3 recipients, third-notice stop rule, no-HR policy, and scoped Area Chair/CAO email dependency.
+  - The legacy `Notice repeat interval` label was renamed to `Scheduler cadence`; the field remains visible as the overdue-gradebook checker cadence.
+  - Added separate configurable timing fields for first notice after deadline, notice interval, and maximum notices. Defaults are 1, 1, and 3, preserving Day 1/2/3 behavior; a 2, 2, 3 setup sends Notice 1/2/3 on Day 2/4/6.
+  - Maximum notices is limited to 3 for now because recipient rules beyond Notice 3 are not yet defined.
+  - Post-implementation review confirmed no new cron command, no grading/submission/lock/reopen/correction changes, and no migration requirement.
+  - Added edge-case regression tests confirming configured HR recipients are not used under the current NCBA policy, missing scoped Area Chair/CAO recipients do not crash the command, and a missing faculty email fails email delivery safely without crashing notice creation.
+  - Updated `docs/DEPLOYMENT_UBUNTU.md` so production cron guidance also reflects the three-notice stop rule.
+
+- Faculty Portal Summary readiness/grade-table review:
+  - Removed the `Encoded Zero Scores` metric from Faculty Portal `My Classes` course cards.
+  - Added `Encoded Zero Scores` to the Summary page `Period Snapshot` readiness cards for the selected offering and grading period.
+  - Count includes active `StudentActivityScore` records where the active activity belongs to the selected period and `raw_score = 0`.
+  - Blank/missing scores remain separate; zero is still valid and is not treated as no grade.
+  - Expanded `Period Snapshot` by default so faculty see readiness cards before submission.
+  - Increased Summary grade-table body row padding for a taller, easier-to-read table.
+  - Updated Faculty guide/manual wording for the new default expanded snapshot behavior.
+  - Added regression coverage in `apps/faculty_portal/tests_assignment_acceptance.py`.
+
+- Faculty Portal guide refresh:
+  - Removed the `Top Faculty Tasks` block from `/faculty/guide/`.
+  - Converted the daily workflow area into a collapsed `Daily Faculty Workflow` accordion and removed the `Start Here` wording.
+  - Added a collapsed `Semester Faculty Workflow` accordion above the daily workflow using `media/portal-img/semester_workflow.png`.
+  - Added practical `How to open` steps to detailed reference cards for My Classes, Dashboard, Class List, Activities, Score Encoding, Attendance, and Summary.
+  - Added screenshot modal buttons for guide images under `media/faculty_helpguide/`, including `1_myclasses.png`, `1_dashboard.png`, `2_activities.png`, `2_encodescores.png`, `2_attendance.png`, and `3_summary.png`.
+  - Updated `apps/faculty_portal/tests_help_guide.py` to cover the revised guide structure, collapsed accordions, modal markup, and screenshot references.
+
+- Faculty Assignment acceptance governance:
+  - Removed the `Undo Acceptance` button from accepted Faculty Portal class cards.
+  - Blocked direct POST attempts to the legacy faculty undo-acceptance route with a faculty-facing message.
+  - Logged blocked attempts as `UNDO_ACCEPTANCE_BLOCKED` without changing assignment state.
+  - Updated the Faculty Help Guide action text to tell faculty to contact the assigning admin or academic office when an accepted load must be unassigned or replaced.
+  - Updated assignment acceptance regression tests to assert the button is hidden and direct POST leaves the assignment accepted.
+
+### Submission Non-Compliance Notice Validation
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.notifications.tests
+# 11 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_admin_can_set_enrollment_ownership_mode_from_configurable_features apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_can_filter_class_override_targets_by_faculty apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_shows_single_device_login_setting apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_can_store_assignment_workflow_settings
+# 4 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_can_store_assignment_workflow_settings apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_rejects_invalid_non_compliance_notice_timing
+# 2 tests passed
+
+# Note: one earlier focused admin test command used the wrong guessed class name `AssignmentAcceptanceTests` and failed before running tests. It was rerun successfully with the correct class name above.
+```
+
+### Faculty Summary Readiness Validation
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_shows_encoded_zero_scores_metric_not_my_courses apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_summary_readiness_cards_show_status_labels
+# 2 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_help_guide
+# 4 tests passed
+```
+
+- Faculty Portal help button new-tab behavior:
+  - Updated the shared Faculty Portal base template so the floating `?` help button opens `{% url 'faculty_portal:guide' %}` in a new tab.
+  - Added `rel="noopener noreferrer"` for safe separate-tab behavior.
+  - Updated the accessible label/title to clarify that the Faculty User Guide opens in a new tab.
+  - Added regression coverage in `apps/faculty_portal/tests_help_guide.py`.
+
+### Faculty Help Button Validation
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_help_guide
+# 4 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+```
+
+- Faculty Assignment replacement/safety enhancements:
+  - Added `FacultyAssignmentReplacementLog` in `apps/academics/models.py`.
+  - Added `FacultyAssignmentSafetyService` in `apps/academics/services.py`.
+  - Added Admin Portal route/page `Academics -> Faculty Assignments -> Replace Faculty`.
+  - Existing Assigned Offerings checkboxes now support `REPLACE FACULTY` in addition to `UNASSIGN SELECTED`.
+  - Replacement workflow requires:
+    - selected active assignment(s)
+    - replacement faculty
+    - replacement type
+    - reason category
+    - remarks/details
+    - explicit impact-review confirmation before processing
+  - Replacement types:
+    - Permanent Replacement
+    - Temporary Substitute
+    - Secondary / Co-Faculty
+    - Administrative Reassignment
+    - Wrong Faculty Assignment
+  - Processing behavior:
+    - Permanent, Administrative, and Wrong Faculty Assignment deactivate the old assignment and create/reactivate the new assignment as primary.
+    - Temporary Substitute and Secondary / Co-Faculty keep the old assignment active and create/reactivate the new assignment as secondary.
+    - New/replacement assignments follow the existing faculty acceptance workflow and are pending until accepted.
+    - Old faculty loses active access after permanent/administrative/wrong-assignment replacement.
+  - Impact analysis counts:
+    - active activities
+    - activity scores
+    - submissions
+    - period grades
+    - final grades
+    - correction requests
+    - reopen requests
+    - relevant grading locks
+  - Historical integrity:
+    - No activities, scores, attendance, submissions, period grades, final grades, correction requests, reopen requests, or locks are rewritten.
+    - Original authorship/history stays attached to existing records.
+  - Direct edit safety:
+    - Changing faculty user or course offering on an in-use `FacultyAssignment` row is blocked.
+    - Safe direct edits such as note/load-role/active-state behavior remain under the existing form rules.
+  - Permissions:
+    - Added `faculty_replacement.view`.
+    - Added `faculty_replacement.process`.
+    - Superadmin, Tenant Admin, Campus Admin, and Registrar get view/process by default.
+    - Area Chair, Dean, College Dean, and CAO are view-only by default unless explicitly granted process permission.
+  - Added focused tests in `apps/admin_portal/tests_faculty_assignment_replacement.py`.
+
+### Faculty Assignment Replacement Validation
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py migrate
+# Applied academics.0010_facultyassignmentreplacementlog
+# Applied rbac.0019_seed_faculty_replacement_permissions
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py migrate --check
+# Exit code 0; no unapplied migrations
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_faculty_assignment_replacement
+# 12 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_assignment_acceptance
+# 112 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.grading.tests.GradeEncodingAccessControlTests
+# 10 tests passed
+```
+
+### Faculty Assignment Replacement Manual Test Steps
+1. Log in as a user with `faculty_replacement.process`.
+2. Open `Admin Portal -> Academics -> Faculty Assignments`.
+3. Search/select the current faculty.
+4. Select one or more assigned offerings.
+5. Click `REPLACE FACULTY`.
+6. Confirm the selected assignment rows and impact counts are shown.
+7. Choose replacement faculty, replacement type, reason category, and remarks.
+8. Check the impact confirmation box and click `Confirm Replacement`.
+9. For Permanent/Administrative/Wrong Assignment, confirm the old faculty assignment becomes inactive and the replacement assignment is primary/pending acceptance.
+10. For Temporary Substitute or Secondary / Co-Faculty, confirm the old assignment stays active/primary and the new assignment is secondary/pending acceptance.
+11. Log in as the old faculty after a permanent replacement and confirm the class no longer appears.
+12. Log in as the replacement faculty and confirm the assignment must be accepted before opening the class.
+13. Try direct-editing an in-use assignment to another faculty and confirm the form blocks it with a Replace Faculty message.
+14. Log in as a view-only role and confirm the page can be viewed but direct POST processing is forbidden.
+
+### Known Limitations / Next Steps
+- There is no separate detailed replacement-log detail page yet; the replacement page shows recent history and the structured records are available in `FacultyAssignmentReplacementLog`.
+- Replacement workflow intentionally does not decide whether the academic replacement is valid; it records and safely applies an authorized admin decision.
+- Replacement faculty must still accept the assignment unless NCBA later approves an admin-bypass workflow for urgent replacements.
+- Future enhancement: add filters and a dedicated replacement history/detail page if operations need a long-term audit browser.
+
+- Faculty Activities Average Activities display cleanup:
+  - Detail dropdown options now hide configured detail weights when the detail belongs to a subcomponent using `Average Activities`.
+  - The Activities table hides the `Detail Weight` column when visible detail weights would only be reference values under `Average Activities`.
+  - Weighted Details behavior remains unchanged; configured detail weights still appear where they affect computation.
+  - Updated regression coverage in `apps/faculty_portal/tests_assignment_acceptance.py`.
+  - No grade computation, scores, activities, submissions, or locks were changed.
+
+### Faculty Activities Display Validation
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_average_activity_detail_weight_is_hidden_on_activity_page
+# 1 test passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+```
+
+- Enrollment Adjustment Tool:
+  - Added `EnrollmentAdjustmentLog` in `apps/enrollment/models.py`.
+  - Added `EnrollmentAdjustmentService` in `apps/enrollment/services.py`.
+  - Added Admin Portal page `Enrollment -> Enrollment Adjustments`.
+  - Added adjustment history and detail/audit view.
+  - Added `enrollment_adjustment.view` and `enrollment_adjustment.process` permissions.
+  - Added menu migration for `Enrollment Adjustments`.
+  - Added seed support in `seed_stage_0_1`.
+  - Added focused tests in `apps/admin_portal/tests_enrollment_adjustments.py`.
+- Supported adjustment actions:
+  - move one student
+  - move multiple selected students
+  - transfer all active students in the source offering
+- Impact analysis counts:
+  - attendance records
+  - active source offering activities
+  - student activity scores
+  - grade submissions
+  - student period grades
+  - student final grades
+  - correction requests
+  - reopen requests
+  - locked source course-offering periods
+- Classification behavior:
+  - `SAFE`: no academic records found; eligible for immediate processing.
+  - `WARNING`: academic records exist; eligible only after explicit warning confirmation.
+  - `BLOCKED`: source and destination are the same, destination enrollment already exists, final grade is submitted, or a source course-offering period is locked.
+- Processing behavior:
+  - creates a destination enrollment
+  - deactivates the source enrollment
+  - writes an `EnrollmentAdjustmentLog` per selected student
+  - does not move, edit, delete, submit, unlock, recompute, or migrate gradebook records
+- Destination offering behavior:
+  - source offering dropdown follows selected Academic Year, Term, and Campus
+  - destination offering dropdown follows authorized scope and selected Academic Year/Term, but is not forced to the source campus
+- Known limitation:
+  - cross-campus/program movement creates the destination enrollment under the destination offering scope, but it does not rewrite the student's master campus/department/program. Student master-data corrections should still come from SIS/import maintenance when Pinnacle changes those values.
+
+- Post-enrollment correction safety:
+  - Added `CourseOfferingSafetyService` in `apps/grading/services.py`.
+  - Added `EnrollmentSafetyService` in `apps/grading/services.py`.
+  - Course Offering safety treats an offering as in use when it has:
+    - enrollments
+    - faculty assignments and accepted faculty assignments
+    - grade activities
+    - student activity scores
+    - student period grades
+    - student final grades
+    - grade submissions
+    - correction requests
+    - submission reopen requests
+    - course-offering period locks
+    - attendance sessions/records
+  - In-use Course Offerings block changes to:
+    - tenant
+    - campus
+    - department
+    - program
+    - academic year
+    - term
+    - course
+    - section
+    - status
+    - active state
+  - In-use Course Offerings still allow safe non-identity edits:
+    - room
+    - schedule text
+  - Enrollment safety treats an enrollment as in use when the student/offering has:
+    - student activity scores
+    - student period grades
+    - student final grades
+    - grade submissions
+    - correction requests
+    - submission reopen requests
+    - course-offering period locks
+    - attendance records
+  - In-use Enrollments block:
+    - student change
+    - course-offering transfer
+    - active-state removal/deactivation
+  - In-use Enrollments still allow status-only updates such as DRP/W/INC when existing enrollment rules permit them.
+  - Added warning panels to the shared Admin Portal form page:
+    - `In use offering`
+    - `In use enrollment`
+  - Added the same central service checks to Django admin forms for `CourseOffering` and `Enrollment`.
+  - No grade computation, scores, activities, grades, submissions, locks, reopen requests, or correction records are modified by the safety checks.
+  - Future tools intentionally not implemented in this phase:
+    - Student Section Transfer Review Tool
+    - Faculty Replacement Tool
+    - Cancelled/Dissolved Class Workflow
+    - Post-Enrollment Change Log
+
+### Post-Enrollment Safety Validation
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py migrate --check
+# Completed with exit code 0; no unapplied migrations reported
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_post_enrollment_safety
+# 8 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_course_template_assignment_safety
+# 14 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.grading.tests.GradeEncodingAccessControlTests
+# 10 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_assignment_acceptance
+# 112 tests passed
+```
+
+### Post-Enrollment Safety Manual Test Steps
+1. Log in as an authorized Admin Portal user.
+2. Open `Admin Portal -> Academics -> Course Offerings`.
+3. Edit an unused offering and confirm identity fields can still be changed according to existing rules.
+4. Edit an offering with enrollments or gradebook records and confirm the `In use offering` warning appears.
+5. Try changing the in-use offering's course, section, term, campus, status, or active state and confirm the form blocks the change.
+6. Change only room or schedule for the in-use offering and confirm the save is allowed.
+7. Open `Admin Portal -> Enrollment`.
+8. Edit an enrollment with no grading records and confirm moving to another offering still follows existing rules.
+9. Edit an enrollment with activity scores or period grades and confirm the `In use enrollment` warning appears.
+10. Try changing the student or course offering and confirm the form blocks the change.
+11. Change only the enrollment status to DRP/W/INC and confirm the save is allowed when existing enrollment rules permit it.
+12. Confirm Grade Encoding Access Control still pauses faculty writes independently from these Admin maintenance safety checks.
+
+- Grade Encoding Access Control:
+  - Added `GradeEncodingControl` in `apps/grading/models.py` with Academic Year, Term, optional period code, optional campus, optional course offering, `OPEN/CLOSED` status, reason, faculty notice, active flag, and created/updated user references.
+  - Added `GradeEncodingAccessService` in `apps/grading/services.py`.
+  - Plugged the new gate into `GradingGovernanceService.assert_encoding_allowed()` so existing protected paths inherit the block:
+    - activity create/update/archive
+    - score save/update
+    - attendance session/record writes
+    - period submission
+  - Added Admin Portal management under `Grading -> Grade Encoding Access Control`:
+    - list/filter
+    - create
+    - edit
+    - open
+    - close
+  - Added `GradeEncodingControlForm` with validation:
+    - Academic Year and Term required by the model/form
+    - reason and faculty notice required when status is `CLOSED`
+    - course offering must match selected tenant/year/term/campus
+    - duplicate active exact-scope controls are blocked in the form
+  - Added RBAC/navigation support:
+    - `grading_encoding_control.manage`
+    - menu item `Grade Encoding Access Control`
+    - migration and `seed_stage_0_1` support
+    - faculty roles do not receive this permission
+  - Added Faculty Portal notices:
+    - dashboard shows closed encoding notices for affected class/period rows without student data
+    - activities, score entry, attendance, and summary pages show read-only closure banners
+  - Added Django admin registration for operational visibility.
+  - Added focused regression tests in `apps/grading/tests.py`.
+
+### Grade Encoding Access Control Validation
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py makemigrations grading
+# Created grading.0029_gradeencodingcontrol
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py migrate
+# Applied grading.0029_gradeencodingcontrol, rbac.0016_seed_grade_encoding_control_permission, navigation.0007_seed_grade_encoding_control_menu
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.grading.tests.GradeEncodingAccessControlTests
+# 7 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal
+# Timed out after 180 seconds. One failure marker appeared before timeout, but the captured output did not include the failure detail.
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal
+# Timed out after 180 seconds after many passing dots; no failure detail was produced before timeout.
+```
+
+### Grade Encoding Access Control Post-Implementation Review
+- Reviewed the Grade Encoding Access Control implementation against the post-review prompt.
+- Fixed Faculty Portal context propagation so the closure state and message are available on:
+  - Activities
+  - Score Entry
+  - Attendance
+  - Summary
+- Tightened Faculty Portal UI flags:
+  - `can_create_activity` now follows the centralized `state["is_editable"]`.
+  - attendance session management now follows the centralized `state["is_editable"]`.
+- Improved blocked direct activity POST messaging so faculty see the actual encoding-control reason/notice after redirect instead of only the generic locked/submitted message.
+- Simplified Faculty Dashboard closure notification:
+  - Dashboard now shows only the compact `Encoding Closed` status in the Grade Encoding Status table.
+  - Dashboard no longer shows the full closure reason/notice alert.
+  - Pending Grade Issues no longer includes encoding-closed entries because faculty cannot resolve those directly.
+  - Full closure reason/notice remains visible inside Activities, Score Entry, Attendance, and Summary pages.
+- Added/validated focused tests:
+  - `apps.grading.tests.GradeEncodingAccessControlTests`
+  - `apps.admin_portal.tests_grade_encoding_control`
+  - `apps.faculty_portal.tests_grade_encoding_control`
+- Isolated the earlier Admin Portal failure marker:
+  - `apps.admin_portal.tests_actual_data_reset.ActualDataResetTests.test_reset_keeps_security_shell_and_deletes_actual_data` expected exactly one `MenuGroup/MenuItem/MenuItemPermission`.
+  - The new Grade Encoding Access Control navigation migration legitimately seeds another Admin menu group/item.
+  - The test now verifies that the protected Actual Data Reset security shell remains present instead of asserting global menu counts.
+
+### Grade Encoding Access Control Review Validation
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py migrate --check
+# Completed with exit code 0; no unapplied migrations reported
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.grading.tests.GradeEncodingAccessControlTests
+# 10 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_grade_encoding_control apps.admin_portal.tests_actual_data_reset
+# 9 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_grade_encoding_control
+# 3 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_academic_performance_insights
+# 19 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_course_template_assignment_safety
+# 14 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_assignment_acceptance
+# 112 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test
+# Timed out after 600 seconds while still progressing. No failure marker was produced before timeout; output showed expected mocked email/API log noise and many passing dots.
+```
+
+### Grade Encoding Access Control Manual Test Steps
+1. Run migrations in the target environment.
+2. Log in as a role with `grading_encoding_control.manage`.
+3. Open `Admin Portal -> Grading -> Grade Encoding Access Control`.
+4. Create a `CLOSED` control for an active Academic Year and Term, with reason and faculty notice.
+5. Confirm the form blocks `CLOSED` status if reason or notice is blank.
+6. Log in as affected faculty and open Dashboard.
+7. Confirm the affected class shows `Encoding Closed` and a closure notice.
+8. Open Activities, Score Entry, Attendance, and Summary for the affected period.
+9. Confirm create/edit/save/submit buttons are hidden or disabled and a closure notice appears.
+10. Attempt direct POST to create an activity or save a score and confirm the server blocks it.
+11. Return to Admin Portal and Open the control.
+12. Confirm normal encoding resumes, subject to existing locks, deadlines, submitted status, and correction rules.
+13. Create a broader Closed control and a lower-scope Open control; confirm the broader Closed control still blocks encoding.
+14. Confirm unrelated offerings outside the scope remain open.
+
+### Grade Encoding Access Control Known Limitations
+- Phase 1 has no department-level, course-code-level, or scheduled date/time automation.
+- A lower-scope `OPEN` control is only an open record for that exact scope; it does not override any broader matching `CLOSED` control.
+- The database unique constraint may not catch all nullable-scope duplicates on every database backend, so the Admin Portal form remains the primary duplicate exact-scope guard.
+- Direct database SQL can bypass the application gate. Operational changes should go through Admin Portal and governed services.
+
+### Grade Encoding Access Control Next Recommended Phase
+- Add department/course-code scope only if operations need it after using the Phase 1 controls.
+- Add a focused Admin Portal test module for list/create/edit/toggle page rendering and permission denial if broader app-level tests remain too slow to isolate quickly.
+- Consider scheduled open/close windows only after policy owners confirm the timing rules.
+
+- Course Template Assignment in-use replacement safety:
+  - Added `CourseTemplateAssignmentSafetyService` in `apps/grading/services.py`.
+  - The service resolves affected offerings from the assignment's course and effective term. A no-term assignment is treated conservatively and excludes terms that already have an exact active published assignment.
+  - Template replacement is blocked when affected offerings have any of:
+    - GradeActivity records
+    - StudentActivityScore records
+    - StudentPeriodGrade records
+    - StudentFinalGrade records
+    - GradeSubmission records
+    - GradeCorrectionRequest records
+    - course-offering GradingPeriodLock records
+  - The blocker runs through the custom Admin Portal `CourseTemplateAssignmentForm` and the Django admin `CourseTemplateAssignmentAdminForm`.
+  - Editing an in-use assignment without changing its template remains allowed for safe fields currently supported by the form.
+  - The Admin Portal edit page now shows an `In use assignment` warning with offering, activity, score, period grade, submission, final grade, correction, and period-lock counts.
+  - The validation message tells admins to use a future-term assignment with no encoded grades or a separate test course instead of replacing the template midstream.
+  - No grade computation, activity, score, submission, correction, lock, or grade records are migrated, deleted, recomputed, or modified by this safety check.
+
+### Course Template Assignment Safety Validation
+```powershell
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_course_template_assignment_safety
+# 14 tests passed, including isolated final-grade, correction-request, and course-offering period-lock blockers
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_course_template_assignment_bulk apps.admin_portal.tests_course_template_assignment_list
+# 5 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_assignment_acceptance
+# 112 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_academic_performance_insights
+# 19 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
+# System check identified no issues
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test
+# Attempted again during the post-implementation review. The full suite did not finish within the 15-minute command timeout. No failure summary was produced before timeout; the last visible output was normal existing account/SIS API test log noise and a long stream of passing dots.
+```
+
+### Course Template Assignment Safety A132 Manual Validation
+- Local A132-ITAPPS active assignment remains `BSA_1ST_3RD_REGULAR` for `2025-2026 / 2ND`.
+- Usage summary for the assignment: 27 affected offerings, 199 activities, 1,647 scores, 75 period grades, 25 final grades, 2 submissions, 0 correction requests, and 0 course-offering period locks.
+- A validation-only attempt to replace A132-ITAPPS with `TEST-ACADEMIC-INSIGHTS` returned invalid with the expected in-use safety message.
+- The database assignment still points to `BSA_1ST_3RD_REGULAR` after validation, and activity/score/period-grade/submission counts were unchanged.
+- No A132 activity, score, grade, submission, or lock records were modified.
+
+### Course Template Assignment Safety Manual Checks
+1. Open `Admin Portal -> Grading -> Course Template Assignments`.
+2. Edit an assignment for a course/term with no activities, scores, grades, or submissions and confirm a template change is allowed.
+3. Edit an assignment for a course/term already used by faculty and confirm the `In use assignment` warning appears.
+4. Try to replace its grading template and confirm the form blocks the change with the clear safety message.
+5. Confirm the original template assignment, activities, scores, period grades, submissions, and locks remain unchanged.
+6. Confirm creating a future-term assignment remains the safe path when no encoded gradebook records exist.
+
+### Course Template Assignment Safety Known Limitations
+- The blocker prevents replacement; it does not map old activities/scores to a new template. A governed migration/mapping tool would need separate approval and detailed academic rules.
+- Direct database SQL can still bypass application validation. Operational changes should go through Admin Portal or governed services.
+- The UI keeps the template dropdown visible and relies on server-side rejection so administrators receive the explicit validation message.
+
+- Course Template Assignment ordering:
+  - Sorted the Course filter and result rows by course title, then course code.
+  - Applied the same ordering to active assignments, inactive assignments, courses without templates, and current offerings without templates.
+  - Added a regression test for title/code ordering.
+  - No assignment, grading-template, scope, or database behavior changed.
+
+- TEST Faculty activity visibility correction:
+  - Confirmed the seeded records existed, but A132 resolved the exact-term operational template `BSA_1ST_3RD_REGULAR` while activities still referenced the dedicated TEST template periods.
+  - Updated the seeder to attach TEST activities and scores to the template officially resolved by `FacultyGradingService.resolve_template_for_offering()`.
+  - Preserved precedence: an exact-term Course Template Assignment still outranks Tenant Grading Profiles. No operational template structure or grading formula was changed.
+  - Added period code/name alias handling so `FX / FINAL` receives the expected final exam activity.
+  - Added a regression test for exact-term template precedence and PRELIM-through-FINAL activity coverage.
+  - Reseeded locally. Current totals are 18 offerings, 138 students, 346 activities, and 2,616 scores.
+  - Verified the real Faculty Portal responses for `test-faculty-01`:
+    - My Classes: Active 2, Archived 0
+    - PRELIM: seven activities
+    - MIDTERM: seven activities
+    - PRE-FINAL: six activities under the operational template
+    - `FX / FINAL`: one final exam activity
+    - MIDTERM Activities page: HTTP 200 with seven visible activities
+
+- TEST Faculty My Classes correction:
+  - Confirmed the TEST assignments existed, but Faculty Portal correctly placed them in Archived because they used `TEST-AY-2026 / TEST-TERM` while NCBA's active scope is `2025-2026 / 2ND`.
+  - Updated the demo seeder to prefer the tenant's configured active Academic Year and Term. The isolated TEST Academic Year/Term remains a fallback when no active scope is configured.
+  - The TEST Tenant Grading Profiles remain limited to the TEST program, campus, course, and effective term, so this does not replace ordinary operational grading profiles.
+  - Added a regression test proving all 18 TEST offerings use the configured active scope when one exists.
+  - Removed and safely rebuilt only the local TEST dataset under `2025-2026 / 2ND`.
+  - Verified `/faculty/my-courses/` as `test-faculty-01`: HTTP 200, Active 2, Archived 0, both A132 TEST sections visible, and password `TestDemo123!` valid.
+
+- Academic Performance Insights TEST dataset extension:
+  - Added one additional TEST faculty member per campus:
+    - `test-faculty-07` for NCBA-01
+    - `test-faculty-08` for NCBA-02
+    - `test-faculty-09` for NCBA-03
+  - Each new faculty member handles both `A132-ITAPPS` and `A221-ACGN` in a new TEST Section C.
+  - Each of the six new offerings has exactly three active enrolled students.
+  - Each student has complete active activity-score records for PRELIM, MIDTERM, PRE-FINAL, and FINAL; verified missing-output count is zero for every new class/period.
+  - The seeder remains idempotent, DEBUG-only, confirmation/password protected, and cleanup-safe.
+  - Applied the seeder locally with the existing demo password. Current totals are 14 TEST users, 18 offerings, 138 students, 346 activities, and 2,616 scores.
+  - No migration was required.
+
+### Additional TEST Faculty Validation
+```powershell
+python manage.py test apps.admin_portal.tests_academic_performance_demo_seed
+# 5 tests passed
+
+python manage.py test apps.admin_portal.tests_academic_performance_demo_seed apps.admin_portal.tests_academic_performance_insights
+# 24 tests passed
+
+python manage.py check
+# System check identified no issues
+```
+
+- Academic Performance Insights presentation review:
+  - Added a main-page Needs Attention panel with neutral section, issue, and suggested-check wording. Normal and incomplete-data states have explicit messages.
+  - Added a CSS-bar legend: green is class average, red is at-risk count, and gray is missing outputs.
+  - Compacted Course and Faculty presentation and protected the View Details action area from crowding.
+  - Added What to Review, Comparison Context, Ready for Comparison, Activity Setup Summary, and a filtered View Activity Consistency shortcut to section Performance Details.
+  - Comparison Context is limited to the same authorized campus, department, course code, academic year, term, and grading period.
+  - Activity Setup now sorts by template component, subcomponent, activity date/title, and ID. Summary labels come from the actual template hierarchy.
+  - View Details now includes a validated local `next` URL. Back to Report restores the exact originating Performance Insights or Activity Consistency filters and pagination. External return URLs fall back safely to the Insights landing page.
+  - Preserved the four summary cards, aggregate-only privacy, role scope, official computation reuse, and read-only behavior.
+  - No migration, chart library, AI, external API, new analytics formula, or database analytics table was added.
+
+### Academic Performance Insights UI Validation
+```powershell
+python manage.py test apps.admin_portal.tests_academic_performance_insights
+# 19 tests passed
+
+python manage.py test
+# 551 tests passed
+
+python manage.py check
+# System check identified no issues
+
+python -m py_compile apps/admin_portal/academic_performance.py apps/admin_portal/views.py
+# passed
+```
+
+### Academic Performance Insights UI Manual Test
+1. Log in as an authorized Area Chair, College Dean, or CAO and open `Grading -> Academic Performance Insights`.
+2. Select Academic Year, Term, Grading Period, and optional scope filters; generate the report.
+3. Confirm the four summary cards remain unchanged and the Needs Attention panel uses neutral wording.
+4. Confirm the green/red/gray bar legend matches class average, at-risk count, and missing outputs.
+5. Confirm Course and Faculty columns remain readable and View Details is fully visible.
+6. Open View Details and confirm What to Review, Comparison Context, Ready for Comparison, Activity Setup Summary, and View Activity Consistency appear.
+7. Confirm activities are ordered by component, subcomponent, then activity title/date.
+8. Click Back to Report and confirm all original filters and the page number are restored.
+9. Repeat from Activity Consistency and confirm Back to Report returns to that filtered page.
+10. Confirm no student names, individual grades, rankings, or faculty-ranking language appear.
+11. Confirm an incomplete section shows the incomplete-data guidance and a normal set shows the within-normal-range message.
+12. Confirm an unauthorized class detail URL remains blocked by existing scope checks.
+
+### Academic Performance Insights UI Known Limitations
+- Comparison readiness uses active activity counts and required-category coverage; it does not compare activity titles or detailed assessment difficulty.
+- Comparison Context reports the largest available same-scope section-average difference and does not introduce ranking.
+- Live reports remain capped at 100 authorized offerings and are not stored as historical analytics snapshots.
+- Authenticated visual browser review remains pending because no in-app browser target was connected during this session.
+
+- Academic Year and import safety:
+  - Confirmed audit log `#5131` records the May 23, 2026 change from `AY2526` to `2025-2026` by `superadmin`; existing offerings and grades remained linked because foreign keys use Academic Year ID `5`.
+  - Confirmed the ordinary Audit Logs page previously hid stored before/after payloads.
+  - Added server-side Academic Year tenant/code immutability after the record is used by terms, course offerings, enrollments, grading-period locks, or final-clearance reports.
+  - Disabled tenant and code fields on the in-use Academic Year edit form with a clear explanation. Name, dates, and active state remain editable.
+  - Added `/admin-portal/audit/logs/<id>/` with changed fields, before/after payloads, request metadata, scope, actor, and redaction of credential-like fields.
+  - Set the Before Record, After Record, and Technical Metadata accordions to open by default.
+  - Added Details links to Audit Logs and Recent Critical Actions.
+  - Future Academic Year create/update audit events now use the affected tenant as their audit scope.
+  - Improved import errors to list available active Academic Year codes and replaced stale `AY2526` template/help examples with `2025-2026` and exact-code instructions.
+  - Confirmed duplicate handling remains importer-specific: sections skip existing records; students use CREATE/UPDATE/UPSERT; courses, course offerings, faculty assignments, and enrollments reject existing duplicates.
+  - Added reusable Import Safety Measures guidance to the bulk-import landing page, all six upload pages, and batch-detail pages.
+  - The guidance accurately states that uploads do not write operational records, only VALID rows are confirmed, confirmation uses independent per-row transactions, partial success is possible, successful writes are audited, and confirmed batches cannot be confirmed twice.
+  - Added importer-specific warnings for create-only behavior, duplicate rejection/skipping, Student UPDATE/UPSERT, and Enrollment AUTO_CREATE.
+  - No migration was required.
+
+### Academic Year Safety Validation
+```powershell
+python manage.py test apps.admin_portal.tests_academic_year_safety
+# 7 tests passed
+
+python manage.py test apps.imports.tests_department_inference apps.admin_portal.tests_import_loading_indicators apps.admin_portal.tests_section_import_template
+# 9 tests passed
+
+python manage.py test apps.admin_portal.tests_academic_year_safety apps.imports.tests_department_inference
+# 11 focused tests passed after final identifier/redaction/import-cache hardening
+
+python manage.py test apps.admin_portal.tests_academic_year_safety
+# 7 tests passed after expanding Audit Log detail sections by default
+
+python manage.py test apps.admin_portal.tests_import_safety_guidance apps.admin_portal.tests_import_loading_indicators apps.admin_portal.tests_section_import_template apps.imports.tests_department_inference apps.imports.tests_student_import
+# 16 importer guidance and regression tests passed
+
+python manage.py test apps.admin_portal.tests_academic_performance_demo_seed
+# 3 demo seed/rename/idempotency/cleanup tests passed
+
+python manage.py check
+# System check identified no issues
+
+python manage.py test --parallel 4
+# 542 tests passed
+```
+
+### Academic Year Safety Manual Checks
+1. Open `Admin Portal -> Academics -> Academic Years`.
+2. Edit an unused Academic Year and confirm its tenant/code can still be corrected.
+3. Create a Term under that Academic Year, reopen Edit, and confirm tenant/code are locked.
+4. Change only the name or dates and confirm the update succeeds.
+5. Open `Admin Portal -> Audit Logs`, select `Details`, and confirm changed fields and before/after values are visible.
+6. Upload a CSV with an invalid Academic Year code and confirm the validation error lists active codes.
+
+### Known Limitations
+- Django `QuerySet.update()` and direct database SQL bypass model `save()` validation. Operational changes must continue through governed application forms/services; direct database maintenance remains a privileged emergency action.
+- Existing historical audit log `#5131` retains its original `DEFAULT/MAIN` scope assignment. Audit records were not rewritten; future Academic Year events use the corrected affected-tenant scope.
+- No Academic Year alias table or governed rename workflow was added. In-use codes are now locked instead of renamed.
+
+### Exact Next Steps
+1. Manually verify the Academic Year edit and Audit Log Details pages in a browser.
+2. Decide later whether a separately approved Academic Year alias/governed-rename workflow is needed for legacy external codes.
+
+- Academic Performance Insights post-implementation review and TEST dataset:
+  - Revalidated all three Insights URLs, `grading_analytics.read`, feature-toggle 404 behavior, Area Chair localization, College Dean cross-campus scope, CAO existing-scope limits, aggregate-only privacy, official computation reuse, and read-only behavior.
+  - Confirmed no student names, individual student grades, student rankings, faculty rankings, AI calls, external APIs, analytics tables, or chart libraries are present.
+  - Added neutral performance status labels: `Normal`, `Needs Attention`, `High Risk`, and `Incomplete Data`.
+  - Improved Activity Consistency to count the most specific active category/subcomponent and detect a required active subcomponent with no activity as `Incomplete Setup`.
+  - Expanded the Dean/CAO summary to campus plus department, courses needing attention, status, and scoped drill down.
+  - Added `python manage.py seed_academic_performance_insights_demo`.
+  - Safety rules:
+    - requires `--confirm-demo-data`
+    - requires `--demo-password` with at least eight characters when seeding
+    - refuses to run when `DEBUG=False`
+    - intentionally provides no non-debug override
+    - is idempotent
+    - cleanup requires `--confirm-demo-data --remove-demo-data`
+  - The command reuses existing NCBA Cubao, Fairview, and Taytay campuses, existing COLLEGE departments, and existing official `A132-ITAPPS` and `A221-ACGN` course records.
+  - It creates isolated `TEST` programs, sections, offerings, users, students, template/profile records, activities, and scores.
+  - The dedicated approved/published TEST template uses PRELIM, MIDTERM, PRE-FINAL, and FINAL. Quizzes and Participation/Output use Average Activities.
+  - Local development data created:
+    - 14 TEST users: one Dean, one CAO, three Area Chairs, and nine faculty users
+    - 18 TEST sections/offerings
+    - 138 synthetic students
+    - 346 activities
+    - 2,616 scores
+  - Re-running the seed command produced the same counts with no duplicates.
+  - Midterm Dean validation originally produced 12 section rows; the extended dataset now produces 18 section rows and three campus/department summaries:
+    - Cubao: `High Risk`
+    - Fairview: `Needs Attention`
+    - Taytay: `Incomplete Data`
+  - Activity Consistency validation:
+    - PRELIM: `Consistent`
+    - MIDTERM: `Minor Difference`
+    - PRE-FINAL: `Needs Review`
+    - FINAL includes `Incomplete Setup`
+  - Verified a saved zero remains a valid encoded score and intentionally absent score records increase Missing Outputs.
+  - Verified CSS bars and table fallbacks are present and their values come from the same report rows.
+  - Compared TEST score values/timestamps and grade/submission/lock/attendance counts before and after report requests; no record changed.
+
+### Academic Performance Insights TEST Data Commands
+```powershell
+python manage.py seed_academic_performance_insights_demo --confirm-demo-data --demo-password "choose-a-demo-password"
+python manage.py seed_academic_performance_insights_demo --confirm-demo-data --remove-demo-data
+```
+
+Do not run this command in production. It refuses when `DEBUG=False`, but TEST data must also be removed or excluded before a development database is copied elsewhere.
+
+### Academic Performance Insights TEST Users
+- College Dean: `test-insights-dean`
+- CAO: `test-insights-cao`
+- Cubao Area Chair: `test-insights-ac-ncba-01`
+- Fairview Area Chair: `test-insights-ac-ncba-02`
+- Taytay Area Chair: `test-insights-ac-ncba-03`
+- Faculty usernames are `test-faculty-01` through `test-faculty-09`.
+- Seeder reruns rename the earlier long `test-insights-fac-*` usernames in place, preserving their user IDs, assignments, activities, and scores.
+- Local assignment map:
+  - `test-faculty-01`: NCBA-01 / A132-ITAPPS
+  - `test-faculty-02`: NCBA-01 / A221-ACGN
+  - `test-faculty-03`: NCBA-02 / A132-ITAPPS
+  - `test-faculty-04`: NCBA-02 / A221-ACGN
+  - `test-faculty-05`: NCBA-03 / A132-ITAPPS
+  - `test-faculty-06`: NCBA-03 / A221-ACGN
+  - `test-faculty-07`: NCBA-01 / A132-ITAPPS and A221-ACGN / Section C / 3 students each
+  - `test-faculty-08`: NCBA-02 / A132-ITAPPS and A221-ACGN / Section C / 3 students each
+  - `test-faculty-09`: NCBA-03 / A132-ITAPPS and A221-ACGN / Section C / 3 students each
+- Verified the original user IDs `23, 24, 26, 27, 29, 30` and all 12 faculty assignments remained unchanged after the rename. No old `test-insights-fac-*` username remains.
+- Password is the value supplied through `--demo-password`; forced password change is disabled for these TEST accounts.
+
+### Academic Performance Insights TEST Manual Test
+1. Confirm the environment is development or staging and `DEBUG=True`.
+2. Run migrations and enable Academic Performance Insights as Superadmin.
+3. Run the seed command with `--confirm-demo-data` and a chosen `--demo-password`.
+4. Log in as `test-insights-ac-ncba-01`; select NCBA-01 and open Academic Performance Insights.
+5. Select the currently configured active Academic Year and Term (`2025-2026 / 2ND` on this development database) and `MIDTERM`; confirm only Cubao TEST sections appear.
+6. Repeat with the Fairview and Taytay TEST Area Chair accounts; confirm each sees only its assigned campus.
+7. Log in as `test-insights-dean`; select `All authorized campuses`, the configured active Academic Year/Term, and `MIDTERM`.
+8. Confirm 18 section rows and the Cubao/Fairview/Taytay campus summaries appear.
+9. Confirm Course Performance shows Normal, Needs Attention, High Risk, and Incomplete Data.
+10. Open Activity Consistency and test PRELIM, MIDTERM, PRE-FINAL, and FINAL for Consistent, Minor Difference, Needs Review, and Incomplete Setup.
+11. Filter by `A132-ITAPPS`, `A221-ACGN`, campus, department, and faculty.
+12. Confirm leadership reports show no student names, individual grades, or rankings.
+13. Open View Details and confirm it contains aggregate component/category and activity setup only.
+14. Log in as `test-insights-cao`; confirm the same three campuses are visible only because the TEST CAO has explicit role assignments for them.
+15. Disable the feature and confirm navigation disappears and direct Insights URLs return 404.
+16. Re-enable it and confirm reports return.
+17. Run the seed command again and confirm counts do not increase.
+18. When testing is complete, run the cleanup command and confirm official courses and unrelated records remain.
+
+### Academic Performance Insights Review Validation
+- [x] Demo seed command safety/idempotency/scenario/cleanup tests - passed, 3 tests.
+- [x] Existing Academic Performance Insights tests - passed, 14 tests.
+- [x] Admin analytics/scope integration group - passed, 88 tests.
+- [x] `python manage.py check` - passed.
+- [x] `python manage.py makemigrations --check --dry-run` - passed; no migration required.
+- [x] Local rendered-response validation passed for CSS bars, table fallbacks, privacy, statuses, campus summaries, and read-only record comparison.
+- [x] `python manage.py test --parallel 4` - passed, 535 tests in 918.628 seconds.
+- [i] An earlier serial full-suite run exceeded the command window; the complete parallel suite subsequently passed.
+- [ ] In-app browser screenshot review was unavailable because no browser target was connected.
+
+- Local Academic Performance Insights activation/test:
+  - Investigated why user `ac` could not see Academic Performance Insights on the development machine.
+  - Confirmed migrations `navigation.0006` and `rbac.0015` are applied, the menu item is active, and `ac` has both `admin_portal.access` and `grading_analytics.read`.
+  - Found the NCBA tenant had no saved `FEATURE_ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED` setting, so the effective value was False even though the UI was believed to have been enabled.
+  - Saved the NCBA tenant setting as True in the local development database.
+  - Verified as `ac` that the Admin dashboard displays Academic Performance Insights and the direct report page returns HTTP 200.
+  - Verified the existing local test data under NCBA-02: Academic Year `2025-2026`, Term `2ND`, Period `MIDTERM`, Course `A132-ITAPPS`.
+  - Verified Course Performance returns one section (`BSA 1-BSA_1A`) with class average `82.76`, one at-risk student, and zero missing outputs.
+  - Verified Activity Consistency shows the correct one-section message because there is no second section with the same course code in the selected scope.
+  - No source code, grading formula, score, grade, submission, or lock record was changed during this local configuration check.
+
+- Academic Performance Insights:
+  - Added the shared Admin Portal pages:
+    - `/admin-portal/grading/performance-insights/`
+    - `/admin-portal/grading/performance-insights/activity-consistency/`
+    - `/admin-portal/grading/performance-insights/classes/<offering_id>/<period_code>/`
+  - Added Course Performance by Section with no more than four summary cards: Sections in Scope, Overall Average, At-Risk Students, and Missing Outputs.
+  - Added Activity Consistency for same-course sections in the same academic year, term, and grading-period code.
+  - Added Dean/CAO Campus Summary when the signed-in role is allowed to compare authorized campuses.
+  - Added section setup detail with component averages and active activity setup only. It contains no student identity or individual student grade.
+  - Added required Academic Year, Term, and Grading Period filters plus optional authorized campus, department, course, and supervised-faculty filters.
+  - Added friendly states for missing filters, unavailable periods, empty scope, one-section comparisons, incomplete setup, and the 100-offering live-report cap.
+  - Reused `FacultyPerformanceService.get_class_performance_snapshot()` and its official `FacultyGradingService.build_period_grade_detail_for_student()` computation path.
+  - Missing Outputs counts unencoded activity-score records only. Attendance is excluded and a saved zero remains encoded.
+  - Added deterministic activity labels: 0 difference is `Consistent`, 1 is `Minor Difference`, 2 or more is `Needs Review`, and a required active component with no activity is `Incomplete Setup`.
+  - Added lightweight CSS bars, responsive tables, exact values, and rule-based text. No chart package, AI, external API, analytics model, or snapshot table was added.
+  - Added `FEATURE_ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED`, default Off. A Superadmin enables it from `Tools -> Configuration Management -> Configurable Features`.
+  - Disabled tenants have no menu/dashboard action and direct Insights URLs return 404.
+  - Reused `grading_analytics.read`. Area Chair filters/data are localized to the active campus; College Dean and CAO cross-campus options remain limited to their existing authorized scope.
+  - Added navigation migration `navigation.0006_seed_academic_performance_insights_menu`.
+  - Added RBAC migration `rbac.0015_grant_cao_grading_analytics_read`.
+  - Analytics are read-only and do not create or alter grades, scores, attendance, submissions, locks, or gradebook records.
+
+### Academic Performance Insights Manual Test
+1. Run `python manage.py migrate`.
+2. Log in as Superadmin and open `Tools -> Configuration Management -> Configurable Features`.
+3. Enable `Academic Performance Insights` and save.
+4. Log in as an Area Chair with `grading_analytics.read`; confirm `Grading -> Academic Performance Insights` is visible.
+5. Open the report without filters; confirm it asks for Academic Year, Term, and Grading Period.
+6. Select all required filters and generate the report; confirm the page shows aggregate section data and no student names, grades, or rankings.
+7. Confirm an Area Chair sees only the active campus and authorized departments in filters and results.
+8. Log in as a College Dean assigned to authorized departments across two campuses; choose `All authorized campuses` and confirm only those scoped campuses appear.
+9. Log in as CAO; confirm results remain limited to existing CAO role assignments rather than becoming globally unrestricted.
+10. Open Activity Consistency and verify same-course section labels for 0, 1, and 2+ activity-count differences.
+11. Remove all active activities from a required non-attendance component in test data; confirm `Incomplete Setup`.
+12. Save a score of `0`; confirm it is not counted as a Missing Output.
+13. Leave one required activity score unencoded; confirm Missing Outputs increases while attendance has no effect on that count.
+14. Open a section detail; confirm only aggregate component results and activity setup are shown.
+15. Remove `grading_analytics.read` from a test role; confirm access is denied.
+16. Disable the feature; confirm the menu/dashboard action disappears and direct URLs return not found.
+17. Compare grade, score, attendance, submission, and lock record counts before and after viewing reports; confirm none changed.
+
+### Academic Performance Insights Validation
+- [x] `python manage.py test apps.admin_portal.tests_academic_performance_insights` - passed, 14 tests.
+- [x] Admin scope/analytics integration group - passed, 85 tests.
+- [x] `python manage.py check` - passed.
+- [x] `python manage.py makemigrations --check --dry-run` - passed; no changes detected.
+- [x] `python manage.py migrate` - applied `navigation.0006` and `rbac.0015` in the development database.
+- [x] `python manage.py test` - passed, 532 tests in 1467.967 seconds.
+- [ ] Authenticated browser smoke test remains pending because no callable in-app browser target was available in this session.
+
+### Academic Performance Insights Known Limitations
+- Phase 1 computes reports live and limits processing to the first 100 authorized offerings. It has no cached analytics snapshots or historical report archive.
+- Missing Outputs covers activity-score records only; attendance is intentionally excluded.
+- Activity Consistency compares active activity counts and required-component coverage. Maximum-score range is informational and activity titles are not used as consistency keys.
+- College Dean scope is inferred from existing active role/campus/department assignments; there is no separate Dean-to-Area-Chair reporting-line model.
+- The reports do not provide student drill-down, faculty ranking/evaluation, cross-faculty comparison, or advanced statistics.
+- CAO permission migration grants `grading_analytics.read` to an existing active `CAO` role. Deployments that create the role later must seed/grant the permission through normal RBAC setup.
+
+### Academic Performance Insights Next Recommended Phase
+- After production usage confirms the Phase 1 definitions, consider optional scheduled aggregate snapshots/export history and a separate attendance indicator. Keep both behind explicit configuration and preserve the current role scope.
+
+- Area Chairman scope/configuration review:
+  - Confirmed user `ac` has active `AREA_CHAIR` assignments for NCBA-01/INFOSYS, NCBA-02/INFOSYS, and NCBA-03/CS. The account default is NCBA-03/CS.
+  - Confirmed the role already grants the required read permissions for Sections, Course Offerings, Course Template Assignments, Course Base Overrides, Grading Analytics, Grade Distribution Monitor, and Faculty Assignments.
+  - Confirmed I-AM GURO (`faculty`) has active Faculty roles for NCBA-01/INFOSYS and NCBA-02/INFOSYS, with NCBA-02/INFOSYS as the account default.
+  - Confirmed I-AM GURO's accepted A132-ITAPPS class is owned by NCBA-02/COLLEGE, not INFOSYS. Its BSA program and BSA 1-BSA_1A section are also under COLLEGE.
+  - Confirmed no active programs, sections, offerings, or department-owned courses currently exist under NCBA-01/INFOSYS, NCBA-02/INFOSYS, or NCBA-03/CS. Fairview's 13 active programs, 101 sections, and 403 offerings are currently attached to COLLEGE.
+  - Confirmed the A132-ITAPPS Course Template Assignment uses template `BSA_1ST_3RD_REGULAR`, but that template is visible to BSBA departments, not INFOSYS. This causes the Area Chairman's Course Template Assignment list to exclude the row even though the shared course itself is in scope.
+  - Confirmed there are no Course Base Value Override records in the current database; a blank page is expected and is not a required setup unless an approved course exception exists.
+  - Confirmed Grading Analytics follows offering/section/program department ownership and therefore has no INFOSYS-owned offering to analyze.
+  - Confirmed Grade Distribution follows accepted faculty assignments: it returns three rows when the current scope is NCBA-01/INFOSYS or NCBA-02/INFOSYS, and zero rows under the account's default NCBA-03/CS scope because I-AM GURO has no Taytay faculty assignment.
+  - No code, permissions, grading formulas, or database records were changed during this review.
+
+- Department-scoped grading templates:
+  - Added `GradingTemplate.department_visibility` with `All Departments` and `Selected Departments`.
+  - Added the `visible_departments` many-to-many relation.
+  - Existing templates default to `All Departments` through migration `grading.0028_gradingtemplate_department_visibility_and_more`.
+  - Added centralized `GradingTemplateAccessService` helpers for active department resolution, queryset filtering, object access, and permission-aware governance checks.
+  - Department matching follows existing parent/child scope expansion and excludes Faculty-only role assignments from Admin template visibility.
+  - Applied centralized filtering to template lists, builder, structure, edit, duplicate, calculator, nested structure maintenance, hotfix queues/actions, Tenant Grading Profile dropdowns, Course Template Assignment dropdowns, and related direct URLs.
+  - Added department-access checks inside template approval, publish, and hotfix workflow guards.
+  - Template duplication now preserves visibility mode and selected departments.
+  - Added form validation requiring at least one same-tenant department in Selected mode.
+  - Added visibility badges/summaries to template list, builder, structure preview, approval review, and hotfix review.
+  - Updated the Admin Grading Template Setup Guide with visibility and duplication guidance.
+  - Faculty grade computation, template resolution, scores, submissions, locks, and existing gradebooks were not changed.
+  - Review hardening completed:
+    - Tenant Grading Profile form help text now resolves a submitted template only through its already-scoped field queryset, so a forged hidden template ID cannot expose active period codes.
+    - Course Template Assignment coverage metrics now consider only templates visible to the current Admin account.
+    - Bulk assignment still respects an existing hidden prior assignment, but its warning uses a generic message and does not disclose the hidden template name.
+    - Added explicit tests for cross-tenant department form data, stale M2M clearing, inactive departments, parent-child scope, permission/department dual requirements, nested direct URLs, forged parent IDs, forged calculator/profile/assignment IDs, governance queues, authorized submit/review/publish/hotfix actions, and superadmin selectors.
+  - Visible Department labels now include campus and department context in the format `Campus Code - Campus Name | Department Code - Department Name`.
+
+### Department Visibility Manual Test
+1. Log in as Superadmin and open `Grading -> Grading Templates`.
+2. Create or edit a template and choose `All Departments`; confirm authorized tenant users retain existing visibility.
+3. Change it to `Selected Departments`, choose Department A, and save.
+4. Log in as an authorized Dean/Area Chair assigned to Department A; confirm the template appears.
+5. Confirm Department A can open Builder, Structure, Calculator, and governance actions only when the required RBAC permission and workflow role are also assigned.
+6. Log in as the equivalent Department B user; confirm the template is absent.
+7. As Department B, try direct Builder, Structure, Edit, Duplicate, Publish, Approval, and Hotfix URLs; confirm 404/not-found.
+8. Open Tenant Grading Profile and Course Template Assignment create pages; confirm Department B's hidden template is absent from dropdowns.
+9. Assign one user to Departments A and B; confirm that user sees selected templates from both departments.
+10. Deactivate a department role assignment; confirm it no longer grants selected-template visibility.
+11. Duplicate a Selected Departments template; confirm the draft copy keeps the same selected departments.
+12. Confirm Superadmin still sees every template.
+13. Open an existing faculty class using the template and confirm score encoding, Summary, submission state, and locked grades are unchanged.
+14. As Department B, try direct Period, Component, Subcomponent, and Detail edit URLs under Department A's template; confirm 404/not-found.
+15. As Department B, submit Department A's hidden template ID to Calculator, Tenant Grading Profile, and Course Template Assignment forms; confirm the forms reject it.
+16. Confirm a rejected hidden Tenant Grading Profile ID does not reveal the hidden template's period codes.
+17. Confirm a course with a hidden prior template assignment does not reveal that template's name in warnings or coverage counts.
+18. Deactivate a selected department and confirm it no longer grants template visibility.
+19. Confirm an active parent-department role can access a selected active child-department template, while a child role does not automatically cover its parent.
+20. Record grade, score, submission, and lock data before and after the checks; confirm no faculty gradebook record changed.
+
+- Detail-item weight visibility:
+  - Admin detail list now always displays the stored percentage instead of replacing it with an averaging message.
+  - Template Builder and structure preview show `Configured Detail Weight`.
+  - Test Calculator keeps the percentage visible and labels it reference-only under Average Activities.
+  - Faculty template preview shows each detail percentage and its parent detail-computation mode.
+  - Faculty activity selectors, activity list, and score-entry header display the chosen detail percentage.
+  - Faculty Summary nested detail headers display the configured percentage.
+  - Grade Explanation Activity Details and Student Consultation Current Period Breakdown display detail percentages.
+  - Faculty and Admin correction screens display percentages beside selected detail items.
+  - Admin detail-level analytics includes a Detail Weight column.
+  - Under Average Activities, every affected page explains that the stored percentage is for reference and is not used in equal activity averaging.
+  - Weighted Details continues to use the configured percentages.
+  - Added no model, migration, grade formula, score, submission, correction-posting, or lock behavior change.
+
+### Detail Weight Visibility Manual Test
+1. Open an Admin grading template containing detail items.
+2. Check the detail list, Builder, structure preview, and Test Calculator; confirm every detail shows its configured percentage.
+3. For an Average Activities subcomponent, confirm the percentage is labeled reference-only or not used in the average.
+4. Log in as assigned faculty and open the class Template page.
+5. Open Activities and confirm detail dropdown options and saved activity rows show the configured percentage.
+6. Open Encode Scores and confirm the selected detail percentage appears in the activity header.
+7. Open Summary and confirm nested detail headers show their configured percentages.
+8. Open Explain beside a grade and confirm Activity Details shows configured detail percentages.
+9. Open Class Performance, select a student, and confirm Current Period Breakdown shows detail percentages when details exist.
+10. Open Faculty Corrections and Admin correction review/on-behalf correction; confirm detail percentages appear.
+11. Open Admin Grading Analytics and confirm the detail-level table includes Detail Weight.
+12. Compare one Average Activities class and one Weighted Details class; confirm computed grades are unchanged.
+
+- Tenant Grading Profile final-grade clarification:
+  - Updated the Admin Grading Template Setup Guide to state explicitly that the profile's main purpose is to control how grading-period grades are combined into the official final grade.
+  - Documented the actual fallback: when no active profile matches, TeacherMate+ averages every active period in the resolved published template.
+  - Added the NCBA Regular example: one four-period template may serve both 1st and 2nd Semester when their structures are identical.
+  - Added the NCBA Summer example: use a separate three-period template containing Midterm, Pre-Final, and Final.
+  - Recommended Regular and Summer profiles using `Average All Active Template Periods` for explicit term-type governance.
+  - Clarified that exact-term Course Template Assignments are checked before profiles when selecting the template.
+  - Added a warning that a four-period Regular template must not be used for Summer when Prelim should be excluded.
+  - Updated the detailed Tenant Grading Profile setup document and focused Admin guide tests.
+  - No grading formula, model, form, permission, URL, or database behavior changed.
+
+### Tenant Grading Profile Guide Manual Test
+1. Open `/admin-portal/guide/grading-template-setup/`.
+2. Open section `6. When to Create a Tenant Grading Profile`.
+3. Confirm the main purpose says that period grades are combined into the official final grade.
+4. Confirm the no-profile explanation says all active template periods are averaged.
+5. Confirm the Regular example shows Prelim, Midterm, Pre-Final, and Final divided by four.
+6. Confirm the Summer example shows Midterm, Pre-Final, and Final divided by three.
+7. Confirm the guide says 1st/2nd Semester may share one Regular template only when their structures match.
+8. Confirm the warning says not to use a four-period Regular template for Summer when Prelim must be excluded.
+
+### Validation For Tenant Grading Profile Guide Clarification
+- [x] `python manage.py test apps.admin_portal.tests_help_guide` - passed, 15 tests.
+- [x] `python manage.py check` - passed.
+- [x] `python manage.py makemigrations --check --dry-run` - passed; no changes detected.
+- [ ] Desktop/mobile browser review remains pending because no in-app browser target was available in this session.
+
+### Validation For Detail Weight Visibility
+- [x] `python manage.py test apps.admin_portal.tests_template_governance apps.admin_portal.tests_template_calculator` - passed, 16 tests.
+- [x] `python manage.py test apps.faculty_portal.tests_performance` - passed, 26 tests.
+- [x] Focused Faculty activity/Summary detail-weight tests - passed, 2 tests.
+- [x] `python manage.py check` - passed.
+- [x] Python compilation passed for the changed service, form, and view modules.
+- [ ] Full browser smoke test remains pending because no in-app browser target was available; manually verify wide Summary/correction tables at desktop and mobile widths.
+
+- Admin Grading Template Setup Guide plain-English rewrite:
+  - Rewrote all eight existing sections without removing any section.
+  - Replaced long technical sentences with short, direct admin instructions.
+  - Simplified table headings and row explanations.
+  - Added a template example: MIDTERM -> Class Standing -> Participation/Output -> Recitation, Assignment/Activities, and Oral Presentation.
+  - Added score examples for Inherit Parent Rule, a 42/50 Raw Score Base-50 quiz, and an approved 85% Direct Percentage entry.
+  - Added a Weighted Details example using Participation/Output at 60% with Recitation 20%, Assignment 30%, and Oral Presentation 50% inside it.
+  - Added an Average Activities example where R1, R2, Assignment 1, Seatwork 1, and Oral 1 are averaged equally.
+  - Kept the required detail-weight guidance: enter positive detail percentages totaling 100% for a complete setup, although Average Activities ignores those detail percentages.
+  - Simplified the CAO submission rule: at least one active Participation/Output activity is required; unused or inactive detail rows do not block; required active-activity scores still apply; zero is valid; Weighted Details remains strict.
+  - Added a BSA program Tenant Grading Profile example and a course-specific Base-40 override example.
+  - Simplified warnings for published/live templates and conflicting grading profiles.
+  - Added no backend logic, grading computation, validation, permission, layout, dependency, or migration change.
+  - Expanded tests to preserve all eight sections, examples, CAO policy meaning, and removal of difficult jargon.
+
+### Grading Setup Guide Wording Manual Test
+1. Log in as an Admin user with `grading_templates.read`.
+2. Open `/admin-portal/guide/grading-template-setup/`.
+3. Confirm all eight sections still appear.
+4. Read the MIDTERM structure example and confirm the levels are easy to follow.
+5. Confirm Raw Score, Inherit Parent Rule, and Direct Percentage include simple examples.
+6. Confirm the Weighted Details percentages total 100%.
+7. Confirm Average Activities says active activities are averaged equally.
+8. Confirm the guide says the detail form still needs positive percentages totaling 100%, although averaging ignores them.
+9. Confirm the Participation/Output submission warning includes at least one active activity, unused details, missing required scores, valid zero, and strict Weighted Details checks.
+10. Confirm the Tenant Grading Profile and Course Base Value Override examples are clear.
+11. Check the tables at desktop and mobile widths for wrapping and horizontal scrolling.
+12. Confirm no template syntax, layout, or browser-console error appears.
+
+- Admin Portal Practical Guide redesign:
+  - Renamed the active role-filtered guide from `Admin Portal Help Guide` to `Admin Portal Practical Guide` in the page title, heading, view context, return links, tests, and documentation.
+  - Kept the hero, introduction, guide actions, and permission/scope notice immediately visible.
+  - Added a visible three-step `How to Use This Practical Guide` overview.
+  - Converted the existing permission-filtered groups into one Bootstrap 5 accordion:
+    - Start Here
+    - Academic and Class Setup
+    - Grading Setup
+    - Submission, Reopening, and Corrections
+    - Reports and Monitoring
+    - Accounts and Access
+    - Superadmin System Control, when the current account is allowed to see it
+  - Opens the first available group by default and keeps later groups collapsed.
+  - Reused the Faculty Help Guide deep-link pattern so shortcut and legacy hash links open the correct accordion before scrolling.
+  - Preserved all existing topic content, menu paths, actions, workflows, role filtering, and anchor IDs.
+  - Strengthened tables with deep-green headers, green/cream banding, editability highlights, hover feedback, and responsive horizontal scrolling.
+  - Strengthened topic cards, menu-path panels, step callouts, and workflow callouts with consistent TeacherMate+ green/gold styling.
+  - Added no frontend dependency, backend business rule, permission change, or database migration.
+  - Added a focused regression for the new practical title, visible overview, accordion IDs/controls, first-open state, responsive table wrapper, and Bootstrap deep-link helper.
+
+### Admin Practical Guide Manual Test
+1. Log in as an Admin Portal user.
+2. Open `/admin-portal/guide/`.
+3. Confirm the heading reads `Admin Portal Practical Guide`.
+4. Confirm the hero, guide buttons, permission notice, and usage overview remain visible.
+5. Confirm `Start Here` is open and later available sections are collapsed.
+6. Open and close every visible accordion group.
+7. Use a topic shortcut and confirm its owning group opens.
+8. Open a legacy deep link such as `#grading-template-calculator` and confirm the Grading Setup group opens and scrolls to the topic.
+9. Confirm action tables use stronger colors and remain readable.
+10. Resize to tablet and mobile widths and confirm tables scroll horizontally without breaking the page.
+11. Log in as Campus Admin and confirm Superadmin System Control remains hidden.
+12. Confirm the browser console has no errors when browser tools are available.
+
+- Dedicated Grading Template Setup Guide:
+  - Added `/admin-portal/guide/grading-template-setup/`, protected by Admin Portal access and `grading_templates.read`.
+  - Added step-by-step instructions for creating a template and building Template -> Period -> Component -> Subcomponent -> Detail.
+  - Documented score-entry choices: Inherit Parent Rule, Raw Score Base-50, and the restricted/approved-use case for Direct Percentage.
+  - Documented `Weighted Details` versus `Average Activities`.
+  - Clarified that Average Activities ignores detail-row weights, but the Participation/Output subcomponent weight still applies upward.
+  - Clarified that the detail form still requires a numeric value; the guide recommends an equal distribution totaling 100% for clean records even though averaging mode ignores those detail weights.
+  - Added the post-template workflow: Calculator, approval, publish, Tenant Grading Profile decision, Course Template Assignment, optional Course Base Override, coverage check, and sample faculty-class verification.
+  - Clarified that Tenant Grading Profiles are based on distinct scope/formula needs rather than automatically one profile per template.
+  - Documented Base-50 precedence: Course Base Override -> matching Tenant Grading Profile -> Course default -> Template default -> system default 50.
+  - Linked the guide from the Admin Practical Guide, Full Admin Guide, Grading Templates list, Template Builder, Tenant Grading Profiles, and Course Base Overrides.
+  - Added tests for guide navigation, required content, and denial without `grading_templates.read`.
+
+### Grading Setup Guide Manual Test
+1. Log in as an Admin user with `grading_templates.read`.
+2. Open `/admin-portal/guide/` and click `Grading Template Setup Guide`.
+3. Confirm `/admin-portal/guide/grading-template-setup/` opens.
+4. Check the structure, score-entry, detail-computation, profile, and override sections.
+5. Confirm Average Activities says detail weights are ignored but the subcomponent weight still matters.
+6. Open `Grading -> Grading Templates` and confirm `Setup Guide` is visible.
+7. Open a template Builder and confirm its `Setup Guide` link works.
+8. Open Tenant Grading Profiles and Course Base Overrides and confirm their guide links open the correct anchored sections.
+9. Test at desktop, tablet, and mobile widths; confirm tables scroll horizontally without clipping.
+10. Log in as an Admin user without `grading_templates.read` and confirm the direct guide URL returns permission denied.
+
 - Practical/full Admin guide navigation:
   - Added `Open Full Admin Guide` to the role-based practical guide.
   - Added `Back to Practical Guide` to the legacy/full Admin guide.
   - Added explicit `?view=full` and `?view=practical` rendering overrides without changing the saved tenant-level default-guide setting.
   - Confirmed Campus Admin users may open the full general guide but still cannot see the Superadmin-only Production Incident Response section.
   - Added regressions for practical-to-full navigation, full-to-practical navigation, practical override when the tenant default is legacy, and Superadmin incident-section isolation.
-- Admin Help Guide operational instructions:
+- Admin Practical Guide operational instructions:
   - Confirmed the active guide is generated from `apps/admin_portal/help_guide.py` and rendered by `templates/admin_portal/guide_role_based.html`.
   - Added a visible `Where to start` block and numbered `How to open and use this page` instructions for every major role-based Admin guide topic.
   - Grade Formula Setup now directs authorized users to `Admin Portal -> Grading -> Grading Templates` and names the actual `Add Template`, `Builder`, `Add Period`, component, subcomponent, detail, `Test Calculator`, approval, and publish actions.
@@ -28,9 +1141,29 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Hotfix guidance covers `Grading Templates -> Hotfix`, `Template Hotfix Requests`, all four apply modes, Selected Offerings, academic justification, impact preview, configured review steps, the typed `APPLY HOTFIX` confirmation, affected/recomputed counts, and skipped offerings.
   - Clarified that selected hotfix scope controls immediate recomputation but does not create a separate per-offering copy of the shared template.
   - Clarified that eligible unsubmitted offerings may be recomputed while official submitted grades require Correction of Grades.
-  - Added guide regressions for exact menu paths, Builder/Average Activities instructions, removal of Direct Percentage wording, hotfix content visibility with permission, and hotfix content isolation without permission.
+- Added guide regressions for exact menu paths, Builder/Average Activities instructions, removal of Direct Percentage wording, hotfix content visibility with permission, and hotfix content isolation without permission.
 
-### Admin Help Guide Manual Test
+### Validation For Grading Setup Guide
+- [x] `python manage.py test apps.admin_portal.tests_help_guide` - passed, 13 tests.
+- [x] `python manage.py check` - passed.
+- [x] `python manage.py makemigrations --check --dry-run` - passed; no changes detected.
+- [ ] Live browser smoke test - not completed because the in-app browser target was unavailable.
+
+### Validation For Admin Practical Guide Accordion
+- [x] `python manage.py test apps.admin_portal.tests_help_guide` - passed, 14 tests.
+- [x] `python manage.py check` - passed.
+- [x] `python manage.py makemigrations --check --dry-run` - passed; no changes detected.
+- [ ] `python manage.py test` - completed 478 tests; 472 passed, with five existing Configurable Features/Faculty Final Clearance failures and one existing Faculty Final Clearance error unrelated to this guide change.
+- [ ] Desktop/mobile browser smoke test - attempted, but no in-app browser target was available.
+
+### Validation For Grading Setup Guide Wording
+- [x] `python manage.py test apps.admin_portal.tests_help_guide` - passed, 15 tests.
+- [x] `python manage.py check` - passed.
+- [x] `python manage.py makemigrations --check --dry-run` - passed; no changes detected.
+- [x] Difficult-term scan found no `governed fallback`, `source of truth`, `resolves the rule upward`, `parent contribution`, `computation behavior`, `strict validation`, or `governed Hotfix` wording in the guide template.
+- [ ] Desktop/mobile browser review remains pending because no in-app browser target was available in this session.
+
+### Admin Practical Guide Manual Test
 1. Log in as an Admin Portal user with `grading_templates.read`.
 2. Open `/admin-portal/guide/`.
 3. Click `Open Full Admin Guide` and confirm the URL includes `?view=full`.
@@ -386,7 +1519,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Pending assignments on `/faculty/my-courses/` now show only `Accept Assignment`; clarification/decline buttons and response textarea were removed from the faculty page.
   - `/faculty/my-courses/<offering>/periods/` now uses one shared sticky `What to do` / `Why set this` note, removes repeated guidance from each period card, shows lightweight activity metric cards for each required subcomponent/detail bucket, and keeps action icons at the bottom of each card.
   - Period-card and Summary deadline display now uses `Month day, year` formatting, with a countdown badge on the Summary page.
-  - `/faculty/my-courses/<offering>/periods/<period>/summary/` Period Snapshot is collapsed by default and simplified to fewer cards.
+  - `/faculty/my-courses/<offering>/periods/<period>/summary/` Period Snapshot is expanded by default and simplified to fewer cards.
   - The Summary gradebook caption now shows campus name instead of campus code.
   - Faculty guide/manual wording was updated for the simplified assignment and snapshot behavior.
 - Faculty Portal Grade Prediction / At-Risk Monitor access check:
@@ -589,6 +1722,54 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Ransomware protection strategy should not rely on antivirus alone. The preferred server-side approach is least privilege, separated upload storage, no-execute mounts, restricted backup credentials, and Synology snapshots/immutability with tested restore procedures.
 
 ## Changed Files This Session
+- `apps/grading/models.py`
+- `apps/grading/access.py`
+- `apps/grading/duplication.py`
+- `apps/grading/services.py`
+- `apps/grading/migrations/0028_gradingtemplate_department_visibility_and_more.py`
+- `apps/admin_portal/services.py`
+- `apps/admin_portal/forms.py`
+- `apps/admin_portal/views.py`
+- `apps/admin_portal/tests_template_department_visibility.py`
+- `templates/admin_portal/grading/template_table.html`
+- `templates/admin_portal/grading/template_builder.html`
+- `templates/admin_portal/grading/template_structure_preview.html`
+- `templates/admin_portal/grading/template_approval_review.html`
+- `templates/admin_portal/grading/template_hotfix_review.html`
+- `templates/admin_portal/grading/template_period_code_reference.html`
+- `templates/admin_portal/grading/grading_setup_guide.html`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `HANDOFF.md`
+- `apps/admin_portal/tests_template_calculator.py`
+- `apps/admin_portal/tests_template_governance.py`
+- `apps/faculty_portal/forms.py`
+- `apps/grading/services.py`
+- `templates/admin_portal/grading/analytics.html`
+- `templates/admin_portal/grading/correction_request_create_on_behalf.html`
+- `templates/admin_portal/grading/correction_request_review.html`
+- `templates/admin_portal/grading/detail_table.html`
+- `templates/admin_portal/grading/template_structure_preview.html`
+- `templates/admin_portal/grading/template_testing_calculator.html`
+- `templates/faculty_portal/activity_scores.html`
+- `templates/faculty_portal/offering_grading_template.html`
+- `templates/faculty_portal/period_activities.html`
+- `templates/faculty_portal/period_corrections.html`
+- `apps/admin_portal/views.py`
+- `apps/admin_portal/urls.py`
+- `apps/admin_portal/tests_help_guide.py`
+- `templates/admin_portal/base.html`
+- `templates/admin_portal/grading/grading_setup_guide.html`
+- `templates/admin_portal/grading/template_list.html`
+- `templates/admin_portal/grading/template_builder.html`
+- `templates/admin_portal/grading/tenant_grading_profile_list.html`
+- `templates/admin_portal/grading/course_base_override_list.html`
+- `templates/admin_portal/guide_role_based.html`
+- `templates/admin_portal/guide.html`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `HANDOFF.md`
+- `logs/system.log` changed from local Django test logging.
 - `templates/faculty_portal/guide_role_based.html`
 - `templates/faculty_portal/guide_manual.html`
 - `apps/faculty_portal/tests_help_guide.py`
@@ -690,6 +1871,9 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - `logs/system.log` changed from dev-server logging during the session.
 
 ## Pending Work
+- Run the Department Visibility manual test above with representative Superadmin, Department A Dean/Area Chair, Department B Dean/Area Chair, and multi-department accounts in a browser.
+- Confirm production applies migration `grading.0028_gradingtemplate_department_visibility_and_more` before admins use the new visibility controls.
+- Manually review `/admin-portal/guide/grading-template-setup/` at desktop, tablet, and mobile widths when a browser target is available. Confirm hero actions wrap cleanly, hierarchy chips remain readable, and wide decision tables scroll without clipping.
 - Manually review `/admin-portal/guide/` at desktop and mobile widths with representative grading-admin and hotfix-reviewer accounts. Confirm the new `Where to start` cards, numbered steps, long menu paths, and action tables wrap cleanly.
 - Manually review the redesigned `/faculty/guide/` at desktop, tablet, and mobile widths when a browser target is available. Confirm accordion animation/focus, deep-link expansion, workflow image sizing, Top Faculty Tasks wrapping, and table horizontal scrolling.
 - Manually review `/faculty/guide/` and `/faculty/guide/manual/` at desktop and mobile widths when a browser target is available, especially the portrait workflow image and hero action wrapping.
@@ -715,6 +1899,13 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
   - Open governance/design topics remain in the context document, including expanded grading methodology options, active AY/Term governance, correction/reopen policy finalization, passing-threshold management, and configurable feature governance.
 
 ## Known Issues / Risks
+- Department Visibility controls Admin access and governance only. It intentionally does not change template resolution for courses or faculty gradebooks already using a template.
+- Non-superusers need an active non-Faculty department-scoped role assignment to access a `Selected Departments` template, in addition to the required RBAC permission. Tenant/campus roles with no department assignment continue to see `All Departments` templates but do not automatically see selected templates.
+- Parent academic-unit assignments cover active child departments through the existing scope hierarchy. A child assignment does not automatically grant access to a parent-only template.
+- Same-tenant validation for `visible_departments` is enforced by the Admin form rather than a database constraint on the many-to-many table. Future scripts or imports that set this relation directly must preserve the same-tenant rule.
+- Browser visual QA for the new conditional department picker and visibility summaries remains pending.
+- The new Grading Template Setup Guide passed permission, navigation, content, and rendering tests, but visual browser validation could not run because the in-app browser target was unavailable.
+- Average Activities ignores detail weights in computation, but `GradingTemplateDetail.weight_percentage` remains a required model/form field. The guide recommends a clean equal distribution totaling 100% for administrative clarity; changing the form to make that field optional or disabled in averaging mode would be a separate UI/model decision.
 - The hotfix apply mode limits which offerings are immediately recomputed, but it does not create an offering-specific copy of the shared grading template. Admins must review all courses resolving to the template before changing its structure.
 - Visual browser validation of the new Admin guide menu-path and hotfix sections could not run because the in-app browser target `iab` was unavailable. Focused rendering and role-filtering tests passed.
 - Participation/Output `Average Activities` is configured on `GradingTemplateSubcomponent`; there is no equivalent computation-mode field directly on a top-level component. A Participation/Output top-level component is covered when its detail-bearing child subcomponent carries `Average Activities`.
@@ -814,6 +2005,20 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 15. Record grade, activity-score, attendance, submission, and lock counts/timestamps before and after opening the consultation page; confirm none changed.
 
 ## Validation Completed
+- [x] Migration generated and applied: `grading.0028_gradingtemplate_department_visibility_and_more`.
+- [x] Migration SQL reviewed with `python manage.py sqlmigrate grading 0028`; existing template rows receive `department_visibility='ALL'`, and the migration adds only the visibility field and department join table.
+- [x] `python manage.py showmigrations grading` confirms `[X] 0028_gradingtemplate_department_visibility_and_more`; `python manage.py migrate --plan` reports no pending operations.
+- [x] `python manage.py migrate` completed with no pending migrations.
+- [x] Department Visibility focused suite passed: `python manage.py test apps.admin_portal.tests_template_department_visibility` (22 tests), including the Visible Department campus-label regression.
+- [x] Admin template governance/calculator/help-guide regression passed: `python manage.py test apps.admin_portal.tests_template_governance apps.admin_portal.tests_template_calculator apps.admin_portal.tests_help_guide` (31 tests).
+- [x] Faculty performance regression passed: `python manage.py test apps.faculty_portal.tests_performance` (26 tests).
+- [x] Faculty assignment, grade encoding, Summary, submission, and locking regression passed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance` (112 tests).
+- [x] Full grading-engine suite passed: `python manage.py test apps.grading.tests` (48 tests).
+- [x] `python manage.py makemigrations --check --dry-run` reported no model drift.
+- [x] `python manage.py check` passed.
+- [x] Python syntax compilation passed for the reviewed access, form, service, view, and focused test modules.
+- [x] `git diff --check` found no whitespace errors; only existing LF-to-CRLF working-copy warnings were reported.
+- [x] Repository-wide `python manage.py test` completed 501 tests: 495 passed; the same five configurable-feature/Faculty Final Clearance failures and one Final Clearance error already documented below remain. No Department Visibility, grading-template governance, calculator, profile, assignment, grading-engine, or faculty-template regression failed.
 - [x] Practical/full Admin guide navigation and role-isolation suite passed: `python manage.py test apps.admin_portal.tests_help_guide` (10 tests).
 - [x] Explicit `?view=full` and `?view=practical` guide overrides passed without changing the configured tenant default.
 - [x] Campus Admin full-guide regression confirmed the Superadmin-only Production Incident Response section and link remain hidden.
@@ -1048,12 +2253,229 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - [x] Permissions/RBAC checked - syllabus redirect requires `faculty_portal.access` and an active assignment in the existing faculty assignment queryset
 - [x] Tenant/campus scope checked - syllabus redirect blocks course/offering tenant mismatch and non-assigned faculty
 
+## 2026-06-13 Area Chair / College Dean Monitoring Scope
+
+### Completed
+- Added supervision-based grading monitoring:
+  - Area Chair -> active faculty role assignment in the exact selected campus/department -> active accepted faculty teaching assignment.
+  - Campus and department scope stay paired; access to Department A in Campus 1 and Department B in Campus 2 does not create accidental cross-campus combinations.
+  - Grading Analytics no longer depends on the Course Offering department matching the Area Chair department.
+  - Grading Analytics defaults to the campus selected in the Admin Portal top bar.
+- Added explicit `All Campuses` filtering to Grading Analytics and Grade Distribution Monitor while preserving exact campus/department pairs.
+- Added `COLLEGE_DEAN` as an active system role with a read-only monitoring baseline.
+- College Dean action permissions are not automatic. Superadmin must explicitly grant assignment maintenance, approval, correction, reopen-review, hotfix-review, or submission-revert permissions when policy requires them.
+- College Dean faculty monitoring starts from active Area Chair assignments within the Dean's assigned campuses/departments.
+- Grade submissions, correction requests, reopen requests, overdue reporting, Grading Analytics, and Grade Distribution Monitor now use supervised accepted assignments.
+- Master-data and setup pages keep their existing ownership scope: Courses, Programs, Sections, Course Offerings, Course Template Assignments, Course Base Overrides, and Period Locks.
+- Corrected Faculty Assignment management so pending, clarification, declined, expired, and accepted loads remain visible to authorized assignment administrators.
+- Added clearer empty states for analytics and grade-governance queues.
+- Updated the Admin Practical Guide and Grading Analytics page with plain-language supervision guidance.
+- Reviewed local Program data:
+  - `BSIS` is assigned to `INFOSYS` for `NCBA-01` and `NCBA-02`; this is correct.
+  - Program changes do not cascade to existing Section or Course Offering department fields.
+  - I-AM Guro's accepted A132 assignment is at `NCBA-02`; its existing offering remains `COLLEGE` and its program is `BSA`, but it is now visible to the `NCBA-02 / INFOSYS` Area Chair through the accepted faculty assignment.
+  - Cubao and Taytay remain empty when no accepted supervised assignment exists in those campus scopes.
+
+### Changed Files
+- `apps/admin_portal/services.py`
+- `apps/admin_portal/views.py`
+- `apps/admin_portal/help_guide.py`
+- `apps/admin_portal/tests_scope.py`
+- `apps/admin_portal/tests_grading_analytics.py`
+- `apps/admin_portal/tests_grade_distribution_monitor.py`
+- `apps/admin_portal/tests_reopen_requests.py`
+- `apps/admin_portal/tests_assignment_acceptance.py`
+- `apps/admin_portal/tests_tenant_grading_profiles.py`
+- `apps/core/management/commands/seed_stage_0_1.py`
+- `apps/core/services/features.py`
+- `apps/rbac/migrations/0013_seed_college_dean_role.py`
+- `apps/rbac/migrations/0014_college_dean_read_only_baseline.py`
+- `templates/admin_portal/grading/analytics.html`
+- `templates/admin_portal/grading/grade_distribution_monitor.html`
+- `templates/admin_portal/grading/submission_list.html`
+- `templates/admin_portal/grading/correction_request_list.html`
+- `templates/admin_portal/grading/reopen_request_list.html`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `HANDOFF.md`
+
+### Validation
+- [x] `python manage.py migrate` - applied `rbac.0013_seed_college_dean_role` and `rbac.0014_college_dean_read_only_baseline`.
+- [x] `python manage.py check` - no issues.
+- [x] `python manage.py makemigrations --check --dry-run` - no changes detected.
+- [x] Python compile check for changed Python modules.
+- [x] Monitoring/scope/analytics/grade-distribution focused suite - 46 tests passed.
+- [x] Supervisory grading regression suite - 204 tests passed.
+- [x] Admin assignment/configuration/non-compliance regression suite - 24 tests passed.
+- [x] Full project suite - 517 tests passed.
+- [x] Live data check confirmed the `ac` role assignments: `NCBA-01 / INFOSYS`, `NCBA-02 / INFOSYS`, and `NCBA-03 / CS`.
+- [x] Live data check confirmed the seeded `COLLEGE_DEAN` role has 19 read/monitor permissions and none of the eight restricted governance action permissions.
+- [ ] Authenticated Admin Portal browser smoke test - attempted on June 13, 2026, but the in-app browser target was unavailable. Complete the manual checks below before production rollout.
+
+### Known Limits / Operational Notes
+- `COLLEGE_DEAN` does not infer campuses or departments automatically. Superadmin must create the Dean's campus/department role assignments.
+- A Dean sees a department's faculty through an active Area Chair assignment. A department with no active Area Chair is intentionally absent from the Dean monitoring chain.
+- There is no separate Dean-to-Area-Chair relationship record. The current chain is inferred from active role assignments with matching campus and department scope.
+- `All Campuses` is currently exposed on Grading Analytics and Grade Distribution Monitor. Other grade-governance queues use the Admin Portal top-bar campus, so multi-campus reviewers switch campus there.
+- Program updates help future classification and filtering but do not rewrite existing Section or Course Offering rows.
+- Course Template Assignment and Course Base Overrides are setup pages, not faculty-monitoring pages; they may legitimately be blank until matching setup records exist.
+- Only active, accepted faculty assignments are included in Grading Analytics. Pending, expired, rejected, and inactive assignments are excluded.
+
+### Manual Test Steps
+1. Log in as `ac`.
+2. Select `NCBA-02` in the top bar and open `Grading -> Grading Analytics`.
+3. Confirm I-AM Guro's accepted A132 class appears even though the existing offering department is `COLLEGE`.
+4. Select `NCBA-01`; confirm only accepted Cubao assignments appear. Current local data has no accepted Cubao assignment for I-AM Guro, so an empty result is expected.
+5. Select `NCBA-03`; confirm only CS-supervised accepted assignments appear.
+6. As Superadmin, assign `COLLEGE_DEAN` to a test Dean for the intended campus and parent/department scope.
+7. Confirm the Dean sees faculty only through active Area Chairs in that assigned scope.
+8. Confirm a department without an active Area Chair does not appear in the Dean's monitoring results.
+9. Open Grading Analytics and Grade Distribution Monitor, select `All Campuses`, and confirm each campus shows only the departments assigned there.
+10. Open Grade Submissions, Correction Requests, Reopen Requests, and the overdue report; confirm they show only accepted classes handled by supervised faculty.
+11. Confirm pending or declined assignments remain visible on Faculty Assignment management but do not appear in grading monitoring.
+12. Log in as a baseline College Dean and confirm monitoring pages are available while approval/mutation actions are absent.
+13. Confirm shared Courses remain `All Campus / All Department` and are not duplicated.
+14. Confirm Course Offerings, Course Template Assignments, Course Base Overrides, and Period Locks retain their normal master-data/setup scope.
+
+## 2026-06-13 Grade Distribution Monitor Simplification
+
+### Completed
+- Removed the `Classes in Scope`, `Rows Reviewed`, `For Review`, `Incomplete Data`, `High Grade Concentration`, and `High Perfect Score Rate` cards.
+- Removed the `Spread`, `Comparison`, and `Status` columns from the page and CSV export.
+- Removed the now-unnecessary review-threshold explanation panel from the Area Chair page.
+- Fixed the Grading Period dropdown to use periods from templates resolved for monitored classes, together with periods already referenced by stored grades or activities.
+- Preserved the masked-student detail modal, distribution percentages, tenant/campus/department supervision scope, and read-only behavior.
+
+### Changed Files
+- `apps/admin_portal/grade_distribution.py`
+- `apps/admin_portal/views.py`
+- `apps/admin_portal/tests_grade_distribution_monitor.py`
+- `templates/admin_portal/grading/grade_distribution_monitor.html`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `HANDOFF.md`
+
+### Validation
+- [x] `python manage.py test apps.admin_portal.tests_grade_distribution_monitor` - 11 tests passed.
+- [x] `python manage.py test` - 518 tests passed.
+- [x] `python manage.py check` - no issues.
+- [x] `python manage.py makemigrations --check --dry-run` - no model changes detected.
+- [x] `git diff --check` for the changed monitor files - passed; only existing LF/CRLF conversion warnings were reported.
+- [ ] Manual authenticated browser check - confirm the simplified columns and populated Grading Period dropdown with a production-like Area Chair account.
+
+### Manual Test Steps
+1. Log in as an Area Chair with supervised accepted faculty assignments.
+2. Open `Grading -> Grade Distribution Monitor`.
+3. Confirm the six removed summary cards do not appear.
+4. Confirm `Spread`, `Comparison`, and `Status` are absent from the results table.
+5. Open the Grading Period dropdown and confirm the periods used by supervised classes are listed.
+6. Select one period and apply the filters; confirm only matching distribution rows remain.
+7. Export CSV and confirm it does not contain Spread, Department/Subject Comparison, or Flags columns.
+8. Open a Period / Level link and confirm the masked-student details modal still works.
+
+## 2026-06-14 Enrollment Adjustment Tool
+
+### Completed
+- Implemented Admin Portal `Enrollment -> Enrollment Adjustments`.
+- Added `EnrollmentAdjustmentLog` for per-student adjustment audit records.
+- Added `EnrollmentAdjustmentService` for impact analysis, classification, and processing.
+- Added permissions:
+  - `enrollment_adjustment.view`
+  - `enrollment_adjustment.process`
+- Added routes:
+  - `admin_portal:enrollment_adjustments`
+  - `admin_portal:enrollment_adjustment_detail`
+- Added templates:
+  - `templates/admin_portal/enrollment/enrollment_adjustments.html`
+  - `templates/admin_portal/enrollment/enrollment_adjustment_detail.html`
+- Added migrations:
+  - `enrollment.0004_enrollmentadjustmentlog`
+  - `enrollment.0005_enrollmentadjustmentlog_audit_state`
+  - `rbac.0017_seed_enrollment_adjustment_permissions`
+  - `rbac.0018_narrow_enrollment_adjustment_process_roles`
+  - `navigation.0008_seed_enrollment_adjustment_menu`
+- Added focused tests in `apps/admin_portal/tests_enrollment_adjustments.py`.
+- Post-review hardening:
+  - campus-level period locks now block adjustments
+  - unsubmitted final-grade records now classify as `WARNING`
+  - default processing rights are limited to Superadmin, Tenant Admin, Campus Admin, and Registrar
+  - Area Chair, Dean, College Dean, and CAO are view-only by default unless explicitly granted process permission
+  - each processing action now gets a batch reference shared by all per-student logs
+  - logs now store source/destination enrollment IDs and before/after enrollment active/status state
+  - page now includes `Load Students / Refresh Student List`, `Select All`, and impact-count scope notes
+
+### Behavior
+- The tool moves one student, multiple selected students, or all active students from a source offering to a destination offering.
+- The tool does not decide if the enrollment correction is academically valid. It assumes Pinnacle/SIS or authorized school offices already approved the correction.
+- Processing changes only enrollment rows:
+  - destination enrollment is created
+  - source enrollment is marked inactive
+  - source gradebook/attendance/submission/correction/reopen/lock records are preserved
+- Destination offering is not forced to the same campus as the source offering, but it remains limited to the logged-in admin's allowed scope.
+
+### Classification Rules
+- `SAFE`: no academic records found.
+- `WARNING`: academic records exist, such as attendance, activities, scores, submissions, period grades, final grades that are not submitted, correction requests, or reopen requests. Processing requires explicit confirmation.
+- `BLOCKED`: source and destination are the same, destination enrollment already exists, final grade is submitted, the source offering has a locked grading period, or a matching campus-level grading period lock is active.
+
+### Changed Files
+- `apps/enrollment/models.py`
+- `apps/enrollment/services.py`
+- `apps/enrollment/admin.py`
+- `apps/enrollment/migrations/0004_enrollmentadjustmentlog.py`
+- `apps/enrollment/migrations/0005_enrollmentadjustmentlog_audit_state.py`
+- `apps/admin_portal/forms.py`
+- `apps/admin_portal/views.py`
+- `apps/admin_portal/urls.py`
+- `apps/admin_portal/tests_enrollment_adjustments.py`
+- `apps/core/management/commands/seed_stage_0_1.py`
+- `apps/rbac/migrations/0017_seed_enrollment_adjustment_permissions.py`
+- `apps/rbac/migrations/0018_narrow_enrollment_adjustment_process_roles.py`
+- `apps/navigation/migrations/0008_seed_enrollment_adjustment_menu.py`
+- `templates/admin_portal/enrollment/enrollment_adjustments.html`
+- `templates/admin_portal/enrollment/enrollment_adjustment_detail.html`
+- `CHANGE_LOG.md`
+- `TEACHERMATEPLUS_CONTEXT.md`
+- `HANDOFF.md`
+
+### Validation
+- [x] `python manage.py migrate` via full local Python path - applied enrollment, RBAC, and navigation migrations.
+- [x] `python manage.py check` via full local Python path - no issues.
+- [x] `python manage.py migrate --check` via full local Python path - no pending migrations.
+- [x] `python manage.py test apps.admin_portal.tests_enrollment_adjustments` via full local Python path - 11 tests passed.
+- [x] `python manage.py test apps.admin_portal.tests_post_enrollment_safety` via full local Python path - 8 tests passed.
+- [ ] Manual authenticated browser smoke test - still needed.
+
+### Manual Test Steps
+1. Log in as an authorized Admin Portal user with `enrollment_adjustment.view` and `enrollment_adjustment.process`.
+2. Open `Enrollment -> Enrollment Adjustments`.
+3. Select Academic Year, Term, Campus, Source Offering, and Destination Offering.
+4. Select one active student and click `Analyze Impact`.
+5. Confirm the impact table shows attendance, activities, scores, submissions, period grades, final grades, correction requests, reopen requests, and locks.
+6. Process a `SAFE` row and confirm the destination enrollment is active while the source enrollment becomes inactive.
+7. Add an activity or score in a source class, analyze again, and confirm the row is `WARNING`.
+8. Confirm a warning row is not processed unless the warning confirmation checkbox is checked.
+9. Create a destination enrollment for the same student and confirm the adjustment is `BLOCKED`.
+10. Create a submitted final grade or locked source course-offering period and confirm the adjustment is `BLOCKED`.
+11. Create a campus-level locked grading period for the source campus/term and confirm the adjustment is `BLOCKED`.
+12. Create a non-submitted final-grade record and confirm the adjustment is `WARNING`, not `SAFE`.
+13. Use `Transfer Entire Class` and confirm only eligible students move while blocked students remain in the source.
+14. Open `Adjustment History`, then `Details`, and confirm the audit snapshot, enrollment state audit, and batch reference are visible.
+15. Log in with view-only permission and confirm processing is blocked.
+16. Attempt direct URL access without view permission and confirm the standard permission-denied response.
+
+### Known Limits / Operational Notes
+- Cross-campus or cross-program movement creates the destination enrollment under the destination offering scope but does not rewrite the student's master campus/department/program.
+- Academic validity still belongs to Pinnacle/SIS and authorized school offices. TeacherMate+ only audits and protects academic records.
+- Gradebook records are not migrated or mapped to the destination offering. Historical verification remains a faculty/admin responsibility for warning transfers.
+
 ## Exact Next Steps For Next Codex Session
 1. Read `AGENTS.md`, `TEACHERMATEPLUS_CONTEXT.md`, `CHANGE_LOG.md`, and this file.
-2. Run the 15-step Student Consultation browser checklist above at desktop and mobile widths, including the new Period Grade exact-value fallback.
-3. Verify a production-like faculty account can see only accepted assigned classes and cannot open another faculty member's performance URL.
-4. Investigate the independently reproducible Admin configurable-feature and Faculty Final Clearance test failures before release gating on the full suite.
-5. Review Phase 1 faculty feedback before considering caching, Chart.js, academic-head views, or comparisons across faculty.
+2. Run the 16-step Enrollment Adjustment Tool manual browser checklist above with a production-like admin account.
+3. Run the 15-step Student Consultation browser checklist above at desktop and mobile widths, including the new Period Grade exact-value fallback.
+4. Verify a production-like faculty account can see only accepted assigned classes and cannot open another faculty member's performance URL.
+5. Run the manual multi-campus Area Chair and College Dean checks above with production-like role assignments.
+6. Review Phase 1 faculty feedback before considering caching, Chart.js, broader academic-head views, or comparisons across faculty.
 
 ## Files To Inspect First Next Session
 - AGENTS.md

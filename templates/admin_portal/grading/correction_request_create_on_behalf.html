@@ -123,6 +123,7 @@
                     <th>Component</th>
                     <th>Subcomponent</th>
                     <th>Detail</th>
+                    <th>Detail Weight</th>
                     <th>Entry Method</th>
                     <th>Total</th>
                   </tr>
@@ -137,11 +138,15 @@
                     <td>{{ row.component_name }}</td>
                     <td>{{ row.subcomponent_name }}</td>
                     <td>{{ row.detail_name }}</td>
+                    <td>
+                      {% if row.detail_weight != "-" %}{{ row.detail_weight }}%{% else %}-{% endif %}
+                      {% if row.detail_weight_reference_only %}<div class="small text-muted">Reference only</div>{% endif %}
+                    </td>
                     <td><span class="badge text-bg-light border">{{ row.entry_method_label }}</span></td>
                     <td>{{ row.total_score }}</td>
                   </tr>
                   {% empty %}
-                  <tr><td colspan="7" class="text-muted">No grading items are available for this period.</td></tr>
+                  <tr><td colspan="8" class="text-muted">No grading items are available for this period.</td></tr>
                   {% endfor %}
                 </tbody>
               </table>
@@ -259,7 +264,7 @@
         if (!activity) return;
         const section = document.createElement("div");
         section.className = "card border-0 shadow-sm correction-encode-section";
-        section.innerHTML = `<div class="card-body pb-0"><div class="alert alert-light border">Entry Method: <strong>${activity.entry_method_label}</strong> | ${activity.component_name} / ${activity.subcomponent_name}${activity.detail_name !== "-" ? ` / ${activity.detail_name}` : ""} | <strong>${activity.title}</strong></div></div>`;
+        section.innerHTML = `<div class="card-body pb-0"><div class="alert alert-light border">Entry Method: <strong>${activity.entry_method_label}</strong> | ${activity.component_name} / ${activity.subcomponent_name}${activity.detail_name !== "-" ? ` / ${activity.detail_name} (${activity.detail_weight}% configured weight${activity.detail_weight_reference_only ? "; reference only" : ""})` : ""} | <strong>${activity.title}</strong></div></div>`;
         const wrapper = document.createElement("div");
         wrapper.className = "table-responsive";
         const table = document.createElement("table");

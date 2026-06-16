@@ -332,6 +332,65 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertIn("Prelim exam should follow", hotfix.justification)
         self.assertContains(response, f"Report #{hotfix.id}")
 
+    def test_average_activity_detail_weight_is_hidden_on_activity_page(self):
+        self._accept_assignment()
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        participation = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="PARTICIPATION",
+            name="Participation/Output",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+        )
+        recitation = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="RECITATION",
+            name="Recitation",
+            weight_percentage=Decimal("25.00"),
+            sort_order=1,
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            template_subcomponent=participation,
+            template_detail=recitation,
+            title="R1",
+            total_score=Decimal("20.00"),
+            created_by_user=self.faculty_user,
+        )
+        self.client.force_login(self.faculty_user)
+
+        template_response = self.client.get(
+            reverse("faculty_portal:offering_grading_template", kwargs={"offering_id": self.offering.id})
+        )
+        self.assertEqual(template_response.status_code, 200)
+        self.assertContains(template_response, "Recitation = 25.00%")
+        self.assertContains(template_response, "configured weight; not used in the activity average")
+
+        activities_response = self.client.get(
+            reverse("faculty_portal:period_activities", args=[self.offering.id, self.prelim.id])
+        )
+        self.assertEqual(activities_response.status_code, 200)
+        self.assertNotContains(activities_response, "Detail Weight")
+        self.assertNotContains(activities_response, "Recitation (25.00% configured weight)")
+        self.assertNotContains(activities_response, "Reference only")
+        self.assertContains(activities_response, "Recitation")
+
+        scores_response = self.client.get(
+            reverse(
+                "faculty_portal:activity_scores",
+                args=[self.offering.id, self.prelim.id, activity.id],
+            )
+        )
+        self.assertEqual(scores_response.status_code, 200)
+        self.assertContains(scores_response, "Configured Detail Weight:")
+        self.assertContains(scores_response, "25.00%")
+        self.assertContains(scores_response, "reference only under Average Activities")
+
     def test_report_template_issue_hidden_for_reopened_gradebook(self):
         self._accept_assignment()
         self._enable_faculty_template_issue_reporting()
@@ -604,6 +663,63 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "my-courses-guide-tag")
         self.assertContains(response, f'href="{guide_url}#guide-workflow"', html=False)
 
+    def test_period_summary_shows_encoded_zero_scores_metric_not_my_courses(self):
+        self._accept_assignment()
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-ZERO",
+            last_name="Zero",
+            first_name="Encoded",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+        )
+        exam_component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=exam_component,
+            title="Zero Score Check",
+            total_score=Decimal("100.00"),
+            created_by_user=self.faculty_user,
+        )
+        StudentActivityScore.objects.create(
+            activity=activity,
+            student=student,
+            raw_score=Decimal("0.00"),
+            computed_score=Decimal("50.00"),
+            encoded_by_user=self.faculty_user,
+        )
+        self.client.force_login(self.faculty_user)
+
+        courses_response = self.client.get(reverse("faculty_portal:my_courses"))
+
+        self.assertEqual(courses_response.status_code, 200)
+        self.assertNotContains(courses_response, "Encoded Zero Scores")
+
+        summary_response = self.client.get(
+            reverse(
+                "faculty_portal:period_summary",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(summary_response.status_code, 200)
+        self.assertContains(summary_response, "Encoded Zero Scores")
+        self.assertContains(summary_response, "Saved raw scores of 0. Review these before submission")
+        self.assertContains(summary_response, '<div class="metric">1</div>', html=False)
+
     def test_my_courses_shows_syllabus_icon_only_when_course_has_link(self):
         self._accept_assignment()
         self.client.force_login(self.faculty_user)
@@ -813,23 +929,22 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             "Please confirm the schedule overlap before I accept this load.",
         )
 
-    def test_faculty_can_undo_accidental_assignment_acceptance_before_work_starts(self):
+    def test_faculty_cannot_undo_assignment_acceptance_from_portal(self):
         self._accept_assignment()
         self.client.force_login(self.faculty_user)
 
         response = self.client.get(reverse("faculty_portal:my_courses"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Undo Acceptance")
+        self.assertNotContains(response, "Undo Acceptance")
 
         response = self.client.post(reverse("faculty_portal:faculty_assignment_undo_accept", args=[self.assignment.id]))
 
         self.assertRedirects(response, reverse("faculty_portal:my_courses"))
         self.assignment.refresh_from_db()
-        self.assertEqual(self.assignment.response_status, FacultyAssignment.ResponseStatus.PENDING)
-        self.assertIsNone(self.assignment.accepted_at)
-        self.assertIsNone(self.assignment.accepted_by)
-        self.assertIsNotNone(self.assignment.response_due_at)
+        self.assertEqual(self.assignment.response_status, FacultyAssignment.ResponseStatus.ACCEPTED)
+        self.assertIsNotNone(self.assignment.accepted_at)
+        self.assertEqual(self.assignment.accepted_by_id, self.faculty_user.id)
 
     def test_faculty_cannot_undo_assignment_acceptance_after_gradebook_work_starts(self):
         self._accept_assignment()
@@ -2256,6 +2371,9 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertEqual(response.context["summary_layout"]["class_standing_blocks"][0]["sections"][1]["avg_label"], "P/O AVE")
         self.assertContains(response, "P/O AVE")
         self.assertContains(response, "CS AVE")
+        self.assertContains(response, "20.00%")
+        self.assertContains(response, "40.00%")
+        self.assertContains(response, "configured; not used in average")
         quizzes_layout = response.context["summary_layout"]["class_standing_blocks"][0]["sections"][0]
         participation_layout = response.context["summary_layout"]["class_standing_blocks"][0]["sections"][1]
         self.assertEqual(quizzes_layout["color_class"], "summary-group-quizzes")
@@ -2270,6 +2388,21 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "summary-group-class-standing-total")
         refreshed = StudentPeriodGrade.objects.get(offering=self.offering, template_period=self.prelim, student=student)
         self.assertEqual(refreshed.class_standing_grade, Decimal("88"))
+
+        explanation_response = self.client.get(
+            reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": self.offering.id,
+                    "period_id": self.prelim.id,
+                    "student_id": student.id,
+                    "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+                },
+            )
+        )
+        self.assertEqual(explanation_response.status_code, 200)
+        self.assertContains(explanation_response, "Configured Detail Weight: 20.00%")
+        self.assertContains(explanation_response, "reference only; not used in the average")
 
     def test_period_summary_weighted_details_keeps_empty_detail_columns(self):
         self._accept_assignment()
@@ -5017,6 +5150,9 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "W")
         self.assertContains(response, "INC")
         self.assertContains(response, "Passing threshold used for pass/fail interpretation")
+        self.assertContains(response, 'id="periodSnapshotCollapse" class="collapse show"', html=False)
+        self.assertContains(response, 'aria-expanded="true"', html=False)
+        self.assertContains(response, "padding-top: 1rem")
 
     def test_faculty_can_remove_student_from_class_when_faculty_allowed_mode_is_enabled(self):
         SystemSettingService.set(

@@ -22,9 +22,11 @@ FACULTY_HELP_SECTIONS = [
                 "code": "assignments",
                 "title": "Assigned Classes",
                 "purpose": "Shows the classes officially assigned to you for the selected academic scope.",
+                "how_to_open": ["From the left navigation bar, click My Classes."],
+                "screenshot": "faculty_helpguide/1_myclasses.png",
                 "check_first": ["Check the campus, academic year, and term.", "Check the course, section, schedule, room, and grading template.", "Report a wrong class before accepting it."],
                 "actions": [
-                    {"name": "Accept", "does": "Confirms that the teaching assignment is correct.", "when": "Use it after checking all class details.", "avoid": "Do not accept a class that is not yours.", "result": "The class moves to Accepted Course Assignments and grading actions become available.", "editable": "Undo Acceptance may be available before grading work begins."},
+                    {"name": "Accept", "does": "Confirms that the teaching assignment is correct.", "when": "Use it after checking all class details.", "avoid": "Do not accept a class that is not yours.", "result": "The class moves to Accepted Course Assignments and grading actions become available.", "editable": "Faculty cannot undo acceptance from the Faculty Portal. If the load is wrong after acceptance, contact the assigning admin or academic office so they can unassign or replace it."},
                     {"name": "Request Clarification", "does": "Returns the assignment to admin with your concern.", "when": "Use it for a wrong course, section, schedule, or load detail.", "avoid": "Do not accept first when the assignment is clearly incorrect.", "result": "Admin can review your message and correct the assignment.", "editable": "You may respond again after admin resolves it."},
                     {"name": "Decline", "does": "Records that you cannot accept the assignment.", "when": "Use it only for an official load issue.", "avoid": "Do not decline merely because setup is incomplete; request clarification instead.", "result": "The assignment remains visible for administrative follow-up.", "editable": "Admin governs any later reassignment."},
                 ],
@@ -35,6 +37,8 @@ FACULTY_HELP_SECTIONS = [
                 "code": "dashboard",
                 "title": "Dashboard and Grade Encoding Status",
                 "purpose": "Shows your accepted classes, current-period encoding status, and gradebook blockers without displaying student names.",
+                "how_to_open": ["From the left navigation bar, click Dashboard."],
+                "screenshot": "faculty_helpguide/1_dashboard.png",
                 "check_first": ["Confirm the academic scope.", "Check each class period and status.", "Open Pending Grade Issues before a deadline."],
                 "actions": [
                     {"name": "Open My Classes", "does": "Opens your accepted teaching assignments.", "when": "Use it to enter a class or grading period.", "avoid": "Do not use another faculty member's account to open a class.", "result": "Your assigned class cards are displayed.", "editable": "No records change."},
@@ -49,6 +53,7 @@ FACULTY_HELP_SECTIONS = [
                 "code": "classlist",
                 "title": "Class List and Student Status",
                 "purpose": "Shows the official students included in your assigned class and the status used for grading readiness.",
+                "how_to_open": ["Click My Classes.", "Find the accepted class.", "Click Class List."],
                 "check_first": ["Confirm the course and section.", "Compare the list with the official enrollment record.", "Check non-active statuses such as DRP, WITHDRAWN, or INC carefully."],
                 "actions": [
                     {"name": "Class List", "does": "Opens the current enrolled-student list.", "when": "Use it before encoding and whenever enrollment changes are reported.", "avoid": "Do not add or remove students outside the permitted roster workflow.", "result": "The active class roster and available status actions are displayed.", "editable": "Roster editing depends on the school's Class Master List Ownership setting."},
@@ -67,6 +72,17 @@ FACULTY_HELP_SECTIONS = [
                 "code": "activities",
                 "title": "Activities",
                 "purpose": "Creates the quizzes, recitations, assignments, activities, examinations, or other items students will complete.",
+                "how_to_open": [
+                    "Click the Grade Activities button from the periodic card.",
+                    "Select a component.",
+                    "Select a subcomponent.",
+                    "Select a detail, when the template asks for one.",
+                    "Type the activity title.",
+                    "Enter the total items or highest possible score.",
+                    "Choose the date conducted.",
+                    "If the date is in the future, expect a TeacherMate+ reminder email for that activity when reminders are enabled.",
+                ],
+                "screenshot": "faculty_helpguide/2_activities.png",
                 "check_first": ["Choose the correct grading period and category.", "Enter the correct highest possible score.", "Check the effective Score Entry rule shown by the form."],
                 "actions": [
                     {"name": "Add Activity", "does": "Creates one graded item.", "when": "Use it when the item will be scored for the class.", "avoid": "Do not create duplicate activity names for the same task.", "result": "The item appears on the Activities, Score Entry, and Summary pages.", "editable": "It can be edited before submission while the gradebook is open."},
@@ -80,6 +96,8 @@ FACULTY_HELP_SECTIONS = [
                 "code": "scores",
                 "title": "Encode Scores: Blank, Zero, and Base-50",
                 "purpose": "Records each student's actual result for one activity.",
+                "how_to_open": ["From the Activities page, click the activity's encoding icon button.", "Choose Start Encoding.", "Enter the scores.", "Click Save Scores."],
+                "screenshot": "faculty_helpguide/2_encodescores.png",
                 "check_first": ["Confirm the activity and highest possible score.", "Confirm the student list.", "Enter the actual raw score earned by each student."],
                 "actions": [
                     {"name": "Save Scores", "does": "Saves the entered student scores.", "when": "Use it after reviewing every value on the page.", "avoid": "Do not leave the page with unsaved changes.", "result": "Saved scores are included in the summary computation.", "editable": "Yes, while the gradebook remains open."},
@@ -92,6 +110,8 @@ FACULTY_HELP_SECTIONS = [
                 "code": "attendance",
                 "title": "Attendance",
                 "purpose": "Records student attendance for a dated class session and supplies attendance grading when required.",
+                "how_to_open": ["Click the Attendance button.", "Add a session date.", "Type the title or description.", "Click Save Session.", "Mark attendance for the listed students and save the records."],
+                "screenshot": "faculty_helpguide/2_attendance.png",
                 "check_first": ["Confirm the session date and class.", "Check that all active students are listed.", "Use the status that matches the official attendance record."],
                 "actions": [
                     {"name": "Add Session", "does": "Creates a dated attendance meeting.", "when": "Use it for an actual class session.", "avoid": "Do not create duplicate sessions for the same meeting.", "result": "The session becomes available for attendance encoding.", "editable": "Yes, while the gradebook is open."},
@@ -110,6 +130,8 @@ FACULTY_HELP_SECTIONS = [
                 "code": "summary",
                 "title": "Summary of Periodic Grades",
                 "purpose": "Shows activity scores, category averages, component totals, and the computed period grade.",
+                "how_to_open": ["Click My Classes.", "Open the accepted class.", "Choose the grading period.", "Click Summary.", "Review Period Snapshot first, then review the grade table before submission."],
+                "screenshot": "faculty_helpguide/3_summary.png",
                 "check_first": ["Check the highest possible score row.", "Look for blanks, unexpected zeros, and wrong student statuses.", "Confirm all expected activities appear."],
                 "actions": [
                     {"name": "Summary", "does": "Displays the current computed gradebook.", "when": "Use it after every major encoding session and before submission.", "avoid": "Do not submit based only on one activity page.", "result": "The latest saved records are shown using the assigned template.", "editable": "The summary itself is read-only; change source scores or activities."},

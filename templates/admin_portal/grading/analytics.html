@@ -6,13 +6,18 @@
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
 </div>
 
+<div class="alert alert-info border mb-3">
+  Results follow the faculty members you supervise and their accepted teaching assignments.
+  Shared courses do not need to be duplicated by campus or department.
+</div>
+
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body">
     <form method="get" class="row g-2 align-items-end">
       <div class="col-md-3">
         <label class="form-label mb-1">Campus</label>
         <select class="form-select" name="campus_id">
-          <option value="">All Campuses</option>
+          <option value="all" {% if all_campuses_selected %}selected{% endif %}>All Campuses</option>
           {% for campus in campus_options %}
           <option value="{{ campus.id }}" {% if selected_campus_id == campus.id %}selected{% endif %}>{{ campus.code }} - {{ campus.name }}</option>
           {% endfor %}
@@ -43,6 +48,16 @@
     </form>
   </div>
 </div>
+
+{% if summary.offerings == 0 %}
+<div class="alert alert-secondary border mb-3">
+  No accepted faculty assignments were found under your current campus, department, and selected filters.
+</div>
+{% elif summary.graded_rows == 0 %}
+<div class="alert alert-info border mb-3">
+  Accepted classes were found, but no computed period-grade data is available for the selected filters yet.
+</div>
+{% endif %}
 
 {% if summary.missing_template_offerings %}
 <div class="alert alert-warning border mb-3">
@@ -312,6 +327,7 @@
         <th>Component</th>
         <th>Subcomponent</th>
         <th>Detail</th>
+        <th>Detail Weight</th>
         <th>Students Graded</th>
         <th>Passed</th>
         <th>Failed</th>
@@ -326,6 +342,12 @@
         <td>{{ row.component_name }}</td>
         <td>{{ row.subcomponent_name }}</td>
         <td>{{ row.detail_name }}</td>
+        <td>
+          {{ row.detail_weight }}%
+          {% if row.detail_computation_mode == "AVERAGE_ACTIVITIES" %}
+          <div class="small text-muted">Reference only</div>
+          {% endif %}
+        </td>
         <td>{{ row.graded }}</td>
         <td>{{ row.passed }}</td>
         <td>{{ row.failed }}</td>
@@ -333,7 +355,7 @@
         <td>{{ row.threshold_display }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="9" class="text-center text-muted py-3">No detail-level failure analytics available.</td></tr>
+      <tr><td colspan="10" class="text-center text-muted py-3">No detail-level failure analytics available.</td></tr>
       {% endfor %}
       </tbody>
     </table>

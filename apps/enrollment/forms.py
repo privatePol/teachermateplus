@@ -1,5 +1,7 @@
 from django import forms
 
+from apps.grading.services import EnrollmentSafetyService
+
 from .models import Enrollment
 
 
@@ -87,4 +89,5 @@ class EnrollmentForm(forms.ModelForm):
                 raise forms.ValidationError("Student and offering must belong to the same tenant.")
             if student.campus_id != offering.campus_id:
                 raise forms.ValidationError("Student campus must match offering campus.")
+        EnrollmentSafetyService.validate_changes_allowed(enrollment=self.instance, cleaned_data=cleaned)
         return cleaned

@@ -1,0 +1,180 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="h5 mb-1">Replace Faculty</h2>
+    <div class="text-muted">Use this only for approved faculty replacement, substitution, or co-faculty assignment.</div>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:faculty_assignment_list' %}">Back to Faculty Assignments</a>
+</div>
+
+{% if has_academic_records %}
+<div class="alert alert-warning">
+  <strong>Academic records already exist for at least one selected offering.</strong>
+  Faculty replacement will not modify existing records. Existing activities, scores, attendance, submissions, period grades,
+  final grades, correction requests, reopen requests, and locks remain preserved under their original ownership/history.
+</div>
+{% else %}
+<div class="alert alert-success">
+  No academic records were detected for the selected offering(s). Replacement can proceed after review.
+</div>
+{% endif %}
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-light fw-semibold">Selected Assignment(s)</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Current Faculty</th>
+          <th>Course</th>
+          <th>Section</th>
+          <th>Load Role</th>
+          <th>Acceptance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for assignment in assignments %}
+        <tr>
+          <td>{{ assignment.faculty_user.full_name|default:assignment.faculty_user.username }}</td>
+          <td>{{ assignment.offering.course.code }} - {{ assignment.offering.course.title }}</td>
+          <td>{{ assignment.offering.section.name|default:assignment.offering.section.code }}</td>
+          <td>{% if assignment.is_primary %}<span class="badge text-bg-success">Primary</span>{% else %}<span class="badge text-bg-secondary">Secondary</span>{% endif %}</td>
+          <td>{{ assignment.get_response_status_display }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-light fw-semibold">Impact Analysis</div>
+  <div class="card-body">
+    <div class="row g-2 mb-3">
+      <div class="col-md-6">
+        <div class="small fw-semibold text-muted text-uppercase">Student-specific records</div>
+        <div class="small text-muted">Scores, period grades, and final grades are counted from student records under each offering.</div>
+      </div>
+      <div class="col-md-6">
+        <div class="small fw-semibold text-muted text-uppercase">Source-offering-wide records</div>
+        <div class="small text-muted">Activities, submissions, correction requests, reopen requests, and locks affect the whole source offering.</div>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered align-middle mb-0">
+        <thead class="table-success">
+          <tr>
+            <th>Offering</th>
+            <th>Activities</th>
+            <th>Scores</th>
+            <th>Submissions</th>
+            <th>Period Grades</th>
+            <th>Final Grades</th>
+            <th>Corrections</th>
+            <th>Reopen</th>
+            <th>Locks</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in impact_rows %}
+          <tr>
+            <td>{{ row.assignment.offering.course.code }} / {{ row.assignment.offering.section.code }}</td>
+            <td>{{ row.impact.activities }}</td>
+            <td>{{ row.impact.scores }}</td>
+            <td>{{ row.impact.submissions }}</td>
+            <td>{{ row.impact.period_grades }}</td>
+            <td>{{ row.impact.final_grades }}</td>
+            <td>{{ row.impact.correction_requests }}</td>
+            <td>{{ row.impact.reopen_requests }}</td>
+            <td>{{ row.impact.grading_locks }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<form method="post" class="card border-0 shadow-sm mb-3">
+  {% csrf_token %}
+  <div class="card-header bg-light fw-semibold">Replacement Details</div>
+  <div class="card-body">
+    {{ form.assignment_ids }}
+    {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Replacement Faculty</label>
+        {{ form.replacement_faculty }}
+        {% if form.replacement_faculty.errors %}<div class="text-danger small">{{ form.replacement_faculty.errors }}</div>{% endif %}
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Replacement Type</label>
+        {{ form.replacement_type }}
+        <div class="form-text">Permanent, administrative, and wrong-assignment replacements deactivate the old assignment. Temporary and co-faculty assignments keep the old assignment active.</div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Reason Category</label>
+        {{ form.reason_category }}
+      </div>
+      <div class="col-12">
+        <label class="form-label">Remarks / Details</label>
+        {{ form.remarks }}
+        {% if form.remarks.errors %}<div class="text-danger small">{{ form.remarks.errors }}</div>{% endif %}
+      </div>
+    </div>
+
+    <div class="form-check mt-3">
+      <input class="form-check-input" type="checkbox" name="confirm_impact" id="confirm-impact">
+      <label class="form-check-label" for="confirm-impact">
+        I reviewed the impact analysis and understand that existing academic records will not be changed.
+      </label>
+    </div>
+  </div>
+  <div class="card-footer d-flex justify-content-end gap-2">
+    <button class="btn btn-outline-secondary" type="submit" name="replacement_action" value="preview">Refresh Impact Analysis</button>
+    {% if can_process %}
+    <button class="btn btn-success" type="submit" name="replacement_action" value="confirm">Confirm Replacement</button>
+    {% else %}
+    <button class="btn btn-success" type="button" disabled>Confirm Replacement</button>
+    {% endif %}
+  </div>
+</form>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-light fw-semibold">Recent Replacement History</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Batch</th>
+          <th>Offering</th>
+          <th>From</th>
+          <th>To</th>
+          <th>Type</th>
+          <th>Reason</th>
+          <th>Processed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in recent_logs %}
+        <tr>
+          <td>{{ log.batch_reference }}</td>
+          <td>{{ log.offering.course.code }} / {{ log.offering.section.code }}</td>
+          <td>{{ log.source_faculty.full_name|default:log.source_faculty.username }}</td>
+          <td>{{ log.replacement_faculty.full_name|default:log.replacement_faculty.username }}</td>
+          <td>{{ log.get_replacement_type_display }}</td>
+          <td>{{ log.get_reason_category_display }}</td>
+          <td>{{ log.processed_at|date:"M d, Y h:i A" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="text-center text-muted py-3">No replacement history for the selected assignment(s).</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

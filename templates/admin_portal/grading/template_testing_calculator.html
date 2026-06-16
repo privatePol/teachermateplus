@@ -414,7 +414,12 @@
                     {% if sub.details %}
                     <ul class="mt-1">
                       {% for detail in sub.details %}
-                      <li>{{ detail.row.name }} = {{ detail.weight }}%</li>
+                      <li>
+                        {{ detail.row.name }} = {{ detail.weight }}%
+                        {% if sub.row.detail_computation_mode == "AVERAGE_ACTIVITIES" %}
+                        <span class="text-muted">(configured weight; reference only)</span>
+                        {% endif %}
+                      </li>
                       {% endfor %}
                     </ul>
                     {% endif %}
@@ -595,6 +600,9 @@
                             {% for detail in sub.details %}
                               <div class="small">
                                 {{ detail.row.name }} = <span class="text-muted">{{ detail.weight }}%</span>
+                                {% if sub.row.detail_computation_mode == "AVERAGE_ACTIVITIES" %}
+                                <span class="text-muted">(configured weight; reference only)</span>
+                                {% endif %}
                                 <span class="text-muted">| Score <strong>{{ detail.score }}</strong></span>
                               </div>
                             {% endfor %}

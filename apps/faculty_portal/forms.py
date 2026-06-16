@@ -132,7 +132,11 @@ class GradeActivityForm(forms.ModelForm):
         self.fields["total_score"].required = False
         self.fields["template_component"].label_from_instance = lambda obj: obj.name
         self.fields["template_subcomponent"].label_from_instance = lambda obj: obj.name
-        self.fields["template_detail"].label_from_instance = lambda obj: obj.name
+        self.fields["template_detail"].label_from_instance = (
+            lambda obj: obj.name
+            if getattr(obj.template_subcomponent, "detail_computation_mode", None) == "AVERAGE_ACTIVITIES"
+            else f"{obj.name} ({obj.weight_percentage}% configured weight)"
+        )
         self.fields["activity_date"].input_formats = ["%Y-%m-%d", "%m-%d-%Y", "%m/%d/%Y"]
         self.fields["title"].help_text = (
             "Keep titles short and consistent so the summary stays easy to read. "
@@ -221,7 +225,7 @@ class GradeCorrectionRequestForm(forms.Form):
             lambda obj: (
                 f"{obj.template_component.code}"
                 f"{' / ' + obj.template_subcomponent.code if obj.template_subcomponent else ''}"
-                f"{' / ' + obj.template_detail.code if obj.template_detail else ''}"
+                f"{' / ' + obj.template_detail.code + ' (' + str(obj.template_detail.weight_percentage) + '% configured weight)' if obj.template_detail else ''}"
                 f" - {obj.title}"
             )
         )

@@ -296,6 +296,31 @@
 
   <div class="settings-card-grid">
   <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-academic-performance" aria-expanded="false" aria-controls="feature-card-academic-performance">
+      <strong>Academic Performance Insights</strong>
+      <span class="toggle-indicator" aria-hidden="true">⌄</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-academic-performance" aria-expanded="false" aria-controls="feature-card-academic-performance">
+      <span class="settings-card-summary-title">Academic Performance Insights</span>
+      <span class="settings-card-summary-text">Enable read-only course, section, campus, and activity-consistency comparisons for authorized academic leaders.</span>
+    </button>
+    <div id="feature-card-academic-performance" class="collapse">
+      <div class="card-body">
+        <div class="form-check form-switch mb-0">
+          {{ form.academic_performance_insights_enabled }}
+          <label class="form-check-label" for="{{ form.academic_performance_insights_enabled.id_for_label }}">
+            {{ form.academic_performance_insights_enabled.label }}
+          </label>
+          {% if form.academic_performance_insights_enabled.help_text %}
+          <div class="form-text">{{ form.academic_performance_insights_enabled.help_text }}</div>
+          {% endif %}
+          {% for error in form.academic_performance_insights_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
     <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-student-portal" aria-expanded="false" aria-controls="feature-card-student-portal">
       <strong>Student Portal</strong>
       <span class="toggle-indicator" aria-hidden="true">+</span>
@@ -695,7 +720,7 @@
     </button>
     <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-non-compliance" aria-expanded="false" aria-controls="feature-card-non-compliance">
       <span class="settings-card-summary-title">Submission Non-Compliance Notices</span>
-      <span class="settings-card-summary-text">Control overdue submission notices, follow-up cadence, academic head visibility, and HR escalation recipients.</span>
+      <span class="settings-card-summary-text">Control the three-stage overdue submission notices for faculty, Area Chair, and CAO follow-up.</span>
     </button>
     <div id="feature-card-non-compliance" class="collapse">
     <div class="card-body">
@@ -718,6 +743,30 @@
           {% endif %}
           {% for error in form.submission_non_compliance_notice_interval_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
         </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.submission_non_compliance_first_notice_after_days.id_for_label }}">{{ form.submission_non_compliance_first_notice_after_days.label }}</label>
+          {{ form.submission_non_compliance_first_notice_after_days }}
+          {% if form.submission_non_compliance_first_notice_after_days.help_text %}
+          <div class="form-text">{{ form.submission_non_compliance_first_notice_after_days.help_text }}</div>
+          {% endif %}
+          {% for error in form.submission_non_compliance_first_notice_after_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.submission_non_compliance_level_interval_days.id_for_label }}">{{ form.submission_non_compliance_level_interval_days.label }}</label>
+          {{ form.submission_non_compliance_level_interval_days }}
+          {% if form.submission_non_compliance_level_interval_days.help_text %}
+          <div class="form-text">{{ form.submission_non_compliance_level_interval_days.help_text }}</div>
+          {% endif %}
+          {% for error in form.submission_non_compliance_level_interval_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="{{ form.submission_non_compliance_max_notice_count.id_for_label }}">{{ form.submission_non_compliance_max_notice_count.label }}</label>
+          {{ form.submission_non_compliance_max_notice_count }}
+          {% if form.submission_non_compliance_max_notice_count.help_text %}
+          <div class="form-text">{{ form.submission_non_compliance_max_notice_count.help_text }}</div>
+          {% endif %}
+          {% for error in form.submission_non_compliance_max_notice_count.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
         <div class="col-md-8">
           <label class="form-label" for="{{ form.submission_non_compliance_head_roles.id_for_label }}">{{ form.submission_non_compliance_head_roles.label }}</label>
           {{ form.submission_non_compliance_head_roles }}
@@ -736,7 +785,18 @@
         </div>
       </div>
       <div class="alert alert-light border small mb-0 mt-3">
-        Notice 1 is a formal notice, Notice 2 is a warning, and Notice 3 onward can stay at escalation level every set interval until the affected period is submitted.
+        <strong>Current NCBA policy:</strong>
+        the existing daily command <code>python manage.py issue_submission_non_compliance_notices</code>
+        checks overdue unsubmitted gradebooks using the scheduler cadence. With the default values,
+        Notice 1 is sent 1 day after the deadline to the faculty only, Notice 2 is sent 2 days after
+        the deadline to the faculty and scoped Area Chair, and Notice 3 is sent 3 days after the
+        deadline to the faculty, scoped Area Chair, and scoped CAO. TeacherMate+ stops automatic
+        notices after the configured maximum notice count. HR is not included in the current NCBA
+        policy. Area Chair and CAO delivery depends on active scoped role assignments and valid email
+        addresses.
+      </div>
+      <div class="alert alert-info border small mb-0 mt-3">
+        {{ form.non_compliance_schedule_preview }}
       </div>
     </div>
     </div>

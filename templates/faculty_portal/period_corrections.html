@@ -74,7 +74,10 @@
                 {% if item.grade_activity %}
                   | {{ item.grade_activity.template_component.name }}
                   {% if item.grade_activity.template_subcomponent %} / {{ item.grade_activity.template_subcomponent.name }}{% endif %}
-                  {% if item.grade_activity.template_detail %} / {{ item.grade_activity.template_detail.name }}{% endif %}
+                  {% if item.grade_activity.template_detail %}
+                    / {{ item.grade_activity.template_detail.name }}
+                    ({{ item.grade_activity.template_detail.weight_percentage }}% configured weight{% if item.grade_activity.template_subcomponent.detail_computation_mode == "AVERAGE_ACTIVITIES" %}; reference only{% endif %})
+                  {% endif %}
                   {% if item.grade_activity.title %} / {{ item.grade_activity.title }}{% endif %}
                 {% endif %}
                 | <span class="text-primary">{{ item.old_value|default:"-" }} -> {{ item.new_value|default:"-" }}</span>
@@ -202,6 +205,7 @@
                     <th>Component</th>
                     <th>Subcomponent</th>
                     <th>Detail</th>
+                    <th>Detail Weight</th>
                     <th>Entry Method</th>
                     <th>Total</th>
                   </tr>
@@ -225,6 +229,10 @@
                     <td>{{ row.component_name }}</td>
                     <td>{{ row.subcomponent_name }}</td>
                     <td>{{ row.detail_name }}</td>
+                    <td>
+                      {% if row.detail_weight != "-" %}{{ row.detail_weight }}%{% else %}-{% endif %}
+                      {% if row.detail_weight_reference_only %}<div class="small text-muted">Reference only</div>{% endif %}
+                    </td>
                     <td><span class="badge text-bg-light border">{{ row.entry_method_label }}</span></td>
                     <td>{{ row.total_score }}</td>
                   </tr>
@@ -446,7 +454,7 @@
             ${activity.score_input_mode === "RAW_BASE50"
               ? `| Total Score: <strong>${activity.total_score}</strong>`
               : "| Encode percentage directly from <strong>0 to 100</strong>"}
-            | ${activity.component_name} / ${activity.subcomponent_name}${activity.detail_name !== "-" ? ` / ${activity.detail_name}` : ""}
+            | ${activity.component_name} / ${activity.subcomponent_name}${activity.detail_name !== "-" ? ` / ${activity.detail_name} (${activity.detail_weight}% configured weight${activity.detail_weight_reference_only ? "; reference only" : ""})` : ""}
             | <strong>${activity.title}</strong>
           </div>
         `;

@@ -62,7 +62,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h2 class="h4 mb-1">Faculty Grade Distribution Monitor</h2>
-    <div class="text-muted small">Read-only academic governance view for grading patterns and review indicators.</div>
+    <div class="text-muted small">Read-only overview of grade patterns for faculty and classes under your supervision.</div>
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-success" href="?{{ export_query }}">Export CSV</a>
@@ -83,7 +83,7 @@
       <div class="col-md-2">
         <label class="form-label mb-1">Campus</label>
         <select class="form-select" name="campus_id">
-          <option value="">All Campuses</option>
+          <option value="all" {% if selected.all_campuses %}selected{% endif %}>All Campuses</option>
           {% for campus in filter_options.campuses %}
           <option value="{{ campus.id }}" {% if selected.campus_id == campus.id %}selected{% endif %}>{{ campus.code }}</option>
           {% endfor %}
@@ -146,6 +146,16 @@
   </div>
 </div>
 
+{% if summary.offerings == 0 %}
+<div class="alert alert-secondary border mb-3">
+  No accepted faculty assignments were found under your current campus, department, and selected filters.
+</div>
+{% elif summary.rows == 0 %}
+<div class="alert alert-info border mb-3">
+  Accepted classes were found, but no grade distribution data is available for the selected filters yet.
+</div>
+{% endif %}
+
 {% if summary.missing_template_offerings %}
 <div class="alert alert-warning border mb-3">
   {{ summary.missing_template_offerings }} class{% if summary.missing_template_offerings != 1 %}es{% endif %}
@@ -155,57 +165,6 @@
 </div>
 {% endif %}
 
-<div class="row g-3 mb-3">
-  <div class="col-md-2 col-6">
-    <div class="card border-0 shadow-sm h-100">
-      <div class="card-body">
-        <div class="text-muted small">Classes in Scope</div>
-        <div class="h5 mb-0">{{ summary.offerings }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-2 col-6">
-    <div class="card border-0 shadow-sm h-100">
-      <div class="card-body">
-        <div class="text-muted small">Rows Reviewed</div>
-        <div class="h5 mb-0">{{ summary.rows }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-2 col-6">
-    <div class="card border-0 shadow-sm h-100">
-      <div class="card-body">
-        <div class="text-muted small">For Review</div>
-        <div class="h5 mb-0">{{ summary.review_rows }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-2 col-6">
-    <div class="card border-0 shadow-sm h-100">
-      <div class="card-body">
-        <div class="text-muted small">Incomplete Data</div>
-        <div class="h5 mb-0">{{ summary.incomplete_rows }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-2 col-6">
-    <div class="card border-0 shadow-sm h-100">
-      <div class="card-body">
-        <div class="text-muted small">High Grade Concentration</div>
-        <div class="h5 mb-0">{{ summary.high_concentration_rows }}</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-2 col-6">
-    <div class="card border-0 shadow-sm h-100">
-      <div class="card-body">
-        <div class="text-muted small">High Perfect Score Rate</div>
-        <div class="h5 mb-0">{{ summary.high_perfect_rows }}</div>
-      </div>
-    </div>
-  </div>
-</div>
-
 {% if summary.missing_template_offerings %}
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body py-2">
@@ -213,17 +172,6 @@
   </div>
 </div>
 {% endif %}
-
-<div class="card border-0 shadow-sm mb-3">
-  <div class="card-body small text-muted">
-    Review flags are indicators for academic review, not findings of misconduct. Current thresholds:
-    high grade band {{ settings.high_grade_band_min }}-{{ settings.high_grade_band_max }},
-    high grade concentration at {{ settings.high_grade_concentration_threshold_percent }}%,
-    exact 100 rate at {{ settings.exact_100_threshold_percent }}%,
-    low variation at {{ settings.low_variation_threshold }} points,
-    minimum sample {{ settings.minimum_student_count_for_flag }} students.
-  </div>
-</div>
 
 <div class="card border-0 shadow-sm">
   <div class="card-header bg-white fw-semibold">Grade Distribution Results</div>
@@ -241,9 +189,6 @@
         <th>75-79</th>
         <th>Below Passing</th>
         <th>Exact 100</th>
-        <th>Spread</th>
-        <th>Comparison</th>
-        <th>Status</th>
       </tr>
       </thead>
       <tbody>
@@ -277,27 +222,10 @@
         <td>{{ row.band_75_79_pct }}%</td>
         <td>{{ row.below_passing_pct }}%</td>
         <td>{{ row.exact_100_pct }}%</td>
-        <td>
-          {% if row.spread is not None %}{{ row.spread|floatformat:2 }}{% else %}-{% endif %}
-          <div class="small text-muted">
-            {% if row.lowest is not None and row.highest is not None %}{{ row.lowest|floatformat:2 }} - {{ row.highest|floatformat:2 }}{% endif %}
-          </div>
-        </td>
-        <td>
-          <div class="small">Dept: {% if row.department_average is not None %}{{ row.department_average|floatformat:2 }}{% else %}-{% endif %}</div>
-          <div class="small text-muted">Subject: {% if row.subject_average is not None %}{{ row.subject_average|floatformat:2 }}{% else %}-{% endif %}</div>
-        </td>
-        <td>
-          <div class="d-flex flex-wrap gap-1">
-            {% for flag in row.flags %}
-            <span class="badge {{ flag.class }}">{{ flag.label }}</span>
-            {% endfor %}
-          </div>
-        </td>
       </tr>
       {% empty %}
       <tr>
-        <td colspan="13" class="text-center text-muted py-4">No grade distribution data is available for the selected filters.</td>
+        <td colspan="10" class="text-center text-muted py-4">No grade distribution data is available for the selected filters.</td>
       </tr>
       {% endfor %}
       </tbody>

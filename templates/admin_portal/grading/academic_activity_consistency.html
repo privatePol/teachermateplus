@@ -1,0 +1,61 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+  <div>
+    <h1 class="h4 mb-1">Activity Consistency</h1>
+    <p class="text-muted mb-0">Compare active assessment setup for sections with the same course code and grading period.</p>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:academic_performance_insights' %}">Back to Performance Insights</a>
+</div>
+
+{% include "admin_portal/grading/_academic_performance_filters.html" %}
+
+{% if not required_filters_present %}
+<div class="alert alert-info border">Select an Academic Year, Term, and Grading Period to compare activity setup.</div>
+{% else %}
+  {% if limited %}<div class="alert alert-warning border">The live report is limited to the first 100 authorized classes. Narrow the filters for a complete comparison.</div>{% endif %}
+  <div class="alert alert-light border border-success-subtle"><strong>Report Summary:</strong> {{ interpretation }}</div>
+  <div class="card border-0 shadow-sm">
+    <div class="card-header bg-white fw-semibold">Same-Course Activity Comparison</div>
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light"><tr><th>Campus</th><th>Course</th><th>Section</th><th>Faculty</th><th>Activities by Component</th><th>Total</th><th>Max Score Range</th><th>Missing Setup</th><th>Consistency</th><th></th></tr></thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ row.campus.code }}</td>
+            <td><strong>{{ row.course_code }}</strong><div class="small text-muted">{{ row.course_title }}</div></td>
+            <td>{{ row.section }}</td><td>{{ row.faculty_name }}</td>
+            <td>{% for label, count in row.component_counts.items %}<div>{{ label }}: <strong>{{ count }}</strong></div>{% empty %}-{% endfor %}</td>
+            <td>{{ row.total_activities }}</td>
+            <td>{% if row.minimum_max_score is not None %}{{ row.minimum_max_score|floatformat:2 }} - {{ row.maximum_max_score|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td>{% for label in row.missing_components %}<div>{{ label }}</div>{% empty %}-{% endfor %}</td>
+            <td>
+              {% if row.consistency_status == "Consistent" %}<span class="badge text-bg-success">{{ row.consistency_status }}</span>
+              {% elif row.consistency_status == "Minor Difference" %}<span class="badge text-bg-info">{{ row.consistency_status }}</span>
+              {% elif row.consistency_status == "Incomplete Setup" %}<span class="badge text-bg-secondary">{{ row.consistency_status }}</span>
+              {% else %}<span class="badge text-bg-warning">{{ row.consistency_status }}</span>{% endif %}
+            </td>
+            <td><a class="btn btn-sm btn-outline-success text-nowrap" href="{% url 'admin_portal:academic_performance_section_detail' row.offering.id row.period.code %}?{% if request.GET %}{{ request.GET.urlencode }}&amp;{% endif %}next={{ request.get_full_path|urlencode }}">View Details</a></td>
+          </tr>
+          {% empty %}<tr><td colspan="10" class="text-center text-muted py-4">No activities are configured for the selected scope.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.has_other_pages %}
+    <div class="card-footer bg-white d-flex justify-content-between align-items-center gap-2 flex-wrap">
+      <span class="small text-muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+      <div class="btn-group btn-group-sm" role="group" aria-label="Activity comparison pages">
+        {% if page_obj.has_previous %}
+        <a class="btn btn-outline-secondary" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+        <a class="btn btn-outline-secondary" href="?{% if page_query %}{{ page_query }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

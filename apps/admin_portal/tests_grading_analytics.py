@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.core.services import ScopeService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 from apps.grading.models import GradingTemplate, GradingTemplatePeriod, StudentPeriodGrade
@@ -91,6 +92,7 @@ class AdminGradingAnalyticsTests(TestCase):
         self.admin_user = self._user("analytics_admin", "Analytics", "Admin")
         self.faculty_user = self._user("analytics_faculty", "Analytics", "Faculty")
         role = Role.objects.create(code="ANALYTICS_ADMIN", name="Analytics Admin")
+        faculty_role = Role.objects.create(code="FACULTY", name="Faculty")
         for code, module, action in (
             ("admin_portal.access", "admin_portal", "access"),
             ("grading_analytics.read", "grading_analytics", "read"),
@@ -103,6 +105,13 @@ class AdminGradingAnalyticsTests(TestCase):
         UserRole.objects.create(
             user=self.admin_user,
             role=role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=faculty_role,
             tenant=self.tenant,
             campus=self.campus,
             department=self.department,
@@ -127,6 +136,119 @@ class AdminGradingAnalyticsTests(TestCase):
         self.assertContains(response, "no published grading template assigned")
         self.assertContains(response, "No Published Template: 1")
         self.assertEqual(response.context["summary"]["missing_template_offerings"], 1)
+
+    def test_grading_analytics_follows_supervised_faculty_when_offering_department_differs(self):
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="COLLEGE",
+            name="College",
+        )
+        self.offering.department = other_department
+        self.offering.save(update_fields=["department", "updated_at"])
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["summary"]["offerings"], 1)
+        self.assertContains(response, "Results follow the faculty members you supervise")
+
+    def test_grading_analytics_defaults_to_current_topbar_campus(self):
+        other_campus = Campus.objects.create(
+            tenant=self.tenant,
+            code="OTHER",
+            name="Other Campus",
+        )
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="IS",
+            name="Information Systems",
+        )
+        other_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+            code="BSIS",
+            name="BS Information Systems",
+        )
+        other_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+            program=other_program,
+            code="BSIS-1B",
+            name="BSIS 1B",
+        )
+        other_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+            program=other_program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=other_section,
+        )
+        UserRole.objects.create(
+            user=self.admin_user,
+            role=self.admin_user.user_roles.get().role,
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+        )
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=Role.objects.get(code="FACULTY"),
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            offering=other_offering,
+            faculty_user=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+        )
+        session = self.client.session
+        session[ScopeService.SESSION_TENANT_KEY] = self.tenant.id
+        session[ScopeService.SESSION_CAMPUS_KEY] = self.campus.id
+        session.save()
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_campus_id"], self.campus.id)
+        self.assertEqual(response.context["summary"]["offerings"], 1)
+
+        all_campuses_response = self.client.get(self.url, {"campus_id": "all"})
+
+        self.assertEqual(all_campuses_response.status_code, 200)
+        self.assertTrue(all_campuses_response.context["all_campuses_selected"])
+        self.assertEqual(all_campuses_response.context["summary"]["offerings"], 2)
+
+    def test_grading_analytics_requires_specific_permission(self):
+        unauthorized_user = self._user("analytics_without_permission", "No", "Analytics")
+        role = Role.objects.create(code="ANALYTICS_NO_READ", name="Analytics No Read")
+        admin_access = Permission.objects.get(code="admin_portal.access")
+        RolePermission.objects.create(role=role, permission=admin_access)
+        UserRole.objects.create(
+            user=unauthorized_user,
+            role=role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        self.client.force_login(unauthorized_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
 
     def test_missing_template_analytics_uses_tenant_passing_threshold(self):
         student = Student.objects.create(

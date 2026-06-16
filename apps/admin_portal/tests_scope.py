@@ -28,6 +28,9 @@ from apps.enrollment.services import EnrollmentService
 from apps.grading.models import (
     CourseTemplateAssignment,
     GradeActivity,
+    GradeCorrectionRequest,
+    GradeSubmission,
+    GradeSubmissionReopenRequest,
     GradingTemplate,
     GradingTemplateComponent,
     GradingTemplatePeriod,
@@ -243,6 +246,365 @@ class FacultyMonitoringScopeTests(TestCase):
         assignment_ids = list(AdminScopeService.scoped_faculty_assignments(request).values_list("id", flat=True))
 
         self.assertIn(self.assignment.id, assignment_ids)
+
+    def test_monitoring_offerings_follow_accepted_supervised_faculty_assignment(self):
+        self._accept_assignment()
+        request = self._build_request()
+
+        offering_ids = list(
+            AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
+        )
+
+        self.assertIn(self.offering.id, offering_ids)
+
+    def test_monitoring_offerings_exclude_unaccepted_faculty_assignment(self):
+        request = self._build_request()
+
+        offering_ids = list(
+            AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
+        )
+
+        self.assertNotIn(self.offering.id, offering_ids)
+
+    def test_grade_governance_queues_follow_accepted_supervised_assignment(self):
+        template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="QUEUE_SCOPE",
+            name="Queue Scope",
+            is_published=True,
+        )
+        period = GradingTemplatePeriod.objects.create(
+            template=template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+            weight_percentage=Decimal("100.00"),
+        )
+        submission = GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            submitted_by_user=self.faculty_user,
+        )
+        correction = GradeCorrectionRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=period,
+            requested_by_user=self.faculty_user,
+            faculty_department=self.department_is,
+            justification="Correct an encoded score.",
+        )
+        reopen = GradeSubmissionReopenRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            submission=submission,
+            offering=self.offering,
+            template_period=period,
+            requested_by_user=self.faculty_user,
+            justification="Complete the required gradebook.",
+        )
+        request = self._build_request()
+
+        self.assertNotIn(
+            submission.id,
+            AdminScopeService.scoped_grade_submissions(request).values_list("id", flat=True),
+        )
+        self.assertNotIn(
+            correction.id,
+            AdminScopeService.scoped_grade_correction_requests(request).values_list("id", flat=True),
+        )
+        self.assertNotIn(
+            reopen.id,
+            AdminScopeService.scoped_grade_submission_reopen_requests(request).values_list("id", flat=True),
+        )
+
+        self._accept_assignment()
+
+        self.assertIn(
+            submission.id,
+            AdminScopeService.scoped_grade_submissions(request).values_list("id", flat=True),
+        )
+        self.assertIn(
+            correction.id,
+            AdminScopeService.scoped_grade_correction_requests(request).values_list("id", flat=True),
+        )
+        self.assertIn(
+            reopen.id,
+            AdminScopeService.scoped_grade_submission_reopen_requests(request).values_list("id", flat=True),
+        )
+
+    def test_monitoring_scope_requires_same_campus_and_department_pair(self):
+        self._accept_assignment()
+        second_campus = Campus.objects.create(
+            tenant=self.tenant,
+            code="NCBA-CUBAO",
+            name="Cubao",
+        )
+        second_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            code="CUB_COLL_IS",
+            name="Cubao Information Systems",
+        )
+        second_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            code="BSIT-CUB",
+            name="BSIT Cubao",
+        )
+        second_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            program=second_program,
+            code="BSIT-CUB-1A",
+            name="BSIT Cubao 1A",
+        )
+        second_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            program=second_program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=second_section,
+        )
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=self.faculty_role,
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            offering=second_offering,
+            faculty_user=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+        )
+        request = self._build_request()
+
+        offering_ids = set(
+            AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
+        )
+
+        self.assertIn(self.offering.id, offering_ids)
+        self.assertNotIn(second_offering.id, offering_ids)
+
+    def test_monitoring_scope_excludes_same_campus_wrong_department(self):
+        self._accept_assignment()
+        other_faculty = User.objects.create_user(
+            username="faculty_other_department",
+            email="faculty_other_department@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department_college,
+        )
+        UserRole.objects.create(
+            user=other_faculty,
+            role=self.faculty_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_college,
+        )
+        other_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=other_faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=other_faculty,
+        )
+        request = self._build_request()
+
+        assignment_ids = set(
+            AdminScopeService.scoped_faculty_assignments(request).values_list("id", flat=True)
+        )
+
+        self.assertIn(self.assignment.id, assignment_ids)
+        self.assertNotIn(other_assignment.id, assignment_ids)
+
+    def test_monitoring_scope_excludes_inactive_faculty_role(self):
+        self._accept_assignment()
+        UserRole.objects.filter(user=self.faculty_user, role=self.faculty_role).update(is_active=False)
+        request = self._build_request()
+
+        self.assertFalse(AdminScopeService.scoped_faculty_assignments(request).exists())
+        self.assertFalse(AdminScopeService.scoped_monitoring_course_offerings(request).exists())
+
+    def test_monitoring_scope_excludes_inactive_area_chair_role(self):
+        self._accept_assignment()
+        UserRole.objects.filter(user=self.ac_user, role=self.ac_role).update(is_active=False)
+        request = self._build_request()
+
+        self.assertFalse(AdminScopeService.scoped_faculty_assignments(request).exists())
+        self.assertFalse(AdminScopeService.scoped_monitoring_course_offerings(request).exists())
+
+    def test_all_campus_monitoring_uses_each_campus_department_pair(self):
+        self._accept_assignment()
+        second_campus = Campus.objects.create(
+            tenant=self.tenant,
+            code="NCBA-CUBAO",
+            name="Cubao",
+        )
+        second_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            code="CUB_COLL_IS",
+            name="Cubao Information Systems",
+        )
+        second_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            code="BSIT-CUB",
+            name="BSIT Cubao",
+        )
+        second_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            program=second_program,
+            code="BSIT-CUB-1A",
+            name="BSIT Cubao 1A",
+        )
+        second_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            program=second_program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=second_section,
+        )
+        UserRole.objects.create(
+            user=self.ac_user,
+            role=self.ac_role,
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+        )
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=self.faculty_role,
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            offering=second_offering,
+            faculty_user=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+        )
+        request = self._build_request()
+
+        default_ids = set(
+            AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
+        )
+        all_ids = set(
+            AdminScopeService.scoped_monitoring_course_offerings(
+                request,
+                include_all_campuses=True,
+            ).values_list("id", flat=True)
+        )
+
+        self.assertEqual(default_ids, {self.offering.id})
+        self.assertEqual(all_ids, {self.offering.id, second_offering.id})
+
+    def test_college_dean_monitoring_starts_from_area_chair_departments(self):
+        self.department_is.parent = self.department_college
+        self.department_is.save(update_fields=["parent", "updated_at"])
+        self._accept_assignment()
+        dean_role, _ = Role.objects.get_or_create(code="COLLEGE_DEAN", defaults={"name": "College Dean"})
+        dean_user = User.objects.create_user(
+            username="college_dean_monitor",
+            email="college_dean_monitor@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department_college,
+        )
+        UserRole.objects.create(
+            user=dean_user,
+            role=dean_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_college,
+        )
+        request = self.factory.get("/")
+        request.user = dean_user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+
+        faculty_ids = list(AdminScopeService.scoped_faculty_users(request))
+        offering_ids = list(
+            AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
+        )
+
+        self.assertIn(self.faculty_user.id, faculty_ids)
+        self.assertIn(self.offering.id, offering_ids)
+
+    def test_college_dean_does_not_monitor_department_without_area_chair(self):
+        UserRole.objects.filter(user=self.ac_user, role=self.ac_role).update(is_active=False)
+        dean_role, _ = Role.objects.get_or_create(code="COLLEGE_DEAN", defaults={"name": "College Dean"})
+        dean_user = User.objects.create_user(
+            username="college_dean_without_ac",
+            email="college_dean_without_ac@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department_is,
+        )
+        UserRole.objects.create(
+            user=dean_user,
+            role=dean_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department_is,
+        )
+        request = self.factory.get("/")
+        request.user = dean_user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+
+        self.assertEqual(list(AdminScopeService.scoped_faculty_users(request)), [])
+        self.assertFalse(AdminScopeService.scoped_monitoring_course_offerings(request).exists())
+
+    def test_college_dean_default_role_does_not_grant_governance_actions(self):
+        dean_role = Role.objects.get(code="COLLEGE_DEAN")
+        action_permissions = {
+            "faculty_assignments.create",
+            "faculty_assignments.update",
+            "grading_templates.approve",
+            "template_hotfixes.review",
+            "grade_submissions.revert_before_deadline",
+            "corrections.create_on_behalf",
+            "corrections.review",
+            "reopen_requests.review",
+        }
+
+        assigned_action_permissions = set(
+            RolePermission.objects.filter(
+                role=dean_role,
+                permission__code__in=action_permissions,
+            ).values_list("permission__code", flat=True)
+        )
+
+        self.assertEqual(assigned_action_permissions, set())
 
     def test_parent_department_role_scope_includes_child_departments(self):
         self.department_is.parent = self.department_college

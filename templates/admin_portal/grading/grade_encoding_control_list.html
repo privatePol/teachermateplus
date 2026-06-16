@@ -1,0 +1,51 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Grade Encoding Access Control</h2>
+  {% if "grading_encoding_control.manage" in effective_permissions %}
+  <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:grade_encoding_control_create' %}">Add Control</a>
+  {% endif %}
+</div>
+<div class="alert alert-light border small">
+  <strong>Purpose:</strong> temporarily open or close faculty grade encoding during enrollment and faculty-loading cleanup.
+  <strong>Closed:</strong> faculty can still view classes, but activity setup, score encoding, and period submission are blocked for the matching scope.
+  <strong>Rule:</strong> any matching Closed control blocks encoding; an Open control does not override a broader Closed control.
+</div>
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <select class="form-select" name="campus_id">
+      <option value="">All Campuses</option>
+      {% for campus in campuses %}
+        <option value="{{ campus.id }}" {% if campus.id|stringformat:'s' == request.GET.campus_id %}selected{% endif %}>{{ campus.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="term_id">
+      <option value="">All Terms</option>
+      {% for t in terms %}
+        <option value="{{ t.id }}" {% if t.id|stringformat:'s' == request.GET.term_id %}selected{% endif %}>{{ t.code }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="status">
+      <option value="">All Status</option>
+      {% for value,label in status_choices %}
+        <option value="{{ value }}" {% if request.GET.status == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <input class="form-control" name="period_code" value="{{ request.GET.period_code }}" placeholder="Period code">
+  </div>
+  <div class="col-md-2">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Course/reason/notice">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+{% include "admin_portal/shared/active_inactive_sections.html" with section_label="Grade Encoding Controls" table_template="admin_portal/grading/grade_encoding_control_table.html" active_empty_message="No active grade encoding controls found." inactive_empty_message="No inactive grade encoding controls found." %}
+{% endblock %}

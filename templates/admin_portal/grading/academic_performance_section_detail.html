@@ -1,0 +1,73 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+  <div>
+    <h1 class="h4 mb-1">{{ summary.course_code }} / {{ summary.section }} Performance Details</h1>
+    <p class="text-muted mb-0">{{ summary.campus.code }} | {{ summary.course_title }} | {{ summary.period.name }} | {{ summary.faculty_name }}</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-sm btn-outline-success" href="{{ activity_consistency_url }}">View Activity Consistency</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ back_url }}">Back to Report</a>
+  </div>
+</div>
+
+<div class="alert alert-light border">This page shows section-level information only. It does not display student names, student grades, or rankings.</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><div class="card h-100 shadow-sm"><div class="card-body"><div class="small text-muted">Class Average</div><div class="h4 mb-0">{% if summary.class_average is not None %}{{ summary.class_average|floatformat:2 }}{% else %}-{% endif %}</div></div></div></div>
+  <div class="col-md-3"><div class="card h-100 shadow-sm"><div class="card-body"><div class="small text-muted">At-Risk Students</div><div class="h4 mb-0">{{ summary.at_risk_count }}</div></div></div></div>
+  <div class="col-md-3"><div class="card h-100 shadow-sm"><div class="card-body"><div class="small text-muted">Missing Outputs</div><div class="h4 mb-0">{{ summary.missing_output_count }}</div></div></div></div>
+  <div class="col-md-3"><div class="card h-100 shadow-sm"><div class="card-body"><div class="small text-muted">Weakest Component</div><div class="fw-semibold">{% if summary.weakest_component %}{{ summary.weakest_component.name }}{% else %}-{% endif %}</div></div></div></div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white fw-semibold">What to Review</div>
+      <div class="card-body">{{ review_guidance }}</div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-white fw-semibold">Ready for Comparison</div>
+      <div class="card-body">
+        <span class="badge text-bg-{{ ready_for_comparison.style }}">{{ ready_for_comparison.label }}</span>
+        <p class="small text-muted mb-0 mt-2">{{ ready_for_comparison.detail }}</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white fw-semibold">Comparison Context</div>
+  <div class="card-body">{{ comparison_context }}</div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white fw-semibold">Component Breakdown</div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0"><thead class="table-light"><tr><th>Component</th><th>Section Average</th></tr></thead>
+      <tbody>{% for component in components %}<tr><td>{{ component.name }}</td><td>{{ component.average|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="2" class="text-center text-muted py-3">Component results are not available yet.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white fw-semibold">Activity Setup</div>
+  <div class="card-body border-bottom">
+    <div class="d-flex gap-3 flex-wrap align-items-center">
+      <div><span class="text-muted small">Total Activities</span><div class="fw-semibold">{{ activity_setup_summary.total_activities }}</div></div>
+      {% for label, count in activity_setup_summary.category_counts.items %}
+      <div><span class="text-muted small">{{ label }}</span><div class="fw-semibold">{{ count }}</div></div>
+      {% endfor %}
+      <div><span class="text-muted small">Activity Setup Status</span><div class="fw-semibold">{{ activity_setup_summary.status }}</div></div>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0"><thead class="table-light"><tr><th>Activity</th><th>Component</th><th>Subcomponent</th><th>Maximum Score</th></tr></thead>
+      <tbody>{% for activity in activity_profile.activities %}<tr><td>{{ activity.title }}</td><td>{{ activity.template_component.name }}</td><td>{% if activity.template_subcomponent %}{{ activity.template_subcomponent.name }}{% else %}-{% endif %}</td><td>{{ activity.total_score|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="4" class="text-center text-muted py-3">No activities are configured yet for this grading period.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

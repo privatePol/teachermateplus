@@ -48,3 +48,29 @@
     {% endif %}
   </div>
 </div>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const visibilityField = document.querySelector('[data-template-department-visibility="true"]');
+    const departmentsField = document.querySelector('[data-template-visible-departments="true"]');
+    if (!visibilityField || !departmentsField) {
+      return;
+    }
+
+    const departmentsGroup = departmentsField.closest(".mb-3");
+    function updateDepartmentVisibility() {
+      const usesSelectedDepartments = visibilityField.value === "SELECTED";
+      if (departmentsGroup) {
+        departmentsGroup.hidden = !usesSelectedDepartments;
+      }
+      departmentsField.required = usesSelectedDepartments;
+      if (!usesSelectedDepartments) {
+        Array.from(departmentsField.options).forEach(function (option) {
+          option.selected = false;
+        });
+      }
+    }
+
+    visibilityField.addEventListener("change", updateDepartmentVisibility);
+    updateDepartmentVisibility();
+  });
+</script>

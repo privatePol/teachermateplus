@@ -1,0 +1,146 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .insight-bar { height: 7px; min-width: 90px; overflow: hidden; background: #e6eee7; border-radius: 999px; margin-top: .35rem; }
+  .insight-bar span { display: block; height: 100%; border-radius: inherit; background: #26834e; }
+  .insight-bar.risk span { background: #bd4f56; }
+  .insight-bar.missing span { background: #7b8580; }
+  .insight-card { border-left: 4px solid #25814c !important; }
+  .insight-course { min-width: 160px; max-width: 220px; }
+  .insight-faculty { min-width: 130px; max-width: 180px; }
+  .insight-action { min-width: 110px; padding-right: 1.25rem !important; }
+</style>
+
+<div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+  <div>
+    <h1 class="h4 mb-1">Academic Performance Insights</h1>
+    <p class="text-muted mb-0">Compare course and section performance only within your authorized academic scope.</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:academic_activity_consistency' %}">Activity Consistency</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
+  </div>
+</div>
+
+{% include "admin_portal/grading/_academic_performance_filters.html" %}
+
+{% if not required_filters_present %}
+<div class="alert alert-info border">
+  Select an Academic Year, Term, and Grading Period to generate the report.
+</div>
+{% else %}
+  {% if limited %}
+  <div class="alert alert-warning border">The live report is limited to the first 100 authorized classes. Narrow the filters for a complete comparison.</div>
+  {% endif %}
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Sections Compared</div><div class="h4 mb-0">{{ summary.sections }}</div></div></div></div>
+    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Overall Average</div><div class="h4 mb-0">{% if summary.overall_average is not None %}{{ summary.overall_average|floatformat:2 }}{% else %}-{% endif %}</div></div></div></div>
+    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">At-Risk Students</div><div class="h4 mb-0">{{ summary.at_risk_count }}</div></div></div></div>
+    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Missing Outputs</div><div class="h4 mb-0">{{ summary.missing_output_count }}</div></div></div></div>
+  </div>
+
+  <div class="alert alert-light border border-success-subtle mb-3"><strong>Report Summary:</strong> {{ interpretation }}</div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white fw-semibold">Needs Attention</div>
+    <div class="card-body">
+      <p class="mb-2">{{ attention_panel.message }}</p>
+      {% for item in attention_panel.items %}
+      <div class="border-start border-3 {% if attention_panel.state == 'incomplete' %}border-secondary{% else %}border-warning{% endif %} ps-3 py-1 mb-2">
+        <div><strong>Section:</strong> {{ item.section }}</div>
+        <div><strong>Main Issue:</strong> {{ item.main_issue }}</div>
+        <div><strong>Suggested Check:</strong> {{ item.suggested_check }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white fw-semibold">Course Performance by Section</div>
+    <div class="card-body py-2 small text-muted border-bottom">
+      Longer <span class="text-success fw-semibold">green</span> bar means a higher class average.
+      Longer <span class="text-danger fw-semibold">red</span> bar means more at-risk students.
+      Longer <span class="text-secondary fw-semibold">gray</span> bar means more missing outputs.
+    </div>
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Campus</th><th>Course</th><th>Section</th><th>Faculty</th><th>Class Average</th>
+            <th>At-Risk Students</th><th>Missing Outputs</th><th>Weakest Component</th><th>Status</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ row.campus.code }}</td>
+            <td class="insight-course"><strong>{{ row.course_code }}</strong><div class="small text-muted lh-sm">{{ row.course_title }}</div></td>
+            <td>{{ row.section }}</td>
+            <td class="insight-faculty"><span class="small">{{ row.faculty_name }}</span></td>
+            <td>
+              {% if row.class_average is not None %}{{ row.class_average|floatformat:2 }}{% else %}-{% endif %}
+              <div class="insight-bar"><span style="width: {{ row.average_bar_width }}%"></span></div>
+            </td>
+            <td>{{ row.at_risk_count }}<div class="insight-bar risk"><span style="width: {{ row.at_risk_bar_width }}%"></span></div></td>
+            <td>{{ row.missing_output_count }}<div class="insight-bar missing"><span style="width: {{ row.missing_bar_width }}%"></span></div></td>
+            <td>{% if row.weakest_component %}{{ row.weakest_component.name }}<div class="small text-muted">{{ row.weakest_component.average|floatformat:2 }}</div>{% else %}-{% endif %}</td>
+            <td>
+              {% if row.status == "Normal" %}<span class="badge text-bg-success">{{ row.status }}</span>
+              {% elif row.status == "Needs Attention" %}<span class="badge text-bg-warning">{{ row.status }}</span>
+              {% elif row.status == "High Risk" %}<span class="badge text-bg-danger">{{ row.status }}</span>
+              {% else %}<span class="badge text-bg-secondary">{{ row.status }}</span>{% endif %}
+              <div class="small text-muted mt-1">{{ row.main_concern }}</div>
+            </td>
+            <td class="insight-action"><a class="btn btn-sm btn-outline-success text-nowrap" href="{% url 'admin_portal:academic_performance_section_detail' row.offering.id row.period.code %}?{% if request.GET %}{{ request.GET.urlencode }}&amp;{% endif %}next={{ request.get_full_path|urlencode }}">View Details</a></td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="10" class="text-center text-muted py-4">No performance data is available for the selected scope.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="card-footer bg-white d-flex justify-content-between">
+      <span class="small text-muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+      <div class="btn-group btn-group-sm">
+        {% if page_obj.has_previous %}<a class="btn btn-outline-secondary" href="?{{ page_query }}&page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+        {% if page_obj.has_next %}<a class="btn btn-outline-secondary" href="?{{ page_query }}&page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if filter_options.role_scope.can_compare_campuses %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-header bg-white fw-semibold">Authorized Campus Summary</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead class="table-light"><tr><th>Campus</th><th>Department</th><th>Courses</th><th>Sections</th><th>Overall Average</th><th>At-Risk Students</th><th>Missing Outputs</th><th>Courses Needing Attention</th><th>Common Weak Component</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {% for row in campus_rows %}
+          <tr>
+            <td>{{ row.campus_code }} - {{ row.campus_name }}</td>
+            <td>{{ row.department_code }} - {{ row.department_name }}</td>
+            <td>{{ row.course_count }}</td><td>{{ row.section_count }}</td>
+            <td>{% if row.overall_average is not None %}{{ row.overall_average|floatformat:2 }}{% else %}-{% endif %}</td>
+            <td>{{ row.at_risk_count }}</td><td>{{ row.missing_output_count }}</td>
+            <td>{{ row.courses_needing_attention }}</td>
+            <td>{{ row.dominant_weakest_component|default:"-" }}</td>
+            <td>
+              {% if row.status == "Normal" %}<span class="badge text-bg-success">{{ row.status }}</span>
+              {% elif row.status == "Needs Attention" %}<span class="badge text-bg-warning">{{ row.status }}</span>
+              {% elif row.status == "High Risk" %}<span class="badge text-bg-danger">{{ row.status }}</span>
+              {% else %}<span class="badge text-bg-secondary">{{ row.status }}</span>{% endif %}
+            </td>
+            <td><a class="btn btn-sm btn-outline-success" href="?academic_year_id={{ filters.academic_year_id }}&term_id={{ filters.term_id }}&period_code={{ filters.period_code }}&campus_id={{ row.campus_id|default:'' }}&department_id={{ row.department_id }}">Drill Down</a></td>
+          </tr>
+          {% empty %}<tr><td colspan="11" class="text-center text-muted py-3">No campus summary is available.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

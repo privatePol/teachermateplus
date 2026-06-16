@@ -614,6 +614,9 @@
           <div class="col-md-3"><a class="btn btn-outline-primary w-100" href="{% url 'admin_portal:audit_log_list' %}">View Audit Logs</a></div>
           {% if "grading_analytics.read" in effective_permissions %}
           <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:grading_analytics' %}">Grading Analytics</a></div>
+          {% if admin_academic_performance_insights_enabled %}
+          <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:academic_performance_insights' %}">Academic Performance Insights</a></div>
+          {% endif %}
           {% endif %}
           {% if "grade_distribution_monitor.read" in effective_permissions %}
           <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:grade_distribution_monitor' %}">Grade Distribution Monitor</a></div>

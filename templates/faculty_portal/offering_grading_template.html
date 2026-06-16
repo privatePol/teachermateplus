@@ -205,9 +205,17 @@
                 <li>
                   {{ sub.name }} = {{ sub.weight }}%
                   {% if sub.details %}
+                  <div class="small text-muted">Detail computation: {{ sub.detail_computation_mode_label }}</div>
+                  {% endif %}
+                  {% if sub.details %}
                   <ul class="mt-1">
                     {% for detail in sub.details %}
-                    <li>{{ detail.name }} = {{ detail.weight }}%</li>
+                    <li>
+                      {{ detail.name }} = {{ detail.weight }}%
+                      {% if sub.detail_computation_mode == "AVERAGE_ACTIVITIES" %}
+                      <span class="text-muted">(configured weight; not used in the activity average)</span>
+                      {% endif %}
+                    </li>
                     {% endfor %}
                   </ul>
                   {% endif %}

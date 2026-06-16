@@ -1,0 +1,78 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+  <div>
+    <h2 class="h5 mb-1">Audit Log Details</h2>
+    <div class="text-muted small">{{ log.entity_type }}{% if log.entity_id %} #{{ log.entity_id }}{% endif %}</div>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:audit_log_list' %}">Back to Audit Logs</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-3"><div class="small text-muted">Timestamp</div><strong>{{ log.created_at|date:"Y-m-d H:i:s" }}</strong></div>
+      <div class="col-md-2"><div class="small text-muted">Action</div><strong>{{ log.action }}</strong></div>
+      <div class="col-md-3">
+        <div class="small text-muted">Actor</div>
+        <strong>{{ log.actor_user.full_name|default:log.actor_user.username|default:"System" }}</strong>
+      </div>
+      <div class="col-md-2"><div class="small text-muted">Portal</div><strong>{{ log.portal }}</strong></div>
+      <div class="col-md-2"><div class="small text-muted">Method</div><strong>{{ log.http_method|default:"-" }}</strong></div>
+      <div class="col-md-4"><div class="small text-muted">Scope</div><strong>{{ log.tenant.code|default:"GLOBAL" }} / {{ log.campus.code|default:"ALL" }}</strong></div>
+      <div class="col-md-4"><div class="small text-muted">Route</div><strong>{{ log.route_name|default:"-" }}</strong></div>
+      <div class="col-md-4"><div class="small text-muted">IP Address</div><strong>{{ log.ip_address|default:"-" }}</strong></div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white fw-semibold">Changed Fields</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr><th>Field</th><th>Before</th><th>After</th></tr>
+      </thead>
+      <tbody>
+      {% for row in changed_fields %}
+        <tr>
+          <td class="fw-semibold">{{ row.field }}</td>
+          <td><pre class="small mb-0 text-wrap">{{ row.before }}</pre></td>
+          <td><pre class="small mb-0 text-wrap">{{ row.after }}</pre></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="3" class="text-center text-muted py-3">No top-level field changes were recorded.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="accordion" id="audit-payloads">
+  <div class="accordion-item">
+    <h3 class="accordion-header">
+      <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#audit-before" aria-expanded="true" aria-controls="audit-before">Full Before Record</button>
+    </h3>
+    <div id="audit-before" class="accordion-collapse collapse show">
+      <div class="accordion-body"><pre class="small mb-0 text-wrap">{{ before_json }}</pre></div>
+    </div>
+  </div>
+  <div class="accordion-item">
+    <h3 class="accordion-header">
+      <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#audit-after" aria-expanded="true" aria-controls="audit-after">Full After Record</button>
+    </h3>
+    <div id="audit-after" class="accordion-collapse collapse show">
+      <div class="accordion-body"><pre class="small mb-0 text-wrap">{{ after_json }}</pre></div>
+    </div>
+  </div>
+  <div class="accordion-item">
+    <h3 class="accordion-header">
+      <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#audit-metadata" aria-expanded="true" aria-controls="audit-metadata">Technical Metadata</button>
+    </h3>
+    <div id="audit-metadata" class="accordion-collapse collapse show">
+      <div class="accordion-body"><pre class="small mb-0 text-wrap">{{ metadata_json }}</pre></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

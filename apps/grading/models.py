@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.core.validators import MinValueValidator
 from uuid import uuid4
@@ -29,12 +30,26 @@ class GradingTemplate(TimeStampedModel, ActivatableModel):
         APPROVED = "APPROVED", "Approved"
         REJECTED = "REJECTED", "Rejected"
 
+    class DepartmentVisibility(models.TextChoices):
+        ALL = "ALL", "All Departments"
+        SELECTED = "SELECTED", "Selected Departments"
+
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="grading_templates")
     code = models.CharField(max_length=64)
     name = models.CharField(max_length=150)
     description = models.TextField(blank=True, null=True)
     default_base_value = models.DecimalField(max_digits=6, decimal_places=2, default=50)
     passing_grade_threshold = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+    department_visibility = models.CharField(
+        max_length=16,
+        choices=DepartmentVisibility.choices,
+        default=DepartmentVisibility.ALL,
+    )
+    visible_departments = models.ManyToManyField(
+        "tenants.Department",
+        blank=True,
+        related_name="visible_grading_templates",
+    )
     approval_status = models.CharField(
         max_length=20,
         choices=ApprovalStatus.choices,
@@ -813,6 +828,104 @@ class GradingPeriodLock(TimeStampedModel, ActivatableModel):
 
     def __str__(self):
         return f"{self.campus.code}:{self.term.code}:{self.period_code}:{self.scope_type}"
+
+
+class GradeEncodingControl(TimeStampedModel, ActivatableModel):
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Open"
+        CLOSED = "CLOSED", "Closed"
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="grade_encoding_controls")
+    academic_year = models.ForeignKey(
+        "academics.AcademicYear",
+        on_delete=models.PROTECT,
+        related_name="grade_encoding_controls",
+    )
+    term = models.ForeignKey("academics.Term", on_delete=models.PROTECT, related_name="grade_encoding_controls")
+    period_code = models.CharField(max_length=50, blank=True, null=True)
+    campus = models.ForeignKey(
+        "tenants.Campus",
+        on_delete=models.PROTECT,
+        related_name="grade_encoding_controls",
+        blank=True,
+        null=True,
+    )
+    course_offering = models.ForeignKey(
+        "academics.CourseOffering",
+        on_delete=models.PROTECT,
+        related_name="grade_encoding_controls",
+        blank=True,
+        null=True,
+    )
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.OPEN)
+    reason = models.CharField(max_length=255, blank=True, null=True)
+    notice_to_faculty = models.TextField(blank=True, null=True)
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="created_grade_encoding_controls",
+    )
+    updated_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="updated_grade_encoding_controls",
+    )
+
+    class Meta:
+        db_table = "grade_encoding_controls"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["tenant", "academic_year", "term", "is_active"], name="idx_enc_ctrl_scope_term"),
+            models.Index(fields=["status", "is_active"], name="idx_enc_ctrl_status"),
+            models.Index(fields=["campus", "course_offering"], name="idx_enc_ctrl_campus_course"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "academic_year", "term", "period_code", "campus", "course_offering"],
+                condition=models.Q(is_active=True),
+                name="uq_active_grade_encoding_control_scope",
+            ),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.term_id and self.academic_year_id and self.term.academic_year_id != self.academic_year_id:
+            errors["term"] = "Term must belong to the selected academic year."
+        if self.campus_id and self.tenant_id and self.campus.tenant_id != self.tenant_id:
+            errors["campus"] = "Campus must belong to the selected tenant."
+        if self.course_offering_id:
+            offering = self.course_offering
+            if self.tenant_id and offering.tenant_id != self.tenant_id:
+                errors["course_offering"] = "Course offering must belong to the selected tenant."
+            if self.academic_year_id and offering.academic_year_id != self.academic_year_id:
+                errors["course_offering"] = "Course offering must belong to the selected academic year."
+            if self.term_id and offering.term_id != self.term_id:
+                errors["course_offering"] = "Course offering must belong to the selected term."
+            if self.campus_id and offering.campus_id != self.campus_id:
+                errors["course_offering"] = "Course offering must belong to the selected campus."
+        if self.status == self.Status.CLOSED:
+            if not (self.reason or "").strip():
+                errors["reason"] = "Enter the reason when closing grade encoding."
+            if not (self.notice_to_faculty or "").strip():
+                errors["notice_to_faculty"] = "Enter the faculty notice when closing grade encoding."
+        if self.period_code:
+            self.period_code = self.period_code.strip().upper()
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        parts = [self.academic_year.code, self.term.code]
+        if self.period_code:
+            parts.append(self.period_code)
+        if self.campus_id:
+            parts.append(self.campus.code)
+        if self.course_offering_id:
+            parts.append(str(self.course_offering_id))
+        return " / ".join(parts)
 
 
 class GradeSubmission(TimeStampedModel):

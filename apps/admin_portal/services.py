@@ -10,6 +10,7 @@ from apps.grading.models import (
     CourseBaseValueOverride,
     CourseTemplateAssignment,
     GradeCorrectionRequest,
+    GradeEncodingControl,
     GradeSubmission,
     GradeSubmissionReopenRequest,
     GradingPeriodLock,
@@ -21,6 +22,7 @@ from apps.grading.models import (
     TemplateHotfixRequest,
     TenantGradingProfile,
 )
+from apps.grading.access import GradingTemplateAccessService
 from apps.imports.models import ImportBatch
 from apps.rbac.models import UserRole
 from apps.students.models import Student
@@ -28,6 +30,9 @@ from apps.tenants.models import Campus, Department, Program, Tenant
 
 
 class AdminScopeService:
+    AREA_CHAIR_ROLE_CODES = {"AC", "AREA_CHAIR", "AREA_CHAIRPERSON"}
+    COLLEGE_DEAN_ROLE_CODE = "COLLEGE_DEAN"
+
     @staticmethod
     def expand_department_filter_ids(department_id, *, tenant_id: int | None = None, campus_id: int | None = None):
         try:
@@ -241,15 +246,23 @@ class AdminScopeService:
         return AdminScopeService._visible_queryset(request, queryset)
 
     @staticmethod
-    def scoped_faculty_assignments(request):
-        tenants, campuses, _departments = AdminScopeService._scoped_tenant_campus_department_ids(request)
-        faculty_user_ids = list(AdminScopeService.scoped_faculty_users(request))
+    def scoped_faculty_assignments(request, *, include_all_campuses=False):
+        tenants = list(AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True))
+        faculty_ids_by_campus = AdminScopeService._faculty_ids_by_monitoring_campus(
+            request,
+            include_all_campuses=include_all_campuses,
+        )
         terms = AdminScopeService.active_scoped_terms(request).values_list("id", flat=True)
+        campus_faculty_filter = models.Q(pk__in=[])
+        for campus_id, faculty_user_ids in faculty_ids_by_campus.items():
+            if faculty_user_ids:
+                campus_faculty_filter |= models.Q(
+                    offering__campus_id=campus_id,
+                    faculty_user_id__in=faculty_user_ids,
+                )
         queryset = (
             FacultyAssignment.objects.filter(
-                faculty_user_id__in=faculty_user_ids,
                 offering__tenant_id__in=tenants,
-                offering__campus_id__in=campuses,
                 offering__term_id__in=terms,
                 offering__is_active=True,
                 offering__department__is_active=True,
@@ -261,6 +274,7 @@ class AdminScopeService:
                 offering__section__program__is_active=True,
                 offering__section__program__department__is_active=True,
             )
+            .filter(campus_faculty_filter)
             .filter(models.Q(offering__course__department__isnull=True) | models.Q(offering__course__department__is_active=True))
             .select_related(
                 "offering",
@@ -273,6 +287,37 @@ class AdminScopeService:
                 "offering__department",
             )
             .order_by("-assigned_at")
+        )
+        return AdminScopeService._visible_queryset(request, queryset)
+
+    @staticmethod
+    def scoped_monitoring_course_offerings(request, *, include_all_campuses=False):
+        assignment_offering_ids = (
+            AdminScopeService.scoped_faculty_assignments(
+                request,
+                include_all_campuses=include_all_campuses,
+            )
+            .filter(
+                is_active=True,
+                response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+                faculty_user__is_active=True,
+            )
+            .values_list("offering_id", flat=True)
+        )
+        queryset = (
+            CourseOffering.objects.filter(id__in=assignment_offering_ids)
+            .select_related(
+                "tenant",
+                "campus",
+                "department",
+                "program",
+                "academic_year",
+                "term",
+                "course",
+                "section",
+            )
+            .order_by("-created_at")
+            .distinct()
         )
         return AdminScopeService._visible_queryset(request, queryset)
 
@@ -314,49 +359,186 @@ class AdminScopeService:
         return AdminScopeService._visible_queryset(request, queryset)
 
     @staticmethod
-    def scoped_faculty_users(request):
-        tenants, campuses, departments = AdminScopeService._scoped_tenant_campus_department_ids(request)
-        unrestricted_department_scope = AdminScopeService._has_unrestricted_department_scope(
-            request, tenants, campuses
+    def scoped_faculty_users(request, *, include_all_campuses=False):
+        faculty_ids_by_campus = AdminScopeService._faculty_ids_by_monitoring_campus(
+            request,
+            include_all_campuses=include_all_campuses,
         )
-        faculty_role_assignments = UserRole.objects.filter(
-            role__code="FACULTY",
-            is_active=True,
-            user__is_active=True,
+        faculty_user_ids = {
+            faculty_user_id
+            for campus_faculty_ids in faculty_ids_by_campus.values()
+            for faculty_user_id in campus_faculty_ids
+        }
+        return (
+            UserRole.objects.filter(
+                role__code="FACULTY",
+                is_active=True,
+                role__is_active=True,
+                user__is_active=True,
+                user_id__in=faculty_user_ids,
+            )
+            .values_list("user_id", flat=True)
+            .distinct()
         )
-        if not request.user.is_superuser:
-            faculty_role_assignments = faculty_role_assignments.filter(
-                models.Q(tenant_id__in=tenants) | models.Q(tenant__isnull=True)
-            ).filter(models.Q(campus_id__in=campuses) | models.Q(campus__isnull=True))
-            if departments and not unrestricted_department_scope:
-                faculty_role_assignments = faculty_role_assignments.filter(
-                    models.Q(department_id__in=departments)
+
+    @staticmethod
+    def _monitoring_campus_ids(request, *, include_all_campuses=False):
+        campus_ids = list(AdminScopeService.active_scoped_campuses(request).values_list("id", flat=True))
+        current_campus_id = getattr(request, "scope", {}).get("campus_id")
+        if not include_all_campuses and current_campus_id in campus_ids:
+            return [current_campus_id]
+        return campus_ids
+
+    @staticmethod
+    def _faculty_ids_by_monitoring_campus(request, *, include_all_campuses=False):
+        tenant_id = getattr(request, "scope", {}).get("tenant_id")
+        if not tenant_id:
+            return {}
+        campus_ids = AdminScopeService._monitoring_campus_ids(
+            request,
+            include_all_campuses=include_all_campuses,
+        )
+        uses_dean_chain = AdminScopeService._uses_college_dean_supervision(request)
+        faculty_ids_by_campus = {}
+        for campus_id in campus_ids:
+            department_ids = None
+            if not request.user.is_superuser:
+                role_scope = UserRole.objects.filter(
+                    user=request.user,
+                    is_active=True,
+                    role__is_active=True,
+                ).exclude(role__code="FACULTY")
+                role_scope = role_scope.filter(
+                    models.Q(tenant_id=tenant_id) | models.Q(tenant__isnull=True)
+                ).filter(models.Q(campus_id=campus_id) | models.Q(campus__isnull=True))
+                unrestricted_department_scope = role_scope.filter(department__isnull=True).exists()
+                accessible_department_ids = ScopeService.get_accessible_department_ids(
+                    request.user,
+                    tenant_id=tenant_id,
+                    campus_id=campus_id,
+                )
+                if uses_dean_chain:
+                    department_ids = AdminScopeService._college_dean_area_chair_department_ids(
+                        request,
+                        tenant_ids=[tenant_id],
+                        campus_ids=[campus_id],
+                        dean_department_ids=accessible_department_ids,
+                    )
+                elif not unrestricted_department_scope:
+                    department_ids = accessible_department_ids
+
+            faculty_roles = UserRole.objects.filter(
+                role__code="FACULTY",
+                role__is_active=True,
+                is_active=True,
+                user__is_active=True,
+            ).filter(
+                models.Q(tenant_id=tenant_id)
+                | (
+                    models.Q(tenant__isnull=True)
+                    & models.Q(user__default_tenant_id=tenant_id)
+                )
+            ).filter(
+                models.Q(campus_id=campus_id)
+                | (
+                    models.Q(campus__isnull=True)
+                    & models.Q(user__default_campus_id=campus_id)
+                )
+            )
+            if department_ids is not None:
+                if not department_ids:
+                    faculty_ids_by_campus[campus_id] = []
+                    continue
+                faculty_roles = faculty_roles.filter(
+                    models.Q(department_id__in=department_ids)
                     | (
                         models.Q(department__isnull=True)
-                        & models.Q(user__default_tenant_id__in=tenants)
-                        & models.Q(user__default_campus_id__in=campuses)
-                        & models.Q(user__default_department_id__in=departments)
+                        & models.Q(user__default_campus_id=campus_id)
+                        & models.Q(user__default_department_id__in=department_ids)
                     )
                 )
-        return faculty_role_assignments.values_list("user_id", flat=True).distinct()
+            faculty_ids_by_campus[campus_id] = list(
+                faculty_roles.values_list("user_id", flat=True).distinct()
+            )
+        return faculty_ids_by_campus
+
+    @staticmethod
+    def _uses_college_dean_supervision(request):
+        if request.user.is_superuser:
+            return False
+        active_non_faculty_roles = UserRole.objects.filter(
+            user=request.user,
+            is_active=True,
+            role__is_active=True,
+        ).exclude(role__code="FACULTY")
+        return (
+            active_non_faculty_roles.exists()
+            and not active_non_faculty_roles.exclude(role__code=AdminScopeService.COLLEGE_DEAN_ROLE_CODE).exists()
+        )
+
+    @staticmethod
+    def _college_dean_area_chair_department_ids(
+        request,
+        *,
+        tenant_ids,
+        campus_ids,
+        dean_department_ids,
+    ):
+        area_chair_roles = (
+            UserRole.objects.filter(
+                is_active=True,
+                role__is_active=True,
+                tenant_id__in=tenant_ids,
+                campus_id__in=campus_ids,
+            )
+            .filter(
+                models.Q(role__code__in=AdminScopeService.AREA_CHAIR_ROLE_CODES)
+                | models.Q(role__code__endswith="_AC")
+            )
+            .exclude(department__isnull=True)
+        )
+        if dean_department_ids:
+            area_chair_roles = area_chair_roles.filter(department_id__in=dean_department_ids)
+        department_ids = []
+        for assignment in area_chair_roles.only("department_id", "tenant_id", "campus_id"):
+            department_ids.extend(
+                ScopeService.expand_department_ids(
+                    [assignment.department_id],
+                    tenant_id=assignment.tenant_id,
+                    campus_id=assignment.campus_id,
+                )
+            )
+        return sorted(set(department_ids))
 
     @staticmethod
     def scoped_grading_templates(request):
-        tenants = AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True)
+        tenants = list(AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True))
         queryset = (
             GradingTemplate.objects.filter(tenant_id__in=tenants)
             .select_related("tenant", "published_by")
+            .prefetch_related("visible_departments")
             .order_by("tenant__name", "name")
+        )
+        queryset = GradingTemplateAccessService.filter_queryset_for_user(
+            request.user,
+            queryset,
+            tenant_ids=tenants,
         )
         return AdminScopeService._visible_queryset(request, queryset)
 
     @staticmethod
     def maintenance_scoped_grading_templates(request):
-        tenants = AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True)
-        return (
+        tenants = list(AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True))
+        queryset = (
             GradingTemplate.objects.filter(tenant_id__in=tenants)
             .select_related("tenant", "published_by")
+            .prefetch_related("visible_departments")
             .order_by("tenant__name", "name")
+        )
+        return GradingTemplateAccessService.filter_queryset_for_user(
+            request.user,
+            queryset,
+            tenant_ids=tenants,
         )
 
     @staticmethod
@@ -555,8 +737,36 @@ class AdminScopeService:
         )
 
     @staticmethod
-    def scoped_grade_submissions(request):
+    def scoped_grade_encoding_controls(request):
+        tenants = AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True)
+        campuses = AdminScopeService.active_scoped_campuses(request).values_list("id", flat=True)
+        terms = AdminScopeService.active_scoped_terms(request).values_list("id", flat=True)
         offerings = AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True)
+        queryset = (
+            GradeEncodingControl.objects.filter(tenant_id__in=tenants, term_id__in=terms)
+            .filter(models.Q(campus_id__in=campuses) | models.Q(campus__isnull=True))
+            .filter(models.Q(course_offering_id__in=offerings) | models.Q(course_offering__isnull=True))
+            .select_related(
+                "tenant",
+                "academic_year",
+                "term",
+                "campus",
+                "course_offering__course",
+                "course_offering__section",
+                "created_by",
+                "updated_by",
+            )
+            .order_by("-updated_at")
+        )
+        return AdminScopeService._visible_queryset(request, queryset)
+
+    @staticmethod
+    def maintenance_scoped_grade_encoding_controls(request):
+        return AdminScopeService.scoped_grade_encoding_controls(request)
+
+    @staticmethod
+    def scoped_grade_submissions(request):
+        offerings = AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
         queryset = (
             GradeSubmission.objects.filter(offering_id__in=offerings)
             .select_related(
@@ -575,7 +785,7 @@ class AdminScopeService:
 
     @staticmethod
     def scoped_grade_correction_requests(request):
-        offerings = AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True)
+        offerings = AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
         queryset = (
             GradeCorrectionRequest.objects.filter(offering_id__in=offerings)
             .select_related(
@@ -599,7 +809,7 @@ class AdminScopeService:
 
     @staticmethod
     def scoped_grade_submission_reopen_requests(request):
-        offerings = AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True)
+        offerings = AdminScopeService.scoped_monitoring_course_offerings(request).values_list("id", flat=True)
         queryset = (
             GradeSubmissionReopenRequest.objects.filter(offering_id__in=offerings)
             .select_related(

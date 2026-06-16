@@ -82,6 +82,8 @@
   </div>
 </div>
 
+{% include "admin_portal/imports/_import_safety.html" %}
+
 {% if batch.error_summary_json.messages %}
 <div class="alert alert-warning">
   {% for msg in batch.error_summary_json.messages %}

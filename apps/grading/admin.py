@@ -1,5 +1,8 @@
+from django import forms
 from django.contrib import admin
+from django.core.exceptions import ValidationError
 
+from .services import CourseTemplateAssignmentSafetyService
 from .models import (
     CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
@@ -9,6 +12,7 @@ from .models import (
     GradeCorrectionRequest,
     GradeCorrectionRequestItem,
     GradeCorrectionUnlockWindow,
+    GradeEncodingControl,
     GradeSubmission,
     GradeSubmissionReopenRequest,
     GradeActivity,
@@ -24,6 +28,23 @@ from .models import (
     StudentFinalGrade,
     StudentPeriodGrade,
 )
+
+
+class CourseTemplateAssignmentAdminForm(forms.ModelForm):
+    class Meta:
+        model = CourseTemplateAssignment
+        fields = "__all__"
+
+    def clean(self):
+        cleaned = super().clean()
+        try:
+            CourseTemplateAssignmentSafetyService.validate_template_replacement_allowed(
+                assignment=self.instance,
+                new_template=cleaned.get("grading_template"),
+            )
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.messages) from exc
+        return cleaned
 
 
 @admin.register(GradingTemplate)
@@ -79,6 +100,7 @@ class GradingTemplateDetailAdmin(admin.ModelAdmin):
 
 @admin.register(CourseTemplateAssignment)
 class CourseTemplateAssignmentAdmin(admin.ModelAdmin):
+    form = CourseTemplateAssignmentAdminForm
     list_display = ("course", "grading_template", "effective_from_term", "is_active")
     search_fields = ("course__code", "grading_template__code")
     list_filter = ("is_active",)
@@ -174,6 +196,22 @@ class GradingPeriodLockAdmin(admin.ModelAdmin):
     )
     search_fields = ("period_code", "campus__code", "term__code", "course_offering__course__code")
     list_filter = ("scope_type", "is_locked", "tenant", "campus")
+
+
+@admin.register(GradeEncodingControl)
+class GradeEncodingControlAdmin(admin.ModelAdmin):
+    list_display = (
+        "tenant",
+        "academic_year",
+        "term",
+        "period_code",
+        "campus",
+        "course_offering",
+        "status",
+        "is_active",
+    )
+    search_fields = ("period_code", "campus__code", "term__code", "course_offering__course__code", "reason")
+    list_filter = ("status", "is_active", "tenant", "campus")
 
 
 @admin.register(GradeSubmission)

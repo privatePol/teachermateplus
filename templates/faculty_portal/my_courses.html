@@ -754,18 +754,6 @@
               Clearance Pending
             </span>
             {% endif %}
-            {% if offering.can_undo_acceptance %}
-            <form method="post" action="{% url 'faculty_portal:faculty_assignment_undo_accept' offering.assignment.id %}" class="d-inline">
-              {% csrf_token %}
-              <button
-                type="submit"
-                class="btn btn-outline-danger"
-                onclick="return confirm('Undo acceptance for this faculty assignment? The class will return to Pending Faculty Assignments.');"
-              >
-                Undo Acceptance
-              </button>
-            </form>
-            {% endif %}
           </footer>
         </article>
       </div>

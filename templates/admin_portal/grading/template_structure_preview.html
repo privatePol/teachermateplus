@@ -183,6 +183,21 @@
       <div class="col-md-3"><strong>Name:</strong> {{ template_obj.name }}</div>
       <div class="col-md-3"><strong>Base Value:</strong> {{ template_obj.default_base_value }}</div>
       <div class="col-md-3"><strong>Passing Threshold:</strong> {{ template_obj.passing_grade_threshold|default:"Tenant/Profile Default" }}</div>
+      <div class="col-12">
+        <strong>Department Visibility:</strong>
+        {{ template_obj.get_department_visibility_display }}
+        {% if template_obj.department_visibility == "SELECTED" %}
+          <span class="text-muted">
+            (
+            {% for department in template_obj.visible_departments.all %}
+              {{ department.code }}{% if not forloop.last %}, {% endif %}
+            {% empty %}
+              no department selected
+            {% endfor %}
+            )
+          </span>
+        {% endif %}
+      </div>
     </div>
   </div>
 </div>
@@ -286,7 +301,12 @@
                             <div class="detail-name">{{ detail.row.name }}</div>
                             <div class="detail-code">{{ detail.row.code }}</div>
                           </td>
-                          <td class="text-end fw-semibold">{% if sub.row.detail_computation_mode == "AVERAGE_ACTIVITIES" %}Ignored for activity average{% else %}{{ detail.weight }}%{% endif %}</td>
+                          <td class="text-end">
+                            <div class="fw-semibold">{{ detail.weight }}%</div>
+                            {% if sub.row.detail_computation_mode == "AVERAGE_ACTIVITIES" %}
+                            <div class="small text-muted">Reference only; not used in the average.</div>
+                            {% endif %}
+                          </td>
                         </tr>
                         {% endfor %}
                       </tbody>

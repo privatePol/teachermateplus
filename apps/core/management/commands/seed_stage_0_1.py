@@ -16,6 +16,7 @@ class Command(BaseCommand):
         ("CAMPUS_ADMIN", "Campus Admin"),
         ("REGISTRAR", "Registrar"),
         ("DEAN", "Academic Dean"),
+        ("COLLEGE_DEAN", "College Dean"),
         ("FACULTY", "Faculty"),
     ]
 
@@ -69,6 +70,8 @@ class Command(BaseCommand):
         ("faculty_assignments.create", "faculty_assignments", "create"),
         ("faculty_assignments.update", "faculty_assignments", "update"),
         ("faculty_assignments.import", "faculty_assignments", "import"),
+        ("faculty_replacement.view", "faculty_replacement", "view"),
+        ("faculty_replacement.process", "faculty_replacement", "process"),
         ("faculty_final_clearance.read", "faculty_final_clearance", "read"),
         ("gradebook.view_student_identity", "gradebook", "view_student_identity"),
         ("students.read", "students", "read"),
@@ -80,6 +83,8 @@ class Command(BaseCommand):
         ("enrollment.create", "enrollment", "create"),
         ("enrollment.update", "enrollment", "update"),
         ("enrollment.import", "enrollment", "import"),
+        ("enrollment_adjustment.view", "enrollment_adjustment", "view"),
+        ("enrollment_adjustment.process", "enrollment_adjustment", "process"),
         ("import_batches.read", "import_batches", "read"),
         ("actual_data_reset.run", "actual_data_reset", "run"),
         ("inactive_records.delete", "inactive_records", "delete"),
@@ -118,6 +123,7 @@ class Command(BaseCommand):
         ("grading_periods.read", "grading_periods", "read"),
         ("grading_periods.lock", "grading_periods", "lock"),
         ("grading_periods.reopen", "grading_periods", "reopen"),
+        ("grading_encoding_control.manage", "grading_encoding_control", "manage"),
         ("grade_submissions.read", "grade_submissions", "read"),
         ("grade_submissions.reopen", "grade_submissions", "reopen"),
         ("grade_submissions.revert_before_deadline", "grade_submissions", "revert_before_deadline"),
@@ -521,6 +527,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "ENROLLMENT_ADJUSTMENTS",
+                groups["ENROLLMENT"],
+                "Enrollment Adjustments",
+                "admin_portal:enrollment_adjustments",
+                25,
+                "enrollment_adjustment.view",
+            ),
+            (
+                "ADMIN",
                 "BULK_IMPORTS",
                 groups["IMPORTS"],
                 "Bulk Imports",
@@ -683,11 +698,29 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "GRADE_ENCODING_CONTROL",
+                groups["GRADING"],
+                "Grade Encoding Access Control",
+                "admin_portal:grade_encoding_control_list",
+                72,
+                "grading_encoding_control.manage",
+            ),
+            (
+                "ADMIN",
                 "GRADING_ANALYTICS",
                 groups["GRADING"],
                 "Grading Analytics",
                 "admin_portal:grading_analytics",
                 75,
+                "grading_analytics.read",
+            ),
+            (
+                "ADMIN",
+                "ACADEMIC_PERFORMANCE_INSIGHTS",
+                groups["GRADING"],
+                "Academic Performance Insights",
+                "admin_portal:academic_performance_insights",
+                76,
                 "grading_analytics.read",
             ),
             (
@@ -832,6 +865,34 @@ class Command(BaseCommand):
         for faculty_perm in ["faculty_portal.access", "dashboard.read", "corrections.create"]:
             RolePermission.objects.get_or_create(role=faculty_role, permission=perm_map[faculty_perm])
 
+        college_dean_role = role_map["COLLEGE_DEAN"]
+        college_dean_permissions = [
+            "admin_portal.access",
+            "dashboard.read",
+            "courses.read",
+            "sections.read",
+            "offerings.read",
+            "faculty_assignments.read",
+            "faculty_final_clearance.read",
+            "grading_analytics.read",
+            "grade_distribution_monitor.read",
+            "grading_templates.read",
+            "template_components.read",
+            "template_subcomponents.read",
+            "template_details.read",
+            "template_hotfixes.read",
+            "course_template_assignments.read",
+            "course_base_overrides.read",
+            "grade_submissions.read",
+            "corrections.read",
+            "reopen_requests.read",
+        ]
+        for permission_code in college_dean_permissions:
+            RolePermission.objects.get_or_create(
+                role=college_dean_role,
+                permission=perm_map[permission_code],
+            )
+
         approver_permissions = [
             "grading_templates.read",
             "grading_templates.approve",
@@ -863,7 +924,7 @@ class Command(BaseCommand):
             "reopen_requests.review",
             "grade_submissions.revert_before_deadline",
         ]
-        for role_code in ["DEAN", "REGISTRAR", "CAMPUS_ADMIN"]:
+        for role_code in ["DEAN", "COLLEGE_DEAN", "REGISTRAR", "CAMPUS_ADMIN"]:
             role_obj = role_map[role_code]
             for perm_code in correction_monitor_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
@@ -895,10 +956,29 @@ class Command(BaseCommand):
                 role=role_obj,
                 permission=perm_map["student_enrollment_query.read"],
             )
+        for role_code in ["SUPER_ADMIN", "TENANT_ADMIN", "CAMPUS_ADMIN", "REGISTRAR"]:
+            role_obj = role_map.get(role_code)
+            if not role_obj:
+                continue
+            for perm_code in ["faculty_replacement.view", "faculty_replacement.process"]:
+                RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
+        for role_code in ["AC", "AREA_CHAIR", "DEAN", "COLLEGE_DEAN", "CAO"]:
+            role_obj = role_map.get(role_code)
+            if not role_obj:
+                continue
+            RolePermission.objects.get_or_create(role=role_obj, permission=perm_map["faculty_replacement.view"])
         for role_code in ["DEAN", "CAMPUS_ADMIN"]:
             role_obj = role_map[role_code]
             for perm_code in reopen_reviewer_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
+        for role_code in ["TENANT_ADMIN", "CAMPUS_ADMIN", "REGISTRAR", "AC", "DEAN", "COLLEGE_DEAN", "CAO"]:
+            role_obj = role_map.get(role_code)
+            if not role_obj:
+                continue
+            RolePermission.objects.get_or_create(
+                role=role_obj,
+                permission=perm_map["grading_encoding_control.manage"],
+            )
 
         User = get_user_model()
         default_username = "superadmin"

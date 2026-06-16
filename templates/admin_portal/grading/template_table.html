@@ -7,6 +7,7 @@
         <th>Name</th>
         <th>Base Value</th>
         <th>Passing Threshold</th>
+        <th>Department Visibility</th>
         <th>Periods</th>
         <th>Record State</th>
         <th>Publish</th>
@@ -23,6 +24,20 @@
         <td>{{ row.name }}</td>
         <td>{{ row.default_base_value }}</td>
         <td>{{ row.passing_grade_threshold|default:"Tenant/Profile Default" }}</td>
+        <td>
+          {% if row.department_visibility == "SELECTED" %}
+            <span class="badge text-bg-warning text-dark">Selected Departments</span>
+            <div class="small text-muted mt-1">
+              {% for department in row.visible_departments.all %}
+                {{ department.code }}{% if not forloop.last %}, {% endif %}
+              {% empty %}
+                No department selected
+              {% endfor %}
+            </div>
+          {% else %}
+            <span class="badge text-bg-success">All Departments</span>
+          {% endif %}
+        </td>
         <td>
           <div>{{ row.period_count }}</div>
           {% if row.active_period_codes %}
@@ -224,7 +239,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="{% if show_inactive_tools %}11{% else %}10{% endif %}" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
+      <tr><td colspan="{% if show_inactive_tools %}12{% else %}11{% endif %}" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

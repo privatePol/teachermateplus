@@ -317,9 +317,21 @@
             <input class="form-check-input" type="checkbox" id="select-all-assigned">
             <label class="form-check-label" for="select-all-assigned">Select all assigned offerings</label>
           </div>
-          {% if "faculty_assignments.update" in effective_permissions %}
-          <button type="submit" class="btn btn-outline-danger btn-sm">UNASSIGN SELECTED</button>
-          {% endif %}
+          <div class="d-flex gap-2">
+            {% if "faculty_replacement.view" in effective_permissions %}
+            <button
+              type="submit"
+              class="btn btn-outline-primary btn-sm"
+              formaction="{% url 'admin_portal:faculty_assignment_replace' %}"
+              formmethod="post"
+            >
+              REPLACE FACULTY
+            </button>
+            {% endif %}
+            {% if "faculty_assignments.update" in effective_permissions %}
+            <button type="submit" class="btn btn-outline-danger btn-sm">UNASSIGN SELECTED</button>
+            {% endif %}
+          </div>
         </div>
 
         <div class="table-responsive" style="max-height: 420px;">

@@ -442,6 +442,16 @@ class FacultyPerformanceTests(TestCase):
         self.assertIn("Project Presentation", current_components)
         self.assertIn("Midterm Exam", current_components)
 
+        self.client.force_login(self.faculty)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:student_performance_consultation",
+                args=[self.offering.id, self.midterm.id, self.students[0].id],
+            )
+        )
+        self.assertContains(response, "Project Presentation")
+        self.assertContains(response, "Configured weight: 100.00%")
+
     def test_consultation_view_renders_inline_svg_performance_trends(self):
         self.client.force_login(self.faculty)
         response = self.client.get(

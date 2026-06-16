@@ -386,7 +386,8 @@
           The buttons below now stay inside this guide.
         </p>
         <div class="quick-links">
-          <a href="{% url 'admin_portal:guide' %}?view=practical">Back to Practical Guide</a>
+          <a href="{% url 'admin_portal:guide' %}?view=practical">Back to Admin Practical Guide</a>
+          <a href="{% url 'admin_portal:grading_setup_guide' %}">Grading Template Setup Guide</a>
           <a href="#admin-guide-topics">Choose a Workstream</a>
           <a href="#quick-start">Dashboard Basics</a>
           <a href="#settings">Active AY/Term</a>
@@ -425,6 +426,7 @@
         <strong>Grading Setup</strong>
         <p>Use these for grading templates, imports, deadlines, and rules.</p>
         <div class="admin-guide-topic-links">
+          <a href="{% url 'admin_portal:grading_setup_guide' %}">Build a Template</a>
           <a href="#settings">Active Period</a>
           <a href="#grading-template-calculator">Calculator</a>
           <a href="#settings">Governance</a>
@@ -644,6 +646,9 @@
           </ol>
           <div class="guide-note">
             Important: this is only a test tool. Faculty still encode actual scores in the Faculty Portal.
+          </div>
+          <div class="mt-3">
+            <a class="btn btn-sm btn-success" href="{% url 'admin_portal:grading_setup_guide' %}">Open the complete grading template setup guide</a>
           </div>
         </div>
       </div>
@@ -1012,7 +1017,7 @@
             <li>After the deadline, submitted/finalized gradebooks must use <strong>Correction of Grades</strong>. Do not use Gradebook Reopen Request for submitted gradebooks after deadline.</li>
             <li>After the deadline, monitor late rows in <strong>Non-Compliance on Periodic Grades Submission</strong>.</li>
             <li>Only users explicitly assigned <code>reopen_requests.review</code> by the Superadmin for the affected tenant/campus may review faculty reopen requests in <strong>Submission Reopen Requests</strong>. Once approved, the reopen window lasts 24 hours only.</li>
-            <li>Keep the daily <code>issue_submission_non_compliance_notices</code> production cron active so accepted faculty receive one follow-up per unsubmitted course gradebook each day until submission.</li>
+            <li>Keep the daily <code>issue_submission_non_compliance_notices</code> production cron active. TeacherMate+ sends up to three overdue notices only: faculty, then faculty plus Area Chair, then faculty plus Area Chair plus CAO.</li>
           </ol>
           <div class="guide-note">
             Simple rule: Active Grading Period tells faculty which period is the current focus. Period Locks tell TeacherMate+ the deadline for each campus and period.
@@ -1403,13 +1408,16 @@
           <div class="guide-subhead">Submission Non-Compliance Notices</div>
           <ol class="guide-steps">
             <li>Open <strong>Configuration Management</strong>, then find the <strong>Submission Non-Compliance Notices</strong> card.</li>
-            <li>Enable the feature, set the repeat interval in days, select the academic-head roles that should be included in the visibility/escalation chain, and enter the HR escalation email recipients.</li>
-            <li>Use scoped role assignments for academic heads such as AC, Dean, or CAO so each user sees only the overdue classes inside the correct tenant, campus, and department scope.</li>
+            <li>Enable the feature after SMTP/email settings are confirmed.</li>
+            <li>Keep <strong>Scheduler cadence</strong> as the daily overdue-gradebook check. It controls how often the command checks; it does not directly set the escalation day.</li>
+            <li>Use <strong>First notice after deadline</strong>, <strong>Notice interval</strong>, and <strong>Maximum notices</strong> to control the notice schedule. Defaults are 1, 1, and 3, which means Notice 1 on Day 1, Notice 2 on Day 2, and Notice 3 on Day 3.</li>
+            <li>Make sure Area Chair and CAO users have the correct scoped role assignments. TeacherMate+ uses those assignments to decide who receives the second and third notices.</li>
             <li>Open the <strong>Non-Compliance on Periodic Grades Submission</strong> report to monitor overdue unsubmitted classes and review the latest notice stage and issue date.</li>
-            <li>Remember the cadence: first communication is <strong>Notice for Non-Compliance</strong>, second is <strong>Warning for Continued Non-Compliance</strong>, and third onward is <strong>Escalation for Unresolved Non-Compliance</strong> until the affected grading period is submitted.</li>
+            <li>With the NCBA defaults, day 1 after the deadline goes to the faculty only; day 2 goes to faculty plus Area Chair; day 3 goes to faculty plus Area Chair plus CAO.</li>
+            <li>TeacherMate+ stops automatic overdue notices after the configured maximum notice count. The Area Chair and CAO handle follow-up after that point.</li>
           </ol>
           <div class="guide-note">
-            Best practice is to run the notice scheduler daily, not every three days. TeacherMate+ checks the configured repeat interval and only issues a new communication when the next stage is actually due.
+            Best practice is to run the notice scheduler daily. TeacherMate+ checks the deadline age and only issues the next communication when that stage is due.
           </div>
           <div class="guide-note mt-3">
             Scheduled job command: <code>manage.py issue_submission_non_compliance_notices</code><br>

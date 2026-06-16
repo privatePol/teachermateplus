@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
+from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.grading.notifications import GradebookReopenNotificationService
@@ -123,13 +123,38 @@ class GradeSubmissionReopenRequestReviewTests(TestCase):
             campus=self.campus,
             department=self.department,
         )
+        self.faculty_user = User.objects.create_user(
+            username="reopen_faculty",
+            email="reopen_faculty@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        faculty_role = Role.objects.create(code="FACULTY", name="Faculty")
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=faculty_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+        )
         self.submission = GradeSubmission.objects.create(
             tenant=self.tenant,
             campus=self.campus,
             offering=self.offering,
             template_period=self.period,
             status=GradeSubmission.Status.REOPENED,
-            submitted_by_user=self.admin_user,
+            submitted_by_user=self.faculty_user,
             submitted_at=timezone.now(),
         )
 

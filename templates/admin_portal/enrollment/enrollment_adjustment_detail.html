@@ -1,0 +1,119 @@
+{% extends "admin_portal/base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h2 class="h5 mb-1">Enrollment Adjustment Details</h2>
+    <div class="text-muted small">Audit record for a post-enrollment academic adjustment.</div>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:enrollment_adjustments' %}">Back to Adjustments</a>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card h-100"><div class="card-body">
+      <div class="text-muted small text-uppercase">Result</div>
+      <div class="fw-bold">{{ log.get_result_display }}</div>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card h-100"><div class="card-body">
+      <div class="text-muted small text-uppercase">Processed At</div>
+      <div class="fw-bold">{{ log.processed_at|date:"Y-m-d H:i" }}</div>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card h-100"><div class="card-body">
+      <div class="text-muted small text-uppercase">Processed By</div>
+      <div class="fw-bold">{{ log.processed_by|default:"-" }}</div>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card h-100"><div class="card-body">
+      <div class="text-muted small text-uppercase">Student</div>
+      <div class="fw-bold">{{ log.student.student_no }}</div>
+      <div>{{ log.student.last_name }}, {{ log.student.first_name }}</div>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card h-100"><div class="card-body">
+      <div class="text-muted small text-uppercase">Batch Reference</div>
+      <div class="fw-bold">{{ log.batch_reference|default:"-" }}</div>
+    </div></div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header fw-semibold">Movement</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="text-muted small text-uppercase">Source Offering</div>
+        <div class="fw-semibold">{{ log.source_offering.course.code }} - {{ log.source_offering.course.title }}</div>
+        <div>{{ log.source_offering.section.code }} | {{ log.source_offering.campus.name }} | {{ log.source_offering.academic_year.name }} / {{ log.source_offering.term.name }}</div>
+      </div>
+      <div class="col-md-6">
+        <div class="text-muted small text-uppercase">Destination Offering</div>
+        <div class="fw-semibold">{{ log.destination_offering.course.code }} - {{ log.destination_offering.course.title }}</div>
+        <div>{{ log.destination_offering.section.code }} | {{ log.destination_offering.campus.name }} | {{ log.destination_offering.academic_year.name }} / {{ log.destination_offering.term.name }}</div>
+      </div>
+    </div>
+    <hr>
+    <div class="text-muted small text-uppercase">Reason</div>
+    <div>{{ log.reason|linebreaksbr }}</div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header fw-semibold">Enrollment State Audit</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Record</th>
+          <th>Enrollment ID</th>
+          <th>Status</th>
+          <th>Active</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Source before adjustment</td>
+          <td>{{ log.source_enrollment_id|default:"-" }}</td>
+          <td>{{ log.source_previous_status|default:"-" }}</td>
+          <td>{{ log.source_previous_is_active|yesno:"Yes,No,-" }}</td>
+        </tr>
+        <tr>
+          <td>Destination after adjustment</td>
+          <td>{{ log.destination_enrollment_id|default:"-" }}</td>
+          <td>{{ log.destination_status|default:"-" }}</td>
+          <td>{{ log.destination_is_active|yesno:"Yes,No,-" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header fw-semibold">Impact Snapshot</div>
+  <div class="card-body">
+    <div class="row g-2">
+      <div class="col-md-3"><div class="border rounded p-2"><div class="small text-muted">Attendance</div><strong>{{ log.impact_snapshot.counts.attendance_count|default:0 }}</strong></div></div>
+      <div class="col-md-3"><div class="border rounded p-2"><div class="small text-muted">Activities</div><strong>{{ log.impact_snapshot.counts.activities_count|default:0 }}</strong></div></div>
+      <div class="col-md-3"><div class="border rounded p-2"><div class="small text-muted">Scores</div><strong>{{ log.impact_snapshot.counts.scores_count|default:0 }}</strong></div></div>
+      <div class="col-md-3"><div class="border rounded p-2"><div class="small text-muted">Submissions</div><strong>{{ log.impact_snapshot.counts.submissions_count|default:0 }}</strong></div></div>
+      <div class="col-md-3"><div class="border rounded p-2"><div class="small text-muted">Period Grades</div><strong>{{ log.impact_snapshot.counts.period_grades_count|default:0 }}</strong></div></div>
+      <div class="col-md-3"><div class="border rounded p-2"><div class="small text-muted">Final Grades</div><strong>{{ log.impact_snapshot.counts.final_grades_count|default:0 }}</strong></div></div>
+      <div class="col-md-3"><div class="border rounded p-2"><div class="small text-muted">Reopen Requests</div><strong>{{ log.impact_snapshot.counts.reopen_requests_count|default:0 }}</strong></div></div>
+      <div class="col-md-3"><div class="border rounded p-2"><div class="small text-muted">Period Locks</div><strong>{{ log.impact_snapshot.counts.period_locks_count|default:0 }}</strong></div></div>
+    </div>
+    {% if log.warning_flags %}
+      <hr>
+      <div class="text-muted small text-uppercase">Warning Flags</div>
+      {% for flag in log.warning_flags %}
+        <span class="badge text-bg-warning">{{ flag }}</span>
+      {% endfor %}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -28,6 +28,7 @@ from apps.grading.models import (
     GradeActivity,
     GradeCorrectionRequest,
     GradeCorrectionRequestItem,
+    GradeEncodingControl,
     GradeSubmission,
     GradingPeriodLock,
     GradingTemplate,
@@ -43,7 +44,7 @@ from apps.grading.models import (
 from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService
 from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
-from apps.grading.services import FacultyGradingService, GradingGovernanceService
+from apps.grading.services import FacultyGradingService, GradeEncodingAccessService, GradingGovernanceService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
@@ -2453,3 +2454,368 @@ class CompletionGraceWindowTests(TestCase):
         self.assertTrue(course_lock.is_locked)
         submission.refresh_from_db()
         self.assertEqual(submission.status, GradeSubmission.Status.REOPENED)
+
+
+class GradeEncodingAccessControlTests(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(code="TEN-ENC", name="Tenant Encoding")
+        self.campus = Campus.objects.create(tenant=self.tenant, code="MAIN", name="Main Campus")
+        self.other_campus = Campus.objects.create(tenant=self.tenant, code="BRANCH", name="Branch Campus")
+        self.department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="CS",
+            name="Computer Studies",
+        )
+        self.other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            code="CSB",
+            name="Computer Studies Branch",
+        )
+        self.program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="BSCS",
+            name="BS Computer Science",
+        )
+        self.other_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            code="BSCS-B",
+            name="BS Computer Science Branch",
+        )
+        self.academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2025-2026",
+            name="AY 2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        self.term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="2ND",
+            name="Second Term",
+            sequence_no=2,
+            start_date=date(2025, 11, 1),
+            end_date=date(2026, 3, 31),
+        )
+        self.course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="CS101",
+            title="Intro to Computing",
+        )
+        self.section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSCS-1A",
+            name="BSCS 1A",
+        )
+        self.other_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=self.other_program,
+            code="BSCS-1B",
+            name="BSCS 1B",
+        )
+        self.offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=self.section,
+        )
+        self.other_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=self.other_program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=self.other_section,
+        )
+        self.faculty_user = User.objects.create_user(
+            username="faculty_encoding_gate",
+            email="faculty_encoding_gate@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        self.student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-90001",
+            last_name="Test",
+            first_name="Student",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            course_offering=self.offering,
+            student=self.student,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+        )
+        self.template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TPL-ENC",
+            name="Encoding Gate Template",
+            is_published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        self.period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+            is_active=True,
+        )
+        self.midterm = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="MIDTERM",
+            name="Midterm",
+            sequence_no=2,
+            is_active=True,
+        )
+        self.component = GradingTemplateComponent.objects.create(
+            template_period=self.period,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=self.template,
+            effective_from_term=self.term,
+            is_active=True,
+        )
+
+    def _closed_control(self, **overrides):
+        defaults = {
+            "tenant": self.tenant,
+            "academic_year": self.academic_year,
+            "term": self.term,
+            "period_code": None,
+            "campus": None,
+            "course_offering": None,
+            "status": GradeEncodingControl.Status.CLOSED,
+            "reason": "Enrollment cleanup",
+            "notice_to_faculty": "Please wait for the final class list.",
+            "is_active": True,
+        }
+        defaults.update(overrides)
+        return GradeEncodingControl.objects.create(**defaults)
+
+    def test_closed_control_requires_reason_and_notice(self):
+        control = GradeEncodingControl(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            term=self.term,
+            status=GradeEncodingControl.Status.CLOSED,
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            control.full_clean()
+
+        self.assertIn("reason", ctx.exception.message_dict)
+        self.assertIn("notice_to_faculty", ctx.exception.message_dict)
+
+    def test_term_level_closed_control_blocks_encoding(self):
+        self._closed_control()
+
+        self.assertFalse(
+            GradeEncodingAccessService.is_encoding_allowed(offering=self.offering, template_period=self.period)
+        )
+        with self.assertRaises(ValidationError):
+            GradingGovernanceService.assert_encoding_allowed(offering=self.offering, template_period=self.period)
+
+    def test_scope_filters_leave_unaffected_offerings_open(self):
+        self._closed_control(campus=self.campus)
+
+        self.assertFalse(
+            GradeEncodingAccessService.is_encoding_allowed(offering=self.offering, template_period=self.period)
+        )
+        self.assertTrue(
+            GradeEncodingAccessService.is_encoding_allowed(offering=self.other_offering, template_period=self.period)
+        )
+
+    def test_period_specific_control_blocks_only_matching_period(self):
+        self._closed_control(period_code="PRELIM")
+
+        self.assertFalse(
+            GradeEncodingAccessService.is_encoding_allowed(offering=self.offering, template_period=self.period)
+        )
+        self.assertTrue(
+            GradeEncodingAccessService.is_encoding_allowed(offering=self.offering, template_period=self.midterm)
+        )
+
+    def test_lower_scope_open_does_not_override_broader_closed_control(self):
+        self._closed_control(campus=self.campus)
+        GradeEncodingControl.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code="PRELIM",
+            campus=self.campus,
+            course_offering=self.offering,
+            status=GradeEncodingControl.Status.OPEN,
+            is_active=True,
+        )
+
+        self.assertFalse(
+            GradeEncodingAccessService.is_encoding_allowed(offering=self.offering, template_period=self.period)
+        )
+
+    def test_create_activity_is_blocked_when_control_is_closed(self):
+        self._closed_control(course_offering=self.offering)
+
+        with self.assertRaises(ValidationError):
+            FacultyGradingService.create_activity(
+                user=self.faculty_user,
+                offering=self.offering,
+                template_period=self.period,
+                template_component=self.component,
+                template_subcomponent=None,
+                template_detail=None,
+                title="Q1",
+                total_score=Decimal("20.00"),
+                activity_date=date(2026, 1, 10),
+            )
+
+        self.assertFalse(GradeActivity.objects.filter(offering=self.offering).exists())
+
+    def test_score_update_and_submission_are_blocked_when_control_is_closed(self):
+        activity = FacultyGradingService.create_activity(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=self.component,
+            template_subcomponent=None,
+            template_detail=None,
+            title="Q1",
+            total_score=Decimal("20.00"),
+            activity_date=date(2026, 1, 10),
+        )
+        self._closed_control(course_offering=self.offering)
+
+        with self.assertRaises(ValidationError):
+            FacultyGradingService.upsert_activity_scores(
+                user=self.faculty_user,
+                activity=activity,
+                score_payload=[{"student_id": self.student.id, "raw_score": Decimal("0.00")}],
+            )
+        with self.assertRaises(ValidationError):
+            GradingGovernanceService.submit_period(
+                user=self.faculty_user,
+                offering=self.offering,
+                template_period=self.period,
+            )
+
+        self.assertFalse(StudentActivityScore.objects.filter(activity=activity).exists())
+        self.assertFalse(GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).exists())
+
+    def test_activity_edit_and_archive_are_blocked_when_control_is_closed(self):
+        activity = FacultyGradingService.create_activity(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=self.component,
+            template_subcomponent=None,
+            template_detail=None,
+            title="Q1",
+            total_score=Decimal("20.00"),
+            activity_date=date(2026, 1, 10),
+        )
+        self._closed_control(course_offering=self.offering)
+
+        with self.assertRaises(ValidationError):
+            FacultyGradingService.update_activity(
+                user=self.faculty_user,
+                activity=activity,
+                template_period=self.period,
+                template_component=self.component,
+                template_subcomponent=None,
+                template_detail=None,
+                title="Q1 Updated",
+                total_score=Decimal("30.00"),
+                activity_date=date(2026, 1, 11),
+            )
+        with self.assertRaises(ValidationError):
+            FacultyGradingService.archive_activity(user=self.faculty_user, activity=activity)
+
+        activity.refresh_from_db()
+        self.assertEqual(activity.title, "Q1")
+        self.assertTrue(activity.is_active)
+
+    def test_attendance_session_and_record_writes_are_blocked_when_control_is_closed(self):
+        session, _created = FacultyGradingService.create_or_update_attendance_session(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            session_date=date(2026, 1, 10),
+            title="Attendance 1",
+        )
+        self._closed_control(course_offering=self.offering)
+
+        with self.assertRaises(ValidationError):
+            FacultyGradingService.create_or_update_attendance_session(
+                user=self.faculty_user,
+                offering=self.offering,
+                template_period=self.period,
+                session_date=date(2026, 1, 11),
+                title="Attendance 2",
+            )
+        with self.assertRaises(ValidationError):
+            FacultyGradingService.upsert_attendance_records(
+                user=self.faculty_user,
+                session=session,
+                status_payload=[{"student_id": self.student.id, "status_code": AttendanceRecord.Status.PRESENT}],
+            )
+
+        self.assertFalse(AttendanceSession.objects.filter(title="Attendance 2").exists())
+        self.assertFalse(AttendanceRecord.objects.filter(session=session).exists())
+
+    def test_open_control_allows_encoding_when_no_other_rules_block(self):
+        GradeEncodingControl.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code="PRELIM",
+            campus=self.campus,
+            course_offering=self.offering,
+            status=GradeEncodingControl.Status.OPEN,
+            is_active=True,
+        )
+
+        activity = FacultyGradingService.create_activity(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=self.component,
+            template_subcomponent=None,
+            template_detail=None,
+            title="Q1",
+            total_score=Decimal("20.00"),
+            activity_date=date(2026, 1, 10),
+        )
+
+        self.assertTrue(activity.pk)

@@ -1,0 +1,73 @@
+<form method="get" class="card card-body border-0 shadow-sm mb-3">
+  <div class="row g-3 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label" for="academic_year_id">Academic Year</label>
+      <select class="form-select" id="academic_year_id" name="academic_year_id" required>
+        <option value="">Select academic year</option>
+        {% for year in filter_options.academic_years %}
+        <option value="{{ year.id }}" {% if filters.academic_year_id == year.id %}selected{% endif %}>{{ year.code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="term_id">Term</label>
+      <select class="form-select" id="term_id" name="term_id" required>
+        <option value="">Select term</option>
+        {% for term in filter_options.terms %}
+        <option value="{{ term.id }}" {% if filters.term_id == term.id %}selected{% endif %}>{{ term.academic_year.code }} / {{ term.code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="period_code">Grading Period</label>
+      <select class="form-select" id="period_code" name="period_code" required>
+        <option value="">Select grading period</option>
+        {% for period in filter_options.periods %}
+        <option value="{{ period.code }}" {% if filters.period_code == period.code %}selected{% endif %}>{{ period.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="campus_id">Campus</label>
+      <select class="form-select" id="campus_id" name="campus_id">
+        {% if filter_options.role_scope.can_compare_campuses %}
+        <option value="all" {% if selected_all_campuses %}selected{% endif %}>All authorized campuses</option>
+        {% endif %}
+        {% for campus in filter_options.role_scope.campuses %}
+        <option value="{{ campus.id }}" {% if filters.campus_id == campus.id %}selected{% endif %}>{{ campus.code }} - {{ campus.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="department_id">Department</label>
+      <select class="form-select" id="department_id" name="department_id">
+        <option value="">All authorized departments</option>
+        {% for department in filter_options.role_scope.departments %}
+        <option value="{{ department.id }}" {% if filters.department_id == department.id %}selected{% endif %}>{{ department.campus.code }} / {{ department.code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="course_code">Course</label>
+      <select class="form-select" id="course_code" name="course_code">
+        <option value="">All course codes</option>
+        {% for course in filter_options.courses %}
+        <option value="{{ course.course__code }}" {% if filters.course_code == course.course__code %}selected{% endif %}>{{ course.course__code }} - {{ course.course__title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="faculty_id">Faculty</label>
+      <select class="form-select" id="faculty_id" name="faculty_id">
+        <option value="">All supervised faculty</option>
+        {% for faculty in filter_options.faculty %}
+        <option value="{{ faculty.id }}" {% if filters.faculty_id == faculty.id %}selected{% endif %}>{% firstof faculty.full_name faculty.username %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3 d-flex gap-2">
+      <button class="btn btn-success flex-grow-1" type="submit">Generate Report</button>
+      <a class="btn btn-outline-secondary" href="{{ request.path }}">Clear</a>
+    </div>
+  </div>
+</form>

@@ -459,6 +459,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Template Builder: {{ template_obj.name }}</h2>
   <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:grading_setup_guide' %}">Setup Guide</a>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grading_template_list' %}">Back</a>
     <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_period_create' %}?template_id={{ template_obj.id }}">Add Period</a>
   </div>
@@ -471,6 +472,19 @@
       <div class="col-md-3"><strong>Name:</strong> {{ template_obj.name }}</div>
       <div class="col-md-2"><strong>Base:</strong> {{ template_obj.default_base_value }}</div>
       <div class="col-md-2"><strong>Passing:</strong> {{ template_obj.passing_grade_threshold|default:"Tenant/Profile Default" }}</div>
+      <div class="col-md-4">
+        <strong>Department Visibility:</strong>
+        {{ template_obj.get_department_visibility_display }}
+        {% if template_obj.department_visibility == "SELECTED" %}
+          <div class="small text-muted">
+            {% for department in template_obj.visible_departments.all %}
+              {{ department.code }}{% if not forloop.last %}, {% endif %}
+            {% empty %}
+              No department selected
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
       <div class="col-md-2">
         <strong>Publish:</strong>
         {% if template_obj.is_published %}
@@ -685,8 +699,11 @@
                           </div>
                           <div class="builder-detail-actions">
                             <div class="builder-meta-card">
-                              <span class="builder-meta-label">Weight</span>
-                              <span class="builder-meta-value">{% if sub.row.detail_computation_mode == "AVERAGE_ACTIVITIES" %}Ignored for activity average{% else %}{{ detail.weight_percentage }}%{% endif %}</span>
+                              <span class="builder-meta-label">Configured Detail Weight</span>
+                              <span class="builder-meta-value">{{ detail.weight_percentage }}%</span>
+                              {% if sub.row.detail_computation_mode == "AVERAGE_ACTIVITIES" %}
+                              <span class="small text-muted">Not used by Average Activities</span>
+                              {% endif %}
                             </div>
                             <div class="builder-meta-card">
                               <span class="builder-meta-label">Score Entry Method</span>

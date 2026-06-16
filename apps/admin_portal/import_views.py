@@ -55,7 +55,10 @@ def _batch_error_tips(batch: ImportBatch):
     tips = []
     all_text = " ".join(messages_list).lower()
     if "academic_year_code" in all_text and "not found" in all_text:
-        tips.append("Use Academic Year CODE from Academic Years (example: `AY2526`), not just display label.")
+        tips.append(
+            "Open Admin Portal -> Academic Years and copy the exact active Code into academic_year_code. "
+            "Do not use an old code from a previous CSV."
+        )
     if "term_code" in all_text and "not found" in all_text:
         tips.append("Use Term CODE from Terms (example: `1ST`, `2ND`).")
     if "course_code" in all_text and "not found" in all_text:
@@ -172,6 +175,7 @@ def import_batch_list_view(request):
                     "label": import_type_labels.get(code, code),
                     "slug": BulkImportService.import_type_to_slug(code),
                     "permission_code": permission_code,
+                    "safety": ImportTemplateService.get_safety_guidance(code),
                 }
             )
 
@@ -270,6 +274,7 @@ def import_upload_view(request, import_slug: str):
         "template_headers": template_meta["headers"],
         "template_sample": template_meta["sample_row"],
         "import_guide": template_meta.get("guide", {}),
+        "import_safety": template_meta.get("safety", {}),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/imports/import_upload.html", context)
@@ -298,6 +303,7 @@ def import_batch_detail_view(request, batch_id: int):
         "can_confirm": can_confirm,
         "import_slug": BulkImportService.import_type_to_slug(batch.import_type),
         "import_guide": ImportTemplateService.get_template_config(batch.import_type).get("guide", {}),
+        "import_safety": ImportTemplateService.get_safety_guidance(batch.import_type),
         "error_tips": _batch_error_tips(batch),
         "enrollment_student_mode_references": _enrollment_student_mode_references(batch),
         "status_badge_class": {

@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.core.models import ActivatableModel, TimeStampedModel
@@ -19,6 +20,45 @@ class AcademicYear(TimeStampedModel, ActivatableModel):
 
     def __str__(self):
         return f"{self.code} - {self.name}"
+
+    def identifiers_are_in_use(self):
+        if not self.pk:
+            return False
+        return (
+            self.terms.exists()
+            or self.course_offerings.exists()
+            or self.enrollments.exists()
+            or self.faculty_final_clearance_reports.exists()
+            or self.grading_period_locks.exists()
+        )
+
+    def _validate_identifier_immutability(self):
+        if not self.pk:
+            return
+        original = AcademicYear.objects.filter(pk=self.pk).only("tenant_id", "code").first()
+        if not original or not self.identifiers_are_in_use():
+            return
+
+        errors = {}
+        if self.tenant_id != original.tenant_id:
+            errors["tenant"] = (
+                "Tenant cannot be changed because this academic year is already used by academic records."
+            )
+        if self.code != original.code:
+            errors["code"] = (
+                "Code cannot be changed because this academic year is already used by terms, "
+                "course offerings, enrollments, grading periods, or reports."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def clean(self):
+        super().clean()
+        self._validate_identifier_immutability()
+
+    def save(self, *args, **kwargs):
+        self._validate_identifier_immutability()
+        return super().save(*args, **kwargs)
 
 
 class Term(TimeStampedModel, ActivatableModel):
@@ -283,3 +323,86 @@ class FacultyAssignment(TimeStampedModel, ActivatableModel):
     @property
     def is_accepted(self):
         return self.response_status == self.ResponseStatus.ACCEPTED and self.accepted_at is not None
+
+
+class FacultyAssignmentReplacementLog(TimeStampedModel):
+    class ReplacementType(models.TextChoices):
+        PERMANENT = "PERMANENT", "Permanent Replacement"
+        TEMPORARY = "TEMPORARY", "Temporary Substitute"
+        SECONDARY = "SECONDARY", "Secondary / Co-Faculty"
+        ADMINISTRATIVE = "ADMINISTRATIVE", "Administrative Reassignment"
+        WRONG_ASSIGNMENT = "WRONG_ASSIGNMENT", "Wrong Faculty Assignment"
+
+    class ReasonCategory(models.TextChoices):
+        RESIGNATION = "RESIGNATION", "Resignation"
+        MEDICAL_LEAVE = "MEDICAL_LEAVE", "Medical Leave"
+        MATERNITY_LEAVE = "MATERNITY_LEAVE", "Maternity Leave"
+        SCHEDULE_CONFLICT = "SCHEDULE_CONFLICT", "Schedule Conflict"
+        WRONG_ASSIGNMENT = "WRONG_ASSIGNMENT", "Wrong Assignment"
+        ADMINISTRATIVE_REASSIGNMENT = "ADMINISTRATIVE_REASSIGNMENT", "Administrative Reassignment"
+        SUBSTITUTE_FACULTY = "SUBSTITUTE_FACULTY", "Substitute Faculty"
+        CO_FACULTY_ASSIGNMENT = "CO_FACULTY_ASSIGNMENT", "Co-Faculty Assignment"
+        OTHER = "OTHER", "Other"
+
+    batch_reference = models.CharField(max_length=40, db_index=True)
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="faculty_assignment_replacement_logs",
+    )
+    campus = models.ForeignKey(
+        "tenants.Campus",
+        on_delete=models.PROTECT,
+        related_name="faculty_assignment_replacement_logs",
+    )
+    offering = models.ForeignKey(
+        "academics.CourseOffering",
+        on_delete=models.PROTECT,
+        related_name="faculty_assignment_replacement_logs",
+    )
+    source_faculty = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="source_faculty_replacement_logs",
+    )
+    replacement_faculty = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="replacement_faculty_replacement_logs",
+    )
+    old_assignment = models.ForeignKey(
+        "academics.FacultyAssignment",
+        on_delete=models.PROTECT,
+        related_name="replacement_logs_as_old_assignment",
+    )
+    new_assignment = models.ForeignKey(
+        "academics.FacultyAssignment",
+        on_delete=models.PROTECT,
+        related_name="replacement_logs_as_new_assignment",
+    )
+    replacement_type = models.CharField(max_length=24, choices=ReplacementType.choices)
+    reason_category = models.CharField(max_length=40, choices=ReasonCategory.choices)
+    remarks = models.TextField()
+    processed_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="processed_faculty_assignment_replacements",
+    )
+    processed_at = models.DateTimeField()
+    old_assignment_before_json = models.JSONField(default=dict)
+    old_assignment_after_json = models.JSONField(default=dict)
+    new_assignment_before_json = models.JSONField(blank=True, null=True)
+    new_assignment_after_json = models.JSONField(default=dict)
+    impact_snapshot_json = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "faculty_assignment_replacement_logs"
+        ordering = ["-processed_at", "-id"]
+        indexes = [
+            models.Index(fields=["tenant", "campus", "processed_at"], name="idx_fac_repl_scope_time"),
+            models.Index(fields=["offering", "processed_at"], name="idx_fac_repl_offering_time"),
+            models.Index(fields=["batch_reference"], name="idx_fac_repl_batch"),
+        ]
+
+    def __str__(self):
+        return f"{self.batch_reference}:{self.offering_id}"

@@ -1,0 +1,78 @@
+<div class="table-responsive">
+  <table class="table table-hover mb-0">
+    <thead>
+      <tr>
+        <th>Academic Year</th>
+        <th>Term</th>
+        <th>Period</th>
+        <th>Campus</th>
+        <th>Course Offering</th>
+        <th>Status</th>
+        <th>Reason / Faculty Notice</th>
+        <th>Updated</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in page_obj %}
+      <tr>
+        <td>{{ row.academic_year.name|default:row.academic_year.code }}</td>
+        <td>{{ row.term.name|default:row.term.code }}</td>
+        <td>{{ row.period_code|default:"All periods" }}</td>
+        <td>
+          {% if row.campus %}
+            {{ row.campus.name|default:row.campus.code }}
+          {% else %}
+            <span class="text-muted">All scoped campuses</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.course_offering %}
+            {{ row.course_offering.course.title }} <span class="text-muted">({{ row.course_offering.course.code }})</span>
+            / {{ row.course_offering.section.name|default:row.course_offering.section.code }}
+          {% else %}
+            <span class="text-muted">All scoped offerings</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if not row.is_active %}
+            <span class="badge text-bg-secondary">Inactive</span>
+          {% elif row.status == "CLOSED" %}
+            <span class="badge text-bg-danger">Closed</span>
+          {% else %}
+            <span class="badge text-bg-success">Open</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="fw-semibold">{{ row.reason|default:"-" }}</div>
+          {% if row.notice_to_faculty %}
+            <div class="small text-muted">{{ row.notice_to_faculty|truncatechars:120 }}</div>
+          {% endif %}
+        </td>
+        <td>
+          {{ row.updated_at|date:"Y-m-d H:i" }}
+          {% if row.updated_by %}<div class="small text-muted">{{ row.updated_by.get_full_name|default:row.updated_by.username }}</div>{% endif %}
+        </td>
+        <td class="text-end">
+          {% if "grading_encoding_control.manage" in effective_permissions %}
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:grade_encoding_control_update' row.id %}">Edit</a>
+          {% if row.is_active and row.status == "CLOSED" %}
+          <form method="post" action="{% url 'admin_portal:grade_encoding_control_open' row.id %}" class="d-inline">
+            {% csrf_token %}
+            <button class="btn btn-sm btn-outline-success">Open</button>
+          </form>
+          {% elif row.is_active %}
+          <form method="post" action="{% url 'admin_portal:grade_encoding_control_close' row.id %}" class="d-inline">
+            {% csrf_token %}
+            <button class="btn btn-sm btn-outline-danger">Close</button>
+          </form>
+          {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="9" class="text-center text-muted py-4">{{ empty_message }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

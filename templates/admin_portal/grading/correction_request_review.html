@@ -114,7 +114,10 @@
                     {% if item.grade_activity %}
                       {{ item.grade_activity.template_component.name }}
                       {% if item.grade_activity.template_subcomponent %}/ {{ item.grade_activity.template_subcomponent.name }}{% endif %}
-                      {% if item.grade_activity.template_detail %}/ {{ item.grade_activity.template_detail.name }}{% endif %}
+                      {% if item.grade_activity.template_detail %}
+                        / {{ item.grade_activity.template_detail.name }}
+                        ({{ item.grade_activity.template_detail.weight_percentage }}% configured weight{% if item.grade_activity.template_subcomponent.detail_computation_mode == "AVERAGE_ACTIVITIES" %}; reference only{% endif %})
+                      {% endif %}
                       {% if item.grade_activity.title %}/ {{ item.grade_activity.title }}{% endif %}
                     {% else %}
                       -

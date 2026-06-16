@@ -16,10 +16,12 @@ from apps.academics.models import (
     Course,
     CourseOffering,
     FacultyAssignment,
+    FacultyAssignmentReplacementLog,
     Section,
     TenantTermGradingPeriod,
     Term,
 )
+from apps.academics.services import FacultyAssignmentSafetyService
 from apps.core.services.settings import SystemSettingService
 from apps.core.services.features import FeatureSettingsService
 from apps.enrollment.services import EnrollmentService
@@ -28,6 +30,7 @@ from apps.grading.models import (
     CorrectionApprovalRouteRule,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
+    GradeEncodingControl,
     GradeSubmission,
     GradingPeriodLock,
     GradingTemplate,
@@ -38,7 +41,7 @@ from apps.grading.models import (
     TemplateHotfixRequest,
     TenantGradingProfile,
 )
-from apps.grading.services import FacultyGradingService
+from apps.grading.services import CourseOfferingSafetyService, CourseTemplateAssignmentSafetyService, FacultyGradingService
 from apps.navigation.models import MenuGroup, MenuItem
 from apps.rbac.models import Permission, Role, UserRole
 from apps.students.models import Student
@@ -69,6 +72,68 @@ def _enforce_active_reference_choices(form):
 def _set_choice_label(field, formatter):
     if field is not None:
         field.label_from_instance = formatter
+
+
+class EnrollmentAdjustmentForm(forms.Form):
+    academic_year = forms.ModelChoiceField(queryset=AcademicYear.objects.none(), required=True)
+    term = forms.ModelChoiceField(queryset=Term.objects.none(), required=True)
+    campus = forms.ModelChoiceField(queryset=Campus.objects.none(), required=True)
+    source_offering = forms.ModelChoiceField(queryset=CourseOffering.objects.none(), required=True)
+    destination_offering = forms.ModelChoiceField(queryset=CourseOffering.objects.none(), required=True)
+    selected_students = forms.MultipleChoiceField(
+        choices=(),
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )
+    transfer_entire_class = forms.BooleanField(required=False)
+    confirm_warning = forms.BooleanField(required=False)
+    reason = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Enter the approved reason from Pinnacle or the authorized school office.",
+    )
+
+    def __init__(
+        self,
+        *args,
+        academic_year_queryset=None,
+        term_queryset=None,
+        campus_queryset=None,
+        offering_queryset=None,
+        source_offering_queryset=None,
+        destination_offering_queryset=None,
+        enrollment_queryset=None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.fields["academic_year"].queryset = academic_year_queryset or AcademicYear.objects.none()
+        self.fields["term"].queryset = term_queryset or Term.objects.none()
+        self.fields["campus"].queryset = campus_queryset or Campus.objects.none()
+        default_offering_queryset = offering_queryset or CourseOffering.objects.none()
+        self.fields["source_offering"].queryset = source_offering_queryset or default_offering_queryset
+        self.fields["destination_offering"].queryset = destination_offering_queryset or default_offering_queryset
+        self.fields["selected_students"].choices = [
+            (
+                str(enrollment.student_id),
+                f"{enrollment.student.student_no} - {enrollment.student.last_name}, {enrollment.student.first_name} ({enrollment.enrollment_status})",
+            )
+            for enrollment in (enrollment_queryset or [])
+        ]
+        for field_name in ("academic_year", "term", "campus", "source_offering", "destination_offering"):
+            self.fields[field_name].widget.attrs.update({"class": "form-select"})
+        self.fields["reason"].widget.attrs.update({"class": "form-control"})
+
+    def clean(self):
+        cleaned = super().clean()
+        source = cleaned.get("source_offering")
+        destination = cleaned.get("destination_offering")
+        selected_students = cleaned.get("selected_students") or []
+        action = self.data.get("action") if self.is_bound else ""
+        if source and destination and source.id == destination.id:
+            raise DjangoValidationError("Source and destination offerings must be different.")
+        if action in {"analyze", "process"} and not cleaned.get("transfer_entire_class") and not selected_students:
+            raise DjangoValidationError("Select at least one student or choose Transfer Entire Class.")
+        return cleaned
 
 
 def _course_label(obj):
@@ -132,11 +197,11 @@ def _campus_label(obj):
 
 def _department_with_campus_label(obj):
     campus = getattr(obj, "campus", None)
-    campus_code = (getattr(campus, "code", "") or "").strip()
+    campus_label = _campus_label(campus) if campus else ""
     code = (getattr(obj, "code", "") or "").strip()
     name = (getattr(obj, "name", "") or "").strip()
     department_label = f"{code} - {name}" if code and name else code or name or str(obj)
-    return f"{campus_code} | {department_label}" if campus_code else department_label
+    return f"{campus_label} | {department_label}" if campus_label else department_label
 
 
 def _offering_label(obj):
@@ -833,8 +898,20 @@ class AcademicYearForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if tenant_queryset is not None:
             self.fields["tenant"].queryset = tenant_queryset
-        self.fields["code"].help_text = "Use a stable short code for imports and references (example: AY2526)."
+        self.fields["code"].help_text = (
+            "Use the exact stable code required by CSV imports and integrations "
+            "(example: 2025-2026). It becomes locked after the academic year is used."
+        )
         self.fields["name"].help_text = "Human-readable label (example: Academic Year 2025-2026)."
+        if self.instance and self.instance.pk and self.instance.identifiers_are_in_use():
+            self.fields["tenant"].disabled = True
+            self.fields["tenant"].help_text = (
+                "Locked because this academic year is already used by academic records."
+            )
+            self.fields["code"].disabled = True
+            self.fields["code"].help_text = (
+                f"Locked as {self.instance.code}. Existing CSV files and integrations depend on this code."
+            )
         _enforce_active_reference_choices(self)
 
 
@@ -1256,6 +1333,7 @@ class CourseOfferingForm(forms.ModelForm):
             raise forms.ValidationError("Course belongs to an inactive department.")
         if section and program and section.program_id != program.id:
             raise forms.ValidationError("Section does not belong to program.")
+        CourseOfferingSafetyService.validate_changes_allowed(offering=self.instance, cleaned_data=cleaned)
         return cleaned
 
 
@@ -1273,6 +1351,62 @@ class FacultyAssignmentForm(forms.ModelForm):
         _set_choice_label(self.fields.get("offering"), _offering_label)
         _set_choice_label(self.fields.get("faculty_user"), _faculty_label)
         _enforce_active_reference_choices(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        offering = cleaned.get("offering")
+        faculty_user = cleaned.get("faculty_user")
+        if offering and faculty_user and self.instance and self.instance.pk:
+            try:
+                FacultyAssignmentSafetyService.validate_direct_assignment_change(
+                    assignment=self.instance,
+                    new_offering_id=offering.id,
+                    new_faculty_user_id=faculty_user.id,
+                )
+            except ValueError as exc:
+                raise forms.ValidationError(str(exc))
+        return cleaned
+
+
+class FacultyAssignmentReplacementForm(forms.Form):
+    assignment_ids = forms.MultipleChoiceField(widget=forms.MultipleHiddenInput)
+    replacement_faculty = forms.ModelChoiceField(queryset=get_user_model().objects.none())
+    replacement_type = forms.ChoiceField(choices=FacultyAssignmentReplacementLog.ReplacementType.choices)
+    reason_category = forms.ChoiceField(choices=FacultyAssignmentReplacementLog.ReasonCategory.choices)
+    remarks = forms.CharField(widget=forms.Textarea(attrs={"rows": 4}), min_length=5)
+
+    def __init__(self, *args, assignment_queryset=None, faculty_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        assignment_queryset = assignment_queryset or FacultyAssignment.objects.none()
+        faculty_queryset = faculty_queryset or get_user_model().objects.none()
+        self.assignment_queryset = assignment_queryset
+        self.fields["assignment_ids"].choices = [(str(row.id), str(row.id)) for row in assignment_queryset]
+        self.fields["replacement_faculty"].queryset = faculty_queryset
+        _set_choice_label(self.fields.get("replacement_faculty"), _faculty_label)
+
+    def clean_assignment_ids(self):
+        ids = []
+        valid_ids = {str(row.id) for row in self.assignment_queryset}
+        for raw in self.cleaned_data["assignment_ids"]:
+            if raw not in valid_ids:
+                raise forms.ValidationError("Selected assignment is no longer available in your scope.")
+            ids.append(int(raw))
+        if not ids:
+            raise forms.ValidationError("Select at least one assigned offering to replace.")
+        return ids
+
+    def clean(self):
+        cleaned = super().clean()
+        replacement_faculty = cleaned.get("replacement_faculty")
+        assignment_ids = cleaned.get("assignment_ids") or []
+        if replacement_faculty and assignment_ids:
+            same_faculty_count = self.assignment_queryset.filter(
+                id__in=assignment_ids,
+                faculty_user=replacement_faculty,
+            ).count()
+            if same_faculty_count:
+                raise forms.ValidationError("Replacement faculty must be different from the current faculty.")
+        return cleaned
 
 
 class StudentForm(forms.ModelForm):
@@ -1327,12 +1461,34 @@ class StudentForm(forms.ModelForm):
 class GradingTemplateForm(forms.ModelForm):
     class Meta:
         model = GradingTemplate
-        fields = ["tenant", "code", "name", "description", "default_base_value", "passing_grade_threshold", "is_active"]
+        fields = [
+            "tenant",
+            "code",
+            "name",
+            "description",
+            "default_base_value",
+            "passing_grade_threshold",
+            "department_visibility",
+            "visible_departments",
+            "is_active",
+        ]
+        widgets = {
+            "visible_departments": forms.SelectMultiple(
+                attrs={
+                    "size": 8,
+                    "data-template-visible-departments": "true",
+                }
+            ),
+        }
 
-    def __init__(self, *args, tenant_queryset=None, **kwargs):
+    def __init__(self, *args, tenant_queryset=None, department_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if tenant_queryset is not None:
             self.fields["tenant"].queryset = tenant_queryset
+        if department_queryset is not None:
+            self.fields["visible_departments"].queryset = department_queryset.select_related(
+                "tenant", "campus"
+            ).order_by("tenant__name", "campus__name", "name")
         self.fields["tenant"].help_text = "Choose the tenant that owns this grading template."
         self.fields["code"].help_text = "Short unique template code used as the admin/system identifier."
         self.fields["name"].help_text = "Readable template name shown to admins and faculty."
@@ -1344,17 +1500,43 @@ class GradingTemplateForm(forms.ModelForm):
             "Optional template-level passing threshold. Use this when the passing rule belongs to the template itself. "
             "Tenant Grading Profile threshold still overrides this when a more specific scoped profile exists."
         )
+        self.fields["department_visibility"].label = "Department Visibility"
+        self.fields["department_visibility"].help_text = (
+            "Choose All Departments for tenant-wide access, or Selected Departments to limit admin viewing and governance."
+        )
+        self.fields["department_visibility"].widget.attrs["data-template-department-visibility"] = "true"
+        self.fields["visible_departments"].label = "Visible Departments"
+        self.fields["visible_departments"].help_text = (
+            "Required for Selected Departments. Hold Ctrl (Windows) or Command (Mac) to choose more than one."
+        )
+        _set_choice_label(self.fields.get("visible_departments"), _department_with_campus_label)
         self.fields["is_active"].help_text = "Only active templates can be assigned and used in grading resolution."
         _enforce_active_reference_choices(self)
 
     def clean(self):
         cleaned = super().clean()
+        tenant = cleaned.get("tenant")
+        visibility = cleaned.get("department_visibility")
+        visible_departments = cleaned.get("visible_departments")
         passing_threshold = cleaned.get("passing_grade_threshold")
         if passing_threshold is not None and (passing_threshold <= 0 or passing_threshold > 100):
             self.add_error(
                 "passing_grade_threshold",
                 "Passing threshold must be greater than 0 and not greater than 100.",
             )
+        if visibility == GradingTemplate.DepartmentVisibility.SELECTED:
+            if not visible_departments:
+                self.add_error(
+                    "visible_departments",
+                    "Select at least one department when Department Visibility is Selected Departments.",
+                )
+            elif tenant and visible_departments.exclude(tenant_id=tenant.id).exists():
+                self.add_error(
+                    "visible_departments",
+                    "Every selected department must belong to the template tenant.",
+                )
+        elif visibility == GradingTemplate.DepartmentVisibility.ALL:
+            cleaned["visible_departments"] = Department.objects.none()
         return cleaned
 
 
@@ -1587,6 +1769,13 @@ class CourseTemplateAssignmentForm(forms.ModelForm):
             raise forms.ValidationError("Course and template must belong to the same tenant.")
         if effective_from_term and course and effective_from_term.tenant_id != course.tenant_id:
             raise forms.ValidationError("Effective term does not belong to the course tenant.")
+        try:
+            CourseTemplateAssignmentSafetyService.validate_template_replacement_allowed(
+                assignment=self.instance,
+                new_template=grading_template,
+            )
+        except DjangoValidationError as exc:
+            raise forms.ValidationError(exc.messages) from exc
         return cleaned
 
 
@@ -1850,6 +2039,159 @@ class GradingPeriodLockForm(forms.ModelForm):
                 raise forms.ValidationError("Offering academic year does not match lock academic year.")
             if term and offering.term_id != term.id:
                 raise forms.ValidationError("Offering term does not match lock term.")
+        return cleaned
+
+
+class GradeEncodingControlForm(forms.ModelForm):
+    class Meta:
+        model = GradeEncodingControl
+        fields = [
+            "tenant",
+            "academic_year",
+            "term",
+            "period_code",
+            "campus",
+            "course_offering",
+            "status",
+            "reason",
+            "notice_to_faculty",
+            "is_active",
+        ]
+        widgets = {
+            "notice_to_faculty": forms.Textarea(attrs={"rows": 3}),
+        }
+
+    def __init__(
+        self,
+        *args,
+        tenant_queryset=None,
+        campus_queryset=None,
+        academic_year_queryset=None,
+        term_queryset=None,
+        offering_queryset=None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if tenant_queryset is not None:
+            self.fields["tenant"].queryset = tenant_queryset
+        if campus_queryset is not None:
+            self.fields["campus"].queryset = campus_queryset
+        if academic_year_queryset is not None:
+            self.fields["academic_year"].queryset = academic_year_queryset
+        if term_queryset is not None:
+            self.fields["term"].queryset = term_queryset
+        if offering_queryset is not None:
+            self.fields["course_offering"].queryset = offering_queryset.select_related(
+                "course",
+                "section",
+                "term__academic_year",
+                "campus",
+            ).order_by(
+                "course__title",
+                "course__code",
+                "section__name",
+                "section__code",
+                "term__academic_year__name",
+                "term__name",
+                "id",
+            )
+        self.fields["period_code"].required = False
+        self.fields["period_code"].widget = forms.Select()
+        period_queryset = GradingTemplatePeriod.objects.filter(is_active=True)
+        if tenant_queryset is not None:
+            period_queryset = period_queryset.filter(template__tenant__in=tenant_queryset)
+        period_options = []
+        seen_codes = set()
+        for period in period_queryset.select_related("template").order_by("sequence_no", "name", "code"):
+            code = (period.code or "").strip().upper()
+            if not code or code in seen_codes:
+                continue
+            seen_codes.add(code)
+            period_options.append((code, _period_label(period)))
+        instance_period_code = (getattr(self.instance, "period_code", "") or "").strip().upper()
+        if instance_period_code and instance_period_code not in seen_codes:
+            period_options.insert(0, (instance_period_code, f"{instance_period_code} (current saved value)"))
+        self.fields["period_code"].choices = [("", "All grading periods"), *period_options]
+        self.fields["period_code"].widget.choices = self.fields["period_code"].choices
+        self.fields["campus"].required = False
+        self.fields["course_offering"].required = False
+        self.fields["reason"].required = False
+        self.fields["notice_to_faculty"].required = False
+        self.fields["period_code"].help_text = (
+            "Leave blank to apply to all grading periods in the selected academic year and term."
+        )
+        self.fields["campus"].help_text = "Leave blank for all campuses within your allowed scope."
+        self.fields["course_offering"].help_text = "Leave blank unless this control is for one specific class."
+        self.fields["reason"].help_text = "Required when status is Closed."
+        self.fields["notice_to_faculty"].help_text = "Required when status is Closed. This is shown to faculty."
+        self.fields["status"].help_text = (
+            "Closed blocks faculty encoding and submission. Open does not override a broader Closed control."
+        )
+        self.fields["is_active"].help_text = "Inactive controls are ignored."
+        self.fields["course_offering"].widget.attrs.update(
+            {
+                "data-searchable-select": "true",
+                "data-search-placeholder": "Search course offering by title, code, section, or term",
+            }
+        )
+        _set_choice_label(self.fields.get("academic_year"), _academic_year_label)
+        _set_choice_label(self.fields.get("term"), _term_label)
+        _set_choice_label(self.fields.get("course_offering"), _offering_label)
+        _enforce_active_reference_choices(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        tenant = cleaned.get("tenant")
+        campus = cleaned.get("campus")
+        academic_year = cleaned.get("academic_year")
+        term = cleaned.get("term")
+        period_code = (cleaned.get("period_code") or "").strip().upper()
+        course_offering = cleaned.get("course_offering")
+        status = cleaned.get("status")
+        reason = (cleaned.get("reason") or "").strip()
+        notice = (cleaned.get("notice_to_faculty") or "").strip()
+        is_active = cleaned.get("is_active")
+        cleaned["period_code"] = period_code or None
+
+        if term and academic_year and term.academic_year_id != academic_year.id:
+            raise forms.ValidationError({"term": "Term must belong to the selected academic year."})
+        if campus and tenant and campus.tenant_id != tenant.id:
+            raise forms.ValidationError({"campus": "Campus must belong to the selected tenant."})
+        if course_offering:
+            if tenant and course_offering.tenant_id != tenant.id:
+                raise forms.ValidationError({"course_offering": "Course offering must belong to the selected tenant."})
+            if academic_year and course_offering.academic_year_id != academic_year.id:
+                raise forms.ValidationError(
+                    {"course_offering": "Course offering must belong to the selected academic year."}
+                )
+            if term and course_offering.term_id != term.id:
+                raise forms.ValidationError({"course_offering": "Course offering must belong to the selected term."})
+            if campus and course_offering.campus_id != campus.id:
+                raise forms.ValidationError({"course_offering": "Course offering must belong to the selected campus."})
+        if status == GradeEncodingControl.Status.CLOSED:
+            errors = {}
+            if not reason:
+                errors["reason"] = "Enter the reason when closing grade encoding."
+            if not notice:
+                errors["notice_to_faculty"] = "Enter the faculty notice when closing grade encoding."
+            if errors:
+                raise forms.ValidationError(errors)
+        if tenant and academic_year and term and is_active:
+            duplicate_qs = GradeEncodingControl.objects.filter(
+                tenant=tenant,
+                academic_year=academic_year,
+                term=term,
+                period_code=cleaned["period_code"],
+                campus=campus,
+                course_offering=course_offering,
+                is_active=True,
+            )
+            if self.instance.pk:
+                duplicate_qs = duplicate_qs.exclude(pk=self.instance.pk)
+            if duplicate_qs.exists():
+                raise forms.ValidationError(
+                    "An active grade encoding control already exists for this exact scope. Edit the existing control instead."
+                )
         return cleaned
 
 
@@ -2161,7 +2503,7 @@ class TenantGradingProfileForm(forms.ModelForm):
             template_raw = self.data.get(self.add_prefix("grading_template"))
             if template_raw:
                 try:
-                    selected_template = GradingTemplate.objects.filter(id=int(template_raw)).first()
+                    selected_template = self.fields["grading_template"].queryset.filter(id=int(template_raw)).first()
                 except (TypeError, ValueError):
                     selected_template = selected_template
 
@@ -2564,6 +2906,14 @@ class DocumentPrintSettingForm(forms.Form):
 
 
 class ConfigurableFeatureSettingForm(forms.Form):
+    academic_performance_insights_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Academic Performance Insights",
+        help_text=(
+            "Allows authorized Area Chair, College Dean, and CAO users to open read-only section, "
+            "course, activity-consistency, and campus comparisons within their assigned scope."
+        ),
+    )
     role_based_help_guide_enabled = forms.BooleanField(
         required=False,
         label="Use the revised role-based Help Guide",
@@ -2701,27 +3051,61 @@ class ConfigurableFeatureSettingForm(forms.Form):
     submission_non_compliance_notice_enabled = forms.BooleanField(
         required=False,
         label="Enable non-compliance notices for overdue grade submissions",
-        help_text="When enabled, TeacherMate+ can issue notice, warning, and escalation follow-ups for overdue unsubmitted periodic grades.",
+        help_text=(
+            "When enabled, TeacherMate+ can issue up to three overdue notices: faculty only, "
+            "faculty plus Area Chair, then faculty plus Area Chair plus CAO."
+        ),
     )
     submission_non_compliance_notice_interval_days = forms.IntegerField(
-        required=True,
+        required=False,
         min_value=1,
         max_value=1,
         initial=1,
-        label="Notice repeat interval",
-        help_text="Daily. TeacherMate+ sends a follow-up each day while the course gradebook remains overdue and unsubmitted.",
+        label="Scheduler cadence",
+        help_text=(
+            "How often TeacherMate+ checks for overdue gradebooks. This does not directly "
+            "determine the notice escalation day."
+        ),
+    )
+    submission_non_compliance_first_notice_after_days = forms.IntegerField(
+        required=False,
+        min_value=1,
+        initial=1,
+        label="First notice after deadline",
+        help_text="Number of days after the deadline before the first notice is sent.",
+    )
+    submission_non_compliance_level_interval_days = forms.IntegerField(
+        required=False,
+        min_value=1,
+        initial=1,
+        label="Notice interval",
+        help_text="Number of days between notice levels.",
+    )
+    submission_non_compliance_max_notice_count = forms.IntegerField(
+        required=False,
+        min_value=1,
+        max_value=3,
+        initial=3,
+        label="Maximum notices",
+        help_text="TeacherMate+ stops automatic notices after this count. Current NCBA policy uses 3 notices.",
     )
     submission_non_compliance_head_roles = forms.ModelMultipleChoiceField(
         queryset=Role.objects.none(),
         required=False,
         label="Academic head roles for visibility and escalation",
-        help_text="Select the scoped academic oversight roles that should be included in escalation recipients and monitoring visibility.",
+        help_text=(
+            "Legacy visibility setting. The NCBA email cadence uses scoped Area Chair recipients on "
+            "the second notice and scoped CAO recipients on the third notice."
+        ),
     )
     submission_non_compliance_hr_recipients = forms.CharField(
         required=False,
         label="HR escalation recipient email(s)",
         widget=forms.Textarea(attrs={"rows": 2}),
-        help_text="Separate multiple HR email addresses with commas or new lines. These recipients are used at escalation stage only.",
+        help_text=(
+            "Legacy field kept for existing settings. The current NCBA three-notice policy does not "
+            "send automatic overdue-gradebook notices to HR."
+        ),
     )
     grade_distribution_high_grade_band_min = forms.DecimalField(
         required=False,
@@ -3002,6 +3386,27 @@ class ConfigurableFeatureSettingForm(forms.Form):
                 chunks.append(cleaned)
         return chunks
 
+    def non_compliance_schedule_preview(self) -> str:
+        def _field_int(field_name: str, default: int) -> int:
+            raw_value = None
+            if self.is_bound:
+                raw_value = self.data.get(self.add_prefix(field_name))
+            if raw_value in (None, ""):
+                raw_value = self.initial.get(field_name, default)
+            try:
+                return max(int(raw_value), 1)
+            except (TypeError, ValueError):
+                return default
+
+        first_day = _field_int("submission_non_compliance_first_notice_after_days", 1)
+        interval = _field_int("submission_non_compliance_level_interval_days", 1)
+        max_count = min(_field_int("submission_non_compliance_max_notice_count", 3), 3)
+        parts = [
+            f"Notice {sequence_no} on Day {first_day + ((sequence_no - 1) * interval)}"
+            for sequence_no in range(1, max_count + 1)
+        ]
+        return "Current schedule: " + ", ".join(parts) + "."
+
     def clean(self):
         cleaned = super().clean()
 
@@ -3095,6 +3500,12 @@ class ConfigurableFeatureSettingForm(forms.Form):
         if not cleaned.get("submission_non_compliance_notice_enabled"):
             cleaned["submission_non_compliance_notice_enabled"] = False
         cleaned["submission_non_compliance_notice_interval_days"] = 1
+        if cleaned.get("submission_non_compliance_first_notice_after_days") is None:
+            cleaned["submission_non_compliance_first_notice_after_days"] = 1
+        if cleaned.get("submission_non_compliance_level_interval_days") is None:
+            cleaned["submission_non_compliance_level_interval_days"] = 1
+        if cleaned.get("submission_non_compliance_max_notice_count") is None:
+            cleaned["submission_non_compliance_max_notice_count"] = 3
         grade_distribution_defaults = {
             "grade_distribution_high_grade_band_min": 90,
             "grade_distribution_high_grade_band_max": 100,

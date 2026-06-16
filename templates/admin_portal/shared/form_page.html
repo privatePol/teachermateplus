@@ -5,6 +5,74 @@
   <h2 class="h5 mb-0">{{ title }}</h2>
   <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
 </div>
+{% if assignment_usage_summary and assignment_usage_summary.is_in_use %}
+<div class="alert alert-warning border-warning shadow-sm" role="alert">
+  <h3 class="h6 mb-2">In use assignment</h3>
+  <p class="mb-2">
+    Template replacement is disabled for this assignment because gradebook records already exist for the affected course and term scope.
+  </p>
+  <div class="row g-2 small mb-2">
+    <div class="col-6 col-md-3"><strong>Offerings:</strong> {{ assignment_usage_summary.offering_count }}</div>
+    <div class="col-6 col-md-3"><strong>Activities:</strong> {{ assignment_usage_summary.activities_count }}</div>
+    <div class="col-6 col-md-3"><strong>Scores:</strong> {{ assignment_usage_summary.scores_count }}</div>
+    <div class="col-6 col-md-3"><strong>Period grades:</strong> {{ assignment_usage_summary.period_grades_count }}</div>
+    <div class="col-6 col-md-3"><strong>Submissions:</strong> {{ assignment_usage_summary.submissions_count }}</div>
+    <div class="col-6 col-md-3"><strong>Final grades:</strong> {{ assignment_usage_summary.final_grades_count }}</div>
+    <div class="col-6 col-md-3"><strong>Corrections:</strong> {{ assignment_usage_summary.correction_requests_count }}</div>
+    <div class="col-6 col-md-3"><strong>Period locks:</strong> {{ assignment_usage_summary.period_locks_count }}</div>
+  </div>
+  <p class="mb-0 small">
+    To use a different template, create a new assignment for a future term with no encoded grades, or create a separate test course.
+  </p>
+</div>
+{% endif %}
+{% if offering_usage_summary and offering_usage_summary.is_in_use %}
+<div class="alert alert-warning border-warning shadow-sm" role="alert">
+  <h3 class="h6 mb-2">In use offering</h3>
+  <p class="mb-2">
+    Identity fields are locked because this offering is already in use. Existing enrollments, faculty assignments,
+    activities, scores, submissions, or locks depend on this offering.
+  </p>
+  <div class="row g-2 small mb-2">
+    <div class="col-6 col-md-3"><strong>Enrollments:</strong> {{ offering_usage_summary.enrollments_count }}</div>
+    <div class="col-6 col-md-3"><strong>Faculty assignments:</strong> {{ offering_usage_summary.faculty_assignments_count }}</div>
+    <div class="col-6 col-md-3"><strong>Accepted assignments:</strong> {{ offering_usage_summary.accepted_faculty_assignments_count }}</div>
+    <div class="col-6 col-md-3"><strong>Activities:</strong> {{ offering_usage_summary.activities_count }}</div>
+    <div class="col-6 col-md-3"><strong>Scores:</strong> {{ offering_usage_summary.scores_count }}</div>
+    <div class="col-6 col-md-3"><strong>Period grades:</strong> {{ offering_usage_summary.period_grades_count }}</div>
+    <div class="col-6 col-md-3"><strong>Final grades:</strong> {{ offering_usage_summary.final_grades_count }}</div>
+    <div class="col-6 col-md-3"><strong>Submissions:</strong> {{ offering_usage_summary.submissions_count }}</div>
+    <div class="col-6 col-md-3"><strong>Corrections:</strong> {{ offering_usage_summary.correction_requests_count }}</div>
+    <div class="col-6 col-md-3"><strong>Reopen requests:</strong> {{ offering_usage_summary.reopen_requests_count }}</div>
+    <div class="col-6 col-md-3"><strong>Period locks:</strong> {{ offering_usage_summary.period_locks_count }}</div>
+    <div class="col-6 col-md-3"><strong>Attendance:</strong> {{ offering_usage_summary.attendance_count }}</div>
+  </div>
+  <p class="mb-0 small">
+    Only safe non-identity fields such as room or schedule may be edited.
+  </p>
+</div>
+{% endif %}
+{% if enrollment_usage_summary and enrollment_usage_summary.is_in_use %}
+<div class="alert alert-warning border-warning shadow-sm" role="alert">
+  <h3 class="h6 mb-2">In use enrollment</h3>
+  <p class="mb-2">
+    Student/offering transfer is disabled because grading records already exist. Status changes may still be allowed.
+  </p>
+  <div class="row g-2 small mb-2">
+    <div class="col-6 col-md-3"><strong>Scores:</strong> {{ enrollment_usage_summary.scores_count }}</div>
+    <div class="col-6 col-md-3"><strong>Period grades:</strong> {{ enrollment_usage_summary.period_grades_count }}</div>
+    <div class="col-6 col-md-3"><strong>Final grades:</strong> {{ enrollment_usage_summary.final_grades_count }}</div>
+    <div class="col-6 col-md-3"><strong>Submissions:</strong> {{ enrollment_usage_summary.submissions_count }}</div>
+    <div class="col-6 col-md-3"><strong>Corrections:</strong> {{ enrollment_usage_summary.correction_requests_count }}</div>
+    <div class="col-6 col-md-3"><strong>Reopen requests:</strong> {{ enrollment_usage_summary.reopen_requests_count }}</div>
+    <div class="col-6 col-md-3"><strong>Period locks:</strong> {{ enrollment_usage_summary.period_locks_count }}</div>
+    <div class="col-6 col-md-3"><strong>Attendance:</strong> {{ enrollment_usage_summary.attendance_count }}</div>
+  </div>
+  <p class="mb-0 small">
+    Use the enrollment status for DRP/W/INC updates. Moving the student to another offering requires academic review.
+  </p>
+</div>
+{% endif %}
 <div class="card border-0 shadow-sm">
   <div class="card-body">
     <form method="post" {% if form_enctype %}enctype="{{ form_enctype }}"{% endif %} novalidate>

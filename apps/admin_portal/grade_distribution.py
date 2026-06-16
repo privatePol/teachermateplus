@@ -13,7 +13,7 @@ from apps.academics.models import CourseOffering, FacultyAssignment
 from apps.admin_portal.services import AdminScopeService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
-from apps.grading.models import GradeActivity, StudentActivityScore, StudentPeriodGrade
+from apps.grading.models import GradeActivity, GradingTemplatePeriod, StudentActivityScore, StudentPeriodGrade
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
 
 User = get_user_model()
@@ -86,7 +86,7 @@ class GradeDistributionMonitorService:
 
         rows = cls._attach_comparison_averages(rows)
         summary = cls._summary(rows, len(offering_ids), len(missing_template_offering_ids))
-        filter_options = cls._filter_options(request, offerings_qs)
+        filter_options = cls._filter_options(request, offerings_qs, selected)
 
         query_params = cls.sanitized_query(request)
         query_params["export"] = "csv"
@@ -105,9 +105,13 @@ class GradeDistributionMonitorService:
         source = request.GET.get("source") or cls.SOURCE_PERIOD
         if source not in {cls.SOURCE_PERIOD, cls.SOURCE_ACTIVITY}:
             source = cls.SOURCE_PERIOD
+        campus_filter_value = (request.GET.get("campus_id") or "").strip().lower()
+        all_campuses = campus_filter_value == "all"
+        scope_campus_id = getattr(request, "scope", {}).get("campus_id")
         return {
             "source": source,
-            "campus_id": cls._safe_int(request.GET.get("campus_id")),
+            "campus_id": None if all_campuses else (cls._safe_int(request.GET.get("campus_id")) or scope_campus_id),
+            "all_campuses": all_campuses,
             "department_id": cls._safe_int(request.GET.get("department_id")),
             "academic_year_id": cls._safe_int(request.GET.get("academic_year_id")),
             "term_id": cls._safe_int(request.GET.get("term_id")),
@@ -117,7 +121,10 @@ class GradeDistributionMonitorService:
 
     @classmethod
     def _filtered_offerings(cls, request, selected):
-        assignment_qs = AdminScopeService.scoped_faculty_assignments(request).filter(
+        assignment_qs = AdminScopeService.scoped_faculty_assignments(
+            request,
+            include_all_campuses=selected["all_campuses"],
+        ).filter(
             is_active=True,
             response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
             offering__status=CourseOffering.Status.OPEN,
@@ -510,7 +517,7 @@ class GradeDistributionMonitorService:
         }
 
     @classmethod
-    def _filter_options(cls, request, offerings_qs):
+    def _filter_options(cls, request, offerings_qs, selected):
         scoped_offerings = list(offerings_qs.distinct()[:500])
         offering_ids = [offering.id for offering in scoped_offerings]
         template_ids = set()
@@ -521,15 +528,37 @@ class GradeDistributionMonitorService:
                 template = None
             if template:
                 template_ids.add(template.id)
-        periods = AdminScopeService.scoped_template_periods(request)
-        if template_ids:
-            periods = periods.filter(template_id__in=template_ids)
+        recorded_period_ids = set(
+            StudentPeriodGrade.objects.filter(offering_id__in=offering_ids).values_list(
+                "template_period_id",
+                flat=True,
+            )
+        )
+        recorded_period_ids.update(
+            GradeActivity.objects.filter(offering_id__in=offering_ids).values_list(
+                "template_period_id",
+                flat=True,
+            )
+        )
+        periods = (
+            GradingTemplatePeriod.objects.filter(
+                models.Q(template_id__in=template_ids) | models.Q(id__in=recorded_period_ids),
+                is_active=True,
+            )
+            .select_related("template", "template__tenant")
+            .distinct()
+        )
         return {
             "campuses": AdminScopeService.active_scoped_campuses(request).order_by("code"),
             "departments": AdminScopeService.active_scoped_departments(request).order_by("code"),
             "academic_years": AdminScopeService.active_scoped_academic_years(request).order_by("-start_date"),
             "terms": AdminScopeService.active_scoped_terms(request).order_by("-academic_year__start_date", "sequence_no"),
-            "faculty": User.objects.filter(id__in=AdminScopeService.scoped_faculty_users(request))
+            "faculty": User.objects.filter(
+                id__in=AdminScopeService.scoped_faculty_users(
+                    request,
+                    include_all_campuses=selected["all_campuses"],
+                )
+            )
             .filter(id__in=FacultyAssignment.objects.filter(offering_id__in=offering_ids).values("faculty_user_id"))
             .order_by("last_name", "first_name", "username"),
             "periods": periods.order_by("template__name", "sequence_no"),

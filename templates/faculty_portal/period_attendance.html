@@ -10,7 +10,12 @@
 
 {% include "faculty_portal/partials/period_quick_nav.html" with nav_current="attendance" %}
 
-{% if is_correction_active %}
+{% if encoding_control_closed %}
+<div class="alert alert-danger">
+  Encoding is currently closed for this class. You may view attendance, but attendance editing is disabled.
+  {% if encoding_control_message %}<div class="small mt-1">{{ encoding_control_message }}</div>{% endif %}
+</div>
+{% elif is_correction_active %}
 <div class="alert alert-warning">
   A governed manual correction window is active. Only scoped students can be updated here.
   {% if "corrections.create" in effective_permissions and system_correction_enabled %}

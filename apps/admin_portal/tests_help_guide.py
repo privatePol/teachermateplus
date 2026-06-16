@@ -159,7 +159,7 @@ class AdminHelpGuideTests(TestCase):
 
         full_response = self.client.get(reverse("admin_portal:guide"), {"view": "full"})
         self.assertTemplateUsed(full_response, "admin_portal/guide.html")
-        self.assertContains(full_response, "Back to Practical Guide")
+        self.assertContains(full_response, "Back to Admin Practical Guide")
         self.assertContains(full_response, "?view=practical")
 
     def test_explicit_practical_view_works_when_legacy_is_tenant_default(self):
@@ -184,6 +184,7 @@ class AdminHelpGuideTests(TestCase):
         response = self.client.get(reverse("admin_portal:guide"), {"view": "practical"})
 
         self.assertTemplateUsed(response, "admin_portal/guide_role_based.html")
+        self.assertContains(response, "Admin Portal Practical Guide")
         self.assertContains(response, "Open Full Admin Guide")
 
     def test_full_guide_keeps_superadmin_incident_section_hidden_from_campus_admin(self):
@@ -220,6 +221,32 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, 'id="grading-template-calculator"', html=False)
         self.assertContains(response, 'id="assignment-acceptance"', html=False)
 
+    def test_practical_guide_uses_accessible_accordion_and_keeps_overview_visible(self):
+        user = User.objects.create_superuser(
+            username="guide_accordion_root",
+            password="testpass123",
+            email="guide_accordion_root@example.com",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("admin_portal:guide"))
+
+        self.assertContains(response, "Admin Portal Practical Guide")
+        self.assertNotContains(response, "Admin Portal Help Guide")
+        self.assertContains(response, "How to Use This Practical Guide")
+        self.assertContains(response, 'id="adminPracticalGuideAccordion"', html=False)
+        self.assertContains(response, 'id="help-collapse-start"', html=False)
+        self.assertContains(response, 'class="accordion-collapse collapse show"', html=False)
+        self.assertContains(response, 'data-bs-target="#help-collapse-grading-setup"', html=False)
+        self.assertContains(response, 'aria-controls="help-collapse-grading-setup"', html=False)
+        self.assertContains(response, 'data-help-collapse="#help-collapse-grading-setup"', html=False)
+        self.assertContains(response, "table-responsive help-table-wrap")
+        self.assertContains(response, "bootstrap.Collapse.getOrCreateInstance")
+
     def test_grading_template_help_names_exact_menu_and_builder_steps(self):
         user = self._make_user(
             username="grading_guide_admin",
@@ -237,6 +264,125 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, "Click the Builder icon on the template row.")
         self.assertContains(response, "Detail Computation to Average Activities")
         self.assertNotContains(response, "Do not confuse Direct Percentage")
+
+    def test_admin_guides_link_to_dedicated_grading_setup_guide(self):
+        user = User.objects.create_superuser(
+            username="grading_setup_link_root",
+            password="testpass123",
+            email="grading_setup_link_root@example.com",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        self.client.force_login(user)
+        setup_url = reverse("admin_portal:grading_setup_guide")
+
+        practical_response = self.client.get(reverse("admin_portal:guide"))
+        self.assertContains(practical_response, setup_url)
+        self.assertContains(practical_response, "Grading Template Setup Guide")
+
+        full_response = self.client.get(reverse("admin_portal:guide"), {"view": "full"})
+        self.assertContains(full_response, setup_url)
+        self.assertContains(full_response, "Build a Template")
+
+    def test_grading_setup_guide_explains_template_profile_and_override_decisions(self):
+        user = self._make_user(
+            username="grading_setup_reader",
+            role_code="GRADING_SETUP_READER",
+            permissions=[
+                self.portal_permission,
+                self.grading_template_permission,
+            ],
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("admin_portal:grading_setup_guide"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "admin_portal/grading/grading_setup_guide.html")
+        self.assertContains(response, "Template")
+        self.assertContains(response, "Period")
+        self.assertContains(response, "Component")
+        self.assertContains(response, "Subcomponent")
+        self.assertContains(response, "Detail")
+        self.assertContains(response, "Raw Score (Base-50)")
+        self.assertContains(response, "Direct Percentage")
+        self.assertContains(response, "For a 50-point quiz, faculty enters 42 out of 50")
+        self.assertContains(response, "TeacherMate+ does not use the detail percentages")
+        self.assertContains(response, "Participation/Output subcomponent percentage still matters")
+        self.assertContains(response, "One per template?")
+        self.assertContains(response, "No. One broad profile may serve many courses")
+        self.assertContains(
+            response,
+            "controls how period grades are combined to compute the official final grade",
+        )
+        self.assertContains(response, "If no profile matches")
+        self.assertContains(response, "averages every active grading period")
+        self.assertContains(response, "Average All Active Template Periods")
+        self.assertContains(response, "at least one active Participation/Output activity")
+        self.assertContains(response, "Unused or inactive detail rows will not block submission")
+        self.assertContains(response, "existing strict checks for the weighted setup still apply")
+        self.assertContains(
+            response,
+            "One approved course must use Base-40",
+        )
+        self.assertNotContains(response, "governed fallback")
+        self.assertNotContains(response, "source of truth")
+
+    def test_grading_setup_guide_keeps_all_sections_and_practical_examples(self):
+        user = self._make_user(
+            username="grading_setup_examples",
+            role_code="GRADING_SETUP_EXAMPLES",
+            permissions=[
+                self.portal_permission,
+                self.grading_template_permission,
+            ],
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("admin_portal:grading_setup_guide"))
+
+        for section_title in (
+            "1. Before You Start",
+            "2. Build the Template Structure",
+            "3. Choose the Score Entry Method",
+            "4. Choose Weighted Details or Average Activities",
+            "5. What to Do After Building the Template",
+            "6. When to Create a Tenant Grading Profile",
+            "7. When to Use Course Base Value Overrides",
+            "8. Final Readiness Checklist",
+        ):
+            self.assertContains(response, section_title)
+
+        self.assertContains(response, "Period: MIDTERM")
+        self.assertContains(response, "Component: Class Standing")
+        self.assertContains(response, "Subcomponent: Participation/Output")
+        self.assertContains(response, "Details: Recitation, Assignment/Activities, Oral Presentation")
+        self.assertContains(response, "Recitation 20%, Assignment 30%, and Oral Presentation 50%")
+        self.assertContains(response, "33.34%, 33.33%, and 33.33%")
+        self.assertContains(response, "BSA program uses a specific published template")
+        self.assertContains(response, "1st and 2nd Semester")
+        self.assertContains(response, "PRELIM, MIDTERM, PRE-FINAL, and FINAL")
+        self.assertContains(response, "Create a separate Summer template")
+        self.assertContains(response, "MIDTERM, PRE-FINAL, and FINAL")
+        self.assertContains(response, "Mark the Summer term as")
+        self.assertContains(response, "Course Template Assignments")
+
+    def test_grading_setup_guide_requires_grading_template_read_permission(self):
+        user = self._make_user(
+            username="grading_setup_blocked",
+            role_code="NON_GRADING_ADMIN",
+            permissions=[
+                self.portal_permission,
+                self.dashboard_permission,
+            ],
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("admin_portal:grading_setup_guide"))
+
+        self.assertEqual(response.status_code, 403)
 
     def test_hotfix_help_is_visible_with_hotfix_permission(self):
         user = self._make_user(
