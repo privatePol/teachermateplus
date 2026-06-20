@@ -234,6 +234,7 @@ FACULTY_HELP_SECTIONS = [
                 "actions": [
                     {"name": "Print Periodic Grades / Tabulation", "does": "Opens a printable grade report.", "when": "Use it after checking the Summary.", "avoid": "Do not distribute a Draft or Reopened gradebook as final.", "result": "A printable view or PDF is produced.", "editable": "Correct the source gradebook through the proper workflow, then regenerate."},
                     {"name": "Generate Final Clearance PDF", "does": "Creates the official faculty completion document when all required classes are complete.", "when": "Use it only when the page says all requirements are complete.", "avoid": "Do not treat a blocked clearance as a system error before checking each class.", "result": "A report with verification details is stored and generated.", "editable": "Regeneration follows current verified records."},
+                    {"name": "Activity History", "does": "Shows a read-only timeline of recent grading, attendance, submission, and notice activity for your assigned classes.", "when": "Use it when you want the fuller story behind recent class changes.", "avoid": "Do not treat it as an editing page.", "result": "Recent updates are listed in time order with quick links back to the relevant page.", "editable": "No records change."},
                 ],
                 "avoid": "Prediction pages are advisory and must not be printed or presented as official grades.",
                 "next_step": "Securely provide the report only to its authorized recipient.",

@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     activity_scores_view,
     analytics_view,
+    activity_history_view,
     class_performance_view,
     dashboard_view,
     faculty_assignment_accept_view,
@@ -58,6 +59,7 @@ urlpatterns = [
     path("faculty/guide/manual/", guide_manual_view, name="guide_manual"),
     path("faculty/quick-tour/disable/", quick_tour_disable_view, name="quick_tour_disable"),
     path("faculty/dashboard/", dashboard_view, name="dashboard"),
+    path("faculty/activity-history/", activity_history_view, name="activity_history"),
     path("faculty/analytics/", analytics_view, name="analytics"),
     path(
         "faculty/performance/parallel-sections/",

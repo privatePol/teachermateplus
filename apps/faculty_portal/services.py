@@ -1,25 +1,29 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db.models import Count, Q
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.academics.services import AcademicGovernanceService
-from apps.core.services.features import FeatureSettingsService
-from apps.enrollment.models import Enrollment
-from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.academics.models import CourseOffering, FacultyAssignment
+from apps.academics.services import AcademicGovernanceService
+from apps.auditlog.models import AuditLog
+from apps.core.services.features import FeatureSettingsService
+from apps.enrollment.models import Enrollment, EnrollmentAdjustmentLog
+from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.grading.models import (
     GradeActivity,
     GradeCorrectionRequest,
     GradeSubmission,
+    GradeSubmissionReopenRequest,
     StudentActivityScore,
     StudentPeriodGrade,
 )
 from apps.grading.services import FacultyGradingService, GradingGovernanceService
+from apps.notifications.models import FacultyReminder, SubmissionNonComplianceNotice
 from apps.predictions.services import PredictionSnapshotService
 
 
@@ -77,6 +81,1159 @@ class FacultyDashboardService:
             "detail": detail,
             "url": url,
             "button_label": button_label,
+        }
+
+
+class FacultyDashboardUpdatesService(FacultyDashboardService):
+    DEFAULT_LIMIT = 5
+    DEADLINE_LOOKAHEAD_HOURS = 48
+
+    @staticmethod
+    def _offering_label(offering) -> str:
+        course_code = offering.course.code if getattr(offering, "course", None) else ""
+        section_label = offering.section.name or offering.section.code if getattr(offering, "section", None) else ""
+        if course_code and section_label:
+            return f"{course_code} / {section_label}"
+        return section_label or course_code or f"Offering {offering.id}"
+
+    @classmethod
+    def _login_anchor(cls, user):
+        login_rows = list(
+            AuditLog.objects.filter(
+                actor_user=user,
+                portal=AuditLog.Portal.FACULTY,
+                action="LOGIN_SUCCESS",
+                entity_type="User",
+            )
+            .order_by("-created_at", "-id")
+            .only("created_at", "id")
+        )
+        if len(login_rows) < 2:
+            current_login_at = login_rows[0].created_at if login_rows else None
+            return {
+                "has_previous_login": False,
+                "since_at": None,
+                "current_login_at": current_login_at,
+            }
+        return {
+            "has_previous_login": True,
+            "since_at": login_rows[1].created_at,
+            "current_login_at": login_rows[0].created_at,
+        }
+
+    @staticmethod
+    def _append_item(items, *, when, priority, message, detail="", severity="info", source="", offering=None):
+        if when is None:
+            return
+        items.append(
+            {
+                "when": when,
+                "priority": priority,
+                "message": message,
+                "detail": detail,
+                "severity": severity,
+                "source": source,
+                "offering": offering,
+            }
+        )
+
+    @classmethod
+    def _faculty_assignment_items(cls, *, user, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        queryset = (
+            FacultyAssignment.objects.filter(faculty_user=user, offering_id__in=offering_ids)
+            .select_related("offering", "offering__course", "offering__section")
+            .order_by("-updated_at", "-id")
+        )
+        for assignment in queryset:
+            offering = assignment.offering
+            label = cls._offering_label(offering)
+            event_at = None
+            message = None
+            if assignment.responded_at and assignment.responded_at > since_at:
+                event_at = assignment.responded_at
+                status_label = assignment.get_response_status_display()
+                if assignment.response_status == FacultyAssignment.ResponseStatus.ACCEPTED:
+                    message = f"Faculty assignment accepted for {label}."
+                elif assignment.response_status == FacultyAssignment.ResponseStatus.DECLINED:
+                    message = f"Faculty assignment declined for {label}."
+                elif assignment.response_status == FacultyAssignment.ResponseStatus.CLARIFICATION_REQUESTED:
+                    message = f"Faculty assignment needs clarification for {label}."
+                elif assignment.response_status == FacultyAssignment.ResponseStatus.EXPIRED:
+                    message = f"Faculty assignment expired for {label}."
+                else:
+                    message = f"Faculty assignment status changed to {status_label.lower()} for {label}."
+            elif assignment.assigned_at and assignment.assigned_at > since_at:
+                event_at = assignment.assigned_at
+                message = f"New faculty assignment for {label}."
+            if event_at and message:
+                cls._append_item(
+                    items,
+                    when=event_at,
+                    priority=90 if assignment.response_status == FacultyAssignment.ResponseStatus.ACCEPTED else 85,
+                    message=message,
+                    detail="Faculty assignment",
+                    severity="success" if assignment.response_status == FacultyAssignment.ResponseStatus.ACCEPTED else "info",
+                    source="faculty_assignment",
+                    offering=offering,
+                )
+        return items
+
+    @classmethod
+    def _enrollment_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        queryset = (
+            Enrollment.objects.filter(course_offering_id__in=offering_ids, created_at__gt=since_at)
+            .select_related("student", "course_offering", "course_offering__course", "course_offering__section")
+            .order_by("-created_at", "-id")
+        )
+        for enrollment in queryset:
+            offering = enrollment.course_offering
+            label = cls._offering_label(offering)
+            student_name = cls._student_name(enrollment.student)
+            message = f"{student_name} was added to {label}."
+            cls._append_item(
+                items,
+                when=enrollment.created_at,
+                priority=80,
+                message=message,
+                detail=getattr(enrollment.student, "student_no", "") or "New enrollment",
+                severity="info",
+                source="enrollment",
+                offering=offering,
+            )
+        return items
+
+    @classmethod
+    def _enrollment_adjustment_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        queryset = (
+            EnrollmentAdjustmentLog.objects.filter(
+                Q(source_offering_id__in=offering_ids) | Q(destination_offering_id__in=offering_ids),
+                processed_at__gt=since_at,
+                result__in=[
+                    EnrollmentAdjustmentLog.Result.COMPLETED,
+                    EnrollmentAdjustmentLog.Result.COMPLETED_WITH_WARNING,
+                ],
+            )
+            .select_related(
+                "student",
+                "source_offering",
+                "source_offering__course",
+                "source_offering__section",
+                "destination_offering",
+                "destination_offering__course",
+                "destination_offering__section",
+            )
+            .order_by("-processed_at", "-id")
+        )
+        for row in queryset:
+            source_label = cls._offering_label(row.source_offering)
+            destination_label = cls._offering_label(row.destination_offering)
+            student_name = cls._student_name(row.student)
+            message = f"{student_name} was moved from {source_label} to {destination_label}."
+            cls._append_item(
+                items,
+                when=row.processed_at,
+                priority=78,
+                message=message,
+                detail="Enrollment adjustment",
+                severity="warning" if row.result == EnrollmentAdjustmentLog.Result.COMPLETED_WITH_WARNING else "info",
+                source="enrollment_adjustment",
+                offering=row.destination_offering if row.destination_offering_id in offering_ids else row.source_offering,
+            )
+        return items
+
+    @classmethod
+    def _grade_submission_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        queryset = (
+            GradeSubmission.objects.filter(
+                offering_id__in=offering_ids,
+                reopened_at__gt=since_at,
+                status=GradeSubmission.Status.REOPENED,
+            )
+            .select_related("offering", "offering__course", "offering__section", "template_period")
+            .order_by("-reopened_at", "-id")
+        )
+        for submission in queryset:
+            label = cls._offering_label(submission.offering)
+            period_name = submission.template_period.name or submission.template_period.code
+            cls._append_item(
+                items,
+                when=submission.reopened_at,
+                priority=76,
+                message=f"{period_name} gradebook was reopened for {label}.",
+                detail="Gradebook reopen",
+                severity="warning",
+                source="grade_submission_reopened",
+                offering=submission.offering,
+            )
+        return items
+
+    @classmethod
+    def _correction_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        queryset = (
+            GradeCorrectionRequest.objects.filter(
+                offering_id__in=offering_ids,
+                reviewed_at__gt=since_at,
+                status__in=[
+                    GradeCorrectionRequest.Status.APPROVED,
+                    GradeCorrectionRequest.Status.REJECTED,
+                ],
+            )
+            .select_related("offering", "offering__course", "offering__section", "template_period")
+            .order_by("-reviewed_at", "-id")
+        )
+        for request_obj in queryset:
+            label = cls._offering_label(request_obj.offering)
+            period_name = request_obj.template_period.name or request_obj.template_period.code
+            action_word = "approved" if request_obj.status == GradeCorrectionRequest.Status.APPROVED else "rejected"
+            cls._append_item(
+                items,
+                when=request_obj.reviewed_at,
+                priority=74,
+                message=f"{period_name} correction request was {action_word} for {label}.",
+                detail="Grade correction request",
+                severity="success" if request_obj.status == GradeCorrectionRequest.Status.APPROVED else "danger",
+                source="grade_correction_request",
+                offering=request_obj.offering,
+            )
+        return items
+
+    @classmethod
+    def _faculty_reminder_items(cls, *, user, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        queryset = (
+            FacultyReminder.objects.filter(
+                faculty_user=user,
+                offering_id__in=offering_ids,
+                created_at__gt=since_at,
+                is_active=True,
+            )
+            .select_related("offering", "offering__course", "offering__section")
+            .order_by("-created_at", "-id")
+        )
+        for reminder in queryset:
+            label = cls._offering_label(reminder.offering)
+            cls._append_item(
+                items,
+                when=reminder.created_at,
+                priority=60,
+                message=f"Faculty reminder created for {label}: {reminder.title}.",
+                detail="Faculty reminder",
+                severity="info",
+                source="faculty_reminder",
+                offering=reminder.offering,
+            )
+        return items
+
+    @classmethod
+    def _submission_notice_items(cls, *, user, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        queryset = (
+            SubmissionNonComplianceNotice.objects.filter(
+                faculty_user=user,
+                offering_id__in=offering_ids,
+                issued_at__gt=since_at,
+            )
+            .select_related("offering", "offering__course", "offering__section", "template_period")
+            .order_by("-issued_at", "-id")
+        )
+        for notice in queryset:
+            label = cls._offering_label(notice.offering)
+            period_name = notice.template_period.name or notice.template_period.code
+            item = {
+                "when": notice.issued_at,
+                "priority": 58,
+                "message": f"{notice.title} was issued for {label} ({period_name}).",
+                "detail": "Submission non-compliance notice",
+                "severity": "warning" if notice.notice_level != SubmissionNonComplianceNotice.NoticeLevel.NOTICE else "info",
+                "source": "submission_non_compliance_notice",
+                "offering": notice.offering,
+                "period_id": notice.template_period_id,
+                "period_label": period_name,
+            }
+            items.append(item)
+        return items
+
+    @classmethod
+    def _deadline_items(cls, *, offerings, since_at, now):
+        items = []
+        if not offerings:
+            return items
+        near_deadline_cutoff = now + timedelta(hours=cls.DEADLINE_LOOKAHEAD_HOURS)
+        for offering in offerings:
+            try:
+                template = FacultyGradingService.resolve_template_for_offering(offering)
+                periods = list(FacultyGradingService.get_template_periods(template))
+            except Exception:
+                continue
+            if not periods:
+                continue
+            active_setting = AcademicGovernanceService.resolve_active_grading_period(
+                tenant_id=offering.tenant_id,
+                campus_id=offering.campus_id,
+                term_id=offering.term_id,
+                now=now,
+            )
+            current_period = next(
+                (
+                    candidate
+                    for candidate in periods
+                    if AcademicGovernanceService.template_period_matches_active_period(
+                        template_period=candidate,
+                        active_period_setting=active_setting,
+                    )
+                ),
+                None,
+            )
+            if current_period is None:
+                current_period = next(
+                    (
+                        candidate
+                        for candidate in periods
+                        if not GradingGovernanceService.is_submitted(
+                            offering=offering,
+                            template_period=candidate,
+                        )
+                    ),
+                    None,
+                )
+            if current_period is None:
+                continue
+            deadline = GradingGovernanceService.resolve_submission_deadline(
+                offering=offering,
+                template_period=current_period,
+            )
+            if not deadline or deadline < since_at or not (now <= deadline <= near_deadline_cutoff):
+                continue
+            label = cls._offering_label(offering)
+            period_name = current_period.name or current_period.code
+            cls._append_item(
+                items,
+                when=deadline,
+                priority=50,
+                message=f"{period_name} submission deadline is approaching for {label}.",
+                detail="Encoding period closing soon",
+                severity="warning",
+                source="deadline_reminder",
+                offering=offering,
+            )
+        return items
+
+    @classmethod
+    def get_dashboard_updates(cls, *, user, offerings, now=None, limit: int | None = None):
+        now = now or timezone.now()
+        limit = limit or cls.DEFAULT_LIMIT
+        offerings = list(offerings or [])
+        anchor = cls._login_anchor(user)
+        if not anchor["has_previous_login"] or not anchor["since_at"]:
+            return {
+                **anchor,
+                "since_at": None,
+                "items": [],
+                "has_more": False,
+                "limit": limit,
+                "empty_message": "No recent updates yet. New changes related to your classes will appear here after your next visit.",
+            }
+
+        since_at = anchor["since_at"]
+        items = []
+        items.extend(cls._faculty_assignment_items(user=user, offerings=offerings, since_at=since_at))
+        items.extend(cls._enrollment_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._enrollment_adjustment_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._grade_submission_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._correction_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._faculty_reminder_items(user=user, offerings=offerings, since_at=since_at))
+        items.extend(cls._submission_notice_items(user=user, offerings=offerings, since_at=since_at))
+        items.extend(cls._deadline_items(offerings=offerings, since_at=since_at, now=now))
+        items = [item for item in items if item["when"] and item["when"] > since_at]
+        items.sort(key=lambda row: (row["when"], row["priority"]), reverse=True)
+        has_more = len(items) > limit
+        return {
+            **anchor,
+            "since_at": since_at,
+            "items": items[:limit],
+            "has_more": has_more,
+            "limit": limit,
+            "empty_message": "No recent updates yet. New changes related to your classes will appear here after your next visit.",
+        }
+
+
+class FacultyActivityHistoryService(FacultyDashboardUpdatesService):
+    DEFAULT_LIMIT = 100
+
+    @staticmethod
+    def _actor_label(actor):
+        if actor is None:
+            return "System"
+        full_name = (getattr(actor, "full_name", "") or "").strip()
+        return full_name or getattr(actor, "username", "") or "System"
+
+    @staticmethod
+    def _safe_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _history_item(
+        cls,
+        *,
+        when,
+        priority,
+        severity,
+        source,
+        source_label,
+        summary,
+        detail="",
+        offering=None,
+        period_label="",
+        actor_name="",
+        actor_username="",
+        url="",
+        button_label="Open",
+    ):
+        if when is None:
+            return None
+        return {
+            "when": when,
+            "priority": priority,
+            "severity": severity,
+            "severity_class": severity,
+            "source": source,
+            "source_label": source_label,
+            "summary": summary,
+            "detail": detail,
+            "offering": offering,
+            "period_label": period_label,
+            "actor_name": actor_name,
+            "actor_username": actor_username,
+            "url": url,
+            "button_label": button_label,
+        }
+
+    @staticmethod
+    def _item_text_search(item):
+        chunks = [
+            item.get("summary") or "",
+            item.get("detail") or "",
+            item.get("source_label") or "",
+            item.get("period_label") or "",
+            item.get("actor_name") or "",
+        ]
+        offering = item.get("offering")
+        if offering is not None:
+            chunks.extend(
+                [
+                    getattr(offering.course, "code", "") or "",
+                    getattr(offering.course, "title", "") or "",
+                    getattr(offering.section, "code", "") or "",
+                    getattr(offering.section, "name", "") or "",
+                ]
+            )
+        return " ".join(chunks).lower()
+
+    @classmethod
+    def _enrollment_audit_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        if not offering_ids:
+            return items
+        queryset = (
+            AuditLog.objects.filter(
+                portal=AuditLog.Portal.FACULTY,
+                entity_type="Enrollment",
+                action__in=["UPDATE"],
+                created_at__gt=since_at,
+            )
+            .select_related("actor_user")
+            .order_by("-created_at", "-id")
+        )
+        for log in queryset:
+            data = log.after_json or {}
+            offering_id = data.get("course_offering_id") or data.get("offering_id")
+            if offering_id not in offering_ids:
+                continue
+            offering = next((off for off in offerings if off.id == offering_id), None)
+            if offering is None:
+                continue
+            student_id = data.get("student_id")
+            summary = f"Enrollment changed for {cls._offering_label(offering)}."
+            detail_bits = []
+            if student_id:
+                detail_bits.append(f"Student ID {student_id}")
+            if data.get("movement_action") == "REMOVE_FROM_CLASS":
+                summary = f"Student removed from {cls._offering_label(offering)}."
+                detail_bits.append("Removed from class list")
+            elif data.get("from_status") or data.get("to_status"):
+                summary = f"Enrollment status updated for {cls._offering_label(offering)}."
+                if data.get("from_status") and data.get("to_status"):
+                    detail_bits.append(f"{data['from_status']} -> {data['to_status']}")
+            else:
+                if data.get("status"):
+                    detail_bits.append(f"Status: {data['status']}")
+            item = cls._history_item(
+                when=log.created_at,
+                priority=88,
+                severity="info",
+                source="enrollment_audit",
+                source_label="Enrollment",
+                summary=summary,
+                detail=" | ".join(detail_bits),
+                offering=offering,
+                actor_name=cls._actor_label(log.actor_user),
+                actor_username=getattr(log.actor_user, "username", "") if log.actor_user else "",
+                url=reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": offering.id}),
+                button_label="Open Enrollment",
+            )
+            if item:
+                items.append(item)
+        return items
+
+    @classmethod
+    def _grade_activity_audit_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        if not offering_ids:
+            return items
+        activity_map = {
+            activity.id: activity
+            for activity in GradeActivity.objects.filter(offering_id__in=offering_ids)
+            .select_related("offering", "template_period")
+            .only("id", "title", "offering_id", "template_period_id", "offering__course__code", "offering__section__code", "template_period__code", "template_period__name")
+        }
+        if not activity_map:
+            return items
+        queryset = (
+            AuditLog.objects.filter(
+                portal=AuditLog.Portal.FACULTY,
+                entity_type="GradeActivity",
+                created_at__gt=since_at,
+            )
+            .select_related("actor_user")
+            .order_by("-created_at", "-id")
+        )
+        for log in queryset:
+            activity = activity_map.get(cls._safe_int(log.entity_id))
+            if activity is None:
+                continue
+            offering = activity.offering
+            period_label = activity.template_period.name or activity.template_period.code or ""
+            title = activity.title or "Activity"
+            after_data = log.after_json or {}
+            if log.action == "DELETE":
+                summary = f"Deleted activity '{title}' from {cls._offering_label(offering)}."
+                severity = "warning"
+            elif log.action == "UPDATE":
+                summary = f"Updated activity '{title}' in {cls._offering_label(offering)}."
+                severity = "info"
+            else:
+                summary = f"Created activity '{title}' in {cls._offering_label(offering)}."
+                severity = "success"
+            detail_bits = []
+            if period_label:
+                detail_bits.append(period_label)
+            if after_data.get("score_input_mode"):
+                detail_bits.append(f"Mode: {after_data['score_input_mode']}")
+            url = (
+                reverse(
+                    "faculty_portal:period_activities",
+                    kwargs={"offering_id": offering.id, "period_id": activity.template_period_id},
+                )
+                if activity.template_period_id
+                else reverse("faculty_portal:offering_periods", kwargs={"offering_id": offering.id})
+            )
+            item = cls._history_item(
+                when=log.created_at,
+                priority=86,
+                severity=severity,
+                source="grade_activity_audit",
+                source_label="Activity Setup",
+                summary=summary,
+                detail=" | ".join(detail_bits),
+                offering=offering,
+                period_label=period_label,
+                actor_name=cls._actor_label(log.actor_user),
+                actor_username=getattr(log.actor_user, "username", "") if log.actor_user else "",
+                url=url,
+                button_label="Open Activities",
+            )
+            if item:
+                items.append(item)
+        return items
+
+    @classmethod
+    def _activity_score_audit_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        if not offering_ids:
+            return items
+        activities = list(
+            GradeActivity.objects.filter(offering_id__in=offering_ids, is_active=True)
+            .select_related("offering", "offering__course", "offering__section", "template_period")
+            .only(
+                "id",
+                "title",
+                "offering_id",
+                "template_period_id",
+                "created_at",
+                "updated_at",
+                "template_period__code",
+                "template_period__name",
+                "offering__course__code",
+                "offering__section__code",
+                "offering__section__name",
+            )
+        )
+        activity_map = {activity.id: activity for activity in activities}
+        if not activity_map:
+            return items
+        queryset = (
+            AuditLog.objects.filter(
+                portal=AuditLog.Portal.FACULTY,
+                entity_type="StudentActivityScore",
+                action="UPDATE",
+                created_at__gt=since_at,
+            )
+            .select_related("actor_user")
+            .order_by("-created_at", "-id")
+        )
+        for log in queryset:
+            metadata = log.metadata_json or {}
+            activity_id = cls._safe_int(metadata.get("activity_id") or log.entity_id)
+            activity = activity_map.get(activity_id)
+            if activity is None:
+                continue
+            offering = activity.offering
+            saved_count = metadata.get("saved_count")
+            period_label = activity.template_period.name or activity.template_period.code or ""
+            summary = f"Scores saved for '{activity.title}' in {cls._offering_label(offering)}."
+            detail_bits = [period_label] if period_label else []
+            if saved_count is not None:
+                detail_bits.append(f"{saved_count} student(s)")
+            item = cls._history_item(
+                when=log.created_at,
+                priority=84,
+                severity="success",
+                source="activity_score_audit",
+                source_label="Score Encoding",
+                summary=summary,
+                detail=" | ".join(detail_bits),
+                offering=offering,
+                period_label=period_label,
+                actor_name=cls._actor_label(log.actor_user),
+                actor_username=getattr(log.actor_user, "username", "") if log.actor_user else "",
+                url=reverse(
+                    "faculty_portal:activity_scores",
+                    kwargs={"offering_id": offering.id, "period_id": activity.template_period_id, "activity_id": activity.id},
+                ),
+                button_label="Open Scores",
+            )
+            if item:
+                items.append(item)
+        return items
+
+    @classmethod
+    def _attendance_audit_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        if not offering_ids:
+            return items
+        sessions = list(
+            AttendanceSession.objects.filter(offering_id__in=offering_ids, is_active=True)
+            .select_related("offering", "offering__course", "offering__section", "template_period")
+            .only(
+                "id",
+                "session_date",
+                "title",
+                "offering_id",
+                "template_period_id",
+                "offering__course__code",
+                "offering__section__code",
+                "offering__section__name",
+                "template_period__code",
+                "template_period__name",
+            )
+        )
+        session_map = {session.id: session for session in sessions}
+        if not session_map:
+            return items
+
+        session_logs = (
+            AuditLog.objects.filter(
+                portal=AuditLog.Portal.FACULTY,
+                entity_type="AttendanceSession",
+                created_at__gt=since_at,
+            )
+            .select_related("actor_user")
+            .order_by("-created_at", "-id")
+        )
+        for log in session_logs:
+            session_id = cls._safe_int(log.entity_id)
+            session = session_map.get(session_id)
+            if session is None:
+                continue
+            offering = session.offering
+            period_label = session.template_period.name or session.template_period.code or ""
+            summary = f"Attendance session saved for {cls._offering_label(offering)}."
+            detail_bits = [str(session.session_date)]
+            if session.title:
+                detail_bits.append(session.title)
+            item = cls._history_item(
+                when=log.created_at,
+                priority=82,
+                severity="info",
+                source="attendance_session_audit",
+                source_label="Attendance Session",
+                summary=summary,
+                detail=" | ".join(detail_bits),
+                offering=offering,
+                period_label=period_label,
+                actor_name=cls._actor_label(log.actor_user),
+                actor_username=getattr(log.actor_user, "username", "") if log.actor_user else "",
+                url=f"{reverse('faculty_portal:period_attendance', kwargs={'offering_id': offering.id, 'period_id': session.template_period_id})}?session_id={session.id}",
+                button_label="Open Attendance",
+            )
+            if item:
+                items.append(item)
+
+        record_logs = (
+            AuditLog.objects.filter(
+                portal=AuditLog.Portal.FACULTY,
+                entity_type="AttendanceRecord",
+                action="UPDATE",
+                created_at__gt=since_at,
+            )
+            .select_related("actor_user")
+            .order_by("-created_at", "-id")
+        )
+        for log in record_logs:
+            metadata = log.metadata_json or {}
+            session_id = cls._safe_int(metadata.get("session_id") or log.entity_id)
+            session = session_map.get(session_id)
+            if session is None:
+                continue
+            offering = session.offering
+            period_label = session.template_period.name or session.template_period.code or ""
+            saved_count = metadata.get("saved_count")
+            summary = f"Attendance records saved for {cls._offering_label(offering)}."
+            detail_bits = [str(session.session_date)]
+            if session.title:
+                detail_bits.append(session.title)
+            if saved_count is not None:
+                detail_bits.append(f"{saved_count} student(s)")
+            item = cls._history_item(
+                when=log.created_at,
+                priority=81,
+                severity="info",
+                source="attendance_record_audit",
+                source_label="Attendance Encoding",
+                summary=summary,
+                detail=" | ".join(detail_bits),
+                offering=offering,
+                period_label=period_label,
+                actor_name=cls._actor_label(log.actor_user),
+                actor_username=getattr(log.actor_user, "username", "") if log.actor_user else "",
+                url=f"{reverse('faculty_portal:period_attendance', kwargs={'offering_id': offering.id, 'period_id': session.template_period_id})}?session_id={session.id}",
+                button_label="Open Attendance",
+            )
+            if item:
+                items.append(item)
+        return items
+
+    @classmethod
+    def _grade_submission_audit_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        if not offering_ids:
+            return items
+        submissions = list(
+            GradeSubmission.objects.filter(offering_id__in=offering_ids)
+            .select_related("offering", "offering__course", "offering__section", "template_period")
+            .only(
+                "id",
+                "status",
+                "submitted_at",
+                "reopened_at",
+                "remarks",
+                "offering_id",
+                "template_period_id",
+                "offering__course__code",
+                "offering__section__code",
+                "template_period__code",
+                "template_period__name",
+            )
+        )
+        submission_map = {submission.id: submission for submission in submissions}
+        if not submission_map:
+            return items
+        queryset = (
+            AuditLog.objects.filter(
+                portal=AuditLog.Portal.FACULTY,
+                entity_type="GradeSubmission",
+                action__in=["SUBMIT", "REOPEN"],
+                created_at__gt=since_at,
+            )
+            .select_related("actor_user")
+            .order_by("-created_at", "-id")
+        )
+        for log in queryset:
+            submission = submission_map.get(cls._safe_int(log.entity_id))
+            if submission is None:
+                continue
+            offering = submission.offering
+            period_label = submission.template_period.name or submission.template_period.code or ""
+            if log.action == "REOPEN":
+                summary = f"{period_label} gradebook reopened for {cls._offering_label(offering)}."
+                severity = "warning"
+            else:
+                summary = f"{period_label} grades submitted for {cls._offering_label(offering)}."
+                severity = "success"
+            detail_bits = []
+            if submission.remarks:
+                detail_bits.append(submission.remarks)
+            item = cls._history_item(
+                when=log.created_at,
+                priority=80,
+                severity=severity,
+                source="grade_submission_audit",
+                source_label="Submission",
+                summary=summary,
+                detail=" | ".join(detail_bits),
+                offering=offering,
+                period_label=period_label,
+                actor_name=cls._actor_label(log.actor_user),
+                actor_username=getattr(log.actor_user, "username", "") if log.actor_user else "",
+                url=reverse(
+                    "faculty_portal:period_summary",
+                    kwargs={"offering_id": offering.id, "period_id": submission.template_period_id},
+                ),
+                button_label="Open Summary",
+            )
+            if item:
+                items.append(item)
+        return items
+
+    @classmethod
+    def _grade_correction_request_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        if not offering_ids:
+            return items
+        queryset = (
+            GradeCorrectionRequest.objects.filter(offering_id__in=offering_ids)
+            .select_related("offering", "offering__course", "offering__section", "template_period", "requested_by_user", "reviewed_by_user")
+            .order_by("-created_at", "-id")
+        )
+        for request_obj in queryset:
+            period_label = request_obj.template_period.name or request_obj.template_period.code or ""
+            if request_obj.reviewed_at and request_obj.reviewed_at > since_at:
+                if request_obj.status == GradeCorrectionRequest.Status.APPROVED:
+                    summary = f"Correction request approved for {cls._offering_label(request_obj.offering)}."
+                    severity = "success"
+                elif request_obj.status == GradeCorrectionRequest.Status.REJECTED:
+                    summary = f"Correction request rejected for {cls._offering_label(request_obj.offering)}."
+                    severity = "danger"
+                elif request_obj.status == GradeCorrectionRequest.Status.LAPSED:
+                    summary = f"Correction request lapsed for {cls._offering_label(request_obj.offering)}."
+                    severity = "warning"
+                else:
+                    summary = f"Correction request updated for {cls._offering_label(request_obj.offering)}."
+                    severity = "info"
+                detail_bits = []
+                if request_obj.review_remarks:
+                    detail_bits.append(request_obj.review_remarks)
+                if request_obj.requested_by_user:
+                    detail_bits.append(f"Requested by {cls._actor_label(request_obj.requested_by_user)}")
+                item = cls._history_item(
+                    when=request_obj.reviewed_at,
+                    priority=78,
+                    severity=severity,
+                    source="grade_correction_review",
+                    source_label="Correction Request",
+                    summary=summary,
+                    detail=" | ".join(detail_bits),
+                    offering=request_obj.offering,
+                    period_label=period_label,
+                    actor_name=cls._actor_label(request_obj.reviewed_by_user),
+                    actor_username=getattr(request_obj.reviewed_by_user, "username", "") if request_obj.reviewed_by_user else "",
+                    url=reverse(
+                        "faculty_portal:period_corrections",
+                        kwargs={"offering_id": request_obj.offering_id, "period_id": request_obj.template_period_id},
+                    ),
+                    button_label="Open Corrections",
+                )
+                if item:
+                    items.append(item)
+            elif request_obj.created_at > since_at:
+                summary = f"Correction request submitted for {cls._offering_label(request_obj.offering)}."
+                detail_bits = []
+                if request_obj.justification:
+                    detail_bits.append(request_obj.justification)
+                item = cls._history_item(
+                    when=request_obj.created_at,
+                    priority=79,
+                    severity="warning" if request_obj.status == GradeCorrectionRequest.Status.PENDING else "info",
+                    source="grade_correction_request",
+                    source_label="Correction Request",
+                    summary=summary,
+                    detail=" | ".join(detail_bits),
+                    offering=request_obj.offering,
+                    period_label=period_label,
+                    actor_name=cls._actor_label(request_obj.requested_by_user),
+                    actor_username=getattr(request_obj.requested_by_user, "username", "") if request_obj.requested_by_user else "",
+                    url=reverse(
+                        "faculty_portal:period_corrections",
+                        kwargs={"offering_id": request_obj.offering_id, "period_id": request_obj.template_period_id},
+                    ),
+                    button_label="Open Corrections",
+                )
+                if item:
+                    items.append(item)
+        return items
+
+    @classmethod
+    def _reopen_request_items(cls, *, offerings, since_at):
+        items = []
+        offering_ids = {offering.id for offering in offerings}
+        if not offering_ids:
+            return items
+        queryset = (
+            GradeSubmissionReopenRequest.objects.filter(offering_id__in=offering_ids)
+            .select_related("offering", "offering__course", "offering__section", "template_period", "requested_by_user", "reviewed_by_user")
+            .order_by("-created_at", "-id")
+        )
+        for request_obj in queryset:
+            period_label = request_obj.template_period.name or request_obj.template_period.code or ""
+            if request_obj.reviewed_at and request_obj.reviewed_at > since_at:
+                if request_obj.status == GradeSubmissionReopenRequest.Status.APPROVED:
+                    summary = f"Reopen request approved for {cls._offering_label(request_obj.offering)}."
+                    severity = "success"
+                elif request_obj.status == GradeSubmissionReopenRequest.Status.REJECTED:
+                    summary = f"Reopen request rejected for {cls._offering_label(request_obj.offering)}."
+                    severity = "danger"
+                else:
+                    summary = f"Reopen request reviewed for {cls._offering_label(request_obj.offering)}."
+                    severity = "info"
+                detail_bits = []
+                if request_obj.review_remarks:
+                    detail_bits.append(request_obj.review_remarks)
+                item = cls._history_item(
+                    when=request_obj.reviewed_at,
+                    priority=77,
+                    severity=severity,
+                    source="reopen_request_review",
+                    source_label="Reopen Request",
+                    summary=summary,
+                    detail=" | ".join(detail_bits),
+                    offering=request_obj.offering,
+                    period_label=period_label,
+                    actor_name=cls._actor_label(request_obj.reviewed_by_user),
+                    actor_username=getattr(request_obj.reviewed_by_user, "username", "") if request_obj.reviewed_by_user else "",
+                    url=reverse(
+                        "faculty_portal:period_summary",
+                        kwargs={"offering_id": request_obj.offering_id, "period_id": request_obj.template_period_id},
+                    ),
+                    button_label="Open Summary",
+                )
+                if item:
+                    items.append(item)
+            elif request_obj.created_at > since_at:
+                summary = f"Reopen request submitted for {cls._offering_label(request_obj.offering)}."
+                item = cls._history_item(
+                    when=request_obj.created_at,
+                    priority=78,
+                    severity="warning",
+                    source="reopen_request",
+                    source_label="Reopen Request",
+                    summary=summary,
+                    detail=request_obj.justification or "",
+                    offering=request_obj.offering,
+                    period_label=period_label,
+                    actor_name=cls._actor_label(request_obj.requested_by_user),
+                    actor_username=getattr(request_obj.requested_by_user, "username", "") if request_obj.requested_by_user else "",
+                    url=reverse(
+                        "faculty_portal:period_summary",
+                        kwargs={"offering_id": request_obj.offering_id, "period_id": request_obj.template_period_id},
+                    ),
+                    button_label="Open Summary",
+                )
+                if item:
+                    items.append(item)
+        return items
+
+    @classmethod
+    def _faculty_assignment_history_items(cls, *, user, offerings, since_at):
+        items = []
+        for item in super()._faculty_assignment_items(user=user, offerings=offerings, since_at=since_at):
+            if item.get("offering") is None:
+                continue
+            item.update(
+                {
+                    "source_label": "Faculty Assignment",
+                    "button_label": "Open My Classes",
+                    "url": reverse("faculty_portal:my_courses"),
+                }
+            )
+            items.append(item)
+        return items
+
+    @classmethod
+    def _faculty_reminder_history_items(cls, *, user, offerings, since_at):
+        items = []
+        for item in super()._faculty_reminder_items(user=user, offerings=offerings, since_at=since_at):
+            if item.get("offering") is None:
+                continue
+            item.update(
+                {
+                    "source_label": "Reminder",
+                    "button_label": "Open Reminders",
+                    "url": reverse("faculty_portal:reminder_center"),
+                }
+            )
+            items.append(item)
+        return items
+
+    @classmethod
+    def _submission_notice_history_items(cls, *, user, offerings, since_at):
+        items = []
+        for item in super()._submission_notice_items(user=user, offerings=offerings, since_at=since_at):
+            if item.get("offering") is None:
+                continue
+            period_id = item.get("period_id")
+            item.update(
+                {
+                    "source_label": "Compliance Notice",
+                    "button_label": "Open Summary",
+                    "url": (
+                        reverse(
+                            "faculty_portal:period_summary",
+                            kwargs={"offering_id": item["offering"].id, "period_id": period_id},
+                        )
+                        if period_id
+                        else reverse("faculty_portal:my_courses")
+                    ),
+                }
+            )
+            items.append(item)
+        return items
+
+    @classmethod
+    def get_activity_history(cls, *, user, offerings, now=None, limit: int | None = None, q: str = ""):
+        now = now or timezone.now()
+        limit = limit or cls.DEFAULT_LIMIT
+        offerings = list(offerings or [])
+        anchor = cls._login_anchor(user)
+        if not anchor["has_previous_login"] or not anchor["since_at"]:
+            return {
+                **anchor,
+                "since_at": None,
+                "items": [],
+                "has_more": False,
+                "limit": limit,
+                "empty_message": "No prior login anchor exists yet. Activity history appears after your next sign-in.",
+                "search_query": q,
+                "item_count": 0,
+                "source_counts": {},
+                "severity_counts": {},
+            }
+
+        since_at = anchor["since_at"]
+        items = []
+        items.extend(cls._faculty_assignment_history_items(user=user, offerings=offerings, since_at=since_at))
+        items.extend(cls._enrollment_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._enrollment_audit_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._enrollment_adjustment_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._grade_activity_audit_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._activity_score_audit_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._attendance_audit_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._grade_submission_audit_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._grade_correction_request_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._reopen_request_items(offerings=offerings, since_at=since_at))
+        items.extend(cls._faculty_reminder_history_items(user=user, offerings=offerings, since_at=since_at))
+        items.extend(cls._submission_notice_history_items(user=user, offerings=offerings, since_at=since_at))
+        items.extend(cls._deadline_items(offerings=offerings, since_at=since_at, now=now))
+        label_map = {
+            "faculty_assignment": "Faculty Assignment",
+            "enrollment": "Enrollment",
+            "enrollment_audit": "Enrollment",
+            "enrollment_adjustment": "Enrollment Move",
+            "grade_activity_audit": "Activity Setup",
+            "activity_score_audit": "Score Encoding",
+            "attendance_session_audit": "Attendance Session",
+            "attendance_record_audit": "Attendance Encoding",
+            "grade_submission_audit": "Submission",
+            "grade_correction_request": "Correction Request",
+            "grade_correction_review": "Correction Request",
+            "reopen_request": "Reopen Request",
+            "reopen_request_review": "Reopen Request",
+            "faculty_reminder": "Reminder",
+            "submission_non_compliance_notice": "Compliance Notice",
+            "deadline_reminder": "Deadline",
+        }
+        for item in items:
+            if not item:
+                continue
+            source_key = item.get("source") or ""
+            item.setdefault("source_label", label_map.get(source_key, source_key.replace("_", " ").title() if source_key else "Update"))
+            item.setdefault("severity_class", item.get("severity") or "secondary")
+            item.setdefault("url", "")
+            item.setdefault("detail", "")
+            item.setdefault("period_label", "")
+            item.setdefault("actor_name", "")
+            item.setdefault("actor_username", "")
+            item.setdefault("button_label", "Open")
+            offering = item.get("offering")
+            if not item["url"] and offering is not None:
+                if source_key in {"enrollment", "enrollment_audit", "enrollment_adjustment"}:
+                    item["url"] = reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": offering.id})
+                    item["button_label"] = "Open Enrollment"
+                elif source_key == "faculty_assignment":
+                    item["url"] = reverse("faculty_portal:my_courses")
+                    item["button_label"] = "Open My Classes"
+                elif source_key == "faculty_reminder":
+                    item["url"] = reverse("faculty_portal:reminder_center")
+                    item["button_label"] = "Open Reminders"
+                elif source_key == "deadline_reminder":
+                    item["url"] = reverse("faculty_portal:offering_periods", kwargs={"offering_id": offering.id})
+                    item["button_label"] = "Open Periods"
+                elif source_key == "submission_non_compliance_notice" and item.get("period_id"):
+                    item["url"] = reverse(
+                        "faculty_portal:period_summary",
+                        kwargs={"offering_id": offering.id, "period_id": item["period_id"]},
+                    )
+                    item["button_label"] = "Open Summary"
+        items = [item for item in items if item and item["when"] and item["when"] > since_at]
+        if q:
+            q_lower = q.lower()
+            items = [item for item in items if q_lower in cls._item_text_search(item)]
+        items.sort(key=lambda row: (row["when"], row["priority"]), reverse=True)
+        has_more = len(items) > limit
+        visible_items = items[:limit]
+        source_counts = Counter(item["source_label"] for item in visible_items)
+        severity_counts = Counter(item["severity"] for item in visible_items)
+        return {
+            **anchor,
+            "since_at": since_at,
+            "items": visible_items,
+            "has_more": has_more,
+            "limit": limit,
+            "empty_message": "No recent activity matched your assigned classes yet.",
+            "search_query": q,
+            "item_count": len(items),
+            "source_counts": dict(source_counts),
+            "severity_counts": dict(severity_counts),
         }
 
 

@@ -37,7 +37,12 @@ from apps.faculty_portal.forms import (
     GradeActivityForm,
     GradeCorrectionRequestForm,
 )
-from apps.faculty_portal.services import FacultyPerformanceService, StudentInterventionService
+from apps.faculty_portal.services import (
+    FacultyActivityHistoryService,
+    FacultyDashboardUpdatesService,
+    FacultyPerformanceService,
+    StudentInterventionService,
+)
 from apps.faculty_portal.help_guide import FACULTY_HELP_SECTIONS
 from apps.grading.models import (
     CourseTemplateAssignment,
@@ -1550,6 +1555,11 @@ def dashboard_view(request):
         now=dashboard_now,
     )
     active_grading_period_rows = _build_active_grading_period_rows(active_offerings, now=dashboard_now)
+    updates_summary = FacultyDashboardUpdatesService.get_dashboard_updates(
+        user=request.user,
+        offerings=active_offerings,
+        now=dashboard_now,
+    )
     grade_status_rows = []
     pending_grade_issues = []
     for offering in active_offerings:
@@ -1728,10 +1738,45 @@ def dashboard_view(request):
         "classes_with_missing_grades": classes_with_missing_grades,
         "deadline_reminder": deadline_reminder,
         "active_grading_period_rows": active_grading_period_rows,
+        "updates_summary": updates_summary,
         "grade_status_rows": grade_status_rows,
         "pending_grade_issues": pending_grade_issues,
     }
     return render(request, "faculty_portal/dashboard.html", {"stats": stats})
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def activity_history_view(request):
+    scope = getattr(request, "scope", {})
+    tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    if not tenant_id:
+        messages.error(request, "Select a tenant scope first.")
+        return redirect("faculty_portal:dashboard")
+
+    q = (request.GET.get("q") or "").strip()
+    offerings = list(_faculty_current_offering_queryset(request.user, tenant_id=tenant_id).distinct())
+    history = FacultyActivityHistoryService.get_activity_history(
+        user=request.user,
+        offerings=offerings,
+        now=timezone.now(),
+        q=q,
+    )
+    context = {
+        "history": history,
+        "history_items": history["items"],
+        "history_has_more": history["has_more"],
+        "history_has_previous_login": history["has_previous_login"],
+        "history_since_at": history["since_at"],
+        "history_current_login_at": history["current_login_at"],
+        "history_empty_message": history["empty_message"],
+        "history_item_count": history["item_count"],
+        "history_source_counts": history["source_counts"],
+        "history_severity_counts": history["severity_counts"],
+        "active_offering_count": len(offerings),
+        "q": q,
+    }
+    return render(request, "faculty_portal/activity_history.html", context)
 
 
 @portal_required("FACULTY")

@@ -1,0 +1,218 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<style>
+  .history-hero {
+    gap: 0.75rem;
+  }
+  .history-panel {
+    border: 0;
+    box-shadow: 0 10px 24px rgba(15, 44, 24, 0.08);
+  }
+  .history-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+  }
+  .history-summary-card .card-body {
+    padding: 0.9rem 1rem;
+  }
+  .history-summary-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b8273;
+  }
+  .history-summary-value {
+    margin-top: 0.3rem;
+    font-size: 1.35rem;
+    font-weight: 800;
+    line-height: 1.1;
+    color: #173b25;
+  }
+  .history-summary-note {
+    margin-top: 0.2rem;
+    color: #5b6f62;
+    font-size: 0.88rem;
+  }
+  .history-badge-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .history-badge-list .badge {
+    white-space: normal;
+  }
+  .history-table th,
+  .history-table td {
+    white-space: normal;
+    vertical-align: top;
+  }
+  .history-table .history-when {
+    min-width: 150px;
+    white-space: nowrap;
+  }
+  .history-table .history-context {
+    min-width: 220px;
+  }
+  .history-table .history-summary {
+    min-width: 280px;
+  }
+  .history-table .history-action {
+    min-width: 120px;
+  }
+  .history-table .history-summary-text {
+    font-weight: 600;
+    color: #173b25;
+  }
+  .history-table .history-detail {
+    margin-top: 0.2rem;
+    color: #526b5d;
+    font-size: 0.88rem;
+  }
+  .history-table .history-meta {
+    color: #5f7265;
+    font-size: 0.86rem;
+  }
+  @media (max-width: 575.98px) {
+    .history-hero .btn {
+      flex: 1 1 auto;
+    }
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap history-hero mb-3 no-print">
+  <div>
+    <h2 class="h4 mb-1">My Activity History</h2>
+    <div class="text-muted small">
+      Recent class activity for your assigned offerings.
+    </div>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:dashboard' %}">Dashboard</a>
+    <a class="btn btn-sm btn-outline-primary" href="{% url 'faculty_portal:my_courses' %}">My Classes</a>
+  </div>
+</div>
+
+<div class="alert alert-light border no-print">
+  {% if history_has_previous_login %}
+    Showing changes since <strong>{{ history_since_at|date:"F j, Y g:i A" }}</strong>.
+    {% if history_current_login_at %}<span class="ms-1">Current login: <strong>{{ history_current_login_at|date:"F j, Y g:i A" }}</strong>.</span>{% endif %}
+  {% else %}
+    There is no prior login anchor yet, so activity history will start showing after your next sign-in.
+  {% endif %}
+</div>
+
+<div class="history-summary-grid mb-3 no-print">
+  <div class="card history-panel history-summary-card">
+    <div class="card-body">
+      <div class="history-summary-label">History Items</div>
+      <div class="history-summary-value">{{ history_item_count }}</div>
+      <div class="history-summary-note">Visible items after filtering.</div>
+    </div>
+  </div>
+  <div class="card history-panel history-summary-card">
+    <div class="card-body">
+      <div class="history-summary-label">Assigned Classes</div>
+      <div class="history-summary-value">{{ active_offering_count }}</div>
+      <div class="history-summary-note">Classes in your current scope.</div>
+    </div>
+  </div>
+  <div class="card history-panel history-summary-card">
+    <div class="card-body">
+      <div class="history-summary-label">Source Mix</div>
+      <div class="history-summary-value">{{ history_source_counts|length }}</div>
+      <div class="history-summary-note">Different activity types in view.</div>
+    </div>
+  </div>
+</div>
+
+<div class="card history-panel mb-3 no-print">
+  <div class="card-body">
+    <form class="row g-2 align-items-end">
+      <div class="col-12 col-lg-9">
+        <label class="form-label">Search history</label>
+        <input class="form-control" name="q" value="{{ q }}" placeholder="Search class, period, student, note, or action">
+      </div>
+      <div class="col-12 col-lg-3 d-flex gap-2">
+        <button class="btn btn-outline-secondary flex-fill" type="submit">Filter</button>
+        {% if q %}
+        <a class="btn btn-outline-secondary flex-fill" href="{% url 'faculty_portal:activity_history' %}">Clear</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card history-panel">
+  <div class="card-body">
+    {% if history_items %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 history-table">
+          <thead class="table-light">
+            <tr>
+              <th class="history-when">When</th>
+              <th>Type</th>
+              <th class="history-summary">Summary</th>
+              <th class="history-context">Context</th>
+              <th class="history-action text-end">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in history_items %}
+            <tr>
+              <td class="history-when">
+                <div class="fw-semibold">{{ item.when|date:"M d, Y" }}</div>
+                <div class="text-muted small">{{ item.when|date:"g:i A" }}</div>
+              </td>
+              <td>
+                <div class="d-flex flex-column gap-1">
+                  <span class="badge text-bg-{{ item.severity_class }}">{{ item.source_label }}</span>
+                  {% if item.actor_name %}
+                  <div class="history-meta">By {{ item.actor_name }}</div>
+                  {% endif %}
+                </div>
+              </td>
+              <td class="history-summary">
+                <div class="history-summary-text">{{ item.summary }}</div>
+                {% if item.detail %}
+                <div class="history-detail">{{ item.detail }}</div>
+                {% endif %}
+              </td>
+              <td class="history-context">
+                {% if item.offering %}
+                <div class="fw-semibold">{{ item.offering.course.code }} | {{ item.offering.section.code }}</div>
+                <div class="history-meta">
+                  {{ item.offering.course.title }}
+                  {% if item.period_label %}<span class="d-block">Period: {{ item.period_label }}</span>{% endif %}
+                </div>
+                {% else %}
+                <span class="text-muted">General history</span>
+                {% endif %}
+              </td>
+              <td class="history-action text-end">
+                {% if item.url %}
+                <a class="btn btn-sm btn-outline-success" href="{{ item.url }}">{{ item.button_label|default:"Open" }}</a>
+                {% else %}
+                <span class="text-muted small">No action</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if history_has_more %}
+      <div class="text-muted small mt-3">
+        Showing the latest {{ history.limit }} items.
+      </div>
+      {% endif %}
+    {% else %}
+      <div class="text-muted">
+        {{ history_empty_message }}
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
