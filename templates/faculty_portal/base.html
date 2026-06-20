@@ -189,24 +189,29 @@
     position: fixed;
     right: 18px;
     bottom: 18px;
-    width: 44px;
-    height: 44px;
+    width: 42px;
+    height: 42px;
     border-radius: 50%;
     border: 1px solid #78927f;
     color: #214a31;
     background: #f8fbf8;
-    font-size: 1.4rem;
-    line-height: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     text-decoration: none;
     box-shadow: 0 6px 16px rgba(24, 59, 37, 0.16);
     z-index: 1060;
+    overflow: hidden;
   }
   .help-fab:hover {
     background: #e6f0e8;
     color: #103d25;
+  }
+  .help-fab img {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+    display: block;
   }
   .privacy-chip {
     position: fixed;
@@ -498,10 +503,10 @@
       href="{% url 'faculty_portal:guide' %}"
       target="_blank"
       rel="noopener noreferrer"
-      aria-label="Open Faculty User Guide in a new tab"
-      title="Open Faculty User Guide in a new tab"
+      aria-label="Faculty Quick Guide"
+      title="Faculty Quick Guide"
       data-tour-id="user-guide"
-    >?</a>
+    ><img src="{% get_media_prefix %}logos/teacher_star.png" alt="" aria-hidden="true"></a>
   {% endif %}
   <a
     class="privacy-chip"
