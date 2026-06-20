@@ -4136,6 +4136,7 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         {
             "id": str(component.id),
             "name": component.name,
+            "score_input_mode": component.score_input_mode,
             "has_subcomponents": component.id in component_ids_with_subcomponents,
         }
         for component in component_qs
@@ -4145,6 +4146,7 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
             "id": str(subcomponent.id),
             "name": subcomponent.name,
             "component_id": str(subcomponent.template_component_id),
+            "score_input_mode": subcomponent.score_input_mode,
             "has_details": subcomponent.id in subcomponent_ids_with_details,
         }
         for subcomponent in subcomponents
@@ -4160,6 +4162,7 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
             ),
             "weight_percentage": str(detail.weight_percentage),
             "detail_computation_mode": detail.template_subcomponent.detail_computation_mode,
+            "score_input_mode": detail.score_input_mode,
             "subcomponent_id": str(detail.template_subcomponent_id),
         }
         for detail in details

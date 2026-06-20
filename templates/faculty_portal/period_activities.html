@@ -97,9 +97,9 @@
         {% for e in form.title.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
       </div>
       <div class="col-md-3">
-        <label class="form-label">Total Score</label>
+        <label class="form-label" id="total-score-label" for="{{ form.total_score.id_for_label }}">Total Items</label>
         {{ form.total_score }}
-        <div class="form-text">For Direct Percentage items, TeacherMate+ automatically uses 100.</div>
+        <div class="form-text" id="total-score-help">Required. Scores will be transmuted using the configured Base value rule.</div>
         {% for e in form.total_score.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
       </div>
       <div class="col-md-3">
@@ -202,6 +202,9 @@
     const componentSelect = document.getElementById("id_template_component");
     const subcomponentSelect = document.getElementById("id_template_subcomponent");
     const detailSelect = document.getElementById("id_template_detail");
+    const totalScoreInput = document.getElementById("id_total_score");
+    const totalScoreLabel = document.getElementById("total-score-label");
+    const totalScoreHelp = document.getElementById("total-score-help");
     if (!componentSelect || !subcomponentSelect || !detailSelect) return;
 
     const componentOptions = JSON.parse(document.getElementById("activity-component-options").textContent);
@@ -210,6 +213,8 @@
     const selectedComponentId = "{{ selected_component_id|default:''|escapejs }}";
     const selectedSubcomponentId = "{{ selected_subcomponent_id|default:''|escapejs }}";
     const selectedDetailId = "{{ selected_detail_id|default:''|escapejs }}";
+    let directPercentageAutoFilled = false;
+    let previousRawTotalScoreValue = totalScoreInput ? totalScoreInput.value : "";
 
     function replaceOptions(selectEl, options, placeholderLabel, selectedValue, keepDisabled) {
       selectEl.innerHTML = "";
@@ -232,6 +237,46 @@
         selectEl.value = "";
       }
       selectEl.disabled = !!keepDisabled;
+    }
+
+    function normalizeScoreInputMode(mode) {
+      return mode && mode !== "INHERIT" ? mode : "";
+    }
+
+    function resolvedScoreInputMode() {
+      const selectedComponent = componentOptions.find((option) => option.id === String(componentSelect.value));
+      const selectedSubcomponent = subcomponentOptions.find((option) => option.id === String(subcomponentSelect.value));
+      const selectedDetail = detailOptions.find((option) => option.id === String(detailSelect.value));
+      return (
+        normalizeScoreInputMode(selectedDetail && selectedDetail.score_input_mode) ||
+        normalizeScoreInputMode(selectedSubcomponent && selectedSubcomponent.score_input_mode) ||
+        normalizeScoreInputMode(selectedComponent && selectedComponent.score_input_mode) ||
+        "RAW_BASE50"
+      );
+    }
+
+    function refreshTotalScoreGuidance() {
+      if (!totalScoreInput || !totalScoreLabel || !totalScoreHelp) return;
+      const isDirectPercentage = resolvedScoreInputMode() === "DIRECT_PERCENTAGE";
+      if (isDirectPercentage) {
+        totalScoreLabel.textContent = "Total Score";
+        totalScoreHelp.textContent = "For Direct Percentage items, TeacherMate+ automatically uses 100.";
+        if (!directPercentageAutoFilled) {
+          previousRawTotalScoreValue = totalScoreInput.value;
+        }
+        totalScoreInput.value = "100";
+        directPercentageAutoFilled = true;
+        totalScoreInput.readOnly = true;
+      } else {
+        totalScoreLabel.textContent = "Total Items";
+        totalScoreHelp.textContent = "Required. Scores will be transmuted using the configured Base value rule.";
+        if (directPercentageAutoFilled && totalScoreInput.value === "100") {
+          totalScoreInput.value = previousRawTotalScoreValue === "100" ? "" : previousRawTotalScoreValue;
+        }
+        directPercentageAutoFilled = false;
+        totalScoreInput.readOnly = false;
+      }
+      totalScoreInput.dispatchEvent(new Event("input", { bubbles: true }));
     }
 
     replaceOptions(
@@ -292,13 +337,20 @@
 
     componentSelect.addEventListener("change", function () {
       refreshSubcomponentOptions(componentSelect.value, "", "");
+      refreshTotalScoreGuidance();
     });
 
     subcomponentSelect.addEventListener("change", function () {
       refreshDetailOptions(componentSelect.value, subcomponentSelect.value, "");
+      refreshTotalScoreGuidance();
+    });
+
+    detailSelect.addEventListener("change", function () {
+      refreshTotalScoreGuidance();
     });
 
     refreshSubcomponentOptions(selectedComponentId, selectedSubcomponentId, selectedDetailId);
+    refreshTotalScoreGuidance();
 
     const initialValues = new Map(activityFormInputs().map(function (element) {
       return [element.name, normalizeValue(element)];

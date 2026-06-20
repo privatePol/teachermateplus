@@ -5041,6 +5041,32 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             reverse("faculty_portal:period_view_history", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
         )
 
+    def test_period_activities_exposes_score_entry_method_guidance_data(self):
+        self._accept_assignment()
+        component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        component.score_input_mode = "DIRECT_PERCENTAGE"
+        component.save(update_fields=["score_input_mode"])
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_activities",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Total Items")
+        self.assertContains(response, "Required. Scores will be transmuted using the configured Base value rule.")
+        component_options = response.context["component_option_data"]
+        self.assertEqual(component_options[0]["score_input_mode"], "DIRECT_PERCENTAGE")
+
+    def test_raw_score_entry_method_label_uses_configured_base_wording(self):
+        self.assertEqual(
+            FacultyGradingService.score_input_mode_label("RAW_BASE50"),
+            "Raw Score (Configured Base)",
+        )
+
     def test_activity_scores_shows_quick_jump_links_and_unsaved_warning_copy(self):
         self.assignment.accepted_at = timezone.now()
         self.assignment.accepted_by = self.faculty_user

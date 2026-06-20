@@ -4383,9 +4383,9 @@ class FacultyGradingService:
     @classmethod
     def score_input_mode_label(cls, score_input_mode: str) -> str:
         return {
-            "RAW_BASE50": "Raw Score (Base-50)",
+            "RAW_BASE50": "Raw Score (Configured Base)",
             "DIRECT_PERCENTAGE": "Direct Percentage",
-        }.get(score_input_mode, "Raw Score (Base-50)")
+        }.get(score_input_mode, "Raw Score (Configured Base)")
 
     @classmethod
     def aggregate_detail_scores(cls, *, subcomponent, detail_scores):

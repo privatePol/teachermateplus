@@ -143,7 +143,7 @@ class GradeActivityForm(forms.ModelForm):
             "Examples: Q1, Q2, R1, A1, AC1, Prelim Exam."
         )
         self.fields["total_score"].help_text = (
-            "Required for Raw Score (Base-50). For Direct Percentage items, TeacherMate+ will use 100 automatically."
+            "Required for raw-score items. Direct Percentage items use 100 automatically."
         )
         self.fields["activity_date"].help_text = (
             "Use the actual activity date. TeacherMate+ uses this for activity order, audit clarity, and class record review."
@@ -174,7 +174,7 @@ class GradeActivityForm(forms.ModelForm):
         if mode == "DIRECT_PERCENTAGE":
             cleaned["total_score"] = total_score or 100
         elif total_score in (None, ""):
-            self.add_error("total_score", "Total score is required for Raw Score (Base-50) items.")
+            self.add_error("total_score", "Total items is required for raw-score items.")
         return cleaned
 
     @staticmethod
