@@ -5,7 +5,9 @@
   <h2 class="h5 mb-0">
     Attendance | {{ offering.course.code }} | {{ period.name }}
   </h2>
-  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+  </div>
 </div>
 
 {% include "faculty_portal/partials/period_quick_nav.html" with nav_current="attendance" %}

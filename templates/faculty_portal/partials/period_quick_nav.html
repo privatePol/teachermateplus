@@ -15,6 +15,12 @@
         Attendance
       </a>
       <a
+        class="btn btn-sm btn-success"
+        href="{% url 'faculty_portal:attendance_summary' offering.id period.id %}"
+      >
+        Attendance Summary
+      </a>
+      <a
         class="btn btn-sm {% if nav_current == 'summary' %}btn-dark{% else %}btn-outline-dark{% endif %}"
         href="{% url 'faculty_portal:period_summary' offering.id period.id %}"
       >

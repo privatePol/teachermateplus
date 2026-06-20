@@ -1,0 +1,118 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h2 class="h5 mb-1">Attendance Summary</h2>
+    <div class="text-muted small">Coverage: {{ coverage_label }}</div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:period_attendance' offering.id period.id %}">Back to Attendance</a>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+  </div>
+</div>
+
+{% include "faculty_portal/partials/period_quick_nav.html" with nav_current="attendance_summary" %}
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="border rounded p-3 bg-white shadow-sm">
+      <div class="text-muted small text-uppercase fw-semibold">Course Units</div>
+      <div class="fs-4 fw-bold">{{ course_units_display|default:"-" }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="border rounded p-3 bg-white shadow-sm">
+      <div class="text-muted small text-uppercase fw-semibold">Maximum Allowable Absences</div>
+      <div class="fs-4 fw-bold">{% if allowable_limit_display %}{{ allowable_limit_display }}{% else %}Not configured{% endif %}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="border rounded p-3 bg-white shadow-sm">
+      <div class="text-muted small text-uppercase fw-semibold">Scope</div>
+      <div class="fw-semibold">{{ offering.course.code }} | {{ period.name }}</div>
+      <div class="small text-muted">Read-only attendance monitor</div>
+    </div>
+  </div>
+</div>
+
+<div class="alert alert-light border">
+  <div class="fw-semibold mb-1">Attendance note</div>
+  <div class="small">
+    Attendance is tracked by session, so the summary counts absent sessions from the start of class through today.
+  </div>
+</div>
+
+<form method="get" class="d-flex flex-wrap gap-2 mb-3">
+  {% for item in status_filter_options %}
+    <button
+      class="btn btn-sm {% if status_filter == item.value %}btn-primary{% else %}btn-outline-primary{% endif %}"
+      type="submit"
+      name="status"
+      value="{{ item.value }}"
+    >
+      {{ item.label }}
+    </button>
+  {% endfor %}
+</form>
+
+{% if not has_records %}
+  <div class="alert alert-secondary mb-0">{{ empty_state_message }}</div>
+{% elif not summary_rows %}
+  <div class="alert alert-secondary mb-0">No students match the selected filter.</div>
+{% else %}
+  <div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Student No.</th>
+            <th>Student Name</th>
+            <th>Total Meetings</th>
+            <th>Present</th>
+            <th>Absent</th>
+            <th>Late</th>
+            <th>Excused</th>
+            <th>Absences</th>
+            <th>Consecutive Absences</th>
+            <th>Allowable Limit</th>
+            <th>Remaining</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in summary_rows %}
+            <tr>
+              <td>{{ row.student_no }}</td>
+              <td>{{ row.student_name }}</td>
+              <td>{{ row.total_meetings }}</td>
+              <td>{{ row.present_count }}</td>
+              <td>{{ row.absent_count }}</td>
+              <td>{{ row.late_count }}</td>
+              <td>{{ row.excused_count }}</td>
+              <td>{{ row.absent_count }}</td>
+              <td>
+                {{ row.consecutive_absence_count }}
+                {% if row.consecutive_absence_flagged %}
+                  <div class="small text-danger fw-semibold">3 consecutive absences</div>
+                {% endif %}
+              </td>
+              <td>{{ row.allowable_limit_display|default:"-" }}</td>
+              <td>{{ row.remaining_allowable_display|default:"-" }}</td>
+              <td>
+                {% if row.status_label == "Exceeded Limit" %}
+                  <span class="badge text-bg-danger">{{ row.status_label }}</span>
+                {% elif row.status_label == "Warning" %}
+                  <span class="badge text-bg-warning">{{ row.status_label }}</span>
+                {% else %}
+                  <span class="badge text-bg-success">{{ row.status_label }}</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

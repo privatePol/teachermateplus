@@ -32,6 +32,7 @@ from .views import (
     public_index_view,
     period_activities_view,
     period_attendance_view,
+    period_attendance_summary_view,
     period_prediction_view,
     period_prediction_guide_view,
     report_template_issue_view,
@@ -143,6 +144,11 @@ urlpatterns = [
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/attendance/",
         period_attendance_view,
         name="period_attendance",
+    ),
+    path(
+        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/attendance/summary/",
+        period_attendance_summary_view,
+        name="attendance_summary",
     ),
     path(
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/summary/",

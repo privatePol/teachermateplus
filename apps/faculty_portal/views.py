@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -4531,6 +4531,149 @@ def activity_scores_view(request, offering_id: int, period_id: int, activity_id:
     return render(request, "faculty_portal/activity_scores.html", context)
 
 
+_ATTENDANCE_ABSENCE_LIMITS_BY_UNITS = {
+    Decimal("6"): Decimal("20"),
+    Decimal("5"): Decimal("18"),
+    Decimal("4"): Decimal("14"),
+    Decimal("3"): Decimal("10"),
+    Decimal("2"): Decimal("3"),
+}
+
+
+def _attendance_allowable_limit_for_course(course):
+    units = getattr(course, "units", None)
+    if units in (None, ""):
+        return None
+    try:
+        units_decimal = Decimal(str(units))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return _ATTENDANCE_ABSENCE_LIMITS_BY_UNITS.get(units_decimal)
+
+
+def _attendance_summary_status_for_absences(absence_count, allowable_limit):
+    if allowable_limit is None:
+        return "OK", 2
+    absence_decimal = Decimal(str(absence_count or 0))
+    allowable_decimal = Decimal(str(allowable_limit))
+    warning_threshold = allowable_decimal * Decimal("0.75")
+    if absence_decimal >= allowable_decimal:
+        return "Exceeded Limit", 0
+    if absence_decimal >= warning_threshold:
+        return "Warning", 1
+    return "OK", 2
+
+
+def _attendance_consecutive_absence_count(session_ids, records_by_session_id):
+    consecutive_absences = 0
+    for session_id in reversed(session_ids):
+        record = records_by_session_id.get(session_id)
+        if not record or record.status_code != AttendanceRecord.Status.ABSENT:
+            break
+        consecutive_absences += 1
+    return consecutive_absences
+
+
+def _build_attendance_summary_rows(*, offering, period, status_filter="all"):
+    today = timezone.localdate()
+    sessions = list(
+        AttendanceSession.objects.filter(
+            offering_id=offering.id,
+            template_period_id=period.id,
+            is_active=True,
+            session_date__lte=today,
+        ).order_by("session_date", "id")
+    )
+    session_ids = [session.id for session in sessions]
+    enrollments = list(FacultyGradingService.get_active_enrollments(offering))
+    records = []
+    if session_ids and enrollments:
+        records = list(
+            AttendanceRecord.objects.filter(
+                session_id__in=session_ids,
+                student_id__in=[enrollment.student_id for enrollment in enrollments],
+                is_active=True,
+            )
+            .select_related("student", "session")
+            .order_by("student__last_name", "student__first_name", "student__student_no", "session__session_date", "id")
+        )
+    records_by_student = defaultdict(list)
+    records_by_session = defaultdict(dict)
+    for record in records:
+        records_by_student[record.student_id].append(record)
+        records_by_session[record.student_id][record.session_id] = record
+
+    allowable_limit = _attendance_allowable_limit_for_course(offering.course)
+    rows = []
+    for enrollment in enrollments:
+        student_records = records_by_student.get(enrollment.student_id, [])
+        status_counts = Counter(record.status_code for record in student_records)
+        absent_count = int(status_counts.get(AttendanceRecord.Status.ABSENT, 0))
+        consecutive_absence_count = _attendance_consecutive_absence_count(
+            session_ids,
+            records_by_session.get(enrollment.student_id, {}),
+        )
+        status_label, status_rank = _attendance_summary_status_for_absences(absent_count, allowable_limit)
+        if status_rank == 2 and consecutive_absence_count >= 3:
+            status_label = "Warning"
+            status_rank = 1
+        if status_filter == "warning" and status_label != "Warning":
+            continue
+        if status_filter == "exceeded" and status_label != "Exceeded Limit":
+            continue
+        rows.append(
+            {
+                "student": enrollment.student,
+                "student_no": enrollment.student.student_no,
+                "student_name": ", ".join(
+                    part
+                    for part in [
+                        enrollment.student.last_name,
+                        enrollment.student.first_name,
+                    ]
+                    if part
+                ),
+                "total_meetings": len(session_ids),
+                "present_count": int(status_counts.get(AttendanceRecord.Status.PRESENT, 0)),
+                "absent_count": absent_count,
+                "late_count": int(status_counts.get(AttendanceRecord.Status.LATE, 0)),
+                "excused_count": int(status_counts.get(AttendanceRecord.Status.EXCUSED, 0)),
+                "consecutive_absence_count": consecutive_absence_count,
+                "consecutive_absence_flagged": consecutive_absence_count >= 3,
+                "allowable_limit": allowable_limit,
+                "allowable_limit_display": _format_decimal_display(allowable_limit) if allowable_limit is not None else "",
+                "remaining_allowable": (
+                    max(allowable_limit - Decimal(str(absent_count)), Decimal("0")) if allowable_limit is not None else None
+                ),
+                "remaining_allowable_display": (
+                    _format_decimal_display(max(allowable_limit - Decimal(str(absent_count)), Decimal("0")))
+                    if allowable_limit is not None
+                    else ""
+                ),
+                "status_label": status_label,
+                "status_rank": status_rank,
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            row["status_rank"],
+            -Decimal(str(row["absent_count"])),
+            -Decimal(str(row["consecutive_absence_count"])),
+            row["student_name"].lower(),
+            row["student_no"],
+        )
+    )
+    for row in rows:
+        row.pop("status_rank", None)
+    return {
+        "rows": rows,
+        "session_count": len(session_ids),
+        "allowable_limit": allowable_limit,
+        "has_records": bool(records),
+        "coverage_label": "Beginning of class to current date",
+    }
+
+
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def period_attendance_view(request, offering_id: int, period_id: int):
@@ -4686,6 +4829,53 @@ def period_attendance_view(request, offering_id: int, period_id: int):
         ),
     }
     return render(request, "faculty_portal/period_attendance.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def period_attendance_summary_view(request, offering_id: int, period_id: int):
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
+    if period is None:
+        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
+
+    status_filter = (request.GET.get("status") or "all").strip().lower()
+    if status_filter not in {"all", "warning", "exceeded"}:
+        status_filter = "all"
+
+    summary = _build_attendance_summary_rows(
+        offering=offering,
+        period=period,
+        status_filter=status_filter,
+    )
+    course_units_display = _format_decimal_display(offering.course.units)
+    allowable_limit_display = _format_decimal_display(summary["allowable_limit"])
+    if summary["allowable_limit"] is None:
+        allowable_limit_display = ""
+
+    context = {
+        "offering": offering,
+        "template": template,
+        "period": period,
+        "summary_rows": summary["rows"],
+        "status_filter": status_filter,
+        "coverage_label": summary["coverage_label"],
+        "course_units_display": course_units_display,
+        "allowable_limit_display": allowable_limit_display,
+        "has_records": summary["has_records"],
+        "session_count": summary["session_count"],
+        "status_filter_options": [
+            {"value": "all", "label": "All"},
+            {"value": "warning", "label": "Warning"},
+            {"value": "exceeded", "label": "Exceeded Limit"},
+        ],
+        "empty_state_message": "No attendance records have been encoded for this class yet.",
+    }
+    return render(request, "faculty_portal/attendance_summary.html", context)
 
 
 @portal_required("FACULTY")
