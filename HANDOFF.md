@@ -1,114 +1,55 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-06-16
+Last updated by Codex: 2026-06-20
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
-- Date: 2026-06-16
-- Session focus: Moved encoded-zero review into the Faculty Summary `Period Snapshot`, refreshed `/faculty/guide/`, removed faculty-side assignment unacceptance, and changed overdue gradebook non-compliance notices to the NCBA three-notice escalation policy.
+- Date: 2026-06-20
+- Session focus: Clarified Faculty Portal activity score-entry guidance so raw-score items show configured Base value wording and Direct Percentage items clearly auto-use `100`.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
 ## Completed In This Session
-- Session ending update - configurable Submission Non-Compliance Notices:
-  - Implemented configurable notice timing through existing feature settings:
-    - `FEATURE_SUBMISSION_NON_COMPLIANCE_FIRST_NOTICE_AFTER_DAYS`
-    - `FEATURE_SUBMISSION_NON_COMPLIANCE_LEVEL_INTERVAL_DAYS`
-    - `FEATURE_SUBMISSION_NON_COMPLIANCE_MAX_NOTICE_COUNT`
-  - Kept the existing command and cron path:
-    - `python manage.py issue_submission_non_compliance_notices`
-    - `ops/cron/teachermateplus.cron` remains the daily production scheduler source.
-  - Preserved current NCBA defaults:
-    - first notice after deadline: `1`
-    - notice interval: `1`
-    - maximum notices: `3`
-    - resulting schedule: Notice 1 on Day 1, Notice 2 on Day 2, Notice 3 on Day 3.
-  - Added custom schedule support with formula:
-    - `required_days_overdue = first_notice_after_days + ((sequence_no - 1) * notice_interval_days)`
-    - example: `2, 2, 3` sends Notice 1 on Day 2, Notice 2 on Day 4, and Notice 3 on Day 6.
-  - Kept recipient rules fixed:
-    - Notice 1: faculty only
-    - Notice 2: faculty plus scoped Area Chair
-    - Notice 3: faculty plus scoped Area Chair plus scoped CAO
-  - Kept HR as a legacy/not-used configuration field under the current NCBA policy.
-  - Limited `Maximum notices` to `3` because recipient rules beyond Notice 3 are not defined yet.
-  - No new notification feature, no new cron command, no migration, and no grading/submission/lock/reopen/correction workflow changes were introduced.
+- Faculty Portal activity setup score-entry guidance:
+  - raw-score activities now show `Total Items` and the help text `Required. Scores will be transmuted using the configured Base value rule.`
+  - Direct Percentage activities now dynamically show `Total Score`, auto-fill `100`, and make the field read-only in the browser
+  - activity dropdown option data now carries component/subcomponent/detail score-entry modes so the browser follows the same inheritance rule as the backend
+  - raw-score entry method display now reads `Raw Score (Configured Base)` instead of `Raw Score (Base-50)` while preserving the internal `RAW_BASE50` constant
+  - score-encoding pages now show `Total Items` for raw-score activities
 
 ### Changed Files For This Ending Pass
-- `apps/core/services/features.py`
-- `apps/notifications/services.py`
-- `apps/notifications/tests.py`
-- `apps/admin_portal/forms.py`
-- `apps/admin_portal/views.py`
-- `apps/admin_portal/tests_assignment_acceptance.py`
-- `templates/admin_portal/tools/configurable_features.html`
-- `templates/admin_portal/guide.html`
-- `docs/DEPLOYMENT_UBUNTU.md`
+- `apps/faculty_portal/forms.py`
+- `apps/faculty_portal/tests_assignment_acceptance.py`
+- `apps/faculty_portal/views.py`
+- `apps/grading/services.py`
+- `templates/faculty_portal/activity_scores.html`
+- `templates/faculty_portal/period_activities.html`
 - `CHANGE_LOG.md`
 - `TEACHERMATEPLUS_CONTEXT.md`
 - `HANDOFF.md`
 
 ### Pending Work / Known Issues / Risks
-- Recipient rules remain fixed by notice level. A full recipient schedule table was not implemented and should require separate approval.
-- `Maximum notices` is capped at `3`; values above 3 are intentionally rejected until recipient rules beyond CAO are designed.
-- Manual authenticated browser verification is still needed on the Configuration Management page to confirm the card layout, preview text, and validation errors render cleanly in the actual Admin Portal UI.
-- Production reminder: scoped Area Chair and CAO users must have active role assignments and valid email addresses, or those recipients will not receive the second/third notices.
-- Existing dirty worktree contains many unrelated files from prior session work. Do not assume every dirty file listed by `git diff --name-only` belongs only to the non-compliance notice change.
+- Browser smoke test still recommended on `Faculty Portal -> Activities`: select a raw-score component and a Direct Percentage component/detail to confirm the label/help text and `100` auto-fill feel right in the real UI.
+- Existing dirty worktree contains unrelated files from prior session work, including enrollment-adjustment and attendance-summary files. Do not assume every dirty file listed by `git diff --name-only` belongs to this score-entry guidance change.
 
 ### Validations Actually Executed For This Ending Pass
 ```powershell
 & 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
 # System check identified no issues
 
-& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.notifications.tests
-# 11 tests passed
-
-& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_can_store_assignment_workflow_settings apps.admin_portal.tests_assignment_acceptance.AdminFacultyAssignmentAcceptanceViewTests.test_configurable_features_rejects_invalid_non_compliance_notice_timing
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_activities_exposes_score_entry_method_guidance_data apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_raw_score_entry_method_label_uses_configured_base_wording
 # 2 tests passed
 ```
 
 ### Exact Next Steps For Next Codex Session
 1. Read `AGENTS.md`, `TEACHERMATEPLUS_CONTEXT.md`, `CHANGE_LOG.md`, and this file before making changes.
-2. Smoke-test `Admin Portal -> Tools -> Configuration Management -> Submission Non-Compliance Notices` in a browser:
-   - confirm `Scheduler cadence` remains visible
-   - confirm the three timing fields render
-   - confirm default preview shows Day 1 / Day 2 / Day 3
-   - submit custom values `2 / 2 / 3` and confirm preview/state behavior
-   - try invalid values `0 / 0 / 4` and confirm validation errors are clear.
-3. On production deployment, pull changes, run `python manage.py check`, restart the app service, and keep the existing daily cron command.
-4. Verify production Area Chair and CAO role assignments and email addresses before enabling non-compliance notices.
-5. Do not expand to a full recipient schedule table unless explicitly approved.
-
-- Submission non-compliance notice escalation:
-  - Updated `SubmissionNonComplianceNoticeService.issue_due_notices()` so automatic overdue gradebook emails stop after three notices.
-  - New cadence:
-    - day 1 after deadline: faculty only
-    - day 2 after deadline: faculty plus scoped Area Chair
-    - day 3 after deadline: faculty plus scoped Area Chair plus scoped CAO
-  - The scheduler remains daily through `ops/cron/teachermateplus.cron`.
-  - Recipient lookup uses active role assignments scoped to the overdue offering's tenant, campus, and exact/ancestor department.
-  - HR recipients are no longer used by the current NCBA overdue-gradebook email cadence.
-  - Updated Admin Configuration help text, Configurable Features summary text, Admin Portal guide wording, project context, and changelog.
-  - Added notification regression coverage for second-stage Area Chair recipients, third-stage CAO recipients, parent-department Area Chair scope, and no fourth automatic notice.
-  - Follow-up cleanup clarified the live `Submission Non-Compliance Notices` configuration card so it no longer says Notice 3 continues repeatedly. The card now names the daily scheduler command, Day 1/2/3 recipients, third-notice stop rule, no-HR policy, and scoped Area Chair/CAO email dependency.
-  - The legacy `Notice repeat interval` label was renamed to `Scheduler cadence`; the field remains visible as the overdue-gradebook checker cadence.
-  - Added separate configurable timing fields for first notice after deadline, notice interval, and maximum notices. Defaults are 1, 1, and 3, preserving Day 1/2/3 behavior; a 2, 2, 3 setup sends Notice 1/2/3 on Day 2/4/6.
-  - Maximum notices is limited to 3 for now because recipient rules beyond Notice 3 are not yet defined.
-  - Post-implementation review confirmed no new cron command, no grading/submission/lock/reopen/correction changes, and no migration requirement.
-  - Added edge-case regression tests confirming configured HR recipients are not used under the current NCBA policy, missing scoped Area Chair/CAO recipients do not crash the command, and a missing faculty email fails email delivery safely without crashing notice creation.
-  - Updated `docs/DEPLOYMENT_UBUNTU.md` so production cron guidance also reflects the three-notice stop rule.
-
-- Faculty Portal Summary readiness/grade-table review:
-  - Removed the `Encoded Zero Scores` metric from Faculty Portal `My Classes` course cards.
-  - Added `Encoded Zero Scores` to the Summary page `Period Snapshot` readiness cards for the selected offering and grading period.
-  - Count includes active `StudentActivityScore` records where the active activity belongs to the selected period and `raw_score = 0`.
-  - Blank/missing scores remain separate; zero is still valid and is not treated as no grade.
-  - Expanded `Period Snapshot` by default so faculty see readiness cards before submission.
-  - Increased Summary grade-table body row padding for a taller, easier-to-read table.
-  - Updated Faculty guide/manual wording for the new default expanded snapshot behavior.
-  - Added regression coverage in `apps/faculty_portal/tests_assignment_acceptance.py`.
+2. Smoke-test `Faculty Portal -> Activities` in a browser:
+   - confirm raw-score items show `Total Items` and configured Base value guidance
+   - confirm Direct Percentage items show `Total Score`, auto-fill `100`, and keep the field read-only
+   - confirm score-entry pages show `Total Items` for raw-score activities and `Encode percentage directly from 0 to 100` for Direct Percentage activities
+3. If the browser smoke test shows a mismatch, adjust only the activity form/template score-entry guidance path.
 
 - Faculty Portal guide refresh:
   - Removed the `Top Faculty Tasks` block from `/faculty/guide/`.
