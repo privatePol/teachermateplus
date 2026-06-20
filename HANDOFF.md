@@ -7,6 +7,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-06-20
+- Current pass: added Generate Password and branded credential email support to Admin Portal user password resets.
 - Current pass: removed reference-only configured detail weights from the Faculty Portal activity score encoding notice for Average Activities.
 - Current pass: implemented frontend-only Phase 1 Excel-like Quick Encoding for the existing Faculty Portal activity score page behind `FEATURE_FACULTY_QUICK_SCORE_ENCODING`.
 - Current pass: improved mobile responsiveness on the Faculty Portal activity score encoding, activity list, attendance encoding, and attendance summary pages so small screens keep the workflow usable without changing backend behavior.
@@ -35,6 +36,13 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Safety confirmations: no backend score saving, blank-vs-zero handling, grade computation, attendance, enrollment, submissions, locks, corrections, routes, models, or migrations were changed.
 - Changed files: `templates/faculty_portal/activity_scores.html`, `apps/faculty_portal/tests_assignment_acceptance.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
 - Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_average_activity_detail_weight_is_hidden_on_activity_page` passed.
+
+## Admin User Password Reset Email
+- Completed work: added a dedicated Admin Portal change-password template with a Generate Password button that fills both password fields before save.
+- Completed work: after an admin resets a user's password, TeacherMate+ emails the affected user a branded temporary-credentials card using the neutral TeacherMate+ sign-in link and keeps `must_change_password=True`.
+- Safety confirmations: no login rules, password validation rules, role assignment behavior, user creation behavior, models, migrations, or routes were changed.
+- Changed files: `apps/admin_portal/views.py`, `apps/admin_portal/tests_users.py`, `templates/admin_portal/security/user_change_password.html`, `templates/admin_portal/emails/user_password_change_credentials.txt`, `templates/admin_portal/emails/user_password_change_credentials.html`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.admin_portal.tests_users` passed with 15 tests.
 
 ## Mobile Responsiveness Pass
 - Completed work: improved the Faculty Portal `period_activities`, `activity_scores`, `period_attendance`, and `attendance_summary` pages for phone-sized screens by strengthening responsive table shells, wrapping action rows, and making the shared quick-jump strip wrap more cleanly.

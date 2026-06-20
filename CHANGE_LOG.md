@@ -7,6 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added Generate Password support to the Admin Portal user change-password page and send the updated temporary credentials to the affected user's email using the standard TeacherMate+ credential card format.
 - Added frontend-only Phase 1 Faculty Quick Score Encoding on the existing activity score page. When `FEATURE_FACULTY_QUICK_SCORE_ENCODING` is enabled, editable score inputs support Enter/Shift+Enter and ArrowUp/ArrowDown navigation, single-column paste from spreadsheets, autofocus on the first editable score field, and an unsaved-changes indicator while keeping the existing form, save button, validation, and backend grading workflow.
 - Improved mobile responsiveness for the Faculty Portal activity score encoding page, activity list, attendance encoding page, and attendance summary page by adding safer responsive wrappers, wrapped action rows, and wider mobile-friendly table fallbacks without changing backend workflows.
 - Tightened the shared Faculty Portal quick-jump strip so its buttons wrap more cleanly on narrow screens, and adjusted the mobile table/action layout on the encoding pages for easier phone use.

@@ -6,9 +6,9 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.auditlog.models import AuditLog
-from apps.rbac.models import Permission, Role
+from apps.rbac.models import Permission, Role, UserPermission
 from apps.admin_portal.forms import UserCreateForm, UserRoleAssignmentForm, UserUpdateForm
-from apps.admin_portal.views import _send_new_user_credentials_email
+from apps.admin_portal.views import _send_new_user_credentials_email, _send_user_password_change_credentials_email
 from apps.tenants.models import Campus, Department, Tenant
 
 
@@ -282,6 +282,174 @@ class UserListTests(TestCase):
         self.assertContains(response, "NCBA-01 | COLLEGE")
         self.assertContains(response, "NCBA-02 | COLLEGE")
 
+    def test_user_change_password_page_has_generate_password_button(self):
+        user = User.objects.create_user(
+            username="reset_page_user",
+            email="reset_page_user@example.com",
+            password="OldPass123!",
+        )
+
+        response = self.client.get(reverse("admin_portal:user_change_password", args=[user.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Generate Password")
+        self.assertContains(response, "generate-password-btn")
+        self.assertContains(response, "generatePassword")
+        self.assertContains(response, "id_new_password1")
+        self.assertContains(response, "id_new_password2")
+        self.assertContains(response, "Save and Email Password")
+        self.assertContains(response, 'const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"')
+        self.assertContains(response, 'const lower = "abcdefghijkmnopqrstuvwxyz"')
+        self.assertContains(response, 'const digits = "23456789"')
+        self.assertContains(response, 'const symbols = "!@#$%^&*()-_=+"')
+        self.assertContains(response, "generatePassword(14)")
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        ALLOWED_HOSTS=["tmp.ncba.edu.ph"],
+    )
+    def test_user_change_password_saves_and_emails_temporary_credentials(self):
+        user = User.objects.create_user(
+            username="reset_email_user",
+            email="reset_email_user@example.com",
+            password="OldPass123!",
+            must_change_password=False,
+        )
+
+        response = self.client.post(
+            reverse("admin_portal:user_change_password", args=[user.id]),
+            {
+                "new_password1": "NewResetPass123!",
+                "new_password2": "NewResetPass123!",
+            },
+            HTTP_HOST="tmp.ncba.edu.ph",
+            secure=True,
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("NewResetPass123!"))
+        self.assertTrue(user.must_change_password)
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(email.to, ["reset_email_user@example.com"])
+        self.assertIn("Password Updated", email.subject)
+        self.assertIn("Username: reset_email_user", email.body)
+        self.assertIn("Temporary Password: NewResetPass123!", email.body)
+        self.assertIn("https://tmp.ncba.edu.ph/", email.body)
+        self.assertNotIn("/admin-portal/", email.body)
+        self.assertNotIn("/faculty/", email.body)
+        html_body = email.alternatives[0].content
+        self.assertIn("PASSWORD UPDATED", html_body)
+        self.assertIn("Open TeacherMate+", html_body)
+        self.assertIn("NewResetPass123!", html_body)
+        self.assertNotIn("/admin-portal/", html_body)
+        self.assertNotIn("/faculty/", html_body)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="SEND_PASSWORD_CHANGE_EMAIL",
+                entity_type="User",
+                entity_id=str(user.id),
+            ).exists()
+        )
+        audit_payload = "\n".join(
+            str(value)
+            for log in AuditLog.objects.filter(entity_type="User", entity_id=str(user.id))
+            for value in (log.before_json, log.after_json, log.metadata_json)
+        )
+        self.assertNotIn("NewResetPass123!", audit_payload)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_user_change_password_invalid_form_does_not_email_or_save(self):
+        user = User.objects.create_user(
+            username="invalid_reset_user",
+            email="invalid_reset_user@example.com",
+            password="OldPass123!",
+            must_change_password=False,
+        )
+
+        response = self.client.post(
+            reverse("admin_portal:user_change_password", args=[user.id]),
+            {
+                "new_password1": "ValidResetPass123!",
+                "new_password2": "DifferentResetPass123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Passwords do not match.")
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("OldPass123!"))
+        self.assertFalse(user.must_change_password)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action__in=["CHANGE_PASSWORD", "SEND_PASSWORD_CHANGE_EMAIL"],
+                entity_type="User",
+                entity_id=str(user.id),
+            ).exists()
+        )
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        ALLOWED_HOSTS=["tmp.ncba.edu.ph"],
+    )
+    def test_user_can_login_with_admin_reset_password(self):
+        admin_access = Permission.objects.get(code="admin_portal.access")
+        user = User.objects.create_user(
+            username="reset_login_user",
+            email="reset_login_user@example.com",
+            password="OldPass123!",
+            must_change_password=False,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserPermission.objects.create(user=user, permission=admin_access)
+
+        response = self.client.post(
+            reverse("admin_portal:user_change_password", args=[user.id]),
+            {
+                "new_password1": "Generated7!Login",
+                "new_password2": "Generated7!Login",
+            },
+            HTTP_HOST="tmp.ncba.edu.ph",
+            secure=True,
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.client.logout()
+
+        login_response = self.client.post(
+            reverse("accounts:admin_login"),
+            {"username": "reset_login_user", "password": "Generated7!Login"},
+            HTTP_HOST="tmp.ncba.edu.ph",
+        )
+
+        self.assertEqual(login_response.status_code, 302)
+        self.assertEqual(login_response.url, reverse("accounts:admin_change_password"))
+
+    def test_user_change_password_permission_still_requires_users_update(self):
+        admin_access = Permission.objects.get(code="admin_portal.access")
+        limited_admin = User.objects.create_user(
+            username="limited_admin",
+            email="limited_admin@example.com",
+            password="LimitedPass123!",
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserPermission.objects.create(user=limited_admin, permission=admin_access)
+        target_user = User.objects.create_user(
+            username="permission_target",
+            email="permission_target@example.com",
+            password="OldPass123!",
+        )
+
+        self.client.force_login(limited_admin)
+        response = self.client.get(reverse("admin_portal:user_change_password", args=[target_user.id]))
+
+        self.assertEqual(response.status_code, 403)
+
     def test_user_create_form_does_not_expose_is_staff(self):
         form = UserCreateForm()
 
@@ -310,5 +478,33 @@ class UserListTests(TestCase):
         self.assertNotIn("Admin Portal", email.body)
         html_body = email.alternatives[0].content
         self.assertIn("Open TeacherMate+", html_body)
+        self.assertNotIn("/admin-portal/", html_body)
+        self.assertNotIn("/faculty/", html_body)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        ALLOWED_HOSTS=["tmp.ncba.edu.ph"],
+    )
+    def test_user_password_change_email_uses_standard_credential_card(self):
+        user = User.objects.create_user(
+            username="password_card_user",
+            email="password_card_user@example.com",
+            password="TemporaryPass123!",
+        )
+        request = RequestFactory().get("/", HTTP_HOST="tmp.ncba.edu.ph", secure=True)
+
+        sent_count = _send_user_password_change_credentials_email(request, user, "ResetCardPass123!")
+
+        self.assertEqual(sent_count, 1)
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertIn("https://tmp.ncba.edu.ph/", email.body)
+        self.assertIn("Temporary Password: ResetCardPass123!", email.body)
+        self.assertNotIn("/admin-portal/", email.body)
+        self.assertNotIn("/faculty/", email.body)
+        html_body = email.alternatives[0].content
+        self.assertIn("PASSWORD UPDATED", html_body)
+        self.assertIn("Open TeacherMate+", html_body)
+        self.assertIn("ResetCardPass123!", html_body)
         self.assertNotIn("/admin-portal/", html_body)
         self.assertNotIn("/faculty/", html_body)

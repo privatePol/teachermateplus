@@ -1415,6 +1415,39 @@ def _send_new_user_credentials_email(request, user, temporary_password: str) -> 
     return message.send(fail_silently=False)
 
 
+def _send_user_password_change_credentials_email(request, user, temporary_password: str) -> int:
+    teachermate_url = request.build_absolute_uri(reverse("accounts:public_index"))
+    logo_context = build_email_logo_context(
+        filename="ncba-logo.png",
+        cid="ncba-logo",
+        external_url=getattr(settings, "EMAIL_SCHOOL_LOGO_URL", ""),
+        configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+    )
+    context = {
+        "user": user,
+        "temporary_password": temporary_password,
+        "teachermate_url": teachermate_url,
+        **logo_context,
+    }
+    text_body = render_to_string("admin_portal/emails/user_password_change_credentials.txt", context)
+    html_body = render_to_string("admin_portal/emails/user_password_change_credentials.html", context)
+    message = EmailMultiAlternatives(
+        subject=format_email_subject("Password Updated"),
+        body=text_body,
+        from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local"),
+        to=[user.email],
+    )
+    attach_logo_for_src(
+        message,
+        src=logo_context["email_logo_src"],
+        filename="ncba-logo.png",
+        cid="ncba-logo",
+        configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+    )
+    message.attach_alternative(html_body, "text/html")
+    return message.send(fail_silently=False)
+
+
 def admin_portal_root_view(request):
     if not request.user.is_authenticated:
         return redirect("accounts:admin_login")
@@ -6076,7 +6109,8 @@ def user_change_password_view(request, user_id: int):
     _style_form(form)
 
     if request.method == "POST" and form.is_valid():
-        user.set_password(form.cleaned_data["new_password1"])
+        raw_password = form.cleaned_data["new_password1"]
+        user.set_password(raw_password)
         user.must_change_password = True
         user.save(update_fields=["password", "must_change_password"])
         AuditService.log_event(
@@ -6088,12 +6122,55 @@ def user_change_password_view(request, user_id: int):
             metadata={"target_username": user.username},
             request=request,
         )
-        messages.success(request, f"Password updated for {user.username}.")
+        try:
+            sent_count = _send_user_password_change_credentials_email(request, user, raw_password)
+            if sent_count:
+                messages.success(
+                    request,
+                    f"Password updated for {user.username} and credentials email sent to {user.email}.",
+                )
+                AuditService.log_event(
+                    action="SEND_PASSWORD_CHANGE_EMAIL",
+                    portal="ADMIN",
+                    entity_type="User",
+                    entity_id=user.id,
+                    actor=request.user,
+                    metadata={"recipient": user.email, "sent_count": sent_count},
+                    request=request,
+                )
+            else:
+                messages.warning(
+                    request,
+                    f"Password updated for {user.username}, but credentials email was not sent (no message accepted by SMTP).",
+                )
+                AuditService.log_event(
+                    action="SEND_PASSWORD_CHANGE_EMAIL_FAILED",
+                    portal="ADMIN",
+                    entity_type="User",
+                    entity_id=user.id,
+                    actor=request.user,
+                    metadata={"recipient": user.email, "reason": "smtp_accepted_zero_messages"},
+                    request=request,
+                )
+        except Exception as exc:
+            messages.warning(
+                request,
+                f"Password updated for {user.username}, but credentials email failed: {exc}",
+            )
+            AuditService.log_event(
+                action="SEND_PASSWORD_CHANGE_EMAIL_FAILED",
+                portal="ADMIN",
+                entity_type="User",
+                entity_id=user.id,
+                actor=request.user,
+                metadata={"recipient": user.email, "error": str(exc)[:800]},
+                request=request,
+            )
         return _redirect_back_or_default(request, "admin_portal:user_list")
 
-    context = {"form": form, "title": f"Change Password: {user.username}"}
+    context = {"form": form, "title": f"Change Password: {user.username}", "target_user": user}
     context.update(_scope_context(request))
-    return render(request, "admin_portal/shared/form_page.html", context)
+    return render(request, "admin_portal/security/user_change_password.html", context)
 
 
 @portal_required("ADMIN")
