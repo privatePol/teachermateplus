@@ -85,7 +85,7 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "Which section has the most missing outputs?")
         self.assertContains(response, "Rule-based interpretation")
 
-    def test_floating_help_button_opens_faculty_guide_in_new_tab(self):
+    def test_floating_help_button_opens_faculty_quick_guide(self):
         response = self.client.get(reverse("faculty_portal:my_courses"))
 
         self.assertEqual(response.status_code, 200)
@@ -93,7 +93,7 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, f'href="{reverse("faculty_portal:guide")}"', html=False)
         self.assertContains(response, 'target="_blank"', html=False)
         self.assertContains(response, 'rel="noopener noreferrer"', html=False)
-        self.assertContains(response, "Open Faculty User Guide in a new tab")
+        self.assertContains(response, "Faculty Quick Guide")
 
     def test_full_faculty_manual_covers_current_gradebook_and_performance_workflows(self):
         response = self.client.get(reverse("faculty_portal:guide_manual"))
