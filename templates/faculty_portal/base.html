@@ -328,6 +328,15 @@
     font-weight: 700;
     white-space: nowrap;
   }
+  .period-quick-nav .quick-jump-actions {
+    row-gap: 0.5rem;
+  }
+  .period-quick-nav .quick-jump-label {
+    min-width: max-content;
+  }
+  .period-quick-nav .quick-jump-actions .btn {
+    white-space: nowrap;
+  }
   @keyframes saveActionCueNudge {
     0%, 100% { transform: translateX(0); }
     50% { transform: translateX(4px); }
@@ -361,6 +370,20 @@
     .save-action-cue {
       width: 100%;
       justify-content: center;
+    }
+    .period-quick-nav .card-body {
+      padding-left: 0.85rem;
+      padding-right: 0.85rem;
+    }
+    .period-quick-nav .quick-jump-label {
+      width: 100%;
+      margin-right: 0;
+      margin-bottom: 0.1rem;
+    }
+    .period-quick-nav .quick-jump-actions .btn {
+      flex: 1 1 9.5rem;
+      justify-content: center;
+      text-align: center;
     }
   }
 </style>
@@ -477,6 +500,15 @@
           <span class="sidebar-label">Reminders</span>
         </a>
         <a
+          href="{% url 'faculty_portal:activity_history' %}"
+          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:activity_history' %}active{% endif %}"
+          title="My Activity History"
+          data-tour-id="activity-history"
+        >
+          <span class="sidebar-icon">&#128340;</span>
+          <span class="sidebar-label">Activity History</span>
+        </a>
+        <a
           href="{% url 'faculty_portal:memo_center' %}"
           class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:memo_center' or request.resolver_match.view_name == 'faculty_portal:memo_edit' %}active{% endif %}"
           title="Faculty Notes / Private Memo"
@@ -591,6 +623,7 @@
         { id: "my-classes", title: "My Classes", text: "Open your assigned classes, grading periods, activities, score sheets, summaries, and submissions." },
         { id: "performance-trends", title: "Performance Trends", text: "Compare parallel sections you handle and open a selected class to review students who need attention." },
         { id: "reminders", title: "Reminders", text: "Check portal reminders and notices related to deadlines and grading tasks." },
+        { id: "activity-history", title: "Activity History", text: "Review recent changes across your assigned classes in one read-only timeline." },
         { id: "user-guide", title: "Faculty Guide", text: "Open the guide when you need a step-by-step reference for faculty workflows." },
         { id: "privacy-notice", title: "Data Privacy Notice", text: "The privacy notice is always available for faculty reference." }
       ];
