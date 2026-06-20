@@ -34,6 +34,21 @@
   .score-page-footer {
     gap: 0.75rem;
   }
+  .quick-score-unsaved-indicator {
+    display: none;
+    align-items: center;
+    gap: 0.35rem;
+    color: #7a4d00;
+    background: #fff3cd;
+    border: 1px solid #ffdf7e;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 0.35rem 0.65rem;
+  }
+  .quick-score-unsaved-indicator.is-visible {
+    display: inline-flex;
+  }
   @media (max-width: 575.98px) {
     .score-page-header {
       flex-direction: column;
@@ -59,6 +74,10 @@
     .score-page-footer {
       flex-direction: column;
       align-items: stretch !important;
+    }
+    .quick-score-unsaved-indicator {
+      justify-content: center;
+      width: 100%;
     }
     .save-scores-guidance {
       margin-right: 0;
@@ -211,7 +230,7 @@
 <div class="alert alert-info">This period is already submitted. Score editing is disabled.</div>
 {% endif %}
 
-<form method="post" novalidate id="activity-scores-form">
+<form method="post" novalidate id="activity-scores-form"{% if is_editable and quick_score_encoding_enabled %} data-quick-score-encoding="true"{% endif %}>
   {% csrf_token %}
   <div class="card border-0 shadow-sm">
     <div class="card-body pb-0">
@@ -254,6 +273,7 @@
                   max="{{ score_input_max }}"
                   class="form-control form-control-sm"
                   name="raw_{{ row.enrollment.student_id }}"
+                  {% if quick_score_encoding_enabled %}data-score-input="true"{% endif %}
                   value="{% if row.score %}{{ row.score.raw_score }}{% else %}0{% endif %}"
                   placeholder="{% if score_input_mode == 'RAW_BASE50' %}0 to {{ activity.total_score }}{% else %}0 to 100{% endif %}"
                   {% if not is_editable %}disabled{% endif %}
@@ -271,6 +291,11 @@
     </div>
     <div class="card-footer d-flex justify-content-end align-items-center save-scores-footer score-page-footer">
       {% if is_editable %}
+      {% if quick_score_encoding_enabled %}
+      <div class="quick-score-unsaved-indicator" id="quick-score-unsaved-indicator" role="status" aria-live="polite">
+        Unsaved changes
+      </div>
+      {% endif %}
       <div class="save-scores-guidance" id="save-scores-guidance" aria-live="polite" aria-hidden="true">
         <span class="save-scores-guidance-arrow" aria-hidden="true">→</span>
         <span class="save-scores-guidance-text">Click Save Scores here</span>
@@ -290,14 +315,58 @@
     const messageBox = document.getElementById("score-validation-message");
     const saveButton = document.getElementById("save-scores-button");
     const saveGuidance = document.getElementById("save-scores-guidance");
+    const unsavedIndicator = document.getElementById("quick-score-unsaved-indicator");
     if (!form || !messageBox) return;
-    const scoreInputs = Array.from(form.querySelectorAll('input[name^="raw_"]:not([disabled])'));
+    const quickEncodingEnabled = form.dataset.quickScoreEncoding === "true";
+    const scoreInputs = Array.from(form.querySelectorAll('input[name^="raw_"]:not([disabled]):not([readonly])'));
     const initialValues = new Map(scoreInputs.map((input) => [input.name, (input.value || "").trim()]));
     let isSubmitting = false;
     let guidanceTimer = null;
 
     function hasUnsavedChanges() {
       return scoreInputs.some((input) => (input.value || "").trim() !== (initialValues.get(input.name) || ""));
+    }
+
+    function syncUnsavedIndicator() {
+      if (!unsavedIndicator) return;
+      unsavedIndicator.classList.toggle("is-visible", hasUnsavedChanges());
+    }
+
+    function moveScoreFocus(currentInput, direction) {
+      if (!quickEncodingEnabled || !currentInput) return;
+      const currentIndex = scoreInputs.indexOf(currentInput);
+      if (currentIndex < 0) return;
+      const nextInput = scoreInputs[currentIndex + direction];
+      if (!nextInput) return;
+      nextInput.focus();
+      nextInput.select();
+    }
+
+    function singleColumnPasteValues(text) {
+      const rows = text.replace(/\r/g, "").split("\n");
+      if (rows[rows.length - 1] === "") {
+        rows.pop();
+      }
+      if (!rows.length) return null;
+      const values = [];
+      for (const row of rows) {
+        const cells = row.split("\t");
+        const hasExtraValue = cells.slice(1).some((cell) => cell.trim() !== "");
+        if (hasExtraValue) return null;
+        values.push((cells[0] || "").trim());
+      }
+      return values;
+    }
+
+    function pasteScoresDown(startInput, values) {
+      const startIndex = scoreInputs.indexOf(startInput);
+      if (startIndex < 0) return;
+      values.forEach((value, offset) => {
+        const targetInput = scoreInputs[startIndex + offset];
+        if (!targetInput) return;
+        targetInput.value = value;
+        targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+      });
     }
 
     function hideSaveGuidance() {
@@ -343,6 +412,18 @@
       input.addEventListener("keydown", function (event) {
         if (event.key === "Enter") {
           event.preventDefault();
+          moveScoreFocus(input, event.shiftKey ? -1 : 1);
+          return;
+        }
+        if (!quickEncodingEnabled || event.altKey || event.ctrlKey || event.metaKey) {
+          return;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          moveScoreFocus(input, 1);
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault();
+          moveScoreFocus(input, -1);
         }
       });
 
@@ -352,6 +433,18 @@
           messageBox.classList.add("d-none");
           messageBox.textContent = "";
         }
+        syncUnsavedIndicator();
+      });
+
+      input.addEventListener("paste", function (event) {
+        if (!quickEncodingEnabled) return;
+        const clipboardData = event.clipboardData || window.clipboardData;
+        if (!clipboardData) return;
+        const values = singleColumnPasteValues(clipboardData.getData("text"));
+        if (!values) return;
+        event.preventDefault();
+        pasteScoresDown(input, values);
+        syncUnsavedIndicator();
       });
     });
 
@@ -396,6 +489,9 @@
 
       messageBox.classList.add("d-none");
       messageBox.textContent = "";
+      if (unsavedIndicator) {
+        unsavedIndicator.classList.remove("is-visible");
+      }
       hideSaveGuidance();
       isSubmitting = true;
     });
@@ -419,6 +515,13 @@
         event.preventDefault();
       }
     });
+
+    if (quickEncodingEnabled && scoreInputs.length) {
+      window.setTimeout(function () {
+        scoreInputs[0].focus();
+        scoreInputs[0].select();
+      }, 0);
+    }
   });
 </script>
 {% endblock %}

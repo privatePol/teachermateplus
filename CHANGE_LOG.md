@@ -7,6 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added frontend-only Phase 1 Faculty Quick Score Encoding on the existing activity score page. When `FEATURE_FACULTY_QUICK_SCORE_ENCODING` is enabled, editable score inputs support Enter/Shift+Enter and ArrowUp/ArrowDown navigation, single-column paste from spreadsheets, autofocus on the first editable score field, and an unsaved-changes indicator while keeping the existing form, save button, validation, and backend grading workflow.
 - Improved mobile responsiveness for the Faculty Portal activity score encoding page, activity list, attendance encoding page, and attendance summary page by adding safer responsive wrappers, wrapped action rows, and wider mobile-friendly table fallbacks without changing backend workflows.
 - Tightened the shared Faculty Portal quick-jump strip so its buttons wrap more cleanly on narrow screens, and adjusted the mobile table/action layout on the encoding pages for easier phone use.
 - Renamed the floating Faculty Portal guide trigger to `Faculty Quick Guide` and enlarged the icon slightly so it is easier to tap without crowding the page.
@@ -19,6 +20,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Increased Faculty Summary grade-table body row padding for a taller, easier-to-scan grade review table.
 
 ### Changed
+- Added `FEATURE_FACULTY_QUICK_SCORE_ENCODING` to Configuration Management so quick score encoding can be enabled per tenant without changing routes, models, migrations, or grading services. The feature defaults Off for safer rollout.
 - Replaced the Faculty Portal floating `?` guide button with a small `teacher_star.png` icon so the help link is less visually intrusive while keeping the same new-tab guide behavior.
 - Added a contextual `?` help callout to the Faculty Portal `Updates Since Your Last Visit` card so faculty can quickly see what kinds of scoped updates may appear there.
 - Recorded the Faculty Dashboard `Updates Since Your Last Visit` implementation and review outcome in the session handoff, confirming the feature uses prior `LOGIN_SUCCESS` anchors, remains scoped and read-only, and adds no migration or notification module.

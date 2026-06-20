@@ -7,6 +7,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-06-20
+- Current pass: implemented frontend-only Phase 1 Excel-like Quick Encoding for the existing Faculty Portal activity score page behind `FEATURE_FACULTY_QUICK_SCORE_ENCODING`.
 - Current pass: improved mobile responsiveness on the Faculty Portal activity score encoding, activity list, attendance encoding, and attendance summary pages so small screens keep the workflow usable without changing backend behavior.
 - Current pass: updated the public Faculty Portal landing page to explicitly name Performance Trends, Class Performance, and Student Consultation.
 - Session focus: Implemented the Faculty Portal `Updates Since Your Last Visit` dashboard card, using prior successful login audit rows as the anchor and scoped class updates as the read-only feed.
@@ -17,6 +18,16 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Review note: Faculty Dashboard `Updates Since Last Visit` was implemented and reviewed. The card shows the latest 5 scoped updates since the faculty member's previous successful login, uses existing `AuditLog` `LOGIN_SUCCESS` rows as the anchor, requires no migration, and does not add a new notification module.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
+
+## Faculty Quick Score Encoding Phase 1
+- Completed work: added a reversible frontend enhancement to `templates/faculty_portal/activity_scores.html` for editable score fields only.
+- Behavior added: Enter moves to the next enabled score input, Shift+Enter moves to the previous input, ArrowDown/ArrowUp move vertically, Tab remains browser-native, the first enabled score field autofocuses, and a single-column paste from Excel/Google Sheets fills enabled score fields downward without auto-submitting.
+- Behavior added: a small `Unsaved changes` indicator appears after edits, and the existing before-unload/link-leave warning remains active for unsaved score changes.
+- Feature control: `FEATURE_FACULTY_QUICK_SCORE_ENCODING` defaults Off through `FeatureSettingsService` for safer rollout and is exposed on Configuration Management. Turning it On adds the quick-encoding activation hook; leaving it Off keeps the original score-entry page behavior.
+- Safety confirmations: no backend score saving, `upsert_activity_scores`, blank-vs-zero handling, grade computation, attendance, enrollment, submissions, locks, corrections, routes, models, or migrations were changed.
+- Changed files: `apps/core/services/features.py`, `apps/admin_portal/forms.py`, `apps/admin_portal/views.py`, `apps/faculty_portal/views.py`, `templates/admin_portal/tools/configurable_features.html`, `templates/faculty_portal/activity_scores.html`, `apps/faculty_portal/tests_assignment_acceptance.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_assignment_acceptance` passed with 117 tests.
+- Pending work / risk: browser smoke test is still recommended on a real score page to feel-check focus movement, paste behavior, and the unsaved indicator on desktop and mobile.
 
 ## Mobile Responsiveness Pass
 - Completed work: improved the Faculty Portal `period_activities`, `activity_scores`, `period_attendance`, and `attendance_summary` pages for phone-sized screens by strengthening responsive table shells, wrapping action rows, and making the shared quick-jump strip wrap more cleanly.

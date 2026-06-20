@@ -4572,6 +4572,10 @@ def activity_scores_view(request, offering_id: int, period_id: int, activity_id:
         "active_approved_reopen_request": state["active_approved_reopen_request"],
         "active_approved_reopen_expires_at": state["active_approved_reopen_expires_at"],
         "can_request_deadline_reopen": state["can_request_deadline_reopen"],
+        "quick_score_encoding_enabled": FeatureSettingsService.is_faculty_quick_score_encoding_enabled(
+            tenant_id=offering.tenant_id,
+            default=False,
+        ),
     }
     return render(request, "faculty_portal/activity_scores.html", context)
 

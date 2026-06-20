@@ -5081,6 +5081,18 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assignment.accepted_by = self.faculty_user
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
         self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_QUICK_SCORE_ENCODING_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        self._create_active_student(
+            student_no="2025-QENC-001",
+            last_name="Quick",
+            first_name="Encode",
+        )
         activity = GradeActivity.objects.create(
             tenant=self.tenant,
             campus=self.campus,
@@ -5109,6 +5121,14 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "score-page-footer")
         self.assertContains(response, "You have unsaved encoded scores. If you leave this page, the encoded data will be lost. Continue?")
         self.assertContains(response, 'event.key === "Enter"')
+        self.assertContains(response, 'data-quick-score-encoding="true"')
+        self.assertContains(response, 'data-score-input="true"')
+        self.assertContains(response, "quick-score-unsaved-indicator")
+        self.assertContains(response, "Unsaved changes")
+        self.assertContains(response, "singleColumnPasteValues")
+        self.assertContains(response, "pasteScoresDown")
+        self.assertContains(response, 'event.key === "ArrowDown"')
+        self.assertContains(response, 'event.key === "ArrowUp"')
         self.assertContains(
             response,
             reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
@@ -5117,6 +5137,73 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             response,
             reverse("faculty_portal:period_attendance", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
         )
+
+    def test_activity_scores_quick_encoding_can_be_disabled_by_feature_flag(self):
+        self._accept_assignment()
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_QUICK_SCORE_ENCODING_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=self.prelim.components.first(),
+            title="Quiz Standard Entry",
+            total_score=50,
+            activity_date=self.term.start_date,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:activity_scores",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id, "activity_id": activity.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "activity-scores-form")
+        self.assertNotContains(response, 'data-quick-score-encoding="true"')
+        self.assertNotContains(response, 'data-score-input="true"')
+        self.assertNotContains(response, 'id="quick-score-unsaved-indicator"')
+        self.assertNotContains(response, "Unsaved changes")
+
+    def test_activity_scores_rejects_score_above_max_without_saving(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-MAX-001",
+            last_name="Max",
+            first_name="Check",
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=self.prelim.components.first(),
+            title="Quiz Max",
+            total_score=50,
+            activity_date=self.term.start_date,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse(
+                "faculty_portal:activity_scores",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id, "activity_id": activity.id},
+            ),
+            {f"raw_{student.id}": "51"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Value must be between 0 and 50")
+        self.assertFalse(StudentActivityScore.objects.filter(activity=activity, student=student).exists())
 
     def test_period_summary_shows_quick_jump_links_to_activities_and_attendance(self):
         self.assignment.accepted_at = timezone.now()

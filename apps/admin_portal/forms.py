@@ -3056,6 +3056,14 @@ class ConfigurableFeatureSettingForm(forms.Form):
         label="Enable faculty portal quick tour",
         help_text="Shows the guided callout tour for faculty users who have not disabled it on their account.",
     )
+    faculty_quick_score_encoding_enabled = forms.BooleanField(
+        required=False,
+        label="Enable faculty quick score encoding",
+        help_text=(
+            "Adds keyboard navigation, single-column paste, autofocus, and an unsaved indicator to the existing "
+            "Faculty Portal score encoding page. Turning this off restores the standard score-entry behavior."
+        ),
+    )
     submission_non_compliance_notice_enabled = forms.BooleanField(
         required=False,
         label="Enable non-compliance notices for overdue grade submissions",
@@ -3505,6 +3513,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
             cleaned["faculty_memo_center_enabled"] = False
         if not cleaned.get("faculty_quick_tour_enabled"):
             cleaned["faculty_quick_tour_enabled"] = False
+        if not cleaned.get("faculty_quick_score_encoding_enabled"):
+            cleaned["faculty_quick_score_encoding_enabled"] = False
         if not cleaned.get("submission_non_compliance_notice_enabled"):
             cleaned["submission_non_compliance_notice_enabled"] = False
         cleaned["submission_non_compliance_notice_interval_days"] = 1

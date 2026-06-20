@@ -706,8 +706,18 @@
         {% endif %}
         {% for error in form.faculty_quick_tour_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
+      <div class="form-check form-switch mb-3">
+        {{ form.faculty_quick_score_encoding_enabled }}
+        <label class="form-check-label" for="{{ form.faculty_quick_score_encoding_enabled.id_for_label }}">
+          {{ form.faculty_quick_score_encoding_enabled.label }}
+        </label>
+        {% if form.faculty_quick_score_encoding_enabled.help_text %}
+        <div class="form-text">{{ form.faculty_quick_score_encoding_enabled.help_text }}</div>
+        {% endif %}
+        {% for error in form.faculty_quick_score_encoding_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
       <div class="alert alert-light border small mb-0">
-        Faculty memos are private to the faculty owner and can optionally be linked to a class or a student for quick follow-up notes. The quick tour is a guided, read-only Faculty Portal orientation.
+        Faculty memos are private to the faculty owner and can optionally be linked to a class or a student for quick follow-up notes. The quick tour and quick score encoding controls are frontend aids only and do not change grading rules.
       </div>
     </div>
     </div>
