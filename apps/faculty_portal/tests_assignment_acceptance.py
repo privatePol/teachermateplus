@@ -387,9 +387,11 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             )
         )
         self.assertEqual(scores_response.status_code, 200)
-        self.assertContains(scores_response, "Configured Detail Weight:")
-        self.assertContains(scores_response, "25.00%")
-        self.assertContains(scores_response, "reference only under Average Activities")
+        self.assertContains(scores_response, "Participation/Output")
+        self.assertContains(scores_response, "Recitation")
+        self.assertNotContains(scores_response, "Configured Detail Weight:")
+        self.assertNotContains(scores_response, "25.00%")
+        self.assertNotContains(scores_response, "reference only under Average Activities")
 
     def test_report_template_issue_hidden_for_reopened_gradebook(self):
         self._accept_assignment()

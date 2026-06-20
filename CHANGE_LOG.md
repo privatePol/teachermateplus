@@ -20,6 +20,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Increased Faculty Summary grade-table body row padding for a taller, easier-to-scan grade review table.
 
 ### Changed
+- Removed reference-only configured detail weights from the Faculty Portal score encoding notice when the activity's subcomponent uses Average Activities, so faculty see the detail name without a misleading weight.
 - Added `FEATURE_FACULTY_QUICK_SCORE_ENCODING` to Configuration Management so quick score encoding can be enabled per tenant without changing routes, models, migrations, or grading services. The feature defaults Off for safer rollout.
 - Replaced the Faculty Portal floating `?` guide button with a small `teacher_star.png` icon so the help link is less visually intrusive while keeping the same new-tab guide behavior.
 - Added a contextual `?` help callout to the Faculty Portal `Updates Since Your Last Visit` card so faculty can quickly see what kinds of scoped updates may appear there.

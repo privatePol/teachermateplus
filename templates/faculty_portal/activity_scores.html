@@ -179,7 +179,9 @@
     | {{ activity.template_component.name }} / {{ activity.template_subcomponent.name }}
     {% if activity.template_detail %}
       / {{ activity.template_detail.name }}
-      (Configured Detail Weight: <strong>{{ activity.template_detail.weight_percentage }}%</strong>{% if activity.template_subcomponent.detail_computation_mode == "AVERAGE_ACTIVITIES" %}; reference only under Average Activities{% endif %})
+      {% if activity.template_subcomponent.detail_computation_mode != "AVERAGE_ACTIVITIES" %}
+      (Configured Detail Weight: <strong>{{ activity.template_detail.weight_percentage }}%</strong>)
+      {% endif %}
     {% endif %}
   {% else %}
     | {{ activity.template_component.name }}

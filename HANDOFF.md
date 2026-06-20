@@ -7,6 +7,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-06-20
+- Current pass: removed reference-only configured detail weights from the Faculty Portal activity score encoding notice for Average Activities.
 - Current pass: implemented frontend-only Phase 1 Excel-like Quick Encoding for the existing Faculty Portal activity score page behind `FEATURE_FACULTY_QUICK_SCORE_ENCODING`.
 - Current pass: improved mobile responsiveness on the Faculty Portal activity score encoding, activity list, attendance encoding, and attendance summary pages so small screens keep the workflow usable without changing backend behavior.
 - Current pass: updated the public Faculty Portal landing page to explicitly name Performance Trends, Class Performance, and Student Consultation.
@@ -28,6 +29,12 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Changed files: `apps/core/services/features.py`, `apps/admin_portal/forms.py`, `apps/admin_portal/views.py`, `apps/faculty_portal/views.py`, `templates/admin_portal/tools/configurable_features.html`, `templates/faculty_portal/activity_scores.html`, `apps/faculty_portal/tests_assignment_acceptance.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
 - Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_assignment_acceptance` passed with 117 tests.
 - Pending work / risk: browser smoke test is still recommended on a real score page to feel-check focus movement, paste behavior, and the unsaved indicator on desktop and mobile.
+
+## Faculty Score Notice Cleanup
+- Completed work: updated `templates/faculty_portal/activity_scores.html` so Average Activities notices keep the detail name but no longer display `Configured Detail Weight` or reference-only weight text on the score encoding page.
+- Safety confirmations: no backend score saving, blank-vs-zero handling, grade computation, attendance, enrollment, submissions, locks, corrections, routes, models, or migrations were changed.
+- Changed files: `templates/faculty_portal/activity_scores.html`, `apps/faculty_portal/tests_assignment_acceptance.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_average_activity_detail_weight_is_hidden_on_activity_page` passed.
 
 ## Mobile Responsiveness Pass
 - Completed work: improved the Faculty Portal `period_activities`, `activity_scores`, `period_attendance`, and `attendance_summary` pages for phone-sized screens by strengthening responsive table shells, wrapping action rows, and making the shared quick-jump strip wrap more cleanly.
