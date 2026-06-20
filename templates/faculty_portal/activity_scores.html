@@ -1,5 +1,85 @@
 {% extends "faculty_portal/base.html" %}
 
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .score-page-header {
+    gap: 0.75rem;
+  }
+  .score-page-header .score-page-title {
+    min-width: 0;
+  }
+  .score-table-shell {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .activity-scores-table {
+    min-width: 760px;
+  }
+  .activity-scores-table thead th {
+    white-space: nowrap;
+  }
+  .activity-scores-table .score-student-name {
+    white-space: normal;
+    min-width: 220px;
+    word-break: break-word;
+  }
+  .activity-scores-table .score-input-cell {
+    min-width: 180px;
+  }
+  .activity-scores-table .score-input-cell .form-control {
+    min-width: 0;
+    width: 100%;
+  }
+  .score-page-footer {
+    gap: 0.75rem;
+  }
+  @media (max-width: 575.98px) {
+    .score-page-header {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    .score-page-header .btn {
+      width: 100%;
+    }
+    .score-page-title {
+      font-size: 1rem;
+      line-height: 1.35;
+    }
+    .activity-scores-table {
+      min-width: 620px;
+    }
+    .activity-scores-table th,
+    .activity-scores-table td {
+      padding: 0.55rem 0.6rem;
+    }
+    .score-table-shell {
+      margin-inline: -0.25rem;
+    }
+    .score-page-footer {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    .save-scores-guidance {
+      margin-right: 0;
+      margin-bottom: 0.65rem;
+      width: 100%;
+      justify-content: center;
+    }
+    .save-scores-guidance-text {
+      white-space: normal;
+      text-align: center;
+    }
+    .score-input-cell input {
+      min-width: 120px;
+    }
+    .activity-scores-table .score-input-cell .form-control {
+      min-width: 0;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block faculty_content %}
 <style>
   .save-scores-guidance {
@@ -60,11 +140,11 @@
     }
   }
 </style>
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="h5 mb-0">
+<div class="d-flex justify-content-between align-items-center flex-wrap score-page-header mb-3">
+  <h2 class="h5 mb-0 score-page-title">
     Encode Scores | {{ offering.course.code }} | {{ period.name }} | {{ activity.title }}
   </h2>
-  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:period_activities' offering.id period.id %}">Back to Activities</a>
+  <a class="btn btn-sm btn-outline-secondary text-nowrap" href="{% url 'faculty_portal:period_activities' offering.id period.id %}">Back to Activities</a>
 </div>
 
 {% include "faculty_portal/partials/period_quick_nav.html" with nav_current="activities" %}
@@ -137,12 +217,12 @@
     <div class="card-body pb-0">
       <div class="alert alert-danger d-none" id="score-validation-message" role="alert"></div>
     </div>
-    <div class="table-responsive">
-      <table class="table table-hover mb-0 align-middle">
+    <div class="table-responsive score-table-shell">
+      <table class="table table-hover mb-0 align-middle activity-scores-table">
         <thead>
           <tr>
             <th style="width: 72px;">No.</th>
-            <th>Name</th>
+            <th class="score-student-name">Name</th>
             <th>Status</th>
             <th style="width: 180px;">
               {% if score_input_mode == "RAW_BASE50" %}
@@ -157,7 +237,7 @@
         {% for row in rows %}
           <tr>
             <td>{{ forloop.counter }}</td>
-            <td>{{ row.enrollment.student.last_name }}, {{ row.enrollment.student.first_name }}</td>
+            <td class="score-student-name">{{ row.enrollment.student.last_name }}, {{ row.enrollment.student.first_name }}</td>
             <td>
               {% if row.enrollment.enrollment_status == "ACTIVE" %}
                 <span class="badge text-bg-success">{{ row.enrollment.enrollment_status }}</span>
@@ -165,7 +245,7 @@
                 <span class="badge text-bg-warning">{{ row.enrollment.enrollment_status }}</span>
               {% endif %}
             </td>
-            <td>
+            <td class="score-input-cell">
               {% if row.enrollment.enrollment_status == "ACTIVE" %}
                 <input
                   type="number"
@@ -189,7 +269,7 @@
         </tbody>
       </table>
     </div>
-    <div class="card-footer d-flex justify-content-end align-items-center save-scores-footer">
+    <div class="card-footer d-flex justify-content-end align-items-center save-scores-footer score-page-footer">
       {% if is_editable %}
       <div class="save-scores-guidance" id="save-scores-guidance" aria-live="polite" aria-hidden="true">
         <span class="save-scores-guidance-arrow" aria-hidden="true">→</span>

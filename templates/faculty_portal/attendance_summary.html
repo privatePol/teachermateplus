@@ -1,14 +1,77 @@
 {% extends "faculty_portal/base.html" %}
 
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .attendance-summary-header {
+    gap: 0.75rem;
+  }
+  .attendance-summary-header .attendance-summary-title {
+    min-width: 0;
+  }
+  .attendance-summary-header .btn {
+    white-space: nowrap;
+  }
+  .attendance-summary-table-shell {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .attendance-summary-table {
+    min-width: 1040px;
+  }
+  .attendance-summary-table thead th {
+    white-space: nowrap;
+  }
+  .attendance-summary-table .attendance-summary-name {
+    white-space: normal;
+    min-width: 220px;
+    word-break: break-word;
+  }
+  .attendance-summary-filters {
+    gap: 0.5rem;
+  }
+  .attendance-summary-filters .btn {
+    min-width: 8.5rem;
+  }
+  @media (max-width: 575.98px) {
+    .attendance-summary-header {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    .attendance-summary-header .btn {
+      width: 100%;
+    }
+    .attendance-summary-title {
+      font-size: 1rem;
+      line-height: 1.35;
+    }
+    .attendance-summary-table {
+      min-width: 900px;
+    }
+    .attendance-summary-table th,
+    .attendance-summary-table td {
+      padding: 0.55rem 0.6rem;
+    }
+    .attendance-summary-table-shell {
+      margin-inline: -0.25rem;
+    }
+    .attendance-summary-filters .btn {
+      flex: 1 1 calc(50% - 0.25rem);
+      justify-content: center;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block faculty_content %}
-<div class="d-flex justify-content-between align-items-start mb-3">
+<div class="d-flex justify-content-between align-items-start flex-wrap attendance-summary-header mb-3">
   <div>
-    <h2 class="h5 mb-1">Attendance Summary</h2>
+    <h2 class="h5 mb-1 attendance-summary-title">Attendance Summary</h2>
     <div class="text-muted small">Coverage: {{ coverage_label }}</div>
   </div>
   <div class="d-flex gap-2 flex-wrap">
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:period_attendance' offering.id period.id %}">Back to Attendance</a>
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+    <a class="btn btn-sm btn-outline-secondary text-nowrap" href="{% url 'faculty_portal:period_attendance' offering.id period.id %}">Back to Attendance</a>
+    <a class="btn btn-sm btn-outline-secondary text-nowrap" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
   </div>
 </div>
 
@@ -43,10 +106,10 @@
   </div>
 </div>
 
-<form method="get" class="d-flex flex-wrap gap-2 mb-3">
+<form method="get" class="d-flex flex-wrap attendance-summary-filters mb-3">
   {% for item in status_filter_options %}
     <button
-      class="btn btn-sm {% if status_filter == item.value %}btn-primary{% else %}btn-outline-primary{% endif %}"
+      class="btn btn-sm text-nowrap {% if status_filter == item.value %}btn-primary{% else %}btn-outline-primary{% endif %}"
       type="submit"
       name="status"
       value="{{ item.value }}"
@@ -62,12 +125,12 @@
   <div class="alert alert-secondary mb-0">No students match the selected filter.</div>
 {% else %}
   <div class="card border-0 shadow-sm">
-    <div class="table-responsive">
-      <table class="table table-hover align-middle mb-0">
+    <div class="table-responsive attendance-summary-table-shell">
+      <table class="table table-hover align-middle mb-0 attendance-summary-table">
         <thead class="table-light">
           <tr>
             <th>Student No.</th>
-            <th>Student Name</th>
+            <th class="attendance-summary-name">Student Name</th>
             <th>Total Meetings</th>
             <th>Present</th>
             <th>Absent</th>
@@ -84,7 +147,7 @@
           {% for row in summary_rows %}
             <tr>
               <td>{{ row.student_no }}</td>
-              <td>{{ row.student_name }}</td>
+              <td class="attendance-summary-name">{{ row.student_name }}</td>
               <td>{{ row.total_meetings }}</td>
               <td>{{ row.present_count }}</td>
               <td>{{ row.absent_count }}</td>

@@ -1,12 +1,95 @@
 {% extends "faculty_portal/base.html" %}
 
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .attendance-page-header {
+    gap: 0.75rem;
+  }
+  .attendance-page-header .attendance-page-title {
+    min-width: 0;
+  }
+  .attendance-page-header .btn {
+    white-space: nowrap;
+  }
+  .attendance-table-shell {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .attendance-records-table {
+    min-width: 760px;
+  }
+  .attendance-records-table thead th {
+    white-space: nowrap;
+  }
+  .attendance-records-table .attendance-student-name {
+    white-space: normal;
+    min-width: 220px;
+  }
+  .attendance-records-table .attendance-status-cell,
+  .attendance-records-table .attendance-remarks-cell {
+    min-width: 170px;
+  }
+  .attendance-records-table .attendance-student-name {
+    word-break: break-word;
+  }
+  .attendance-session-form .form-control,
+  .attendance-session-selector .form-select {
+    min-width: 0;
+  }
+  @media (max-width: 575.98px) {
+    .attendance-page-header {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    .attendance-page-header .btn {
+      width: 100%;
+    }
+    .attendance-page-title {
+      font-size: 1rem;
+      line-height: 1.35;
+    }
+    .attendance-session-actions {
+      margin-top: 0.25rem;
+    }
+    .attendance-session-actions .btn,
+    .attendance-session-actions .save-action-cue {
+      width: 100%;
+      justify-content: center;
+    }
+    .attendance-table-shell {
+      margin-inline: -0.25rem;
+    }
+    .attendance-records-table {
+      min-width: 720px;
+    }
+    .attendance-records-table th,
+    .attendance-records-table td {
+      padding: 0.55rem 0.6rem;
+    }
+    .attendance-records-table .attendance-student-name {
+      min-width: 180px;
+    }
+    .attendance-records-footer {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    .attendance-records-footer .btn,
+    .attendance-records-footer .save-action-cue {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block faculty_content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="h5 mb-0">
+<div class="d-flex justify-content-between align-items-center flex-wrap attendance-page-header mb-3">
+  <h2 class="h5 mb-0 attendance-page-title">
     Attendance | {{ offering.course.code }} | {{ period.name }}
   </h2>
   <div class="d-flex gap-2 flex-wrap">
-    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+    <a class="btn btn-sm btn-outline-secondary text-nowrap" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
   </div>
 </div>
 
@@ -62,18 +145,18 @@
   <div class="card-header bg-white"><strong>Create or Select Session</strong></div>
   <div class="card-body">
     {% if can_manage_sessions %}
-      <form method="post" class="row g-2 align-items-end" id="attendance-session-form">
+      <form method="post" class="row g-2 align-items-end attendance-session-form" id="attendance-session-form">
         {% csrf_token %}
         <input type="hidden" name="action" value="create_session">
-        <div class="col-md-3">
+        <div class="col-12 col-md-3">
           <label class="form-label">Session Date</label>
           {{ session_form.session_date }}
         </div>
-        <div class="col-md-5">
+        <div class="col-12 col-md-5">
           <label class="form-label">Title (optional)</label>
           {{ session_form.title }}
         </div>
-        <div class="col-md-2">
+        <div class="col-12 col-md-2 attendance-session-actions">
           <div class="save-action-cue justify-content-center mb-2" id="attendance-session-save-cue" aria-hidden="true">
             <span class="save-action-cue-arrow" aria-hidden="true">→</span>
             <span class="save-action-cue-text">Click Save Session</span>
@@ -87,8 +170,8 @@
       </div>
     {% endif %}
     <div class="mt-3">
-      <form method="get" class="row g-2">
-        <div class="col-md-5">
+      <form method="get" class="row g-2 attendance-session-selector">
+        <div class="col-12 col-md-5">
           <label class="form-label">Select Session</label>
           <select class="form-select" name="session_id" onchange="this.form.submit()">
             <option value="">-- Select --</option>
@@ -114,8 +197,8 @@
       <strong>Attendance Records</strong>
       <span class="small text-muted">Session: {{ selected_session.session_date }}{% if selected_session.title %} - {{ selected_session.title }}{% endif %}</span>
     </div>
-    <div class="table-responsive">
-      <table class="table table-hover mb-0 align-middle">
+    <div class="table-responsive attendance-table-shell">
+      <table class="table table-hover mb-0 align-middle attendance-records-table">
         <thead>
           <tr>
             <th>Student No</th>
@@ -128,8 +211,8 @@
         {% for row in attendance_rows %}
           <tr>
             <td>{{ row.enrollment.student.student_no }}</td>
-            <td>{{ row.enrollment.student.last_name }}, {{ row.enrollment.student.first_name }}</td>
-            <td>
+            <td class="attendance-student-name">{{ row.enrollment.student.last_name }}, {{ row.enrollment.student.first_name }}</td>
+            <td class="attendance-status-cell">
               <select class="form-select form-select-sm" name="status_{{ row.enrollment.student_id }}" {% if not is_editable %}disabled{% endif %}>
                 {% for value,label in status_choices %}
                   <option value="{{ value }}" {% if row.record and row.record.status_code == value %}selected{% elif not row.record and value == "P" %}selected{% endif %}>
@@ -138,7 +221,7 @@
                 {% endfor %}
               </select>
             </td>
-            <td>
+            <td class="attendance-remarks-cell">
               <input
                 class="form-control form-control-sm"
                 type="text"
@@ -154,7 +237,7 @@
         </tbody>
       </table>
     </div>
-    <div class="card-footer d-flex justify-content-end align-items-center gap-2 flex-wrap">
+    <div class="card-footer d-flex justify-content-end align-items-center gap-2 flex-wrap attendance-records-footer">
       {% if is_editable %}
       <div class="save-action-cue" id="attendance-records-save-cue" aria-hidden="true">
         <span class="save-action-cue-arrow" aria-hidden="true">→</span>

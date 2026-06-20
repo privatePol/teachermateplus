@@ -1,7 +1,7 @@
-<div class="card border-0 shadow-sm mb-3 no-print">
+<div class="card border-0 shadow-sm mb-3 no-print period-quick-nav">
   <div class="card-body py-2">
-    <div class="d-flex flex-wrap gap-2 align-items-center">
-      <span class="small text-muted fw-semibold me-1">Quick Jump:</span>
+    <div class="d-flex flex-wrap gap-2 align-items-center quick-jump-actions">
+      <span class="small text-muted fw-semibold me-1 quick-jump-label">Quick Jump:</span>
       <a
         class="btn btn-sm {% if nav_current == 'activities' %}btn-success{% else %}btn-outline-success{% endif %}"
         href="{% url 'faculty_portal:period_activities' offering.id period.id %}"

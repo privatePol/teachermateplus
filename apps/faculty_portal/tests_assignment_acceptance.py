@@ -3652,6 +3652,11 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "This period is currently read-only under active grading period governance.")
         self.assertContains(response, "Attendance Records")
+        self.assertContains(response, "period-quick-nav")
+        self.assertContains(response, "attendance-table-shell")
+        self.assertContains(response, "attendance-records-table")
+        self.assertContains(response, "attendance-session-actions")
+        self.assertContains(response, "attendance-records-footer")
         self.assertContains(response, "disabled")
         self.assertNotContains(response, "Save Attendance")
 
@@ -5028,6 +5033,10 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Quick Jump:")
+        self.assertContains(response, "period-quick-nav")
+        self.assertContains(response, "activity-table-shell")
+        self.assertContains(response, "activities-table")
+        self.assertContains(response, "activity-row-actions")
         self.assertContains(
             response,
             reverse("faculty_portal:period_attendance", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
@@ -5093,6 +5102,11 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Quick Jump:")
+        self.assertContains(response, "period-quick-nav")
+        self.assertContains(response, "score-table-shell")
+        self.assertContains(response, "activity-scores-table")
+        self.assertContains(response, "score-page-header")
+        self.assertContains(response, "score-page-footer")
         self.assertContains(response, "You have unsaved encoded scores. If you leave this page, the encoded data will be lost. Continue?")
         self.assertContains(response, 'event.key === "Enter"')
         self.assertContains(

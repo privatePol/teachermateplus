@@ -1,11 +1,93 @@
 {% extends "faculty_portal/base.html" %}
 
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .activity-page-header {
+    gap: 0.75rem;
+  }
+  .activity-page-header .activity-page-title {
+    min-width: 0;
+  }
+  .activity-page-header .btn {
+    white-space: nowrap;
+  }
+  .activity-form-actions {
+    gap: 0.75rem;
+  }
+  .activity-table-shell {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .activities-table {
+    min-width: 960px;
+  }
+  .activities-table thead th {
+    white-space: nowrap;
+  }
+  .activities-table .activity-title-cell {
+    white-space: normal;
+    min-width: 220px;
+    word-break: break-word;
+  }
+  .activity-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+  @media (max-width: 575.98px) {
+    .activity-page-header {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    .activity-page-header .btn {
+      width: 100%;
+    }
+    .activity-page-title {
+      font-size: 1rem;
+      line-height: 1.35;
+    }
+    .activity-form-actions {
+      flex-direction: column;
+      align-items: stretch !important;
+    }
+    .activity-form-actions .btn,
+    .activity-form-actions .save-action-cue {
+      width: 100%;
+      justify-content: center;
+    }
+    .activities-table {
+      min-width: 720px;
+    }
+    .activities-table th,
+    .activities-table td {
+      padding: 0.55rem 0.6rem;
+    }
+    .activity-table-shell {
+      margin-inline: -0.25rem;
+    }
+    .activity-row-actions {
+      flex-direction: column;
+      align-items: stretch !important;
+      width: 100%;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
+    .activity-row-actions .btn,
+    .activity-row-actions form {
+      width: 100%;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block faculty_content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2 class="h5 mb-0">
+<div class="d-flex justify-content-between align-items-center flex-wrap activity-page-header mb-3">
+  <h2 class="h5 mb-0 activity-page-title">
     {{ offering.course.code }} | {{ period.name }} | Activities
   </h2>
-  <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
+  <a class="btn btn-sm btn-outline-secondary text-nowrap" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
 </div>
 
 {% include "faculty_portal/partials/period_quick_nav.html" with nav_current="activities" %}
@@ -109,7 +191,7 @@
         {% for e in form.activity_date.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
       </div>
       </form>
-    <div class="d-flex justify-content-end align-items-center gap-2 flex-wrap mt-3">
+    <div class="d-flex justify-content-end align-items-center flex-wrap activity-form-actions mt-3">
       <div class="save-action-cue" id="activity-save-cue" aria-hidden="true">
         <span class="save-action-cue-arrow" aria-hidden="true">&rarr;</span>
         <span class="save-action-cue-text">{% if editing_activity %}Click Update Activity{% else %}Click Save Activity{% endif %}</span>
@@ -129,12 +211,12 @@
     <strong>Activities</strong>
     <small class="text-muted">Active Students: {{ active_enrollment_count }}</small>
   </div>
-  <div class="table-responsive">
-    <table class="table table-hover mb-0">
+  <div class="table-responsive activity-table-shell">
+    <table class="table table-hover mb-0 activities-table">
       <thead>
         <tr>
           <th>Date</th>
-          <th>Title</th>
+          <th class="activity-title-cell">Title</th>
           <th>Component</th>
           <th>Subcomponent</th>
           <th>Detail</th>
@@ -151,7 +233,7 @@
       {% for row in activities %}
         <tr>
           <td>{{ row.activity_date|default:"-" }}</td>
-          <td>{{ row.title }}</td>
+          <td class="activity-title-cell">{{ row.title }}</td>
           <td>{{ row.template_component.name }}</td>
           <td>{{ row.template_subcomponent.name|default:"-" }}</td>
           <td>{{ row.template_detail.name|default:"-" }}</td>
@@ -168,7 +250,7 @@
           <td>{{ row.total_score }}</td>
           <td>{{ row.score_count }}</td>
           <td class="text-end">
-            <div class="d-inline-flex gap-2">
+            <div class="d-flex align-items-center justify-content-end activity-row-actions">
               <a class="btn btn-sm btn-outline-primary" href="{% url 'faculty_portal:activity_scores' offering.id period.id row.id %}">
                 Encode Scores
               </a>

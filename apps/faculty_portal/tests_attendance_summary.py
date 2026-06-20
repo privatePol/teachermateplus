@@ -418,6 +418,10 @@ class FacultyAttendanceSummaryTests(TestCase):
         self.assertContains(response, "Coverage: Beginning of class to current date")
         self.assertContains(response, "Course Units")
         self.assertContains(response, "Maximum Allowable Absences")
+        self.assertContains(response, "period-quick-nav")
+        self.assertContains(response, "attendance-summary-filters")
+        self.assertContains(response, "attendance-summary-table-shell")
+        self.assertContains(response, "attendance-summary-table")
         self.assertEqual(response.context["allowable_limit_display"], "10")
 
     def test_faculty_cannot_open_attendance_summary_for_unassigned_class(self):
@@ -497,3 +501,4 @@ class FacultyAttendanceSummaryTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No attendance records have been encoded for this class yet.")
+        self.assertContains(response, "attendance-summary-table")
