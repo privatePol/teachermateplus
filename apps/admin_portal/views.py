@@ -9612,24 +9612,47 @@ def enrollment_update_view(request, enrollment_id: int):
 
 
 def _enrollment_adjustment_offering_label(offering):
-    return f"{offering.academic_year.code} / {offering.term.code} / {offering.campus.code} / {offering.course.code} / {offering.section.code}"
+    course_title = (offering.course.title or "").strip()
+    course_code = (offering.course.code or "").strip()
+    section_name = (offering.section.name or "").strip()
+    section_code = (offering.section.code or "").strip()
+    course_label = f"{course_title} ({course_code})" if course_title and course_code else course_title or course_code
+    section_label = f"{section_name} ({section_code})" if section_name and section_code and section_name != section_code else section_name or section_code
+    return f"{course_label} / {section_label}" if section_label else course_label
+
+
+def _enrollment_adjustment_offering_option(offering):
+    course_title = (offering.course.title or "").strip()
+    course_code = (offering.course.code or "").strip()
+    return {
+        "id": offering.id,
+        "label": _enrollment_adjustment_offering_label(offering),
+        "course_title": course_title,
+        "course_code": course_code,
+        "search_text": f"{course_code} {course_title}".strip().lower(),
+        "academic_year_id": offering.academic_year_id,
+        "term_id": offering.term_id,
+        "campus_id": offering.campus_id,
+    }
 
 
 def _enrollment_adjustment_form_context(request, *, data=None, initial=None):
-    source_offering_qs = AdminScopeService.scoped_course_offerings(request).order_by(
+    offering_qs = AdminScopeService.scoped_course_offerings(request).select_related(
+        "academic_year",
+        "term",
+        "campus",
+        "course",
+        "section",
+    ).order_by(
+        "course__title",
+        "course__code",
+        "section__code",
         "academic_year__code",
         "term__sequence_no",
         "campus__code",
-        "course__code",
-        "section__code",
     )
-    destination_offering_qs = AdminScopeService.scoped_course_offerings(request).order_by(
-        "academic_year__code",
-        "term__sequence_no",
-        "campus__code",
-        "course__code",
-        "section__code",
-    )
+    source_offering_qs = offering_qs
+    destination_offering_qs = offering_qs
     academic_year_id = (data or initial or {}).get("academic_year") or (data or initial or {}).get("academic_year_id")
     term_id = (data or initial or {}).get("term") or (data or initial or {}).get("term_id")
     campus_id = (data or initial or {}).get("campus") or (data or initial or {}).get("campus_id")
@@ -9642,6 +9665,7 @@ def _enrollment_adjustment_form_context(request, *, data=None, initial=None):
         destination_offering_qs = destination_offering_qs.filter(term_id=term_id)
     if campus_id:
         source_offering_qs = source_offering_qs.filter(campus_id=campus_id)
+        destination_offering_qs = destination_offering_qs.filter(campus_id=campus_id)
 
     source_offering = None
     enrollment_qs = Enrollment.objects.none()
@@ -9661,7 +9685,8 @@ def _enrollment_adjustment_form_context(request, *, data=None, initial=None):
     )
     form.fields["source_offering"].label_from_instance = _enrollment_adjustment_offering_label
     form.fields["destination_offering"].label_from_instance = _enrollment_adjustment_offering_label
-    return form, source_offering, enrollment_qs
+    offering_options = [_enrollment_adjustment_offering_option(offering) for offering in offering_qs]
+    return form, source_offering, enrollment_qs, offering_options
 
 
 @portal_required("ADMIN")
@@ -9678,7 +9703,10 @@ def enrollment_adjustments_view(request):
     )
 
     if request.method == "POST":
-        form, source_offering, enrollment_qs = _enrollment_adjustment_form_context(request, data=request.POST)
+        form, source_offering, enrollment_qs, offering_options = _enrollment_adjustment_form_context(
+            request,
+            data=request.POST,
+        )
         if form.is_valid():
             destination_offering = form.cleaned_data["destination_offering"]
             if form.cleaned_data.get("transfer_entire_class"):
@@ -9717,7 +9745,10 @@ def enrollment_adjustments_view(request):
             "source_offering": request.GET.get("source_offering"),
             "destination_offering": request.GET.get("destination_offering"),
         }
-        form, source_offering, enrollment_qs = _enrollment_adjustment_form_context(request, initial=initial)
+        form, source_offering, enrollment_qs, offering_options = _enrollment_adjustment_form_context(
+            request,
+            initial=initial,
+        )
 
     scoped_offering_ids = AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True)
     history = (
@@ -9745,6 +9776,7 @@ def enrollment_adjustments_view(request):
         "selected_student_ids": selected_student_ids,
         "can_process": can_process,
         "history": history,
+        "offering_options": offering_options,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/enrollment/enrollment_adjustments.html", context)

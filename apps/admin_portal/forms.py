@@ -110,8 +110,12 @@ class EnrollmentAdjustmentForm(forms.Form):
         self.fields["term"].queryset = term_queryset or Term.objects.none()
         self.fields["campus"].queryset = campus_queryset or Campus.objects.none()
         default_offering_queryset = offering_queryset or CourseOffering.objects.none()
-        self.fields["source_offering"].queryset = source_offering_queryset or default_offering_queryset
-        self.fields["destination_offering"].queryset = destination_offering_queryset or default_offering_queryset
+        self.fields["source_offering"].queryset = (
+            source_offering_queryset if source_offering_queryset is not None else default_offering_queryset
+        )
+        self.fields["destination_offering"].queryset = (
+            destination_offering_queryset if destination_offering_queryset is not None else default_offering_queryset
+        )
         self.fields["selected_students"].choices = [
             (
                 str(enrollment.student_id),
@@ -121,6 +125,11 @@ class EnrollmentAdjustmentForm(forms.Form):
         ]
         for field_name in ("academic_year", "term", "campus", "source_offering", "destination_offering"):
             self.fields[field_name].widget.attrs.update({"class": "form-select"})
+        for field_name in ("academic_year", "term", "campus"):
+            self.fields[field_name].widget.attrs["data-enrollment-adjustment-filter"] = "true"
+        for field_name in ("source_offering", "destination_offering"):
+            self.fields[field_name].widget.attrs["data-enrollment-adjustment-offering"] = "true"
+            self.fields[field_name].widget.attrs["data-placeholder"] = "---------"
         self.fields["reason"].widget.attrs.update({"class": "form-control"})
 
     def clean(self):
@@ -207,8 +216,7 @@ def _department_with_campus_label(obj):
 def _offering_label(obj):
     course_label = _course_label(getattr(obj, "course", None))
     section_label = _section_label(getattr(obj, "section", None))
-    term_label = _term_label(getattr(obj, "term", None))
-    return f"{course_label} | {section_label} | {term_label}"
+    return f"{course_label} | {section_label}"
 
 
 def _faculty_label(obj):

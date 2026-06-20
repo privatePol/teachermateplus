@@ -1,6 +1,6 @@
 {% extends "admin_portal/base.html" %}
 
-{% block content %}
+{% block admin_content %}
 <div class="d-flex justify-content-between align-items-start mb-3">
   <div>
     <h2 class="h5 mb-1">Enrollment Adjustments</h2>
@@ -15,11 +15,14 @@
 
 <form method="post" class="card mb-4">
   {% csrf_token %}
-  <div class="card-header fw-semibold">Adjustment Setup</div>
+  <div class="card-header fw-semibold">Step 1 - Adjustment Setup</div>
   <div class="card-body">
     {% if form.non_field_errors %}
       <div class="alert alert-danger">{{ form.non_field_errors }}</div>
     {% endif %}
+    <div class="alert alert-light border small mb-3">
+      Choose the academic year, term, and campus first. The source and destination offering lists will narrow to match those selections.
+    </div>
     <div class="row g-3">
       <div class="col-md-4">
         <label class="form-label" for="{{ form.academic_year.id_for_label }}">Academic Year</label>
@@ -35,11 +38,29 @@
       </div>
       <div class="col-md-6">
         <label class="form-label" for="{{ form.source_offering.id_for_label }}">Source Offering</label>
+        <input
+          type="search"
+          class="form-control form-control-sm mb-2"
+          id="{{ form.source_offering.id_for_label }}-search"
+          data-enrollment-adjustment-offering-search="true"
+          data-target-select="{{ form.source_offering.id_for_label }}"
+          placeholder="Filter by course code or title"
+          autocomplete="off"
+        >
         {{ form.source_offering }}
         <div class="form-text">The class where the student is currently enrolled.</div>
       </div>
       <div class="col-md-6">
         <label class="form-label" for="{{ form.destination_offering.id_for_label }}">Destination Offering</label>
+        <input
+          type="search"
+          class="form-control form-control-sm mb-2"
+          id="{{ form.destination_offering.id_for_label }}-search"
+          data-enrollment-adjustment-offering-search="true"
+          data-target-select="{{ form.destination_offering.id_for_label }}"
+          placeholder="Filter by course code or title"
+          autocomplete="off"
+        >
         {{ form.destination_offering }}
         <div class="form-text">The class where the student should be moved.</div>
       </div>
@@ -256,9 +277,104 @@
     </table>
   </div>
 </div>
+{{ offering_options|json_script:"enrollment-adjustment-offering-options" }}
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const selectAllButton = document.getElementById("select-all-students");
+    const offeringOptionsElement = document.getElementById("enrollment-adjustment-offering-options");
+    const academicYearField = document.getElementById("{{ form.academic_year.id_for_label }}");
+    const termField = document.getElementById("{{ form.term.id_for_label }}");
+    const campusField = document.getElementById("{{ form.campus.id_for_label }}");
+    const sourceOfferingField = document.getElementById("{{ form.source_offering.id_for_label }}");
+    const destinationOfferingField = document.getElementById("{{ form.destination_offering.id_for_label }}");
+    const sourceOfferingSearchField = document.getElementById("{{ form.source_offering.id_for_label }}-search");
+    const destinationOfferingSearchField = document.getElementById("{{ form.destination_offering.id_for_label }}-search");
+
+    let offeringOptions = [];
+    if (offeringOptionsElement) {
+      try {
+        offeringOptions = JSON.parse(offeringOptionsElement.textContent || "[]");
+      } catch (error) {
+        offeringOptions = [];
+      }
+    }
+
+    function getFilteredOfferingOptions() {
+      const selectedAcademicYearId = academicYearField ? academicYearField.value : "";
+      const selectedTermId = termField ? termField.value : "";
+      const selectedCampusId = campusField ? campusField.value : "";
+
+      return offeringOptions.filter(function (option) {
+        const matchesAcademicYear = !selectedAcademicYearId || String(option.academic_year_id) === String(selectedAcademicYearId);
+        const matchesTerm = !selectedTermId || String(option.term_id) === String(selectedTermId);
+        const matchesCampus = !selectedCampusId || String(option.campus_id) === String(selectedCampusId);
+        return matchesAcademicYear && matchesTerm && matchesCampus;
+      });
+    }
+
+    function rebuildOfferingField(selectField, searchField) {
+      if (!selectField) {
+        return;
+      }
+
+      const previousValue = selectField.value;
+      const searchValue = searchField && searchField.value ? searchField.value.trim().toLowerCase() : "";
+      const placeholderLabel = selectField.dataset.placeholder || "---------";
+
+      selectField.innerHTML = "";
+
+      const placeholderOption = document.createElement("option");
+      placeholderOption.value = "";
+      placeholderOption.textContent = placeholderLabel;
+      selectField.appendChild(placeholderOption);
+
+      const filteredOptions = getFilteredOfferingOptions().filter(function (option) {
+        if (!searchValue) {
+          return true;
+        }
+        const haystack = (option.search_text || option.label || "").toLowerCase();
+        return haystack.indexOf(searchValue) !== -1;
+      });
+
+      let hasPreviousValue = false;
+      filteredOptions.forEach(function (option) {
+        const optionElement = document.createElement("option");
+        optionElement.value = option.id;
+        optionElement.textContent = option.label;
+        if (String(option.id) === String(previousValue)) {
+          optionElement.selected = true;
+          hasPreviousValue = true;
+        }
+        selectField.appendChild(optionElement);
+      });
+
+      if (!hasPreviousValue) {
+        selectField.value = "";
+      }
+    }
+
+    function rebuildAllOfferingFields() {
+      rebuildOfferingField(sourceOfferingField, sourceOfferingSearchField);
+      rebuildOfferingField(destinationOfferingField, destinationOfferingSearchField);
+    }
+
+    if (academicYearField) {
+      academicYearField.addEventListener("change", rebuildAllOfferingFields);
+    }
+    if (termField) {
+      termField.addEventListener("change", rebuildAllOfferingFields);
+    }
+    if (campusField) {
+      campusField.addEventListener("change", rebuildAllOfferingFields);
+    }
+    if (sourceOfferingSearchField) {
+      sourceOfferingSearchField.addEventListener("input", rebuildAllOfferingFields);
+    }
+    if (destinationOfferingSearchField) {
+      destinationOfferingSearchField.addEventListener("input", rebuildAllOfferingFields);
+    }
+    rebuildAllOfferingFields();
+
     if (!selectAllButton) return;
     selectAllButton.addEventListener("click", function () {
       const boxes = document.querySelectorAll('input[name="selected_students"]');
