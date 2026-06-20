@@ -7,49 +7,96 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-06-20
-- Session focus: Clarified Faculty Portal activity score-entry guidance so raw-score items show configured Base value wording and Direct Percentage items clearly auto-use `100`.
+- Current pass: improved mobile responsiveness on the Faculty Portal activity score encoding, activity list, attendance encoding, and attendance summary pages so small screens keep the workflow usable without changing backend behavior.
+- Current pass: updated the public Faculty Portal landing page to explicitly name Performance Trends, Class Performance, and Student Consultation.
+- Session focus: Implemented the Faculty Portal `Updates Since Your Last Visit` dashboard card, using prior successful login audit rows as the anchor and scoped class updates as the read-only feed.
+- Follow-up change: moved the `Updates Since Your Last Visit` card directly below the grade submission deadline banner on the Faculty Dashboard.
+- Follow-up change: increased the bottom spacing on the `Updates Since Your Last Visit` card so it sits farther from the Grade Encoding Status and Pending Grade Issues panels.
+- Follow-up change: added a contextual `?` help callout to the `Updates Since Your Last Visit` card header.
+- Follow-up change: replaced the Faculty Portal floating `?` guide button with a small `teacher_star.png` icon.
+- Review note: Faculty Dashboard `Updates Since Last Visit` was implemented and reviewed. The card shows the latest 5 scoped updates since the faculty member's previous successful login, uses existing `AuditLog` `LOGIN_SUCCESS` rows as the anchor, requires no migration, and does not add a new notification module.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
 
+## Mobile Responsiveness Pass
+- Completed work: improved the Faculty Portal `period_activities`, `activity_scores`, `period_attendance`, and `attendance_summary` pages for phone-sized screens by strengthening responsive table shells, wrapping action rows, and making the shared quick-jump strip wrap more cleanly.
+- Completed work: kept the Faculty User Guide trigger on the compact `teacher_star.png` image and left backend/grading behavior untouched.
+- Changed files: `templates/faculty_portal/partials/period_quick_nav.html`, `templates/faculty_portal/base.html`, `templates/faculty_portal/activity_scores.html`, `templates/faculty_portal/period_activities.html`, `templates/faculty_portal/period_attendance.html`, `templates/faculty_portal/attendance_summary.html`, `apps/faculty_portal/tests_assignment_acceptance.py`, `apps/faculty_portal/tests_attendance_summary.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_assignment_acceptance apps.faculty_portal.tests_attendance_summary` passed with 123 tests.
+- Pending work / risk: browser/device smoke test on iPhone-width, Android-width, tablet, and desktop widths is still recommended for visual confirmation.
+- Exact next step: visually confirm the responsive wrapping on the Faculty Portal encoding pages.
+
+## Faculty Quick Guide Rename
+- Completed work: renamed the floating Faculty Guide trigger to `Faculty Quick Guide` and increased the guide icon/button size slightly for better tapability.
+- Changed files: `templates/faculty_portal/base.html`, `apps/faculty_portal/tests_help_guide.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_help_guide` passed with 4 tests.
+
+## Public Landing Copy
+- Completed work: tightened the public Faculty Portal landing copy so Performance Trends, Class Performance, and Student Consultation are named explicitly in the intro text.
+- Changed files: `templates/faculty_portal/public_index.html`, `apps/faculty_portal/tests_public_login.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_public_login` passed with 6 tests.
+
 ## Completed In This Session
-- Faculty Portal activity setup score-entry guidance:
-  - raw-score activities now show `Total Items` and the help text `Required. Scores will be transmuted using the configured Base value rule.`
-  - Direct Percentage activities now dynamically show `Total Score`, auto-fill `100`, and make the field read-only in the browser
-  - activity dropdown option data now carries component/subcomponent/detail score-entry modes so the browser follows the same inheritance rule as the backend
-  - raw-score entry method display now reads `Raw Score (Configured Base)` instead of `Raw Score (Base-50)` while preserving the internal `RAW_BASE50` constant
-  - score-encoding pages now show `Total Items` for raw-score activities
+- Faculty Portal dashboard `Updates Since Your Last Visit`:
+  - added a read-only dashboard card that uses the prior successful faculty login as the `since_at` anchor
+  - scoped the feed to the faculty member's active offerings using the existing faculty portal scope
+  - surfaced the latest five low-risk updates from existing timestamped records, including assignments, enrollments, enrollment adjustments, reopened submissions, correction decisions, reminders, notices, and deadline warnings
+  - moved the card directly under the grade submission deadline banner for clearer priority ordering on the dashboard
+  - increased the card's bottom spacing so it visually separates from the panels below it
+  - added a contextual `?` help callout in the card header explaining what appears in the feed
+  - added focused regression tests for empty-login state, prior-login anchor selection, scope filtering, reopened submissions, correction decisions, and newest-five truncation
+  - kept the feature read-only with no new model or migration
+- Faculty Portal guide button update:
+  - replaced the floating `?` guide button with a smaller `teacher_star.png` icon while keeping the guide open-in-new-tab behavior
+- Review confirmation: no faculty, campus, class, or student data leakage was found; the previous-login anchor uses the prior `LOGIN_SUCCESS` row rather than the current login; updates are newest-first with priority tie-breaker; empty/no-prior-login state fails safely; no migrations were added; and no login, grading, attendance, enrollment, corrections, locks, or submissions behavior was changed.
 
 ### Changed Files For This Ending Pass
-- `apps/faculty_portal/forms.py`
+- `apps/faculty_portal/tests_dashboard_updates.py`
 - `apps/faculty_portal/tests_assignment_acceptance.py`
-- `apps/faculty_portal/views.py`
-- `apps/grading/services.py`
+- `apps/faculty_portal/tests_attendance_summary.py`
+- `apps/faculty_portal/tests_help_guide.py`
+- `apps/faculty_portal/tests_public_login.py`
 - `templates/faculty_portal/activity_scores.html`
+- `templates/faculty_portal/attendance_summary.html`
+- `templates/faculty_portal/base.html`
+- `templates/faculty_portal/partials/period_quick_nav.html`
 - `templates/faculty_portal/period_activities.html`
+- `templates/faculty_portal/period_attendance.html`
+- `templates/faculty_portal/public_index.html`
 - `CHANGE_LOG.md`
 - `TEACHERMATEPLUS_CONTEXT.md`
 - `HANDOFF.md`
 
 ### Pending Work / Known Issues / Risks
-- Browser smoke test still recommended on `Faculty Portal -> Activities`: select a raw-score component and a Direct Percentage component/detail to confirm the label/help text and `100` auto-fill feel right in the real UI.
-- Existing dirty worktree contains unrelated files from prior session work, including enrollment-adjustment and attendance-summary files. Do not assume every dirty file listed by `git diff --name-only` belongs to this score-entry guidance change.
+- Browser smoke test still recommended on the Faculty Dashboard to confirm the new card layout, ordering, and empty state feel right in the real UI.
+- Existing dirty worktree contains unrelated files from prior session work, including enrollment-adjustment and attendance-summary files. Do not assume every dirty file listed by `git diff --name-only` belongs to this dashboard update change.
 
 ### Validations Actually Executed For This Ending Pass
 ```powershell
 & 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py check
-# System check identified no issues
+# System check identified no issues (0 silenced).
 
-& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_activities_exposes_score_entry_method_guidance_data apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_raw_score_entry_method_label_uses_configured_base_wording
-# 2 tests passed
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_assignment_acceptance apps.faculty_portal.tests_attendance_summary
+# 123 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_public_login
+# 6 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_help_guide
+# 4 tests passed
+
+& 'C:\Users\Lenovo\AppData\Local\Python\pythoncore-3.14-64\python.exe' manage.py test apps.faculty_portal.tests_dashboard_updates
+# 12 tests passed
 ```
 
 ### Exact Next Steps For Next Codex Session
 1. Read `AGENTS.md`, `TEACHERMATEPLUS_CONTEXT.md`, `CHANGE_LOG.md`, and this file before making changes.
-2. Smoke-test `Faculty Portal -> Activities` in a browser:
-   - confirm raw-score items show `Total Items` and configured Base value guidance
-   - confirm Direct Percentage items show `Total Score`, auto-fill `100`, and keep the field read-only
-   - confirm score-entry pages show `Total Items` for raw-score activities and `Encode percentage directly from 0 to 100` for Direct Percentage activities
-3. If the browser smoke test shows a mismatch, adjust only the activity form/template score-entry guidance path.
+2. Smoke-test the Faculty Portal in a browser:
+   - confirm the new updates card appears in the dashboard shell
+   - confirm the empty state shows the no-previous-login message
+   - confirm the latest-5 truncation and ordering feel readable
+   - confirm the responsive score, activity, attendance, and attendance-summary pages at phone, tablet, and desktop widths
+3. If the browser smoke test shows a mismatch, adjust only the affected Faculty Portal template/CSS path.
 
 - Faculty Portal guide refresh:
   - Removed the `Top Faculty Tasks` block from `/faculty/guide/`.

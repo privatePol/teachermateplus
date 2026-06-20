@@ -7,6 +7,11 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Improved mobile responsiveness for the Faculty Portal activity score encoding page, activity list, attendance encoding page, and attendance summary page by adding safer responsive wrappers, wrapped action rows, and wider mobile-friendly table fallbacks without changing backend workflows.
+- Tightened the shared Faculty Portal quick-jump strip so its buttons wrap more cleanly on narrow screens, and adjusted the mobile table/action layout on the encoding pages for easier phone use.
+- Renamed the floating Faculty Portal guide trigger to `Faculty Quick Guide` and enlarged the icon slightly so it is easier to tap without crowding the page.
+- Added a clearer public Faculty Portal landing-page callout for Performance Trends, Class Performance, and Student Consultation so the intro copy matches the available faculty tools.
+- Added Faculty Portal dashboard card `Updates Since Your Last Visit`, driven by the prior successful faculty login and scoped to the faculty member's active class offerings. The card is read-only, shows the latest 5 scoped updates, and surfaces low-risk class changes such as assignments, enrollments, reopen requests, correction decisions, reminders, notices, and near-deadline warnings.
 - Reworked `/faculty/guide/` with collapsed `Semester Faculty Workflow` and `Daily Faculty Workflow` accordions, removed the `Top Faculty Tasks` strip, used `media/portal-img/semester_workflow.png` for the semester workflow visual, and added click-by-click `How to open` instructions plus screenshot modal buttons for key faculty pages including My Classes, Dashboard, Activities, Score Encoding, Attendance, and Summary.
 - Updated the Faculty Portal floating `?` help button to open the Faculty User Guide in a separate browser tab with `noopener noreferrer`, keeping the current faculty workflow page open.
 - Added Faculty Portal `Attendance Summary` for `/faculty/my-courses/<offering_id>/periods/<period_id>/attendance/summary/`, showing read-only attendance totals from class start to today, the 2/3/4/5/6-unit allowable-absence policy, status filters, and at-risk sorting with a consecutive-absence warning when a student misses three sessions in a row.
@@ -14,6 +19,11 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Increased Faculty Summary grade-table body row padding for a taller, easier-to-scan grade review table.
 
 ### Changed
+- Replaced the Faculty Portal floating `?` guide button with a small `teacher_star.png` icon so the help link is less visually intrusive while keeping the same new-tab guide behavior.
+- Added a contextual `?` help callout to the Faculty Portal `Updates Since Your Last Visit` card so faculty can quickly see what kinds of scoped updates may appear there.
+- Recorded the Faculty Dashboard `Updates Since Your Last Visit` implementation and review outcome in the session handoff, confirming the feature uses prior `LOGIN_SUCCESS` anchors, remains scoped and read-only, and adds no migration or notification module.
+- Increased the vertical spacing below the Faculty Portal `Updates Since Your Last Visit` card so it separates more clearly from the Grade Encoding Status and Pending Grade Issues panels.
+- Moved the Faculty Portal `Updates Since Your Last Visit` card directly under the grade submission deadline banner so the dashboard reads in a clearer priority order.
 - Clarified Faculty Portal activity setup for score-entry methods. Raw-score activities now show `Total Items` with configured Base value guidance, Direct Percentage activities dynamically show `Total Score`, auto-fill `100`, and display raw-score entry as `Raw Score (Configured Base)` instead of the misleading fixed `Base-50` label.
 - Tightened the Enrollment Adjustment Tool page so source and destination offerings now filter from the selected Academic Year, Term, and Campus, the offering labels now omit academic year/term/campus details, and the setup section now reads as Step 1 so the flow matches the visible page structure.
 - Sorted the Enrollment Adjustment Tool source and destination offering dropdowns by course title so the available classes read in a more natural course-description order within the selected scope.
