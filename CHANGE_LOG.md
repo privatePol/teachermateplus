@@ -7,6 +7,10 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added admin-editable `grade_column_label` support to grading template periods so faculty and admin grade summary tables can use a custom current-period header, with the existing tabulation label as the fallback and `FINAL GRADE` unchanged.
+- Updated the Faculty Portal final-period summary so prior period headers also respect each period's admin-set `grade_column_label`, letting PRELIM, MIDTERM, and PRE-FINAL render custom display labels while keeping the overall `FINAL GRADE` column unchanged.
+- Updated the printable final-period report of grades so it follows the grading template labels too, showing the configured PRELIM, MIDTERM, PRE-FINAL, final-period, and `FINAL GRADE` columns instead of collapsing the report to only the final-period grade.
+- Updated the grade explanation modal so the current-period label and official-grade prose follow the same periodic column-label rules, avoiding duplicated `Grade` wording while still keeping the final-course `FINAL GRADE` breakdown labels intact.
 - Added Generate Password support to the Admin Portal user change-password page and send the updated temporary credentials to the affected user's email using the standard TeacherMate+ credential card format.
 - Added frontend-only Phase 1 Faculty Quick Score Encoding on the existing activity score page. When `FEATURE_FACULTY_QUICK_SCORE_ENCODING` is enabled, editable score inputs support Enter/Shift+Enter and ArrowUp/ArrowDown navigation, single-column paste from spreadsheets, autofocus on the first editable score field, and an unsaved-changes indicator while keeping the existing form, save button, validation, and backend grading workflow.
 - Improved mobile responsiveness for the Faculty Portal activity score encoding page, activity list, attendance encoding page, and attendance summary page by adding safer responsive wrappers, wrapped action rows, and wider mobile-friendly table fallbacks without changing backend workflows.
@@ -21,6 +25,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Increased Faculty Summary grade-table body row padding for a taller, easier-to-scan grade review table.
 
 ### Changed
+- Updated the Faculty Portal period summary table so the current-period column uses a display-only label from the tabulation helper. FINAL/FINALS/FX now show as `FINAL EXAM`, while the computed overall course grade remains `FINAL GRADE`.
 - Refined the Faculty Portal Activities taxonomy badges with a more vibrant palette: class standing stays light blue, exam-related rows use orange, subcomponent and detail badges use distinct accent colors, and badge text is no longer bold.
 - Updated the Faculty Portal Activities table to use compact icon-only Encode Scores, Edit, and Delete actions with accessible labels, show component/subcomponent/detail as distinct color badges, remove the `Entry Method` column, and rename the period quick-jump `Summary` button to `Grade Summary`.
 - Removed reference-only configured detail weights from the Faculty Portal score encoding notice when the activity's subcomponent uses Average Activities, so faculty see the detail name without a misleading weight.

@@ -813,7 +813,13 @@
         <th class="print-row-no">No.</th>
         <th class="print-student-no">Student No</th>
         <th>Student Name</th>
-        <th class="print-grade">{{ period.name }} Grade</th>
+        {% for prior in prior_period_headers %}
+        <th class="print-grade print-prior-grade">{{ prior.label }}</th>
+        {% endfor %}
+        <th class="print-grade print-period-grade">{{ period_grade_header_label }}</th>
+        {% if show_official_final_grade %}
+        <th class="print-grade print-final-grade">FINAL GRADE</th>
+        {% endif %}
         <th class="print-grade-status">Status</th>
       </tr>
     </thead>
@@ -823,12 +829,18 @@
         <td class="print-row-no">{{ forloop.counter }}</td>
         <td class="print-student-no">{{ row.student.student_no }}</td>
         <td>{{ row.student.last_name }}, {{ row.student.first_name }}</td>
-        <td class="print-grade">{{ row.period_grade|default:"" }}</td>
+        {% for value in row.prior_period_grades %}
+        <td class="print-grade print-prior-grade">{{ value|default:"" }}</td>
+        {% endfor %}
+        <td class="print-grade print-period-grade">{{ row.period_grade|default:"" }}</td>
+        {% if show_official_final_grade %}
+        <td class="print-grade print-final-grade">{{ row.final_grade|default:"" }}</td>
+        {% endif %}
         <td class="print-grade-status">{{ row.print_grade_status }}</td>
       </tr>
       {% empty %}
       <tr>
-        <td colspan="5" class="text-center">No summary rows available.</td>
+        <td colspan="{{ print_sheet_colspan }}" class="text-center">No summary rows available.</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -863,7 +875,7 @@
             <th rowspan="4" class="metric-col metric-final">{{ prior.label }}</th>
           {% endfor %}
           {% if show_official_period_grade %}
-          <th rowspan="4" class="metric-col metric-final">{{ period.name|upper }} Grade</th>
+          <th rowspan="4" class="metric-col metric-final">{{ period_grade_header_label }}</th>
           {% endif %}
           {% if show_official_final_grade %}
           <th rowspan="4" class="metric-col metric-final">FINAL GRADE</th>

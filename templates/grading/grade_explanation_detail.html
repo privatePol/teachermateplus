@@ -93,7 +93,7 @@
     </div>
     <div class="grade-explain-final">
       <div class="grade-explain-final-label">
-        {% if explanation.grade_type == "FINAL" %}Final Grade{% else %}Final {{ explanation.period.name }} Grade{% endif %}
+        {% if explanation.grade_type == "FINAL" %}Final Grade{% else %}{{ explanation.period_label|default:explanation.period.name }}{% endif %}
       </div>
       <div class="grade-explain-final-value">
         {{ explanation.official_value|default_if_none:explanation.computed_official_value|default_if_none:"-" }}
@@ -127,7 +127,7 @@
     <div class="grade-explain-card-grid">
       {% for row in explanation.period_breakdown %}
       <article class="grade-explain-card">
-        <div class="grade-explain-card-title">{{ row.period_name }}</div>
+        <div class="grade-explain-card-title">{{ row.display_label|default:row.period_name }}</div>
         <div class="grade-explain-metric"><span>Period Grade</span><strong>{{ row.period_grade|default_if_none:"-" }}</strong></div>
         <div class="grade-explain-metric"><span>Weight or Share</span><strong>{% if row.weight %}{{ row.weight }}%{% else %}Average share{% endif %}</strong></div>
         <div class="grade-explain-metric"><span>Contribution</span><strong class="grade-explain-contribution">{{ row.contribution|floatformat:2|default_if_none:"-" }}</strong></div>
@@ -140,7 +140,7 @@
     {% if explanation.diagnostic_differs_from_official %}
     <h3 class="grade-explain-section-title">Official Submitted Grade</h3>
     <p class="grade-explain-lead">
-      The official {{ explanation.period.name }} Grade is {{ explanation.official_value|floatformat:2 }}.
+      The official {{ explanation.period_heading_label|default:explanation.period.name }} Grade is {{ explanation.official_value|floatformat:2 }}.
       It remains the recorded grade unless an approved correction or reopen process changes it.
     </p>
     <div class="grade-explain-card-grid">
@@ -148,7 +148,7 @@
         <div class="grade-explain-card-title">Stored Grade Record</div>
         <div class="grade-explain-metric"><span>Class Standing</span><strong>{{ explanation.class_standing|floatformat:2|default_if_none:"-" }}</strong></div>
         <div class="grade-explain-metric"><span>Exam</span><strong>{{ explanation.exam_grade|floatformat:2|default_if_none:"-" }}</strong></div>
-        <div class="grade-explain-metric"><span>Official {{ explanation.period.name }} Grade</span><strong class="grade-explain-contribution">{{ explanation.official_value|floatformat:2 }}</strong></div>
+        <div class="grade-explain-metric"><span>Official {{ explanation.period_heading_label|default:explanation.period.name }} Grade</span><strong class="grade-explain-contribution">{{ explanation.official_value|floatformat:2 }}</strong></div>
       </article>
     </div>
     <div class="alert alert-info mt-3">
@@ -167,8 +167,8 @@
       {% if explanation.raw_value is not None %}from {{ explanation.raw_value|floatformat:2 }}{% endif %}.
     </p>
     {% else %}
-    <h3 class="grade-explain-section-title">{{ explanation.period.name }} Grade Summary</h3>
-    <p class="grade-explain-lead">Your {{ explanation.period.name }} Grade is computed from:</p>
+    <h3 class="grade-explain-section-title">{{ explanation.period_heading_label|default:explanation.period.name }} Grade Summary</h3>
+    <p class="grade-explain-lead">Your {{ explanation.period_heading_label|default:explanation.period.name }} Grade is computed from:</p>
     {% endif %}
     <div class="grade-explain-card-grid">
       {% for component in explanation.component_breakdown %}
@@ -321,7 +321,7 @@
           <tbody>
             {% for row in explanation.period_breakdown %}
             <tr>
-              <td>{{ row.period_name }}</td>
+              <td>{{ row.display_label|default:row.period_name }}</td>
               <td>{{ row.period_grade|default_if_none:"-" }}</td>
               <td>{% if row.missing %}0{% else %}{{ row.value_used }}{% endif %}</td>
               <td>{% if row.weight %}{{ row.weight }}%{% else %}Average divisor{% endif %}</td>

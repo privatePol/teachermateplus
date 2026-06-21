@@ -279,6 +279,7 @@ class GradingTemplatePeriod(TimeStampedModel, ActivatableModel):
     )
     code = models.CharField(max_length=50)
     name = models.CharField(max_length=120)
+    grade_column_label = models.CharField(max_length=80, blank=True, default="")
     sequence_no = models.PositiveIntegerField(default=1)
     weight_percentage = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
 

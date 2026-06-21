@@ -1328,6 +1328,14 @@ def _tabulation_period_label(period):
     return name
 
 
+def _tabulation_period_grade_column_label(period):
+    custom_label = (getattr(period, "grade_column_label", "") or "").strip()
+    if custom_label:
+        return custom_label
+    base_label = _tabulation_period_label(period)
+    return base_label if base_label == "FINAL EXAM" else f"{base_label} GRADE"
+
+
 def _period_sheet_columns_from_layout(section):
     columns = []
     highest_values = []
@@ -5099,6 +5107,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
             template=template,
         )
 
+    period_grade_header_label = _tabulation_period_grade_column_label(period)
+
     final_grade_map = {
         row.student_id: row.final_grade
         for row in StudentFinalGrade.objects.filter(offering_id=offering.id)
@@ -5112,7 +5122,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
         prior_period_headers = [
             {
                 "id": prior.id,
-                "label": f"{prior.name.upper()} GRADE",
+                "label": _tabulation_period_grade_column_label(prior),
             }
             for prior in prior_periods
         ]
@@ -5245,6 +5255,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "offering": offering,
         "template": template,
         "period": period,
+        "period_grade_header_label": period_grade_header_label,
         "summary_layout": summary_layout,
         "visible_exam_components": visible_exam_components,
         "rows": enriched_rows,

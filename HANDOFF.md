@@ -7,6 +7,10 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-06-21
+- Current pass: added admin-editable `grade_column_label` support for grading template periods so the faculty/admin grade summary header can be customized per period while the overall `FINAL GRADE` column stays unchanged.
+- Current pass: updated the Faculty Portal period summary table so the current-period column shows `FINAL EXAM` for the final period while prior period headers can also use admin-set labels such as PG, MG, and PFG, with the computed overall `FINAL GRADE` unchanged.
+- Current pass: updated the printable final-period report of grades so it follows the grading template labels as well, showing the configured PRELIM, MIDTERM, PRE-FINAL, final-period, and `FINAL GRADE` columns.
+- Current pass: aligned the grade explanation modal with the same periodic label rules so the final-period explain window uses `FINAL EXAM` or the admin-configured label without duplicated `Grade` wording, and the final-grade breakdown keeps the display labels in the formula/detail cards.
 - Current pass: refreshed the Faculty Portal Activities taxonomy badges with a more vibrant palette, while keeping icon-only row actions and the `Grade Summary` quick-jump label.
 - Current pass: updated the Faculty Portal Activities table with icon-only action controls, distinct component/subcomponent/detail badges, no `Entry Method` column, and a `Grade Summary` quick-jump label.
 - Current pass: added Generate Password and branded credential email support to Admin Portal user password resets.
@@ -29,6 +33,18 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Safety confirmations: no backend activity saving, score saving, grading computation, attendance, enrollment, submissions, locks, corrections, routes, models, or migrations were changed.
 - Changed files: `templates/faculty_portal/period_activities.html`, `templates/faculty_portal/partials/period_quick_nav.html`, `apps/faculty_portal/tests_assignment_acceptance.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
 - Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_average_activity_detail_weight_is_hidden_on_activity_page` passed.
+
+## Faculty Period Summary Label Fix
+- Completed work: added a display-only `period_grade_header_label` context value in the faculty period summary view and switched the summary template to use it, so final periods show `FINAL EXAM` while normal periods still show `<PERIOD NAME> GRADE`.
+- Completed work: added admin-editable `grade_column_label` support to grading template periods so the summary header can use a custom label when configured and still fall back to the tabulation helper when blank.
+- Completed work: applied the same label logic to prior period headers in the final summary table so PRELIM, MIDTERM, and PRE-FINAL can reflect their configured display labels.
+- Completed work: updated the printable final-period report of grades to use the same label logic, so the PDF/print view no longer collapses to only the final-period grade column.
+- Completed work: aligned the grade explanation modal with the same periodic label rules so the final-period explain window uses `FINAL EXAM` or the admin-configured label without duplicated `Grade` wording, and the final-grade breakdown keeps the display labels in the formula/detail cards.
+- Safety confirmations: no grading template names/codes, grade computation, submission logic, or final course grade calculation were changed.
+- Changed files: `apps/grading/models.py`, `apps/grading/migrations/0030_gradingtemplateperiod_grade_column_label.py`, `apps/grading/duplication.py`, `apps/admin_portal/forms.py`, `apps/admin_portal/tests_template_department_visibility.py`, `apps/faculty_portal/views.py`, `templates/faculty_portal/period_summary.html`, `templates/faculty_portal/guide.html`, `templates/faculty_portal/guide_manual.html`, `apps/faculty_portal/tests_assignment_acceptance.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.admin_portal.tests_template_department_visibility.GradingTemplateDepartmentVisibilityTests.test_template_period_edit_shows_and_saves_grade_column_label` passed; `python.exe manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_final_period_summary_shows_prior_period_grade_columns_and_final_grade apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_final_period_summary_uses_custom_grade_column_label_when_configured apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_final_period_summary_uses_custom_prior_period_grade_column_labels` passed.
+- Pending work / risk: no backend risk remains from this change, but a quick browser smoke check on one final-period submitted grade explanation and one custom-labeled period is still a good visual sanity check.
+- Exact next step: if we revisit this area, open the final-period summary and the grade explanation modal in the browser and confirm the top-right label, submitted-grade prose, and formula cards read naturally with and without a custom `grade_column_label`.
 
 ## Faculty Quick Score Encoding Phase 1
 - Completed work: added a reversible frontend enhancement to `templates/faculty_portal/activity_scores.html` for editable score fields only.

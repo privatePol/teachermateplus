@@ -74,6 +74,7 @@ class GradingTemplateDepartmentVisibilityTests(TestCase):
         )
 
         self.dean_role = Role.objects.create(code="DEAN", name="Academic Dean")
+        self.super_admin_role = Role.objects.create(code="SUPER_ADMIN", name="Super Admin")
         permission_codes = (
             ("admin_portal.access", "admin_portal", "access"),
             ("grading_templates.read", "grading_templates", "read"),
@@ -493,6 +494,36 @@ class GradingTemplateDepartmentVisibilityTests(TestCase):
             "template",
             "Select a valid choice. That choice is not one of the available choices.",
         )
+
+    def test_template_period_edit_shows_and_saves_grade_column_label(self):
+        draft_template = self._create_template("DRAFT-TEMPLATE")
+        draft_template.is_published = False
+        draft_template.save(update_fields=["is_published", "updated_at"])
+        period, _, _, _ = self._create_template_structure(draft_template)
+        self._login(self.superadmin)
+
+        edit_response = self.client.get(
+            reverse("admin_portal:template_period_update", kwargs={"period_id": period.id})
+        )
+        self.assertEqual(edit_response.status_code, 200)
+        self.assertContains(edit_response, "Grade column label")
+        self.assertContains(edit_response, 'placeholder="FINAL EXAM"', html=False)
+
+        response = self.client.post(
+            reverse("admin_portal:template_period_update", kwargs={"period_id": period.id}),
+            {
+                "template": draft_template.id,
+                "code": period.code,
+                "name": period.name,
+                "grade_column_label": "FINAL PERIOD GRADE",
+                "sequence_no": period.sequence_no,
+                "weight_percentage": "100.00",
+                "is_active": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        period.refresh_from_db()
+        self.assertEqual(period.grade_column_label, "FINAL PERIOD GRADE")
 
     def test_list_calculator_and_dropdowns_hide_other_department_template(self):
         self._login(self.dean_a)

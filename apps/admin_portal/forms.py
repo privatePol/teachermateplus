@@ -1631,12 +1631,17 @@ class TemplateHotfixReviewForm(forms.Form):
 class GradingTemplatePeriodForm(forms.ModelForm):
     class Meta:
         model = GradingTemplatePeriod
-        fields = ["template", "code", "name", "sequence_no", "weight_percentage", "is_active"]
+        fields = ["template", "code", "name", "grade_column_label", "sequence_no", "weight_percentage", "is_active"]
 
     def __init__(self, *args, template_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if template_queryset is not None:
             self.fields["template"].queryset = template_queryset
+        self.fields["grade_column_label"].label = "Grade column label"
+        self.fields["grade_column_label"].help_text = (
+            "Optional. Used as the grade table header. Leave blank to use the default period label."
+        )
+        self.fields["grade_column_label"].widget.attrs.setdefault("placeholder", "FINAL EXAM")
         _enforce_active_reference_choices(self)
         _set_choice_label(
             self.fields.get("template"),

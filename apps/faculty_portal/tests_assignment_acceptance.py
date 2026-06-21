@@ -2772,12 +2772,296 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "PRELIM GRADE")
         self.assertContains(response, "MIDTERM GRADE")
         self.assertContains(response, "PRE-FINAL GRADE")
+        self.assertContains(response, "FINAL EXAM")
         self.assertContains(response, "FINAL GRADE")
         self.assertContains(response, "81")
         self.assertContains(response, "84")
         self.assertContains(response, "87")
         self.assertContains(response, "89")
         self.assertContains(response, "85")
+
+        period_explanation = self.client.get(
+            reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": self.offering.id,
+                    "period_id": self.final.id,
+                    "student_id": student.id,
+                    "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+                },
+            )
+        )
+        self.assertEqual(period_explanation.status_code, 200)
+        self.assertContains(period_explanation, "FINAL EXAM")
+        self.assertContains(period_explanation, "Official FINAL EXAM Grade")
+        self.assertContains(period_explanation, "Final Exam Score")
+
+        final_explanation = self.client.get(
+            reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": self.offering.id,
+                    "period_id": self.final.id,
+                    "student_id": student.id,
+                    "grade_type": GradeExplanationService.GRADE_TYPE_FINAL,
+                },
+            )
+        )
+        self.assertEqual(final_explanation.status_code, 200)
+        self.assertContains(final_explanation, "Final Grade Summary")
+        self.assertContains(final_explanation, "PRELIM GRADE")
+        self.assertContains(final_explanation, "MIDTERM GRADE")
+        self.assertContains(final_explanation, "PRE-FINAL GRADE")
+        self.assertContains(final_explanation, "FINAL EXAM")
+        self.assertContains(final_explanation, "FG = (PRELIM GRADE + MIDTERM GRADE + PRE-FINAL GRADE + FINAL EXAM) / 4")
+        self.assertNotContains(final_explanation, "FINAL FINAL GRADE")
+
+    def test_final_period_summary_uses_custom_grade_column_label_when_configured(self):
+        self.final.grade_column_label = "FINAL PERIOD GRADE"
+        self.final.save(update_fields=["grade_column_label", "updated_at"])
+
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-CUSTOM-001",
+            last_name="Custom",
+            first_name="Label",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+        GradingTemplateComponent.objects.create(
+            template_period=self.final,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=60,
+            sort_order=1,
+        )
+        GradingTemplateComponent.objects.create(
+            template_period=self.final,
+            code="EXAM",
+            name="Final Exam",
+            weight_percentage=40,
+            sort_order=2,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            student=student,
+            period_grade=Decimal("81.00"),
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.midterm,
+            student=student,
+            period_grade=Decimal("84.00"),
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prefinal,
+            student=student,
+            period_grade=Decimal("87.00"),
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.final,
+            student=student,
+            exam_grade=Decimal("91.00"),
+            period_grade=Decimal("89.00"),
+        )
+        StudentFinalGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            student=student,
+            final_grade=Decimal("85.00"),
+        )
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.accepted_by = self.faculty_user
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.final,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.final.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "FINAL PERIOD GRADE")
+        self.assertContains(response, "FINAL GRADE")
+        self.assertContains(response, "85")
+
+        period_explanation = self.client.get(
+            reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": self.offering.id,
+                    "period_id": self.final.id,
+                    "student_id": student.id,
+                    "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+                },
+            )
+        )
+        self.assertEqual(period_explanation.status_code, 200)
+        self.assertContains(period_explanation, "FINAL PERIOD GRADE")
+        self.assertContains(period_explanation, "Official FINAL PERIOD Grade")
+
+        final_explanation = self.client.get(
+            reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": self.offering.id,
+                    "period_id": self.final.id,
+                    "student_id": student.id,
+                    "grade_type": GradeExplanationService.GRADE_TYPE_FINAL,
+                },
+            )
+        )
+        self.assertEqual(final_explanation.status_code, 200)
+        self.assertContains(final_explanation, "FINAL PERIOD GRADE")
+        self.assertNotContains(final_explanation, "FINAL FINAL GRADE")
+
+    def test_final_period_summary_uses_custom_prior_period_grade_column_labels(self):
+        self.prelim.grade_column_label = "PG"
+        self.midterm.grade_column_label = "MG"
+        self.prefinal.grade_column_label = "PFG"
+        self.prelim.save(update_fields=["grade_column_label", "updated_at"])
+        self.midterm.save(update_fields=["grade_column_label", "updated_at"])
+        self.prefinal.save(update_fields=["grade_column_label", "updated_at"])
+
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-CUSTOM-002",
+            last_name="Custom",
+            first_name="Periods",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+        GradingTemplateComponent.objects.create(
+            template_period=self.final,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=60,
+            sort_order=1,
+        )
+        GradingTemplateComponent.objects.create(
+            template_period=self.final,
+            code="EXAM",
+            name="Final Exam",
+            weight_percentage=40,
+            sort_order=2,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            student=student,
+            period_grade=Decimal("81.00"),
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.midterm,
+            student=student,
+            period_grade=Decimal("84.00"),
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prefinal,
+            student=student,
+            period_grade=Decimal("87.00"),
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.final,
+            student=student,
+            exam_grade=Decimal("91.00"),
+            period_grade=Decimal("89.00"),
+        )
+        StudentFinalGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            student=student,
+            final_grade=Decimal("85.00"),
+        )
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.accepted_by = self.faculty_user
+        self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        self.assignment.save(update_fields=["accepted_at", "accepted_by", "response_status", "updated_at"])
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.final,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.final.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, ">PG<", html=False)
+        self.assertContains(response, ">MG<", html=False)
+        self.assertContains(response, ">PFG<", html=False)
+        self.assertContains(response, "FINAL EXAM")
+        self.assertContains(response, "FINAL GRADE")
+        self.assertContains(response, '<th class="print-grade print-prior-grade">PG</th>', html=False)
+        self.assertContains(response, '<th class="print-grade print-prior-grade">MG</th>', html=False)
+        self.assertContains(response, '<th class="print-grade print-prior-grade">PFG</th>', html=False)
+        self.assertContains(response, '<th class="print-grade print-period-grade">FINAL EXAM</th>', html=False)
+        self.assertContains(response, '<th class="print-grade print-final-grade">FINAL GRADE</th>', html=False)
 
     def test_final_period_summary_uses_fx_grade_without_extra_exam_column(self):
         student = self._create_active_student(
@@ -2826,8 +3110,8 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "TRANSMUTED FINAL EXAM GRADE")
-        self.assertNotContains(response, ">FINAL EXAM<", html=False)
-        self.assertContains(response, "FINAL Grade")
+        self.assertContains(response, "FINAL EXAM")
+        self.assertContains(response, "FINAL GRADE")
         self.assertContains(response, "98")
 
     def test_period_summary_shows_periodic_grade_before_submission_by_default(self):

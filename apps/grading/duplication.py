@@ -64,6 +64,7 @@ class GradingTemplateDuplicationService:
                 template=duplicate,
                 code=period.code,
                 name=period.name,
+                grade_column_label=period.grade_column_label,
                 sequence_no=period.sequence_no,
                 weight_percentage=period.weight_percentage,
                 is_active=period.is_active,

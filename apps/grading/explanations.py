@@ -18,6 +18,36 @@ class GradeExplanationService:
     GRADE_TYPE_FINAL = "FINAL"
 
     @staticmethod
+    def _period_grade_column_label_from_parts(*, period_name: str | None, period_code: str | None, grade_column_label: str | None = ""):
+        custom_label = (grade_column_label or "").strip()
+        if custom_label:
+            return custom_label
+        name = (period_name or period_code or "").strip().upper()
+        code = (period_code or "").strip().upper()
+        if name in {"FINAL", "FINALS", "FX"} or code in {"FINAL", "FINALS", "FX"}:
+            return "FINAL EXAM"
+        if not name:
+            return "GRADE"
+        if "GRADE" in name:
+            return name
+        return f"{name} GRADE"
+
+    @classmethod
+    def _period_grade_column_label(cls, period):
+        return cls._period_grade_column_label_from_parts(
+            period_name=getattr(period, "name", None),
+            period_code=getattr(period, "code", None),
+            grade_column_label=getattr(period, "grade_column_label", None),
+        )
+
+    @classmethod
+    def _period_grade_heading_label(cls, period):
+        label = cls._period_grade_column_label(period)
+        if label.upper().endswith(" GRADE"):
+            return label[:-6].strip()
+        return label
+
+    @staticmethod
     def _display_student_no(student, *, masked: bool):
         if not masked:
             return student.student_no
@@ -195,6 +225,10 @@ class GradeExplanationService:
         }
 
         if grade_type == cls.GRADE_TYPE_FINAL:
+            period_by_id = {
+                period.id: period
+                for period in template.periods.filter(is_active=True)
+            }
             period_rows = {
                 row.template_period_id: Decimal(row.period_grade)
                 for row in StudentPeriodGrade.objects.filter(offering=offering, student=student)
@@ -205,8 +239,32 @@ class GradeExplanationService:
                 template=template,
                 period_values_by_period_id=period_rows,
             )
+            display_entries = []
+            for entry in final_detail["entries"]:
+                period_obj = period_by_id.get(entry["period_id"])
+                display_entries.append(
+                    {
+                        **entry,
+                        "display_label": cls._period_grade_column_label(period_obj)
+                        if period_obj
+                        else cls._period_grade_column_label_from_parts(
+                            period_name=entry.get("period_name"),
+                            period_code=entry.get("period_code"),
+                        ),
+                    }
+                )
             final_row = StudentFinalGrade.objects.filter(offering=offering, student=student).first()
             official_value = final_row.final_grade if final_row else None
+            if final_detail.get("strategy", {}).get("mode") == "WEIGHTED_PERIODS":
+                formula_text = "FG = " + " + ".join(
+                    f"({entry['display_label']} x {entry['weight']:.2f}%)" for entry in display_entries
+                )
+            else:
+                formula_text = (
+                    f"FG = ({' + '.join(entry['display_label'] for entry in display_entries)}) / {len(display_entries)}"
+                    if display_entries
+                    else final_detail.get("strategy", {}).get("formula_label")
+                )
             payload.update(
                 {
                     "period": None,
@@ -214,8 +272,8 @@ class GradeExplanationService:
                     "raw_value": final_detail["raw_value"],
                     "computed_official_value": final_detail["official_value"],
                     "pass_fail": cls._pass_fail(official_value, threshold_trace["value"]),
-                    "period_breakdown": final_detail["entries"],
-                    "formula_text": final_strategy.get("formula_label"),
+                    "period_breakdown": display_entries,
+                    "formula_text": formula_text,
                     "component_breakdown": [],
                 }
             )
@@ -261,6 +319,8 @@ class GradeExplanationService:
                     "code": template_period.code,
                     "name": template_period.name,
                 },
+                "period_label": cls._period_grade_column_label(template_period),
+                "period_heading_label": cls._period_grade_heading_label(template_period),
                 "official_value": official_value,
                 "raw_value": period_detail["period_grade_raw"],
                 "computed_official_value": period_detail["period_grade"],
