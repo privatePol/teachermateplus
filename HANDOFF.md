@@ -1,12 +1,14 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-06-20
+Last updated by Codex: 2026-06-21
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
-- Date: 2026-06-20
+- Date: 2026-06-21
+- Current pass: refreshed the Faculty Portal Activities taxonomy badges with a more vibrant palette, while keeping icon-only row actions and the `Grade Summary` quick-jump label.
+- Current pass: updated the Faculty Portal Activities table with icon-only action controls, distinct component/subcomponent/detail badges, no `Entry Method` column, and a `Grade Summary` quick-jump label.
 - Current pass: added Generate Password and branded credential email support to Admin Portal user password resets.
 - Current pass: removed reference-only configured detail weights from the Faculty Portal activity score encoding notice for Average Activities.
 - Current pass: implemented frontend-only Phase 1 Excel-like Quick Encoding for the existing Faculty Portal activity score page behind `FEATURE_FACULTY_QUICK_SCORE_ENCODING`.
@@ -20,6 +22,13 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Review note: Faculty Dashboard `Updates Since Last Visit` was implemented and reviewed. The card shows the latest 5 scoped updates since the faculty member's previous successful login, uses existing `AuditLog` `LOGIN_SUCCESS` rows as the anchor, requires no migration, and does not add a new notification module.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
+
+## Faculty Activities Table UI Cleanup
+- Completed work: replaced visible `Encode Scores`, `Edit`, and `Delete` row action text in `templates/faculty_portal/period_activities.html` with compact icon-only controls while retaining titles, aria labels, and visually hidden labels for accessibility.
+- Completed work: rendered component, subcomponent, and detail values as distinct vibrant badges, removed the activities table `Entry Method` column, and renamed the shared period quick-jump `Summary` label to `Grade Summary`.
+- Safety confirmations: no backend activity saving, score saving, grading computation, attendance, enrollment, submissions, locks, corrections, routes, models, or migrations were changed.
+- Changed files: `templates/faculty_portal/period_activities.html`, `templates/faculty_portal/partials/period_quick_nav.html`, `apps/faculty_portal/tests_assignment_acceptance.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_average_activity_detail_weight_is_hidden_on_activity_page` passed.
 
 ## Faculty Quick Score Encoding Phase 1
 - Completed work: added a reversible frontend enhancement to `templates/faculty_portal/activity_scores.html` for editable score fields only.

@@ -20,7 +20,7 @@
     -webkit-overflow-scrolling: touch;
   }
   .activities-table {
-    min-width: 960px;
+    min-width: 880px;
   }
   .activities-table thead th {
     white-space: nowrap;
@@ -35,6 +35,63 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 0.5rem;
+  }
+  .activity-taxonomy-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    max-width: 12rem;
+    white-space: normal;
+    text-align: left;
+    line-height: 1.25;
+    font-weight: 500;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  .activity-taxonomy-component-standing {
+    background: #cfe8ff;
+    color: #0c4a7d;
+  }
+  .activity-taxonomy-component-exam {
+    background: #ffd8ad;
+    color: #8a4b00;
+  }
+  .activity-taxonomy-subcomponent-standing {
+    background: #d8f1eb;
+    color: #16624d;
+  }
+  .activity-taxonomy-subcomponent-exam {
+    background: #ffe4c1;
+    color: #9b5200;
+  }
+  .activity-taxonomy-detail-standing {
+    background: #e3dbff;
+    color: #4c3291;
+  }
+  .activity-taxonomy-detail-exam {
+    background: #ffd5de;
+    color: #a02d4f;
+  }
+  .activity-taxonomy-none {
+    background: #e7eaee;
+    color: #5b6570;
+  }
+  .activity-icon-btn {
+    --bs-btn-padding-x: 0.42rem;
+    --bs-btn-padding-y: 0.28rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+  }
+  .activity-icon-btn svg {
+    width: 1rem;
+    height: 1rem;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
   }
   @media (max-width: 575.98px) {
     .activity-page-header {
@@ -58,7 +115,7 @@
       justify-content: center;
     }
     .activities-table {
-      min-width: 720px;
+      min-width: 680px;
     }
     .activities-table th,
     .activities-table td {
@@ -74,7 +131,7 @@
       flex-wrap: wrap;
       justify-content: flex-start;
     }
-    .activity-row-actions .btn,
+    .activity-row-actions .btn:not(.activity-icon-btn),
     .activity-row-actions form {
       width: 100%;
     }
@@ -223,7 +280,6 @@
           {% if show_detail_weight_column %}
           <th>Detail Weight</th>
           {% endif %}
-          <th>Entry Method</th>
           <th>Total</th>
           <th>Encoded</th>
           <th></th>
@@ -234,9 +290,35 @@
         <tr>
           <td>{{ row.activity_date|default:"-" }}</td>
           <td class="activity-title-cell">{{ row.title }}</td>
-          <td>{{ row.template_component.name }}</td>
-          <td>{{ row.template_subcomponent.name|default:"-" }}</td>
-          <td>{{ row.template_detail.name|default:"-" }}</td>
+          <td>
+            {% if row.template_component.is_exam_component %}
+            <span class="badge activity-taxonomy-badge activity-taxonomy-component-exam">{{ row.template_component.name }}</span>
+            {% else %}
+            <span class="badge activity-taxonomy-badge activity-taxonomy-component-standing">{{ row.template_component.name }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.template_subcomponent %}
+            {% if row.template_component.is_exam_component %}
+            <span class="badge activity-taxonomy-badge activity-taxonomy-subcomponent-exam">{{ row.template_subcomponent.name }}</span>
+            {% else %}
+            <span class="badge activity-taxonomy-badge activity-taxonomy-subcomponent-standing">{{ row.template_subcomponent.name }}</span>
+            {% endif %}
+            {% else %}
+            <span class="badge activity-taxonomy-badge activity-taxonomy-none">-</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row.template_detail %}
+            {% if row.template_component.is_exam_component %}
+            <span class="badge activity-taxonomy-badge activity-taxonomy-detail-exam">{{ row.template_detail.name }}</span>
+            {% else %}
+            <span class="badge activity-taxonomy-badge activity-taxonomy-detail-standing">{{ row.template_detail.name }}</span>
+            {% endif %}
+            {% else %}
+            <span class="badge activity-taxonomy-badge activity-taxonomy-none">-</span>
+            {% endif %}
+          </td>
           {% if show_detail_weight_column %}
           <td>
             {% if row.template_detail and row.template_subcomponent.detail_computation_mode != "AVERAGE_ACTIVITIES" %}
@@ -244,30 +326,48 @@
             {% else %}-{% endif %}
           </td>
           {% endif %}
-          <td>
-            <span class="badge text-bg-light border">{{ row.resolved_score_input_mode_label }}</span>
-          </td>
           <td>{{ row.total_score }}</td>
           <td>{{ row.score_count }}</td>
           <td class="text-end">
             <div class="d-flex align-items-center justify-content-end activity-row-actions">
-              <a class="btn btn-sm btn-outline-primary" href="{% url 'faculty_portal:activity_scores' offering.id period.id row.id %}">
-                Encode Scores
+              <a class="btn btn-sm btn-outline-primary activity-icon-btn" href="{% url 'faculty_portal:activity_scores' offering.id period.id row.id %}" title="Encode Scores" aria-label="Encode scores for {{ row.title }}">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 4h16v16H4z"></path>
+                  <path d="M8 8h8"></path>
+                  <path d="M8 12h3"></path>
+                  <path d="M14 12h2"></path>
+                  <path d="M8 16h2"></path>
+                  <path d="M13 16h3"></path>
+                </svg>
+                <span class="visually-hidden">Encode Scores</span>
               </a>
               {% if can_create_activity %}
-              <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:period_activity_edit' offering.id period.id row.id %}">
-                Edit
+              <a class="btn btn-sm btn-outline-secondary activity-icon-btn" href="{% url 'faculty_portal:period_activity_edit' offering.id period.id row.id %}" title="Edit" aria-label="Edit {{ row.title }}">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path>
+                  <path d="M14 7l3 3"></path>
+                </svg>
+                <span class="visually-hidden">Edit</span>
               </a>
               <form method="post" action="{% url 'faculty_portal:period_activity_delete' offering.id period.id row.id %}" onsubmit="return confirm('Delete activity {{ row.title|escapejs }}? Existing encoded scores under this activity will be removed from computation.');">
                 {% csrf_token %}
-                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                <button type="submit" class="btn btn-sm btn-outline-danger activity-icon-btn" title="Delete" aria-label="Delete {{ row.title }}">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 7h16"></path>
+                    <path d="M10 11v6"></path>
+                    <path d="M14 11v6"></path>
+                    <path d="M6 7l1 13h10l1-13"></path>
+                    <path d="M9 7V4h6v3"></path>
+                  </svg>
+                  <span class="visually-hidden">Delete</span>
+                </button>
               </form>
               {% endif %}
             </div>
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="{% if show_detail_weight_column %}10{% else %}9{% endif %}" class="text-center text-muted py-4">No activities yet.</td></tr>
+        <tr><td colspan="{% if show_detail_weight_column %}9{% else %}8{% endif %}" class="text-center text-muted py-4">No activities yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>

@@ -362,6 +362,19 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             total_score=Decimal("20.00"),
             created_by_user=self.faculty_user,
         )
+        exam_component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
+        exam_component.is_exam_component = True
+        exam_component.save(update_fields=["is_exam_component", "updated_at"])
+        GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=exam_component,
+            title="Exam 1",
+            total_score=Decimal("100.00"),
+            created_by_user=self.faculty_user,
+        )
         self.client.force_login(self.faculty_user)
 
         template_response = self.client.get(
@@ -378,6 +391,21 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertNotContains(activities_response, "Detail Weight")
         self.assertNotContains(activities_response, "Recitation (25.00% configured weight)")
         self.assertNotContains(activities_response, "Reference only")
+        self.assertNotContains(activities_response, "<th>Entry Method</th>", html=True)
+        self.assertContains(activities_response, "Grade Summary")
+        self.assertContains(activities_response, "activity-icon-btn")
+        self.assertContains(activities_response, 'title="Encode Scores"')
+        self.assertContains(activities_response, 'aria-label="Encode scores for R1"')
+        self.assertContains(activities_response, 'title="Edit"')
+        self.assertContains(activities_response, 'aria-label="Edit R1"')
+        self.assertContains(activities_response, 'title="Delete"')
+        self.assertContains(activities_response, 'aria-label="Delete R1"')
+        self.assertContains(activities_response, "activity-taxonomy-component-standing")
+        self.assertContains(activities_response, "activity-taxonomy-subcomponent-standing")
+        self.assertContains(activities_response, "activity-taxonomy-detail-standing")
+        self.assertContains(activities_response, "activity-taxonomy-component-exam")
+        self.assertContains(activities_response, "Class Standing")
+        self.assertContains(activities_response, "Participation/Output")
         self.assertContains(activities_response, "Recitation")
 
         scores_response = self.client.get(

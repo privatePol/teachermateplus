@@ -21,6 +21,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Increased Faculty Summary grade-table body row padding for a taller, easier-to-scan grade review table.
 
 ### Changed
+- Refined the Faculty Portal Activities taxonomy badges with a more vibrant palette: class standing stays light blue, exam-related rows use orange, subcomponent and detail badges use distinct accent colors, and badge text is no longer bold.
+- Updated the Faculty Portal Activities table to use compact icon-only Encode Scores, Edit, and Delete actions with accessible labels, show component/subcomponent/detail as distinct color badges, remove the `Entry Method` column, and rename the period quick-jump `Summary` button to `Grade Summary`.
 - Removed reference-only configured detail weights from the Faculty Portal score encoding notice when the activity's subcomponent uses Average Activities, so faculty see the detail name without a misleading weight.
 - Added `FEATURE_FACULTY_QUICK_SCORE_ENCODING` to Configuration Management so quick score encoding can be enabled per tenant without changing routes, models, migrations, or grading services. The feature defaults Off for safer rollout.
 - Replaced the Faculty Portal floating `?` guide button with a small `teacher_star.png` icon so the help link is less visually intrusive while keeping the same new-tab guide behavior.
