@@ -1,0 +1,108 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">Class List Change Requests</h2>
+</div>
+
+<form class="row g-2 mb-3">
+  <div class="col-md-2">
+    <select class="form-select" name="campus_id">
+      <option value="">All Campuses</option>
+      {% for campus in campuses %}
+      <option value="{{ campus.id }}" {% if campus_id|stringformat:"s" == campus.id|stringformat:"s" %}selected{% endif %}>
+        {{ campus.name|default:campus.code }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="request_type">
+      <option value="">All Types</option>
+      {% for code,label in request_type_choices %}
+      <option value="{{ code }}" {% if request_type == code %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select" name="status">
+      <option value="">All Status</option>
+      {% for code,label in status_choices %}
+      <option value="{{ code }}" {% if status == code %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-4">
+    <input class="form-control" name="q" value="{{ q }}" placeholder="Course, section, faculty, student reference, remarks">
+  </div>
+  <div class="col-md-2">
+    <button class="btn btn-outline-secondary w-100">Filter</button>
+  </div>
+</form>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0 align-middle">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Campus</th>
+          <th>Faculty</th>
+          <th>Class</th>
+          <th>Type</th>
+          <th>Student / Reference</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in page_obj %}
+        <tr>
+          <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ row.campus.name|default:row.campus.code }}</td>
+          <td>
+            {{ row.faculty_requester.full_name|default:row.faculty_requester.username }}
+            {% if row.faculty_requester.full_name != row.faculty_requester.username %}
+              <div class="small text-muted">{{ row.faculty_requester.username }}</div>
+            {% endif %}
+          </td>
+          <td>
+            {{ row.offering.course.code }} - {{ row.offering.course.title }}
+            <div class="small text-muted">{{ row.offering.section.code }} | {{ row.offering.term.code }}</div>
+          </td>
+          <td>
+            <span class="badge {% if row.request_type == 'ADD' %}text-bg-primary{% else %}text-bg-warning text-dark{% endif %}">
+              {% if row.request_type == 'ADD' %}Request Add Student{% else %}Request Remove Student{% endif %}
+            </span>
+          </td>
+          <td>
+            {% for item in row.items.all %}
+              <div class="small">
+                {% if item.student %}
+                  {{ item.student.student_no }} - {{ item.student.last_name }}, {{ item.student.first_name }}
+                {% else %}
+                  {{ item.reference_student_no|default:"-" }} - {{ item.reference_student_name|default:"Manual reference" }}
+                {% endif %}
+              </div>
+            {% endfor %}
+          </td>
+          <td>
+            <span class="badge {% if row.status == 'APPROVED' %}text-bg-success{% elif row.status == 'REJECTED' %}text-bg-danger{% elif row.status == 'CANCELLED' %}text-bg-secondary{% else %}text-bg-warning text-dark{% endif %}">
+              {{ row.status }}
+            </span>
+          </td>
+          <td class="text-end">
+            {% if "class_list_change_requests.review" in effective_permissions %}
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:class_list_change_request_review' row.id %}">Review</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" class="text-center text-muted py-4">No class list change requests were found for the selected scope.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer">{% include "admin_portal/shared/pagination.html" %}</div>
+</div>
+{% endblock %}

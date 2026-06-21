@@ -7,6 +7,8 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-06-21
+- Current pass: refined the Faculty Portal class list change request panel so it now sits below the class master list, uses a gray recent-requests header, lets faculty remove pending requests, and excludes already-enrolled students from the add-request matched-student selector.
+- Current pass: converted the Faculty Portal class list change request add/remove/cancel actions to AJAX so the request area refreshes in place without reloading the page.
 - Current pass: added admin-editable `grade_column_label` support for grading template periods so the faculty/admin grade summary header can be customized per period while the overall `FINAL GRADE` column stays unchanged.
 - Current pass: updated the Faculty Portal period summary table so the current-period column shows `FINAL EXAM` for the final period while prior period headers can also use admin-set labels such as PG, MG, and PFG, with the computed overall `FINAL GRADE` unchanged.
 - Current pass: updated the printable final-period report of grades so it follows the grading template labels as well, showing the configured PRELIM, MIDTERM, PRE-FINAL, final-period, and `FINAL GRADE` columns.
@@ -26,6 +28,16 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Review note: Faculty Dashboard `Updates Since Last Visit` was implemented and reviewed. The card shows the latest 5 scoped updates since the faculty member's previous successful login, uses existing `AuditLog` `LOGIN_SUCCESS` rows as the anchor, requires no migration, and does not add a new notification module.
 - Current branch: main
 - Current environment: Windows PowerShell workspace at `D:\teachermateplus`; Django apps-based project using SQLite for development.
+
+## Class List Change Request Workflow
+- Completed work: added Faculty Portal request-add/request-remove controls for the existing class master list page, with recent request history and campus-scoped admin review.
+- Completed work: added Campus Admin and Superadmin review pages, plus safe approval/rejection handling that uses the existing enrollment create/deactivate services instead of letting faculty mutate the class list directly.
+- Completed work: hid cancelled class list change requests from the Admin Portal queue so faculty-requester cancellations no longer appear in the review list.
+- Completed work: made the Faculty Portal class list change request forms post to an explicit enrollment URL so the AJAX buttons do not depend on browser fallback resolution and should avoid the 404 path.
+- Validation performed: `python.exe manage.py check` passed; `python.exe manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_can_submit_add_request_via_ajax_without_page_refresh apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_can_submit_remove_request_via_ajax_without_page_refresh apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_can_cancel_pending_request_via_ajax_without_page_refresh apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_faculty_can_remove_pending_class_list_change_request_from_recent_requests apps.admin_portal.tests_class_list_change_requests` passed with 12 tests.
+- Changed files: `templates/faculty_portal/partials/class_list_change_requests_area.html`, `templates/faculty_portal/offering_enrollment.html`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Pending work / risk: if cancelled requests should still be available in an audit-only screen, that would need a separate explicit UI.
+- Exact next step: decide whether cancelled class list change requests should stay hidden everywhere or be moved to a separate audit-only admin filter.
 
 ## Faculty Activities Table UI Cleanup
 - Completed work: replaced visible `Encode Scores`, `Edit`, and `Delete` row action text in `templates/faculty_portal/period_activities.html` with compact icon-only controls while retaining titles, aria labels, and visually hidden labels for accessibility.

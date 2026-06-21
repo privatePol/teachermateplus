@@ -116,9 +116,9 @@ from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.scope import ScopeService
 from apps.core.services.settings import SystemSettingService
-from apps.enrollment.forms import EnrollmentForm
-from apps.enrollment.models import Enrollment, EnrollmentAdjustmentLog
-from apps.enrollment.services import EnrollmentAdjustmentService, EnrollmentService
+from apps.enrollment.forms import EnrollmentForm, ClassListChangeRequestReviewForm
+from apps.enrollment.models import ClassListChangeRequest, Enrollment, EnrollmentAdjustmentLog
+from apps.enrollment.services import ClassListChangeRequestService, EnrollmentAdjustmentService, EnrollmentService
 from apps.faculty_portal.views import _build_summary_layout, _build_summary_row_values, _period_edit_state
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
@@ -9705,6 +9705,122 @@ def enrollment_update_view(request, enrollment_id: int):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("class_list_change_requests.view")
+def class_list_change_request_list_view(request):
+    queryset = AdminScopeService.scoped_class_list_change_requests(request)
+    campus_id = request.GET.get("campus_id", "").strip()
+    status = request.GET.get("status", "").strip().upper()
+    request_type = request.GET.get("request_type", "").strip().upper()
+    q = request.GET.get("q", "").strip()
+    if campus_id:
+        queryset = queryset.filter(campus_id=campus_id)
+    if status:
+        queryset = queryset.filter(status=status)
+    if request_type:
+        queryset = queryset.filter(request_type=request_type)
+    if q:
+        queryset = queryset.filter(
+            Q(offering__course__code__icontains=q)
+            | Q(offering__course__title__icontains=q)
+            | Q(offering__section__code__icontains=q)
+            | Q(faculty_requester__username__icontains=q)
+            | Q(faculty_requester__first_name__icontains=q)
+            | Q(faculty_requester__last_name__icontains=q)
+            | Q(items__reference_student_no__icontains=q)
+            | Q(items__reference_student_name__icontains=q)
+            | Q(remarks__icontains=q)
+            | Q(review_remarks__icontains=q)
+        ).distinct()
+    context = {
+        "page_obj": _get_page(request, queryset),
+        "q": q,
+        "status": status,
+        "request_type": request_type,
+        "campus_id": campus_id,
+        "campuses": AdminScopeService.active_scoped_campuses(request),
+        "status_choices": ClassListChangeRequest.Status.choices,
+        "request_type_choices": ClassListChangeRequest.RequestType.choices,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/enrollment/class_list_change_request_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("class_list_change_requests.review")
+def class_list_change_request_review_view(request, request_id: int):
+    request_obj = get_object_or_404(
+        AdminScopeService.scoped_class_list_change_requests(request),
+        id=request_id,
+    )
+    can_review_request = (
+        ClassListChangeRequestService.can_review_request(user=request.user, request_obj=request_obj)
+        and request_obj.status == ClassListChangeRequest.Status.PENDING
+    )
+    student_qs = AdminScopeService.scoped_students(request).filter(campus_id=request_obj.campus_id)
+    form = ClassListChangeRequestReviewForm(request.POST or None, student_queryset=student_qs)
+    _style_form(form)
+    if request.method == "POST":
+        if not can_review_request:
+            form.add_error(None, "You are not allowed to review this request.")
+        elif form.is_valid():
+            approved = form.cleaned_data["decision"] == ClassListChangeRequestReviewForm.Decision.APPROVE
+            before = model_before_after(request_obj)
+            try:
+                updated = ClassListChangeRequestService.review_request(
+                    user=request.user,
+                    request_obj=request_obj,
+                    approved=approved,
+                    review_remarks=form.cleaned_data.get("review_remarks"),
+                    resolved_student=form.cleaned_data.get("resolved_student"),
+                )
+            except ValidationError as exc:
+                form.add_error(None, "; ".join(exc.messages))
+            else:
+                after = model_before_after(updated)
+                after["item_count"] = updated.items.count()
+                AuditService.log_event(
+                    action="APPROVE" if approved else "REJECT",
+                    portal="ADMIN",
+                    entity_type="ClassListChangeRequest",
+                    entity_id=updated.id,
+                    actor=request.user,
+                    tenant=updated.tenant,
+                    campus=updated.campus,
+                    before_data=before,
+                    after_data=after,
+                    metadata={
+                        "critical_action": True,
+                        "decision": "APPROVE" if approved else "REJECT",
+                        "reason": (form.cleaned_data.get("review_remarks") or "").strip(),
+                        "impact_summary": {
+                            "offering_id": updated.offering_id,
+                            "request_type": updated.request_type,
+                            "item_count": updated.items.count(),
+                            "student_ref": (
+                                updated.items.first().reference_student_no if updated.items.exists() else ""
+                            ),
+                        },
+                    },
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    "Class list change request approved." if approved else "Class list change request rejected.",
+                )
+                return redirect("admin_portal:class_list_change_request_list")
+    context = {
+        "title": f"Review Class List Change Request #{request_obj.id}",
+        "form": form,
+        "request_obj": request_obj,
+        "can_review_request": can_review_request,
+        "student_lookup_required": request_obj.request_type == ClassListChangeRequest.RequestType.ADD
+        and not request_obj.items.filter(student__isnull=False).exists(),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/enrollment/class_list_change_request_review.html", context)
 
 
 def _enrollment_adjustment_offering_label(offering):

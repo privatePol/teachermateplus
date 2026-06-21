@@ -11,7 +11,12 @@ from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.academics.services import AcademicGovernanceService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.settings import SystemSettingService
-from apps.enrollment.models import Enrollment, EnrollmentAdjustmentLog
+from apps.enrollment.models import (
+    ClassListChangeRequest,
+    ClassListChangeRequestItem,
+    Enrollment,
+    EnrollmentAdjustmentLog,
+)
 from apps.grading.models import (
     GradeActivity,
     GradeCorrectionRequest,
@@ -22,6 +27,7 @@ from apps.grading.models import (
     StudentFinalGrade,
     StudentPeriodGrade,
 )
+from apps.grading.services import EnrollmentSafetyService
 
 
 @dataclass(frozen=True)
@@ -620,3 +626,192 @@ class EnrollmentService:
             update_fields=["enrollment_status", "is_active", "encoded_by_user", "encoded_via_portal", "updated_at"]
         )
         return enrollment
+
+    @classmethod
+    def deactivate_enrollment(
+        cls,
+        *,
+        user,
+        enrollment: Enrollment,
+        portal: str = Enrollment.SourcePortal.ADMIN,
+    ):
+        offering = enrollment.course_offering
+        if not cls.can_update_classlist_status(user=user, offering=offering, portal=portal):
+            raise PermissionDenied("You are not allowed to update enrollment for this offering.")
+        EnrollmentSafetyService.validate_changes_allowed(
+            enrollment=enrollment,
+            cleaned_data={
+                "student": enrollment.student,
+                "course_offering": enrollment.course_offering,
+                "is_active": False,
+            },
+        )
+        enrollment.is_active = False
+        enrollment.encoded_by_user = user
+        enrollment.encoded_via_portal = portal.upper()
+        enrollment.save(update_fields=["is_active", "encoded_by_user", "encoded_via_portal", "updated_at"])
+        return enrollment
+
+
+class ClassListChangeRequestService:
+    @classmethod
+    def _resolve_student(cls, item, *, resolved_student=None):
+        student = item.student or resolved_student
+        if not student:
+            raise ValidationError("A matched student is required to approve this add request.")
+        return student
+
+    @classmethod
+    def can_review_request(cls, *, user, request_obj: ClassListChangeRequest):
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        if request_obj.campus_id is None:
+            return False
+        return PermissionService.has_permission(
+            user,
+            "class_list_change_requests.review",
+            tenant_id=request_obj.tenant_id,
+            campus_id=request_obj.campus_id,
+        )
+
+    @classmethod
+    @transaction.atomic
+    def create_request(
+        cls,
+        *,
+        user,
+        offering,
+        request_type: str,
+        remarks: str = "",
+        student=None,
+        student_number: str = "",
+        student_name: str = "",
+        enrollments=None,
+    ):
+        if request_type not in ClassListChangeRequest.RequestType.values:
+            raise ValidationError("Invalid class list change request type.")
+        if not user or not user.is_authenticated:
+            raise PermissionDenied("You are not allowed to submit this request.")
+        if offering.faculty_assignments.filter(
+            faculty_user_id=user.id,
+            is_active=True,
+            offering__is_active=True,
+        ).exists() is False:
+            raise PermissionDenied("You are not allowed to submit this request for this offering.")
+        if student is not None and (student.tenant_id != offering.tenant_id or student.campus_id != offering.campus_id):
+            raise ValidationError("Student and offering campus must match.")
+        if enrollments:
+            for enrollment in enrollments:
+                if enrollment.course_offering_id != offering.id:
+                    raise ValidationError("Selected class-list rows must belong to the current offering.")
+
+        request_obj = ClassListChangeRequest.objects.create(
+            tenant_id=offering.tenant_id,
+            campus_id=offering.campus_id,
+            offering=offering,
+            faculty_requester=user,
+            request_type=request_type,
+            status=ClassListChangeRequest.Status.PENDING,
+            remarks=(remarks or "").strip(),
+        )
+
+        if request_type == ClassListChangeRequest.RequestType.ADD:
+            ClassListChangeRequestItem.objects.create(
+                request=request_obj,
+                student=student,
+                reference_student_no=(student.student_no if student else student_number or ""),
+                reference_student_name=(
+                    f"{student.last_name}, {student.first_name}" if student else (student_name or student_number or "")
+                ),
+            )
+        else:
+            for enrollment in enrollments or []:
+                ClassListChangeRequestItem.objects.create(
+                    request=request_obj,
+                    student=enrollment.student,
+                    enrollment=enrollment,
+                    reference_student_no=enrollment.student.student_no,
+                    reference_student_name=f"{enrollment.student.last_name}, {enrollment.student.first_name}",
+                )
+        return request_obj
+
+    @classmethod
+    @transaction.atomic
+    def review_request(
+        cls,
+        *,
+        user,
+        request_obj: ClassListChangeRequest,
+        approved: bool,
+        review_remarks: str = "",
+        resolved_student=None,
+    ):
+        if not cls.can_review_request(user=user, request_obj=request_obj):
+            raise PermissionDenied("You are not allowed to review this request.")
+        if request_obj.status != ClassListChangeRequest.Status.PENDING:
+            raise ValidationError("Only pending class list change requests can be reviewed.")
+
+        review_remarks = (review_remarks or "").strip()
+        if not approved and not review_remarks:
+            raise ValidationError("A rejection reason is required.")
+
+        if approved:
+            if request_obj.request_type == ClassListChangeRequest.RequestType.ADD:
+                for item in request_obj.items.all():
+                    student = cls._resolve_student(item, resolved_student=resolved_student)
+                    if item.student_id != student.id:
+                        item.student = student
+                        item.reference_student_no = student.student_no
+                        item.reference_student_name = f"{student.last_name}, {student.first_name}"
+                        item.save(
+                            update_fields=[
+                                "student",
+                                "reference_student_no",
+                                "reference_student_name",
+                                "updated_at",
+                            ]
+                        )
+                    EnrollmentService.create_enrollment(
+                        user=user,
+                        offering=request_obj.offering,
+                        student=student,
+                        enrollment_status=Enrollment.Status.ACTIVE,
+                        portal=Enrollment.SourcePortal.ADMIN,
+                    )
+            else:
+                for item in request_obj.items.select_related("enrollment", "enrollment__student").all():
+                    if not item.enrollment_id:
+                        raise ValidationError("A remove request item is missing its class-list row.")
+                    EnrollmentService.deactivate_enrollment(
+                        user=user,
+                        enrollment=item.enrollment,
+                        portal=Enrollment.SourcePortal.ADMIN,
+                    )
+            request_obj.status = ClassListChangeRequest.Status.APPROVED
+        else:
+            request_obj.status = ClassListChangeRequest.Status.REJECTED
+
+        request_obj.reviewed_by = user
+        request_obj.reviewed_at = timezone.now()
+        request_obj.review_remarks = review_remarks
+        request_obj.save(update_fields=["status", "reviewed_by", "reviewed_at", "review_remarks", "updated_at"])
+        return request_obj
+
+    @classmethod
+    @transaction.atomic
+    def cancel_request(cls, *, user, request_obj: ClassListChangeRequest):
+        if not user or not user.is_authenticated:
+            raise PermissionDenied("You are not allowed to cancel this request.")
+        if request_obj.faculty_requester_id != user.id:
+            raise PermissionDenied("You are not allowed to cancel this request.")
+        if request_obj.status != ClassListChangeRequest.Status.PENDING:
+            raise ValidationError("Only pending class list change requests can be removed.")
+
+        request_obj.status = ClassListChangeRequest.Status.CANCELLED
+        request_obj.reviewed_by = user
+        request_obj.reviewed_at = timezone.now()
+        request_obj.review_remarks = "Cancelled by faculty requester."
+        request_obj.save(update_fields=["status", "reviewed_by", "reviewed_at", "review_remarks", "updated_at"])
+        return request_obj

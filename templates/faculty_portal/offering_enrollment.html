@@ -65,6 +65,49 @@
   .class-list-search-note strong {
     color: #23412e;
   }
+  .class-list-request-panel {
+    margin-top: 1.5rem;
+    border: 1px solid #dce8da;
+    border-radius: 0.9rem;
+    background: #fbfdfb;
+  }
+  .class-list-request-panel .card-header,
+  .class-list-recent-panel .card-header {
+    background: linear-gradient(180deg, #d9f0b6 0%, #83b84d 100%) !important;
+    color: #214116 !important;
+  }
+  .class-list-request-panel .panel-title {
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: #23412e;
+    line-height: 1.2;
+  }
+  .class-list-request-panel .panel-note {
+    font-size: 1rem;
+    color: #5f7464;
+  }
+  .class-list-request-table thead th {
+    background: #f6f8f3;
+    color: #375227;
+    border-bottom-color: #d7dde3;
+  }
+  .class-list-request-table thead th {
+    font-weight: 700;
+  }
+  .class-list-recent-panel .recent-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #23412e;
+  }
+  .class-list-master-panel .card-header {
+    background: linear-gradient(180deg, #e1f0cb 0%, #a7cd67 100%) !important;
+    color: #22421a !important;
+  }
+  .class-list-master-panel .master-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #22421a;
+  }
 </style>
 {% endblock %}
 
@@ -78,11 +121,7 @@
 </div>
 <div class="alert {% if mode == 'FACULTY_ALLOWED' %}alert-success{% else %}alert-warning{% endif %}">
   Class Master List Mode: <strong>{{ mode }}</strong>
-  {% if mode != 'FACULTY_ALLOWED' %}
-    - Adding or removing students from this class list is admin-only, but faculty may still update true <strong>DRP</strong>, <strong>WITHDRAWN</strong>, or <strong>INC</strong> status on existing class-list rows.
-  {% else %}
-    - Use <strong>Remove from Class</strong> for schedule movement. Use <strong>DRP</strong> only when the student dropped this class, <strong>WITHDRAWN</strong> only when the student withdrew from the term, and <strong>INC</strong> when the class record should be marked incomplete.
-  {% endif %}
+  - Use <strong>Request Add Student</strong> or <strong>Request Remove Student</strong> when the class list needs a change. Campus Admin will verify the request with AIMS/Registrar before the roster changes.
 </div>
 {% if is_read_only_class %}
 <div class="alert alert-warning">
@@ -104,47 +143,19 @@
       <span class="small text-muted">Incomplete class record.</span>
     </div>
     <div class="small text-muted">
-      Use <strong>Remove from Class</strong> only for schedule movement. `DRP`, `WITHDRAWN`, and `INC` are excluded from normal active grading coverage and submission readiness.
+      Use <strong>Request Remove Student</strong> only for class-list changes after campus verification. <strong>DRP</strong>, <strong>WITHDRAWN</strong>, and <strong>INC</strong> remain the roster status labels for grading coverage and submission readiness.
     </div>
   </div>
 </div>
 
-{% if can_manage %}
-<div class="card border-0 shadow-sm mb-3">
-  <div class="card-header bg-white"><strong>Add Student to This Class</strong></div>
-  <div class="card-body">
-    <form method="post" class="row g-2">
-      {% csrf_token %}
-      <input type="hidden" name="action" value="upsert_student">
-      <div class="col-md-6">
-        <label class="form-label">Search Student</label>
-        <input
-          type="text"
-          id="student-search-input"
-          class="form-control mb-2"
-          placeholder="Type student number or last name, first name"
-          autocomplete="off">
-        <div class="class-list-search-note mb-2">
-          Start typing to show only students whose <strong>student number</strong> or <strong>last name, first name</strong> matches your search.
-        </div>
-        <label class="form-label">Student</label>
-        {{ form.student }}
-        {% for e in form.student.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Status</label>
-        {{ form.enrollment_status }}
-        {% for e in form.enrollment_status.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
-      </div>
-      <div class="col-md-3 d-flex align-items-end">
-        <button class="btn btn-success w-100" type="submit">Save</button>
-      </div>
-    </form>
+<div class="card border-0 shadow-sm class-list-master-panel">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <strong class="master-title">Class Master List</strong>
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#classMasterListCollapse" aria-expanded="true" aria-controls="classMasterListCollapse">
+      Collapse
+    </button>
   </div>
-</div>
-{% endif %}
-
-<div class="card border-0 shadow-sm">
+  <div id="classMasterListCollapse" class="collapse show">
   <div class="table-responsive">
     <table class="table table-hover mb-0 class-list-table">
       <thead><tr><th class="class-list-line-no">No.</th><th>Student No</th><th>Name</th><th>Status</th><th>Source</th>{% if can_update_status %}<th class="text-end">Action</th>{% endif %}</tr></thead>
@@ -152,21 +163,6 @@
       {% for row in enrollments %}
         <tr>
           <td class="class-list-line-no">
-            {% if can_manage %}
-            <form method="post" class="d-inline js-remove-from-class-form me-2">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="remove_from_class">
-              <input type="hidden" name="enrollment_id" value="{{ row.id }}">
-              <button
-                class="class-list-remove-btn"
-                type="submit"
-                data-bs-toggle="tooltip"
-                data-bs-title="Remove from Class"
-                aria-label="Remove from Class">
-                &times;
-              </button>
-            </form>
-            {% endif %}
             {{ forloop.counter }}
           </td>
           <td class="class-list-student-no">
@@ -208,6 +204,10 @@
     </table>
   </div>
 </div>
+</div>
+
+<div id="class-list-change-request-alert" class="mt-3" aria-live="polite"></div>
+{% include "faculty_portal/partials/class_list_change_requests_area.html" %}
 
 {% if removed_enrollments %}
 <div class="card border-0 shadow-sm mt-3">
@@ -244,9 +244,36 @@
 {{ block.super }}
 <script>
   (function () {
-    const searchInput = document.getElementById("student-search-input");
-    const studentSelect = document.getElementById("id_student");
-    if (searchInput && studentSelect) {
+    const alertTargetId = "class-list-change-request-alert";
+    const areaSelector = "#class-list-change-requests-area";
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function renderAlert(message, isSuccess) {
+      if (!message) {
+        return "";
+      }
+      const toneClass = isSuccess ? "alert-success" : "alert-danger";
+      return '<div class="alert ' + toneClass + ' mb-0 py-2">' + escapeHtml(message) + "</div>";
+    }
+
+    function bindSearchHelpers() {
+      const searchInput = document.getElementById("student-search-input");
+      const studentSelect = document.getElementById("id_student");
+      const studentNumberInput = document.getElementById("id_student_number");
+      const studentNameInput = document.getElementById("id_student_name");
+      if (!searchInput || !studentSelect || studentSelect.dataset.searchBound === "1") {
+        return;
+      }
+      studentSelect.dataset.searchBound = "1";
+
       const allOptions = Array.from(studentSelect.options).map(function (option) {
         return {
           value: option.value,
@@ -285,25 +312,93 @@
       searchInput.addEventListener("input", function (event) {
         renderOptions(event.target.value);
       });
-    }
 
-    document.querySelectorAll(".js-remove-from-class-form").forEach(function (form) {
-      form.addEventListener("submit", function (event) {
-        const typed = window.prompt("Type 'remove' to confirm removing this student from this class.");
-        if (typed !== "remove") {
-          event.preventDefault();
-          if (typed !== null) {
-            window.alert("Removal cancelled. Type 'remove' exactly to continue.");
-          }
+      studentSelect.addEventListener("change", function () {
+        const selectedOption = studentSelect.selectedOptions && studentSelect.selectedOptions[0];
+        if (!selectedOption || !selectedOption.value) {
+          return;
+        }
+        const text = selectedOption.textContent || "";
+        const parts = text.split(" - ");
+        if (studentNumberInput && !studentNumberInput.value && parts[0]) {
+          studentNumberInput.value = parts[0].trim();
+        }
+        if (studentNameInput && !studentNameInput.value && parts[1]) {
+          studentNameInput.value = parts[1].trim();
         }
       });
-    });
+    }
 
-    if (window.bootstrap && window.bootstrap.Tooltip) {
-      document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (element) {
-        new window.bootstrap.Tooltip(element);
+    async function submitClassListChangeRequest(form) {
+      const alertTarget = document.getElementById(alertTargetId);
+      const formData = new FormData(form);
+      const requestUrl = form.getAttribute("action") || form.action || window.location.href;
+      const response = await fetch(requestUrl, {
+        method: "POST",
+        body: formData,
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch (error) {
+        payload = { ok: false, message: "The request could not be processed." };
+      }
+
+      if (alertTarget) {
+        alertTarget.innerHTML = renderAlert(payload.message, response.ok && payload.ok);
+      }
+
+      if (payload.html) {
+        const currentArea = document.querySelector(areaSelector);
+        if (currentArea) {
+          currentArea.outerHTML = payload.html;
+        }
+        window.initClassListChangeRequestsUi();
+      }
+
+      if (!response.ok || payload.ok === false) {
+        return false;
+      }
+      return true;
+    }
+
+    function bindAjaxForms() {
+      const forms = document.querySelectorAll(".js-class-list-change-request-form");
+      forms.forEach(function (form) {
+        if (form.dataset.ajaxBound === "1") {
+          return;
+        }
+        form.dataset.ajaxBound = "1";
+        form.addEventListener("submit", function (event) {
+          event.preventDefault();
+          submitClassListChangeRequest(form).catch(function () {
+            const alertTarget = document.getElementById(alertTargetId);
+            if (alertTarget) {
+              alertTarget.innerHTML = renderAlert("The request could not be processed right now.", false);
+            }
+          });
+        });
       });
     }
+
+    function bindTooltips() {
+      if (window.bootstrap && window.bootstrap.Tooltip) {
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (element) {
+          new window.bootstrap.Tooltip(element);
+        });
+      }
+    }
+
+    window.initClassListChangeRequestsUi = function () {
+      bindSearchHelpers();
+      bindAjaxForms();
+      bindTooltips();
+    };
+
+    window.initClassListChangeRequestsUi();
   })();
 </script>
 {% endblock %}

@@ -5,7 +5,7 @@ from django.forms.models import model_to_dict
 
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.core.services.scope import ScopeService
-from apps.enrollment.models import Enrollment
+from apps.enrollment.models import ClassListChangeRequest, Enrollment
 from apps.grading.models import (
     CourseBaseValueOverride,
     CourseTemplateAssignment,
@@ -355,6 +355,28 @@ class AdminScopeService:
                 "course_offering__section",
             )
             .order_by("student__last_name", "student__first_name")
+        )
+        return AdminScopeService._visible_queryset(request, queryset)
+
+    @staticmethod
+    def scoped_class_list_change_requests(request):
+        offerings = AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True)
+        campuses = AdminScopeService.active_scoped_campuses(request).values_list("id", flat=True)
+        queryset = (
+            ClassListChangeRequest.objects.filter(offering_id__in=offerings, campus_id__in=campuses)
+            .exclude(status=ClassListChangeRequest.Status.CANCELLED)
+            .select_related(
+                "tenant",
+                "campus",
+                "offering",
+                "offering__course",
+                "offering__section",
+                "offering__term",
+                "faculty_requester",
+                "reviewed_by",
+            )
+            .prefetch_related("items", "items__student", "items__enrollment", "items__enrollment__student")
+            .order_by("-created_at", "-id")
         )
         return AdminScopeService._visible_queryset(request, queryset)
 

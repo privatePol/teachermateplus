@@ -49,6 +49,8 @@ from .views import (
     enrollment_create_view,
     enrollment_adjustment_detail_view,
     enrollment_adjustments_view,
+    class_list_change_request_list_view,
+    class_list_change_request_review_view,
     enrollment_list_view,
     enrollment_update_view,
     faculty_activity_monitor_view,
@@ -390,6 +392,12 @@ urlpatterns = [
     path("admin-portal/students/create/", student_create_view, name="student_create"),
     path("admin-portal/students/<int:student_id>/edit/", student_update_view, name="student_update"),
     path("admin-portal/enrollment/", enrollment_list_view, name="enrollment_list"),
+    path("admin-portal/enrollment/class-list-change-requests/", class_list_change_request_list_view, name="class_list_change_request_list"),
+    path(
+        "admin-portal/enrollment/class-list-change-requests/<int:request_id>/review/",
+        class_list_change_request_review_view,
+        name="class_list_change_request_review",
+    ),
     path("admin-portal/enrollment/adjustments/", enrollment_adjustments_view, name="enrollment_adjustments"),
     path(
         "admin-portal/enrollment/adjustments/<int:log_id>/",

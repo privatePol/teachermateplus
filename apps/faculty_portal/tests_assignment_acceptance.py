@@ -20,7 +20,7 @@ from apps.academics.models import (
 )
 from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
 from apps.auditlog.models import AuditLog
-from apps.enrollment.models import Enrollment
+from apps.enrollment.models import ClassListChangeRequest, Enrollment
 from apps.grading.models import (
     CourseTemplateAssignment,
     DetailComputationMode,
@@ -5595,7 +5595,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, 'aria-expanded="true"', html=False)
         self.assertContains(response, "padding-top: 1rem")
 
-    def test_faculty_can_remove_student_from_class_when_faculty_allowed_mode_is_enabled(self):
+    def test_faculty_can_request_remove_student_from_class_when_faculty_allowed_mode_is_enabled(self):
         SystemSettingService.set(
             "ENROLLMENT_OWNERSHIP_MODE",
             "FACULTY_ALLOWED",
@@ -5633,14 +5633,306 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.client.force_login(self.faculty_user)
         response = self.client.post(
             reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
-            {"action": "remove_from_class", "enrollment_id": enrollment.id},
+            {
+                "action": "request_remove_class_list_change",
+                "enrollments": [enrollment.id],
+                "remarks": "Please remove after registrar verification.",
+            },
             follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Student removed from this class list")
+        self.assertContains(response, "forwarded to Campus Admin for AIMS verification")
+        self.assertContains(response, "PENDING")
+        change_request = ClassListChangeRequest.objects.get(offering=self.offering, faculty_requester=self.faculty_user)
+        self.assertEqual(change_request.request_type, ClassListChangeRequest.RequestType.REMOVE)
+        self.assertEqual(change_request.status, ClassListChangeRequest.Status.PENDING)
         enrollment.refresh_from_db()
-        self.assertFalse(enrollment.is_active)
+        self.assertTrue(enrollment.is_active)
+
+    def test_faculty_can_request_add_student_with_manual_reference_without_student_match(self):
+        self._accept_assignment()
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+            {
+                "action": "request_add_class_list_change",
+                "student_number": "2025-CLCR-001",
+                "student_name": "Manual Add Student",
+                "remarks": "Please verify against AIMS.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "forwarded to Campus Admin for AIMS verification")
+        change_request = ClassListChangeRequest.objects.get(offering=self.offering, faculty_requester=self.faculty_user)
+        self.assertEqual(change_request.request_type, ClassListChangeRequest.RequestType.ADD)
+        self.assertEqual(change_request.status, ClassListChangeRequest.Status.PENDING)
+        self.assertEqual(change_request.items.count(), 1)
+        item = change_request.items.get()
+        self.assertEqual(item.reference_student_no, "2025-CLCR-001")
+        self.assertEqual(item.reference_student_name, "Manual Add Student")
+        self.assertFalse(Enrollment.objects.filter(course_offering=self.offering).exists())
+
+    def test_faculty_class_list_add_dropdown_excludes_students_already_enrolled_in_current_class(self):
+        self._accept_assignment()
+        enrolled_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-203",
+            last_name="Already",
+            first_name="Enrolled",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=enrolled_student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+        available_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-204",
+            last_name="Available",
+            first_name="Student",
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}))
+
+        self.assertEqual(response.status_code, 200)
+        add_request_form = response.context["add_request_form"]
+        student_queryset = add_request_form.fields["student"].queryset
+        self.assertNotIn(enrolled_student, student_queryset)
+        self.assertIn(available_student, student_queryset)
+
+    def test_faculty_can_remove_pending_class_list_change_request_from_recent_requests(self):
+        self._accept_assignment()
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-205",
+            last_name="Pending",
+            first_name="Removal",
+        )
+        enrollment = Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+        self.client.force_login(self.faculty_user)
+        self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+            {
+                "action": "request_remove_class_list_change",
+                "enrollments": [enrollment.id],
+                "remarks": "Please remove after registrar verification.",
+            },
+            follow=True,
+        )
+        change_request = ClassListChangeRequest.objects.get(offering=self.offering, faculty_requester=self.faculty_user)
+
+        response = self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+            {
+                "action": "cancel_class_list_change_request",
+                "request_id": change_request.id,
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "pending class list change request was removed")
+        change_request.refresh_from_db()
+        enrollment.refresh_from_db()
+        self.assertEqual(change_request.status, ClassListChangeRequest.Status.CANCELLED)
+        self.assertTrue(enrollment.is_active)
+
+    def test_faculty_can_submit_add_request_via_ajax_without_page_refresh(self):
+        self._accept_assignment()
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-206",
+            last_name="Ajax",
+            first_name="Add",
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+            {
+                "action": "request_add_class_list_change",
+                "student": student.id,
+                "remarks": "Please add after registrar verification.",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("forwarded to Campus Admin", payload["message"])
+        self.assertIn("class-list-change-requests-area", payload["html"])
+        self.assertIn("PENDING", payload["html"])
+        self.assertEqual(
+            ClassListChangeRequest.objects.filter(offering=self.offering, faculty_requester=self.faculty_user).count(),
+            1,
+        )
+
+    def test_faculty_can_submit_remove_request_via_ajax_without_page_refresh(self):
+        self._accept_assignment()
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-207",
+            last_name="Ajax",
+            first_name="Remove",
+        )
+        enrollment = Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+            {
+                "action": "request_remove_class_list_change",
+                "enrollments": [enrollment.id],
+                "remarks": "Please remove after registrar verification.",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("forwarded to Campus Admin", payload["message"])
+        self.assertIn("class-list-change-requests-area", payload["html"])
+        self.assertIn("PENDING", payload["html"])
+        self.assertEqual(
+            ClassListChangeRequest.objects.filter(offering=self.offering, faculty_requester=self.faculty_user).count(),
+            1,
+        )
+
+    def test_faculty_can_cancel_pending_request_via_ajax_without_page_refresh(self):
+        self._accept_assignment()
+        student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-208",
+            last_name="Ajax",
+            first_name="Cancel",
+        )
+        enrollment = Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+        self.client.force_login(self.faculty_user)
+        self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+            {
+                "action": "request_remove_class_list_change",
+                "enrollments": [enrollment.id],
+                "remarks": "Please remove after registrar verification.",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        change_request = ClassListChangeRequest.objects.get(offering=self.offering, faculty_requester=self.faculty_user)
+
+        response = self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+            {
+                "action": "cancel_class_list_change_request",
+                "request_id": change_request.id,
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("removed", payload["message"])
+        self.assertIn("class-list-change-requests-area", payload["html"])
+        self.assertIn("CANCELLED", payload["html"])
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, ClassListChangeRequest.Status.CANCELLED)
+
+    def test_faculty_cannot_request_class_list_change_for_unassigned_class(self):
+        self._accept_assignment()
+        self.client.force_login(self.faculty_user)
+        other_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=Section.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                program=self.program,
+                code="BSIT-1B",
+                name="BSIT 1B",
+            ),
+        )
+
+        response = self.client.post(
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": other_offering.id}),
+            {
+                "action": "request_add_class_list_change",
+                "student_number": "2025-CLCR-404",
+                "student_name": "Not Assigned",
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_class_list_page_shows_search_help_and_remove_confirmation_prompt(self):
         SystemSettingService.set(
@@ -5687,9 +5979,10 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Status Legend")
         self.assertContains(response, "Dropped from this class.")
         self.assertContains(response, "Incomplete class record.")
-        self.assertContains(response, "Type student number or last name, first name")
-        self.assertContains(response, "Type 'remove' to confirm removing this student from this class.")
-        self.assertContains(response, "data-bs-title=\"Remove from Class\"")
+        self.assertContains(response, "Request Class List Change")
+        self.assertContains(response, "Request Add Student")
+        self.assertContains(response, "Request Remove Student")
+        self.assertContains(response, "Your request will be forwarded to the Campus Admin assigned to this class campus for AIMS verification.")
         self.assertContains(response, "<option value=\"DRP\">DRP</option>", html=True)
         self.assertContains(response, "<option value=\"INC\">INC</option>", html=True)
         self.assertContains(response, "text-bg-warning text-dark")

@@ -1,0 +1,104 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="h5 mb-0">{{ title }}</h2>
+  <div class="d-flex gap-2">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:class_list_change_request_list' %}">Back</a>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Request Details</strong></div>
+      <div class="card-body">
+        <div class="mb-2"><strong>Campus:</strong> {{ request_obj.campus.name|default:request_obj.campus.code }}</div>
+        <div class="mb-2">
+          <strong>Faculty:</strong>
+          {{ request_obj.faculty_requester.full_name|default:request_obj.faculty_requester.username }}
+          {% if request_obj.faculty_requester.full_name != request_obj.faculty_requester.username %}
+            <span class="text-muted">({{ request_obj.faculty_requester.username }})</span>
+          {% endif %}
+        </div>
+        <div class="mb-2">
+          <strong>Class:</strong>
+          {{ request_obj.offering.course.code }} - {{ request_obj.offering.course.title }}
+          <div class="small text-muted">{{ request_obj.offering.section.code }} | {{ request_obj.offering.term.code }}</div>
+        </div>
+        <div class="mb-2">
+          <strong>Type:</strong>
+          {% if request_obj.request_type == "ADD" %}Request Add Student{% else %}Request Remove Student{% endif %}
+        </div>
+        <div class="mb-2">
+          <strong>Status:</strong>
+          <span class="badge {% if request_obj.status == 'APPROVED' %}text-bg-success{% elif request_obj.status == 'REJECTED' %}text-bg-danger{% elif request_obj.status == 'CANCELLED' %}text-bg-secondary{% else %}text-bg-warning text-dark{% endif %}">
+            {{ request_obj.status }}
+          </span>
+        </div>
+        <div class="mb-2"><strong>Faculty Remarks:</strong><br>{{ request_obj.remarks|default:"-" }}</div>
+        <div class="mb-2">
+          <strong>Items:</strong>
+          <ul class="mb-0">
+            {% for item in request_obj.items.all %}
+            <li>
+              {% if item.student %}
+                {{ item.student.student_no }} - {{ item.student.last_name }}, {{ item.student.first_name }}
+              {% else %}
+                {{ item.reference_student_no|default:"-" }} - {{ item.reference_student_name|default:"Manual reference" }}
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% if request_obj.review_remarks %}
+        <div class="mb-2"><strong>Admin Remarks:</strong><br>{{ request_obj.review_remarks }}</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white"><strong>Review Action</strong></div>
+      <div class="card-body">
+        {% if student_lookup_required %}
+        <div class="alert alert-info py-2">
+          This add request was submitted without a matched student. Select the correct student before approving.
+        </div>
+        {% endif %}
+        {% if not can_review_request %}
+          <div class="alert alert-warning">
+            You are not allowed to review this request in the current campus scope.
+          </div>
+        {% endif %}
+        <form method="post" novalidate>
+          {% csrf_token %}
+          {% if form.non_field_errors %}
+          <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+          {% endif %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ form.decision.id_for_label }}">{{ form.decision.label }}</label>
+            {{ form.decision }}
+            {% for error in form.decision.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          {% if student_lookup_required %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ form.resolved_student.id_for_label }}">Resolved Student</label>
+            {{ form.resolved_student }}
+            <div class="form-text">Choose the correct student record from the campus student file.</div>
+            {% for error in form.resolved_student.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          {% endif %}
+          <div class="mb-3">
+            <label class="form-label" for="{{ form.review_remarks.id_for_label }}">{{ form.review_remarks.label|default:"Review Remarks" }}</label>
+            {{ form.review_remarks }}
+            <div class="form-text">Required when rejecting the request.</div>
+            {% for error in form.review_remarks.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          <button class="btn btn-primary" type="submit" {% if not can_review_request %}disabled{% endif %}>Submit Review</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

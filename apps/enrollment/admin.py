@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django import forms
 
-from .models import Enrollment, EnrollmentAdjustmentLog
+from .models import ClassListChangeRequest, ClassListChangeRequestItem, Enrollment, EnrollmentAdjustmentLog
 from apps.grading.services import EnrollmentSafetyService
 
 
@@ -70,3 +70,58 @@ class EnrollmentAdjustmentLogAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+
+class ClassListChangeRequestItemInline(admin.TabularInline):
+    model = ClassListChangeRequestItem
+    extra = 0
+    can_delete = False
+    fields = ("student", "enrollment", "reference_student_no", "reference_student_name")
+    readonly_fields = fields
+
+
+@admin.register(ClassListChangeRequest)
+class ClassListChangeRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "campus",
+        "offering",
+        "faculty_requester",
+        "request_type",
+        "status",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+    )
+    search_fields = (
+        "offering__course__code",
+        "offering__course__title",
+        "offering__section__code",
+        "faculty_requester__username",
+        "remarks",
+        "review_remarks",
+        "items__reference_student_no",
+        "items__reference_student_name",
+    )
+    list_filter = ("campus", "request_type", "status")
+    readonly_fields = (
+        "tenant",
+        "campus",
+        "offering",
+        "faculty_requester",
+        "request_type",
+        "status",
+        "remarks",
+        "reviewed_by",
+        "reviewed_at",
+        "review_remarks",
+        "created_at",
+        "updated_at",
+    )
+    inlines = [ClassListChangeRequestItemInline]
+
+
+@admin.register(ClassListChangeRequestItem)
+class ClassListChangeRequestItemAdmin(admin.ModelAdmin):
+    list_display = ("request", "student", "enrollment", "reference_student_no", "reference_student_name")
+    search_fields = ("reference_student_no", "reference_student_name", "student__student_no", "student__last_name")

@@ -32,6 +32,11 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 - `Tools -> Configuration Management -> Student Portal` exposes the tenant-level Student Portal enable/disable toggle, student grade release toggles, and the attendance-detail visibility toggle. The portal default remains Off.
 
 ### Admin Portal
+- Faculty class list changes now use a request workflow instead of direct roster mutation: the Faculty Portal enrollment page exposes Request Add Student / Request Remove Student actions, Campus Admins review requests for their own campus, Superadmin can review all campuses, and approvals use the existing safe enrollment create/deactivate paths.
+- Faculty can remove a pending class-list request from their own recent-request history, and the add-request student picker skips students already enrolled in the current class to reduce accidental duplicates.
+- The Faculty Portal class list change request actions now submit by AJAX and refresh only the request panel, keeping the class master list page from reloading when faculty request add/remove changes or remove a pending request.
+- Cancelled class list change requests are hidden from the Admin Portal request queue, so faculty-requester removals no longer clutter the review list.
+- The request forms now post to an explicit faculty enrollment URL so the AJAX layer does not depend on browser fallback URL resolution.
 - `Academics -> Faculty Assignments` now supports controlled faculty replacement within the existing assignment module:
   - Users select current active assignment rows, open `Replace Faculty`, choose replacement faculty, replacement type, reason category, and remarks, then review impact counts before confirming.
   - Replacement types are Permanent Replacement, Temporary Substitute, Secondary / Co-Faculty, Administrative Reassignment, and Wrong Faculty Assignment.

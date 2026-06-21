@@ -1,4 +1,5 @@
 from django import forms
+from django.db import models
 
 from apps.grading.services import EnrollmentSafetyService
 
@@ -90,4 +91,95 @@ class EnrollmentForm(forms.ModelForm):
             if student.campus_id != offering.campus_id:
                 raise forms.ValidationError("Student campus must match offering campus.")
         EnrollmentSafetyService.validate_changes_allowed(enrollment=self.instance, cleaned_data=cleaned)
+        return cleaned
+
+
+class ClassListAddRequestForm(forms.Form):
+    student = forms.ModelChoiceField(queryset=None, required=False)
+    student_number = forms.CharField(max_length=32, required=False)
+    student_name = forms.CharField(max_length=150, required=False)
+    remarks = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Optional note for Campus Admin review.",
+    )
+
+    def __init__(self, *args, student_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["student"].queryset = student_queryset if student_queryset is not None else self.fields["student"].queryset
+        self.fields["student"].required = False
+        self.fields["student"].label_from_instance = (
+            lambda obj: f"{obj.student_no} - {obj.last_name}, {obj.first_name}"
+        )
+        self.fields["student"].widget.attrs["class"] = "form-select"
+        self.fields["student_number"].widget.attrs["class"] = "form-control"
+        self.fields["student_name"].widget.attrs["class"] = "form-control"
+        self.fields["student_number"].widget.attrs["placeholder"] = "Student number"
+        self.fields["student_name"].widget.attrs["placeholder"] = "Student name"
+        self.fields["remarks"].widget.attrs["class"] = "form-control"
+
+    def clean(self):
+        cleaned = super().clean()
+        student = cleaned.get("student")
+        student_number = (cleaned.get("student_number") or "").strip()
+        student_name = (cleaned.get("student_name") or "").strip()
+        if not student and not student_number and not student_name:
+            raise forms.ValidationError("Provide a matched student or enter a student number or name for the request.")
+        if student:
+            cleaned["student_number"] = student.student_no
+            cleaned["student_name"] = f"{student.last_name}, {student.first_name}"
+        else:
+            cleaned["student_number"] = student_number
+            cleaned["student_name"] = student_name or student_number
+        return cleaned
+
+
+class ClassListRemoveRequestForm(forms.Form):
+    enrollments = forms.ModelMultipleChoiceField(queryset=None, required=True, widget=forms.CheckboxSelectMultiple)
+    remarks = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Explain why these students should be removed from the class master list.",
+    )
+
+    def __init__(self, *args, enrollment_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["enrollments"].queryset = (
+            enrollment_queryset if enrollment_queryset is not None else self.fields["enrollments"].queryset
+        )
+        self.fields["enrollments"].label_from_instance = (
+            lambda obj: f"{obj.student.student_no} - {obj.student.last_name}, {obj.student.first_name}"
+        )
+        self.fields["remarks"].widget.attrs["class"] = "form-control"
+
+
+class ClassListChangeRequestReviewForm(forms.Form):
+    class Decision(models.TextChoices):
+        APPROVE = "APPROVE", "Approve"
+        REJECT = "REJECT", "Reject"
+
+    decision = forms.ChoiceField(choices=Decision.choices, widget=forms.Select(attrs={"class": "form-select"}))
+    review_remarks = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4, "class": "form-control"}),
+        help_text="Required when rejecting a request.",
+    )
+    resolved_student = forms.ModelChoiceField(queryset=None, required=False)
+
+    def __init__(self, *args, student_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["resolved_student"].queryset = (
+            student_queryset if student_queryset is not None else self.fields["resolved_student"].queryset
+        )
+        self.fields["resolved_student"].required = False
+        self.fields["resolved_student"].label_from_instance = (
+            lambda obj: f"{obj.student_no} - {obj.last_name}, {obj.first_name}"
+        )
+        self.fields["resolved_student"].widget.attrs["class"] = "form-select"
+
+    def clean(self):
+        cleaned = super().clean()
+        decision = cleaned.get("decision")
+        review_remarks = (cleaned.get("review_remarks") or "").strip()
+        if decision == self.Decision.REJECT and not review_remarks:
+            raise forms.ValidationError("A rejection reason is required.")
         return cleaned

@@ -113,3 +113,83 @@ class EnrollmentAdjustmentLog(TimeStampedModel):
 
     def __str__(self):
         return f"{self.student_id}:{self.source_offering_id}->{self.destination_offering_id}:{self.result}"
+
+
+class ClassListChangeRequest(TimeStampedModel):
+    class RequestType(models.TextChoices):
+        ADD = "ADD", "Add Student"
+        REMOVE = "REMOVE", "Remove Student"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="class_list_change_requests")
+    campus = models.ForeignKey("tenants.Campus", on_delete=models.PROTECT, related_name="class_list_change_requests")
+    offering = models.ForeignKey(
+        "academics.CourseOffering",
+        on_delete=models.PROTECT,
+        related_name="class_list_change_requests",
+    )
+    faculty_requester = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="requested_class_list_change_requests",
+    )
+    request_type = models.CharField(max_length=16, choices=RequestType.choices)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    remarks = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="reviewed_class_list_change_requests",
+    )
+    reviewed_at = models.DateTimeField(blank=True, null=True)
+    review_remarks = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = "class_list_change_requests"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["campus", "status", "created_at"], name="idx_clsreq_campus_status"),
+            models.Index(fields=["offering", "status", "created_at"], name="idx_clsreq_offering_status"),
+            models.Index(fields=["faculty_requester", "created_at"], name="idx_clsreq_requester_time"),
+        ]
+
+    def __str__(self):
+        return f"{self.offering_id}:{self.request_type}:{self.status}"
+
+
+class ClassListChangeRequestItem(TimeStampedModel):
+    request = models.ForeignKey(
+        "enrollment.ClassListChangeRequest",
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    student = models.ForeignKey(
+        "students.Student",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="class_list_change_request_items",
+    )
+    enrollment = models.ForeignKey(
+        "enrollment.Enrollment",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="class_list_change_request_items",
+    )
+    reference_student_no = models.CharField(max_length=32, blank=True)
+    reference_student_name = models.CharField(max_length=150, blank=True)
+
+    class Meta:
+        db_table = "class_list_change_request_items"
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.request_id}:{self.student_id or self.enrollment_id or 'manual'}"

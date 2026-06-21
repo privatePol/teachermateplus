@@ -7,6 +7,10 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added Faculty Portal `Class List Change Request` workflow for the existing class master list page, so faculty can request add/remove actions without mutating the roster directly. Requests are campus-scoped, land in an admin review queue, and are applied only after Campus Admin or Superadmin approval using the existing safe enrollment create/deactivate services.
+- Refined the Faculty Portal class list change request panel so Request Add Student, Request Remove Student, and the pending-request Remove button now submit by AJAX and refresh only the request area instead of reloading the whole page.
+- Hid cancelled class list change requests from the Admin Portal request queue so requests removed by the faculty requester no longer appear in the admin review list.
+- Made the class list change request forms post to an explicit faculty enrollment URL so the AJAX buttons do not fall back to an ambiguous target and trigger a 404.
 - Added admin-editable `grade_column_label` support to grading template periods so faculty and admin grade summary tables can use a custom current-period header, with the existing tabulation label as the fallback and `FINAL GRADE` unchanged.
 - Updated the Faculty Portal final-period summary so prior period headers also respect each period's admin-set `grade_column_label`, letting PRELIM, MIDTERM, and PRE-FINAL render custom display labels while keeping the overall `FINAL GRADE` column unchanged.
 - Updated the printable final-period report of grades so it follows the grading template labels too, showing the configured PRELIM, MIDTERM, PRE-FINAL, final-period, and `FINAL GRADE` columns instead of collapsing the report to only the final-period grade.
@@ -25,6 +29,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Increased Faculty Summary grade-table body row padding for a taller, easier-to-scan grade review table.
 
 ### Changed
+- Moved the Faculty Portal `Request Class List Change` panel below the class master list, added a gray header to the recent-requests table, added a faculty-side remove button for pending requests, and excluded already-enrolled students from the add-request matched-student selector.
 - Updated the Faculty Portal period summary table so the current-period column uses a display-only label from the tabulation helper. FINAL/FINALS/FX now show as `FINAL EXAM`, while the computed overall course grade remains `FINAL GRADE`.
 - Refined the Faculty Portal Activities taxonomy badges with a more vibrant palette: class standing stays light blue, exam-related rows use orange, subcomponent and detail badges use distinct accent colors, and badge text is no longer bold.
 - Updated the Faculty Portal Activities table to use compact icon-only Encode Scores, Edit, and Delete actions with accessible labels, show component/subcomponent/detail as distinct color badges, remove the `Entry Method` column, and rename the period quick-jump `Summary` button to `Grade Summary`.

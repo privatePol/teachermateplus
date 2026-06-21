@@ -9,6 +9,7 @@ from django import forms as django_forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Avg, Count, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
+from django.template.loader import render_to_string
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -26,11 +27,11 @@ from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 from apps.core.services.settings import SystemSettingService
-from apps.enrollment.models import Enrollment
-from apps.enrollment.services import EnrollmentService
+from apps.enrollment.models import ClassListChangeRequest, Enrollment
+from apps.enrollment.services import ClassListChangeRequestService, EnrollmentService
+from apps.enrollment.forms import ClassListAddRequestForm, ClassListRemoveRequestForm
 from apps.faculty_portal.forms import (
     AttendanceSessionForm,
-    FacultyEnrollmentForm,
     FacultyMemoForm,
     FacultyReminderForm,
     FacultyTemplateIssueReportForm,
@@ -6630,15 +6631,6 @@ def offering_enrollment_view(request, offering_id: int):
         return redirect("faculty_portal:my_courses")
     offering = _require_faculty_offering_or_404(request, offering_id)
     mode = EnrollmentService.get_enrollment_mode(offering.tenant_id, offering_id=offering.id)
-    can_create_enrollment = (
-        not offering.faculty_is_read_only
-        and EnrollmentService.can_create_or_update(
-            user=request.user,
-            offering=offering,
-            portal=Enrollment.SourcePortal.FACULTY,
-            action="create",
-        )
-    )
     can_update_status = (
         not offering.faculty_is_read_only
         and EnrollmentService.can_update_classlist_status(
@@ -6652,64 +6644,258 @@ def offering_enrollment_view(request, offering_id: int):
         campus_id=offering.campus_id,
         is_active=True,
     ).order_by("last_name", "first_name")
+    active_enrollments = (
+        offering.enrollments.select_related("student")
+        .filter(is_active=True)
+        .order_by("student__last_name", "student__first_name", "student__student_no")
+    )
+    active_student_ids = list(active_enrollments.values_list("student_id", flat=True))
+    add_request_form = ClassListAddRequestForm(student_queryset=student_qs.exclude(id__in=active_student_ids))
+    remove_request_form = ClassListRemoveRequestForm(enrollment_queryset=active_enrollments)
+    is_ajax_request = request.headers.get("x-requested-with") == "XMLHttpRequest"
 
-    form = FacultyEnrollmentForm(student_queryset=student_qs)
+    def build_request_area_context(*, add_form, remove_form):
+        return {
+            "offering": offering,
+            "mode": mode,
+            "can_request_class_list_change": not offering.faculty_is_read_only,
+            "add_request_form": add_form,
+            "remove_request_form": remove_form,
+            "enrollments": active_enrollments,
+            "class_list_change_requests": (
+                ClassListChangeRequest.objects.filter(offering=offering, faculty_requester=request.user)
+                .select_related("reviewed_by")
+                .prefetch_related("items", "items__student", "items__enrollment", "items__enrollment__student")
+                .order_by("-created_at", "-id")
+            ),
+        }
+
+    def build_request_area_html(*, add_form, remove_form):
+        return render_to_string(
+            "faculty_portal/partials/class_list_change_requests_area.html",
+            build_request_area_context(add_form=add_form, remove_form=remove_form),
+            request=request,
+        )
+
+    def ajax_response(*, ok: bool, message: str, add_form, remove_form, status: int = 200):
+        return JsonResponse(
+            {
+                "ok": ok,
+                "message": message,
+                "html": build_request_area_html(add_form=add_form, remove_form=remove_form),
+            },
+            status=status,
+        )
+
     if request.method == "POST":
         if offering.faculty_is_read_only:
-            messages.error(request, offering.faculty_read_only_reason)
-            return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
-        action = (request.POST.get("action") or "upsert_student").strip().lower()
-        if action == "remove_from_class":
-            if not can_create_enrollment:
-                messages.error(
-                    request,
-                    "Student movement updates are admin-only for this tenant. Ask the academic office to update the class master list.",
+            message = offering.faculty_read_only_reason
+            if is_ajax_request:
+                return ajax_response(
+                    ok=False,
+                    message=message,
+                    add_form=add_request_form,
+                    remove_form=remove_request_form,
+                    status=403,
                 )
-                return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
-            enrollment_id = request.POST.get("enrollment_id")
-            enrollment = offering.enrollments.filter(id=enrollment_id, is_active=True).select_related("student").first()
-            if not enrollment:
-                messages.error(request, "Active class-list row not found.")
-                return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
-            enrollment = EnrollmentService.update_enrollment(
-                user=request.user,
-                enrollment=enrollment,
-                enrollment_status=Enrollment.Status.ACTIVE,
-                is_active=False,
-                portal=Enrollment.SourcePortal.FACULTY,
+            messages.error(request, message)
+            return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
+        action = (request.POST.get("action") or "").strip().lower()
+        if action == "request_add_class_list_change":
+            add_request_form = ClassListAddRequestForm(request.POST, student_queryset=student_qs)
+            if add_request_form.is_valid():
+                try:
+                    request_obj = ClassListChangeRequestService.create_request(
+                        user=request.user,
+                        offering=offering,
+                        request_type=ClassListChangeRequest.RequestType.ADD,
+                        remarks=add_request_form.cleaned_data.get("remarks"),
+                        student=add_request_form.cleaned_data.get("student"),
+                        student_number=add_request_form.cleaned_data.get("student_number"),
+                        student_name=add_request_form.cleaned_data.get("student_name"),
+                    )
+                except (PermissionDenied, ValidationError) as exc:
+                    add_request_form.add_error(None, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+                else:
+                    AuditService.log_event(
+                        action="CREATE",
+                        portal="FACULTY",
+                        entity_type="ClassListChangeRequest",
+                        entity_id=request_obj.id,
+                        actor=request.user,
+                        after_data={
+                            "offering_id": request_obj.offering_id,
+                            "campus_id": request_obj.campus_id,
+                            "request_type": request_obj.request_type,
+                            "status": request_obj.status,
+                            "student_number": request_obj.items.first().reference_student_no if request_obj.items.exists() else "",
+                            "student_name": request_obj.items.first().reference_student_name if request_obj.items.exists() else "",
+                        },
+                        request=request,
+                    )
+                    message = "Your class list add request was submitted and forwarded to Campus Admin for AIMS verification."
+                    if is_ajax_request:
+                        return ajax_response(
+                            ok=True,
+                            message=message,
+                            add_form=ClassListAddRequestForm(student_queryset=student_qs.exclude(id__in=active_student_ids)),
+                            remove_form=ClassListRemoveRequestForm(enrollment_queryset=active_enrollments),
+                        )
+                    messages.success(request, message)
+                    return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
+            if is_ajax_request:
+                return ajax_response(
+                    ok=False,
+                    message="Please review the highlighted fields before submitting the add request.",
+                    add_form=add_request_form,
+                    remove_form=remove_request_form,
+                    status=400,
+                )
+        elif action == "request_remove_class_list_change":
+            remove_request_form = ClassListRemoveRequestForm(request.POST, enrollment_queryset=active_enrollments)
+            if remove_request_form.is_valid():
+                try:
+                    request_obj = ClassListChangeRequestService.create_request(
+                        user=request.user,
+                        offering=offering,
+                        request_type=ClassListChangeRequest.RequestType.REMOVE,
+                        remarks=remove_request_form.cleaned_data.get("remarks"),
+                        enrollments=remove_request_form.cleaned_data.get("enrollments"),
+                    )
+                except (PermissionDenied, ValidationError) as exc:
+                    remove_request_form.add_error(None, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+                else:
+                    AuditService.log_event(
+                        action="CREATE",
+                        portal="FACULTY",
+                        entity_type="ClassListChangeRequest",
+                        entity_id=request_obj.id,
+                        actor=request.user,
+                        after_data={
+                            "offering_id": request_obj.offering_id,
+                            "campus_id": request_obj.campus_id,
+                            "request_type": request_obj.request_type,
+                            "status": request_obj.status,
+                            "item_count": request_obj.items.count(),
+                        },
+                        request=request,
+                    )
+                    message = "Your class list remove request was submitted and forwarded to Campus Admin for AIMS verification."
+                    if is_ajax_request:
+                        return ajax_response(
+                            ok=True,
+                            message=message,
+                            add_form=ClassListAddRequestForm(student_queryset=student_qs.exclude(id__in=active_student_ids)),
+                            remove_form=ClassListRemoveRequestForm(enrollment_queryset=active_enrollments),
+                        )
+                    messages.success(request, message)
+                    return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
+            if is_ajax_request:
+                return ajax_response(
+                    ok=False,
+                    message="Please review the highlighted fields before submitting the remove request.",
+                    add_form=add_request_form,
+                    remove_form=remove_request_form,
+                    status=400,
+                )
+        elif action == "cancel_class_list_change_request":
+            request_id = request.POST.get("request_id")
+            request_obj = (
+                ClassListChangeRequest.objects.filter(
+                    id=request_id,
+                    offering=offering,
+                    faculty_requester=request.user,
+                )
+                .select_related("faculty_requester")
+                .first()
             )
+            if not request_obj:
+                messages.error(request, "Pending request not found.")
+                return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
+            try:
+                ClassListChangeRequestService.cancel_request(user=request.user, request_obj=request_obj)
+            except (PermissionDenied, ValidationError) as exc:
+                message = str(exc)
+                if is_ajax_request:
+                    return ajax_response(
+                        ok=False,
+                        message=message,
+                        add_form=add_request_form,
+                        remove_form=remove_request_form,
+                        status=400,
+                    )
+                messages.error(request, message)
+                return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
             AuditService.log_event(
-                action="UPDATE",
+                action="CANCEL",
                 portal="FACULTY",
-                entity_type="Enrollment",
-                entity_id=enrollment.id,
+                entity_type="ClassListChangeRequest",
+                entity_id=request_obj.id,
                 actor=request.user,
+                before_data={
+                    "offering_id": request_obj.offering_id,
+                    "campus_id": request_obj.campus_id,
+                    "request_type": request_obj.request_type,
+                    "status": ClassListChangeRequest.Status.PENDING,
+                },
                 after_data={
-                    "student_id": enrollment.student_id,
-                    "course_offering_id": enrollment.course_offering_id,
-                    "status": enrollment.enrollment_status,
-                    "is_active": enrollment.is_active,
-                    "source": enrollment.encoded_via_portal,
-                    "movement_action": "REMOVE_FROM_CLASS",
+                    "offering_id": request_obj.offering_id,
+                    "campus_id": request_obj.campus_id,
+                    "request_type": request_obj.request_type,
+                    "status": request_obj.status,
                 },
                 request=request,
             )
-            messages.success(request, "Student removed from this class list. Use this when the student transferred to a different class schedule.")
+            message = "Your pending class list change request was removed."
+            if is_ajax_request:
+                return ajax_response(
+                    ok=True,
+                    message=message,
+                    add_form=ClassListAddRequestForm(student_queryset=student_qs.exclude(id__in=active_student_ids)),
+                    remove_form=ClassListRemoveRequestForm(enrollment_queryset=active_enrollments),
+                )
+            messages.success(request, message)
             return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
-
         if action == "update_status":
             if not can_update_status:
-                messages.error(request, "You are not allowed to update class list status for this offering.")
+                message = "You are not allowed to update class list status for this offering."
+                if is_ajax_request:
+                    return ajax_response(
+                        ok=False,
+                        message=message,
+                        add_form=add_request_form,
+                        remove_form=remove_request_form,
+                        status=403,
+                    )
+                messages.error(request, message)
                 return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
             enrollment_id = request.POST.get("enrollment_id")
             new_status = (request.POST.get("enrollment_status") or "").strip().upper()
             allowed_statuses = {key for key, _ in Enrollment.Status.choices}
             enrollment = offering.enrollments.filter(id=enrollment_id).select_related("student").first()
             if not enrollment:
-                messages.error(request, "Enrollment row not found.")
+                message = "Enrollment row not found."
+                if is_ajax_request:
+                    return ajax_response(
+                        ok=False,
+                        message=message,
+                        add_form=add_request_form,
+                        remove_form=remove_request_form,
+                        status=404,
+                    )
+                messages.error(request, message)
                 return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
             if new_status not in allowed_statuses:
-                messages.error(request, "Invalid enrollment status.")
+                message = "Invalid enrollment status."
+                if is_ajax_request:
+                    return ajax_response(
+                        ok=False,
+                        message=message,
+                        add_form=add_request_form,
+                        remove_form=remove_request_form,
+                        status=400,
+                    )
+                messages.error(request, message)
                 return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
             previous_status = enrollment.enrollment_status
             try:
@@ -6721,7 +6907,16 @@ def offering_enrollment_view(request, offering_id: int):
                     portal=Enrollment.SourcePortal.FACULTY,
                 )
             except (PermissionDenied, ValidationError) as exc:
-                messages.error(request, str(exc))
+                message = str(exc)
+                if is_ajax_request:
+                    return ajax_response(
+                        ok=False,
+                        message=message,
+                        add_form=add_request_form,
+                        remove_form=remove_request_form,
+                        status=400,
+                    )
+                messages.error(request, message)
                 return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
             AuditService.log_event(
                 action="UPDATE",
@@ -6738,41 +6933,33 @@ def offering_enrollment_view(request, offering_id: int):
                 },
                 request=request,
             )
-            messages.success(request, f"Enrollment status updated to {new_status}.")
-            return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
-
-        if not can_create_enrollment:
-            messages.error(request, "Enrollment creation is admin-only for this tenant.")
-            return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
-
-        form = FacultyEnrollmentForm(request.POST or None, student_queryset=student_qs)
-        if form.is_valid():
-            try:
-                enrollment, created = EnrollmentService.create_enrollment(
-                    user=request.user,
-                    offering=offering,
-                    student=form.cleaned_data["student"],
-                    enrollment_status=form.cleaned_data["enrollment_status"],
-                    portal=Enrollment.SourcePortal.FACULTY,
+            message = f"Enrollment status updated to {new_status}."
+            if is_ajax_request:
+                return ajax_response(
+                    ok=True,
+                    message=message,
+                    add_form=ClassListAddRequestForm(student_queryset=student_qs.exclude(id__in=active_student_ids)),
+                    remove_form=ClassListRemoveRequestForm(enrollment_queryset=active_enrollments),
                 )
-            except (PermissionDenied, ValidationError) as exc:
-                messages.error(request, str(exc))
-                return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
-            AuditService.log_event(
-                action="CREATE" if created else "UPDATE",
-                portal="FACULTY",
-                entity_type="Enrollment",
-                entity_id=enrollment.id,
-                actor=request.user,
-                after_data={
-                    "student_id": enrollment.student_id,
-                    "course_offering_id": enrollment.course_offering_id,
-                    "status": enrollment.enrollment_status,
-                    "source": enrollment.encoded_via_portal,
-                },
-                request=request,
-            )
-            messages.success(request, "Enrollment record saved.")
+            messages.success(request, message)
+            return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
+
+        if action not in {
+            "request_add_class_list_change",
+            "request_remove_class_list_change",
+            "cancel_class_list_change_request",
+            "update_status",
+        }:
+            message = "Please use the request forms to add or remove class-list students."
+            if is_ajax_request:
+                return ajax_response(
+                    ok=False,
+                    message=message,
+                    add_form=add_request_form,
+                    remove_form=remove_request_form,
+                    status=400,
+                )
+            messages.error(request, message)
             return redirect("faculty_portal:offering_enrollment", offering_id=offering.id)
 
     enrollments = (
@@ -6785,15 +6972,23 @@ def offering_enrollment_view(request, offering_id: int):
         .filter(is_active=False)
         .order_by("-updated_at", "student__last_name", "student__first_name", "student__student_no")
     )
+    class_list_change_requests = (
+        ClassListChangeRequest.objects.filter(offering=offering, faculty_requester=request.user)
+        .select_related("reviewed_by")
+        .prefetch_related("items", "items__student", "items__enrollment", "items__enrollment__student")
+        .order_by("-created_at", "-id")
+    )
     context = {
         "offering": offering,
         "mode": mode,
-        "can_manage": can_create_enrollment,
+        "can_request_class_list_change": not offering.faculty_is_read_only,
         "can_update_status": can_update_status,
         "is_read_only_class": offering.faculty_is_read_only,
         "read_only_reason": offering.faculty_read_only_reason,
-        "form": form,
+        "add_request_form": add_request_form,
+        "remove_request_form": remove_request_form,
         "enrollments": enrollments,
         "removed_enrollments": removed_enrollments,
+        "class_list_change_requests": class_list_change_requests,
     }
     return render(request, "faculty_portal/offering_enrollment.html", context)

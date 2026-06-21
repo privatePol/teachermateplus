@@ -1,0 +1,205 @@
+<div id="class-list-change-requests-area">
+  {% if can_request_class_list_change %}
+  <div class="card border-0 shadow-sm mb-3 class-list-request-panel">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <div>
+        <div class="panel-title">Request Class List Change</div>
+        <div class="panel-note">Your request will be forwarded to the Campus Admin assigned to this class campus for AIMS verification.</div>
+      </div>
+      <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#classListRequestCollapse" aria-expanded="true" aria-controls="classListRequestCollapse">
+        Collapse
+      </button>
+    </div>
+    <div id="classListRequestCollapse" class="collapse show">
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-lg-6">
+            <div class="border rounded-3 p-3 h-100 bg-white">
+              <div class="fw-semibold mb-1">Request Add Student</div>
+              <div class="small text-muted mb-3">Search the student file first. If no match is found, submit the student number or name as a manual reference.</div>
+              <form method="post" action="{% url 'faculty_portal:offering_enrollment' offering.id %}" class="row g-2 js-class-list-change-request-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="request_add_class_list_change">
+                <div class="col-12">
+                  <label class="form-label">Search Student</label>
+                  <input
+                    type="text"
+                    id="student-search-input"
+                    class="form-control mb-2"
+                    placeholder="Type student number or last name, first name"
+                    autocomplete="off">
+                  <div class="class-list-search-note mb-2">
+                    Start typing to show only students whose <strong>student number</strong> or <strong>last name, first name</strong> matches your search.
+                  </div>
+                  <label class="form-label">Matched Student</label>
+                  {{ add_request_form.student }}
+                  {% for e in add_request_form.student.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Student No</label>
+                  {{ add_request_form.student_number }}
+                  {% for e in add_request_form.student_number.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Student Name</label>
+                  {{ add_request_form.student_name }}
+                  {% for e in add_request_form.student_name.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Remarks</label>
+                  {{ add_request_form.remarks }}
+                  {% for e in add_request_form.remarks.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+                </div>
+                {% for e in add_request_form.non_field_errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+                <div class="col-12 d-grid">
+                  <button class="btn btn-success" type="submit">Request Add Student</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="border rounded-3 p-3 h-100 bg-white">
+              <div class="fw-semibold mb-1">Request Remove Student</div>
+              <div class="small text-muted mb-3">Select one or more students from the current class master list and explain the reason for removal.</div>
+              <form method="post" action="{% url 'faculty_portal:offering_enrollment' offering.id %}" class="row g-2 js-class-list-change-request-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="request_remove_class_list_change">
+                <div class="col-12">
+                  <div class="table-responsive" style="max-height: 300px;">
+                    <table class="table table-sm align-middle mb-0">
+                      <thead class="table-light">
+                        <tr>
+                          <th style="width: 44px;"></th>
+                          <th>Student No</th>
+                          <th>Name</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for row in enrollments %}
+                        <tr>
+                          <td>
+                            <input class="form-check-input" type="checkbox" name="enrollments" value="{{ row.id }}" id="remove-{{ row.id }}">
+                          </td>
+                          <td><label class="mb-0" for="remove-{{ row.id }}">{{ row.student.student_no }}</label></td>
+                          <td><label class="mb-0" for="remove-{{ row.id }}">{{ row.student.last_name|upper }}, {{ row.student.first_name|title }}</label></td>
+                          <td>
+                            <span class="badge {% if row.enrollment_status == 'DRP' %}text-bg-danger{% elif row.enrollment_status == 'W' %}text-bg-warning text-dark{% elif row.enrollment_status == 'ACTIVE' %}text-bg-success{% elif row.enrollment_status == 'INC' %}text-bg-info text-dark{% else %}text-bg-secondary{% endif %}">
+                              {% if row.enrollment_status == 'W' %}WITHDRAWN{% else %}{{ row.enrollment_status }}{% endif %}
+                            </span>
+                          </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center text-muted py-3">No active students to request removal for.</td></tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                  {% for e in remove_request_form.enrollments.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Remarks</label>
+                  {{ remove_request_form.remarks }}
+                  {% for e in remove_request_form.remarks.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+                </div>
+                {% for e in remove_request_form.non_field_errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
+                <div class="col-12 d-grid">
+                  <button class="btn btn-warning" type="submit">Request Remove Student</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if class_list_change_requests %}
+  <div class="card border-0 shadow-sm mt-3 class-list-recent-panel">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <strong class="recent-title">Recent Class List Change Requests</strong>
+      <span class="badge text-bg-light border">{{ class_list_change_requests|length }}</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle class-list-request-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Student / Reference</th>
+            <th>Status</th>
+            <th>Campus Admin Note</th>
+            <th class="text-end">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for change_request in class_list_change_requests %}
+          <tr>
+            <td>{{ change_request.created_at|date:"Y-m-d H:i" }}</td>
+            <td>
+              <span class="badge {% if change_request.request_type == 'ADD' %}text-bg-primary{% else %}text-bg-warning text-dark{% endif %}">
+                {% if change_request.request_type == 'ADD' %}Request Add Student{% else %}Request Remove Student{% endif %}
+              </span>
+            </td>
+            <td>
+              {% if change_request.request_type == 'ADD' %}
+                {% with item=change_request.items.all|first %}
+                  {% if item and item.student %}
+                    {{ item.student.student_no }} - {{ item.student.last_name }}, {{ item.student.first_name }}
+                  {% elif item %}
+                    {{ item.reference_student_no|default:item.reference_student_name }}
+                  {% else %}
+                    <span class="text-muted">-</span>
+                  {% endif %}
+                {% endwith %}
+              {% else %}
+                {% for item in change_request.items.all %}
+                  <div class="small">
+                    {% if item.student %}
+                      {{ item.student.student_no }} - {{ item.student.last_name }}, {{ item.student.first_name }}
+                    {% else %}
+                      {{ item.reference_student_no|default:"-" }} - {{ item.reference_student_name|default:"Manual reference" }}
+                    {% endif %}
+                  </div>
+                {% endfor %}
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge {% if change_request.status == 'APPROVED' %}text-bg-success{% elif change_request.status == 'REJECTED' %}text-bg-danger{% elif change_request.status == 'CANCELLED' %}text-bg-secondary{% else %}text-bg-warning text-dark{% endif %}">
+                {{ change_request.status }}
+              </span>
+            </td>
+            <td>
+              {% if change_request.review_remarks %}
+                {{ change_request.review_remarks }}
+              {% else %}
+                <span class="text-muted">-</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if change_request.status == 'PENDING' %}
+              <form method="post" action="{% url 'faculty_portal:offering_enrollment' offering.id %}" class="d-inline js-class-list-change-request-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="cancel_class_list_change_request">
+                <input type="hidden" name="request_id" value="{{ change_request.id }}">
+                <button
+                  type="submit"
+                  class="btn btn-sm btn-outline-danger"
+                  onclick="return confirm('Remove this pending class list change request?');"
+                >
+                  Remove
+                </button>
+              </form>
+              {% else %}
+                <span class="text-muted">-</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
