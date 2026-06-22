@@ -623,7 +623,11 @@
           {% endif %}
             {% if has_faculty_assignments_read %}
             <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_assignment_dashboard' %}">Assignment Dashboard</a></div>
+            {% endif %}
+            {% if "faculty_activity_monitor.read" in effective_permissions %}
             <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_activity_monitor' %}">Faculty Activity Monitor</a></div>
+            {% endif %}
+            {% if "faculty_final_clearance.read" in effective_permissions %}
             <div class="col-md-3"><a class="btn btn-outline-success w-100" href="{% url 'admin_portal:faculty_final_clearance' %}">Faculty Final Clearance</a></div>
             {% endif %}
           </div>

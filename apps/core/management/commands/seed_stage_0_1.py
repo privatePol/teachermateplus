@@ -70,9 +70,12 @@ class Command(BaseCommand):
         ("faculty_assignments.create", "faculty_assignments", "create"),
         ("faculty_assignments.update", "faculty_assignments", "update"),
         ("faculty_assignments.import", "faculty_assignments", "import"),
+        ("faculty_activity_monitor.read", "faculty_activity_monitor", "read"),
+        ("faculty_gradebook_monitor.read", "faculty_gradebook_monitor", "read"),
         ("faculty_replacement.view", "faculty_replacement", "view"),
         ("faculty_replacement.process", "faculty_replacement", "process"),
         ("faculty_final_clearance.read", "faculty_final_clearance", "read"),
+        ("grade_prediction_monitor.read", "grade_prediction_monitor", "read"),
         ("gradebook.view_student_identity", "gradebook", "view_student_identity"),
         ("students.read", "students", "read"),
         ("students.create", "students", "create"),
@@ -487,7 +490,7 @@ class Command(BaseCommand):
                 "Faculty Activity Monitor",
                 "admin_portal:faculty_activity_monitor",
                 65,
-                "faculty_assignments.read",
+                "faculty_activity_monitor.read",
             ),
             (
                 "ADMIN",
@@ -873,7 +876,10 @@ class Command(BaseCommand):
             "sections.read",
             "offerings.read",
             "faculty_assignments.read",
+            "faculty_activity_monitor.read",
+            "faculty_gradebook_monitor.read",
             "faculty_final_clearance.read",
+            "grade_prediction_monitor.read",
             "grading_analytics.read",
             "grade_distribution_monitor.read",
             "grading_templates.read",
@@ -967,6 +973,18 @@ class Command(BaseCommand):
             if not role_obj:
                 continue
             RolePermission.objects.get_or_create(role=role_obj, permission=perm_map["faculty_replacement.view"])
+        academic_monitor_permissions = [
+            "faculty_activity_monitor.read",
+            "faculty_gradebook_monitor.read",
+            "faculty_final_clearance.read",
+            "grade_prediction_monitor.read",
+        ]
+        for role_code in ["AC", "AREA_CHAIR", "DEAN", "COLLEGE_DEAN", "CAO"]:
+            role_obj = role_map.get(role_code)
+            if not role_obj:
+                continue
+            for perm_code in academic_monitor_permissions:
+                RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
         for role_code in ["DEAN", "CAMPUS_ADMIN"]:
             role_obj = role_map[role_code]
             for perm_code in reopen_reviewer_permissions:

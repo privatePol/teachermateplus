@@ -486,7 +486,7 @@ class FeatureSettingsService:
             cls.GRADE_PREDICTION_ROLE_CODES_KEY,
             tenant_id=tenant_id,
             default=default
-            or ["FACULTY", "DEAN", "COLLEGE_DEAN", "REGISTRAR", "CAMPUS_ADMIN", "TENANT_ADMIN", "SUPER_ADMIN"],
+            or ["FACULTY", "AC", "AREA_CHAIR", "DEAN", "COLLEGE_DEAN", "CAO", "SUPER_ADMIN"],
         )
         return cls._role_code_list(value)
 

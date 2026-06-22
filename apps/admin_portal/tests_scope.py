@@ -125,6 +125,16 @@ class FacultyMonitoringScopeTests(TestCase):
 
         self.faculty_role = Role.objects.create(code="FACULTY", name="Faculty")
         self.ac_role = Role.objects.create(code="NCBA_FAIRVIEW_AC", name="Fairview AC")
+        for code, module, action in [
+            ("faculty_activity_monitor.read", "faculty_activity_monitor", "read"),
+            ("faculty_gradebook_monitor.read", "faculty_gradebook_monitor", "read"),
+            ("grade_prediction_monitor.read", "grade_prediction_monitor", "read"),
+        ]:
+            permission, _ = Permission.objects.get_or_create(
+                code=code,
+                defaults={"module": module, "action": action},
+            )
+            RolePermission.objects.get_or_create(role=self.ac_role, permission=permission)
 
         UserRole.objects.create(
             user=self.faculty_user,

@@ -7,6 +7,11 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+<<<<<<< Updated upstream
+=======
+- Added separate Admin Portal academic monitor permissions for `faculty_activity_monitor.read`, `faculty_gradebook_monitor.read`, and `grade_prediction_monitor.read`, so Faculty Assignment management can stay available to operations users without also granting faculty activity, gradebook, or prediction monitoring access.
+- Added the backend foundation for the future online-only Flutter Faculty Companion App under `/api/mobile/v1/`. The new `apps/mobile_api` app provides session-based faculty auth, dashboard/classes/students, consultation summary, server-side grade explanation, attendance, quick activity, score entry, missing-score, readiness, and notification endpoints while reusing existing TeacherMate+ faculty assignment scope, grading services, lock enforcement, validation, computation, and audit patterns.
+>>>>>>> Stashed changes
 - Added Faculty Portal `Class List Change Request` workflow for the existing class master list page, so faculty can request add/remove actions without mutating the roster directly. Requests are campus-scoped, land in an admin review queue, and are applied only after Campus Admin or Superadmin approval using the existing safe enrollment create/deactivate services.
 - Refined the Faculty Portal class list change request panel so Request Add Student, Request Remove Student, and the pending-request Remove button now submit by AJAX and refresh only the request area instead of reloading the whole page.
 - Hid cancelled class list change requests from the Admin Portal request queue so requests removed by the faculty requester no longer appear in the admin review list.
@@ -29,6 +34,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Increased Faculty Summary grade-table body row padding for a taller, easier-to-scan grade review table.
 
 ### Changed
+- Restricted Admin Portal Faculty Assignment monitor shortcuts and routes so Campus Admin can continue managing faculty assignments while Activity Monitor, Final Clearance, Grade Book Monitor, and Prediction Monitor access is limited to explicitly permitted academic-monitor roles such as AC, Dean/College Dean, CAO, and Superadmin.
 - Moved the Faculty Portal `Request Class List Change` panel below the class master list, added a gray header to the recent-requests table, added a faculty-side remove button for pending requests, and excluded already-enrolled students from the add-request matched-student selector.
 - Updated the Faculty Portal period summary table so the current-period column uses a display-only label from the tabulation helper. FINAL/FINALS/FX now show as `FINAL EXAM`, while the computed overall course grade remains `FINAL GRADE`.
 - Refined the Faculty Portal Activities taxonomy badges with a more vibrant palette: class standing stays light blue, exam-related rows use orange, subcomponent and detail badges use distinct accent colors, and badge text is no longer bold.

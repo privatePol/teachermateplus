@@ -1641,7 +1641,7 @@ def dashboard_view(request):
 
 
 @portal_required("ADMIN")
-@permission_required("faculty_assignments.read")
+@permission_required("faculty_activity_monitor.read")
 def faculty_activity_monitor_view(request):
     now = timezone.now()
     is_print_mode = request.GET.get("print") == "1"
@@ -6575,9 +6575,21 @@ def role_permissions_view(request, role_id: int):
             "label": "Faculty Final Clearance",
             "description": "Controls review and printing of faculty final clearance status after class grading requirements are completed.",
         },
+        "faculty_activity_monitor": {
+            "label": "Faculty Activity Monitor",
+            "description": "Controls access to faculty login, activity, score-entry, and gradebook activity monitoring reports.",
+        },
+        "faculty_gradebook_monitor": {
+            "label": "Faculty Gradebook Monitor",
+            "description": "Controls access to read-only faculty gradebook review pages for supervised faculty.",
+        },
         "faculty_portal": {
             "label": "Faculty Portal Access",
             "description": "Allows users to enter the Faculty Portal. Faculty class access still depends on accepted assignments and scope.",
+        },
+        "grade_prediction_monitor": {
+            "label": "Grade Prediction Monitor",
+            "description": "Controls access to admin-side unofficial grade prediction monitoring reports.",
         },
         "grade_distribution_monitor": {
             "label": "Grade Distribution Monitor",
@@ -6708,7 +6720,10 @@ def role_permissions_view(request, role_id: int):
             "grading_analytics.read": "Allows viewing admin grading analytics.",
             "grade_distribution_monitor.read": "Allows viewing faculty grade distribution monitoring reports.",
             "faculty_analytics.read": "Allows viewing faculty-side analytics.",
+            "faculty_activity_monitor.read": "Allows viewing faculty activity monitoring reports for supervised faculty.",
             "faculty_final_clearance.read": "Allows previewing and verifying Faculty Final Clearance reports.",
+            "faculty_gradebook_monitor.read": "Allows viewing read-only faculty gradebook monitoring pages for supervised faculty.",
+            "grade_prediction_monitor.read": "Allows viewing admin grade prediction monitoring pages for supervised faculty.",
             "gradebook.view_student_identity": "Allows authorized gradebook reviewers to see unmasked student numbers and names within their allowed scope.",
             "system_settings.update": "Allows changing tenant/system configuration settings.",
             "menus.update": "Allows changing portal navigation menu setup.",
@@ -7652,7 +7667,7 @@ def faculty_assignment_list_view(request):
 
 
 @portal_required("ADMIN")
-@permission_required("faculty_assignments.read")
+@permission_required("faculty_gradebook_monitor.read")
 def faculty_gradebook_monitor_view(request):
     faculty_ids = AdminScopeService.scoped_faculty_users(request)
     all_faculty = User.objects.filter(id__in=faculty_ids, is_active=True).order_by("last_name", "first_name", "username")
@@ -7916,7 +7931,7 @@ def faculty_gradebook_monitor_view(request):
 
 
 @portal_required("ADMIN")
-@permission_required("faculty_assignments.read")
+@permission_required("faculty_gradebook_monitor.read")
 def faculty_gradebook_explanation_view(request, offering_id: int, period_id: int, student_id: int, grade_type: str):
     scoped_assignment = (
         AdminScopeService.scoped_faculty_assignments(request)
@@ -7993,7 +8008,7 @@ def faculty_gradebook_explanation_view(request, offering_id: int, period_id: int
 
 
 @portal_required("ADMIN")
-@permission_required("faculty_assignments.read")
+@permission_required("grade_prediction_monitor.read")
 def grade_prediction_monitor_view(request):
     tenant_id = getattr(request, "scope", {}).get("tenant_id")
     if tenant_id and not FeatureSettingsService.can_user_access_grade_prediction(user=request.user, tenant_id=tenant_id):

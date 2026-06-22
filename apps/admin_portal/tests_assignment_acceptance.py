@@ -143,9 +143,22 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             module="faculty_assignments",
             action="read",
         )
+        self.faculty_activity_monitor_read, _ = Permission.objects.get_or_create(
+            code="faculty_activity_monitor.read",
+            defaults={"module": "faculty_activity_monitor", "action": "read"},
+        )
+        self.faculty_gradebook_monitor_read, _ = Permission.objects.get_or_create(
+            code="faculty_gradebook_monitor.read",
+            defaults={"module": "faculty_gradebook_monitor", "action": "read"},
+        )
         faculty_final_clearance_read, _ = Permission.objects.get_or_create(
             code="faculty_final_clearance.read",
             defaults={"module": "faculty_final_clearance", "action": "read"},
+        )
+        self.faculty_final_clearance_read = faculty_final_clearance_read
+        self.grade_prediction_monitor_read, _ = Permission.objects.get_or_create(
+            code="grade_prediction_monitor.read",
+            defaults={"module": "grade_prediction_monitor", "action": "read"},
         )
         faculty_assignment_create = Permission.objects.create(
             code="faculty_assignments.create",
@@ -165,10 +178,10 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         RolePermission.objects.create(role=faculty_role, permission=faculty_access)
         RolePermission.objects.create(role=admin_role, permission=admin_access)
         RolePermission.objects.create(role=admin_role, permission=faculty_assignment_read)
-        RolePermission.objects.create(role=admin_role, permission=faculty_final_clearance_read)
         RolePermission.objects.create(role=admin_role, permission=faculty_assignment_create)
         RolePermission.objects.create(role=admin_role, permission=faculty_assignment_update)
         RolePermission.objects.create(role=admin_role, permission=system_settings_update)
+        self.admin_role = admin_role
 
         UserRole.objects.create(
             user=self.faculty_user,
@@ -262,6 +275,21 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             ]
         )
 
+    def _grant_academic_monitor_access(self):
+        for permission in [
+            self.faculty_activity_monitor_read,
+            self.faculty_gradebook_monitor_read,
+            self.faculty_final_clearance_read,
+            self.grade_prediction_monitor_read,
+        ]:
+            RolePermission.objects.get_or_create(role=self.admin_role, permission=permission)
+
+    def _grant_final_clearance_access(self):
+        RolePermission.objects.get_or_create(
+            role=self.admin_role,
+            permission=self.faculty_final_clearance_read,
+        )
+
     def test_admin_assignment_view_reports_pending_acceptance_metrics(self):
         self.client.force_login(self.admin_user)
 
@@ -276,6 +304,36 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertEqual(response.context["pending_acceptance_count"], 1)
         self.assertContains(response, "Pending Acceptance")
         self.assertContains(response, "Due Within 24 Hours")
+
+    def test_campus_admin_assignment_page_hides_academic_monitor_actions(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            reverse("admin_portal:faculty_assignment_list"),
+            {"faculty_user_id": self.faculty_user.id, "assign": "1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ASSIGN COURSE OFFERINGS")
+        self.assertNotContains(response, "OPEN ACTIVITY MONITOR")
+        self.assertNotContains(response, "OPEN FINAL CLEARANCE")
+        self.assertNotContains(response, "OPEN GRADE BOOK")
+        self.assertNotContains(response, "OPEN PREDICTION")
+
+    def test_campus_admin_assignment_permission_does_not_open_academic_monitors(self):
+        self.client.force_login(self.admin_user)
+
+        blocked_urls = [
+            reverse("admin_portal:faculty_activity_monitor"),
+            reverse("admin_portal:faculty_gradebook_monitor"),
+            reverse("admin_portal:grade_prediction_monitor"),
+            reverse("admin_portal:faculty_final_clearance"),
+        ]
+
+        for url in blocked_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url, {"faculty_user_id": self.faculty_user.id})
+                self.assertEqual(response.status_code, 403)
 
     def test_assignment_offering_filter_requires_explicit_submit(self):
         self.client.force_login(self.admin_user)
@@ -845,6 +903,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
 
     def test_faculty_final_clearance_preview_shows_complete_and_incomplete_courses(self):
         self._build_final_clearance_fixture()
+        self._grant_final_clearance_access()
         self.client.force_login(self.admin_user)
 
         response = self.client.get(
@@ -872,6 +931,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
 
     def test_faculty_final_clearance_admin_post_is_preview_only(self):
         self._build_final_clearance_fixture()
+        self._grant_final_clearance_access()
         self.client.force_login(self.admin_user)
 
         response = self.client.post(
@@ -894,6 +954,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
 
     def test_faculty_final_clearance_verify_view_displays_generated_snapshot(self):
         self._build_final_clearance_fixture()
+        self._grant_final_clearance_access()
         report_obj = FacultyFinalClearanceReportService.generate_report_record(
             faculty_user=self.faculty_user,
             term=self.term,
@@ -914,6 +975,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
 
     def test_faculty_final_clearance_lookup_finds_report_by_reference_and_code(self):
         self._build_final_clearance_fixture()
+        self._grant_final_clearance_access()
         report_obj = FacultyFinalClearanceReportService.generate_report_record(
             faculty_user=self.faculty_user,
             term=self.term,
@@ -937,6 +999,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
 
     def test_faculty_final_clearance_lookup_rejects_invalid_code(self):
         self._build_final_clearance_fixture()
+        self._grant_final_clearance_access()
         report_obj = FacultyFinalClearanceReportService.generate_report_record(
             faculty_user=self.faculty_user,
             term=self.term,
@@ -957,6 +1020,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertContains(response, "No official NCBA faculty final clearance report matched")
 
     def test_faculty_final_clearance_marks_zero_active_students_as_incomplete(self):
+        self._grant_final_clearance_access()
         accepted_at = timezone.now()
         self.assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
         self.assignment.accepted_at = accepted_at
