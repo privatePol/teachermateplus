@@ -14,9 +14,17 @@ def env_bool(name, default=False):
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+def env_list(name, default=""):
+    return [value.strip() for value in os.getenv(name, default).split(",") if value.strip()]
+
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-this-in-production")
 DEBUG = env_bool("DJANGO_DEBUG", False)
-ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if h.strip()]
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "*")
+MOBILE_API_CORS_ALLOWED_ORIGINS = env_list(
+    "MOBILE_API_CORS_ALLOWED_ORIGINS",
+    "http://localhost:8085,http://127.0.0.1:8085",
+)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -56,6 +64,7 @@ if DEBUG_TOOLBAR_ENABLED:
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "apps.mobile_api.middleware.MobileApiCorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

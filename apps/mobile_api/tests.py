@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -280,6 +280,31 @@ class MobileApiFoundationTests(TestCase):
 
     def post_json(self, url, payload):
         return self.client.post(url, data=json.dumps(payload), content_type="application/json")
+
+    @override_settings(MOBILE_API_CORS_ALLOWED_ORIGINS=["http://localhost:8085"])
+    def test_mobile_api_allows_configured_flutter_web_preflight(self):
+        response = self.client.options(
+            reverse("mobile_api:login"),
+            HTTP_ORIGIN="http://localhost:8085",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS="content-type",
+        )
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "http://localhost:8085")
+        self.assertEqual(response["Access-Control-Allow-Credentials"], "true")
+        self.assertIn("POST", response["Access-Control-Allow-Methods"])
+        self.assertIn("content-type", response["Access-Control-Allow-Headers"])
+
+    @override_settings(MOBILE_API_CORS_ALLOWED_ORIGINS=["http://localhost:8085"])
+    def test_mobile_api_does_not_allow_unconfigured_preflight_origin(self):
+        response = self.client.options(
+            reverse("mobile_api:login"),
+            HTTP_ORIGIN="http://example.invalid",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS="content-type",
+        )
+        self.assertEqual(response.status_code, 405)
+        self.assertNotIn("Access-Control-Allow-Origin", response)
 
     def test_faculty_login_and_current_user_endpoint_work(self):
         response = self.post_json(
