@@ -259,9 +259,10 @@ def _resolve_period(offering, period_id=None):
     periods = list(FacultyGradingService.get_template_periods(template))
     if not periods:
         raise ApiError("validation_error", "No active grading period is configured for this class.")
-    if period_id:
+    if period_id is not None and period_id != "":
+        period_id = _parse_int_param(period_id, "period_id")
         for period in periods:
-            if period.id == int(period_id):
+            if period.id == period_id:
                 return template, period
         raise ApiError("validation_error", "Selected grading period does not belong to this class.")
 
@@ -298,6 +299,17 @@ def _date(value, *, default_today=False):
         return date.fromisoformat(str(value))
     except (TypeError, ValueError) as exc:
         raise ApiError("validation_error", "Date must use YYYY-MM-DD format.") from exc
+
+
+def _parse_int_param(value, field_name: str) -> int:
+    if value in (None, ""):
+        raise ApiError("validation_error", f"{field_name} is required.")
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        return int(str(value).strip())
+    except (TypeError, ValueError) as exc:
+        raise ApiError("validation_error", f"{field_name} must be a valid integer.") from exc
 
 
 def _activity_for_faculty(user, activity_id: int):
@@ -618,7 +630,6 @@ def grade_explanation_view(request, offering_id: int, student_id: int):
                 "formula_text": explanation.get("formula_text"),
             },
             "notes": explanation.get("warnings", []),
-            "server_explanation": explanation,
         }
     )
 
@@ -679,7 +690,7 @@ def attendance_save_view(request, offering_id: int):
     )
     status_payload = []
     for row in rows:
-        student_id = int(row.get("student_id") or 0)
+        student_id = _parse_int_param(row.get("student_id"), "student_id")
         if student_id not in enrolled_ids:
             raise ApiError("forbidden", "Student is not enrolled in this class.", status=403)
         status_code = str(row.get("status_code") or row.get("status") or "").upper()
@@ -878,7 +889,7 @@ def activity_scores_save_view(request, activity_id: int):
     )
     score_payload = []
     for row in rows:
-        student_id = int(row.get("student_id") or 0)
+        student_id = _parse_int_param(row.get("student_id"), "student_id")
         if student_id not in enrolled_ids:
             raise ApiError("forbidden", "Student is not enrolled in this class.", status=403)
         raw_value = row.get("raw_score")

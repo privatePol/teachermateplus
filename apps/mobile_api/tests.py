@@ -356,7 +356,7 @@ class MobileApiFoundationTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()["data"]
-        self.assertIn("server_explanation", payload)
+        self.assertNotIn("server_explanation", payload)
         self.assertIn("formula_text", payload["computed_result"])
         self.assertTrue(
             AuditLog.objects.filter(
@@ -365,6 +365,34 @@ class MobileApiFoundationTests(TestCase):
                 metadata_json__source="mobile_api",
             ).exists()
         )
+
+    def test_malformed_period_and_student_ids_return_validation_errors(self):
+        self.client.force_login(self.faculty)
+
+        response = self.client.get(
+            reverse("mobile_api:grade_explanation", args=[self.offering.id, self.student.id]),
+            {"period_id": "bad"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "validation_error")
+
+        attendance_response = self.post_json(
+            reverse("mobile_api:attendance_save", args=[self.offering.id]),
+            {
+                "period_id": self.period.id,
+                "date": "2026-01-20",
+                "records": [{"student_id": "bad", "status_code": AttendanceRecord.Status.PRESENT}],
+            },
+        )
+        self.assertEqual(attendance_response.status_code, 400)
+        self.assertEqual(attendance_response.json()["error"]["code"], "validation_error")
+
+        score_response = self.post_json(
+            reverse("mobile_api:activity_scores_save", args=[self.activity.id]),
+            {"scores": [{"student_id": "bad", "raw_score": "10"}]},
+        )
+        self.assertEqual(score_response.status_code, 400)
+        self.assertEqual(score_response.json()["error"]["code"], "validation_error")
 
     def test_attendance_save_validates_scope_membership_status_and_audits(self):
         self.client.force_login(self.faculty)
