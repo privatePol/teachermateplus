@@ -39,3 +39,4 @@ backups/
 # Runtime logs
 logs/*.log
 *.log
+logs/system.log
