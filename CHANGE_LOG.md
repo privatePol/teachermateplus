@@ -7,6 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added the backend foundation for the future online-only Flutter Faculty Companion App under `/api/mobile/v1/`. The new `apps/mobile_api` app provides session-based faculty auth, dashboard/classes/students, consultation summary, server-side grade explanation, attendance, quick activity, score entry, missing-score, readiness, and notification endpoints while reusing existing TeacherMate+ faculty assignment scope, grading services, lock enforcement, validation, computation, and audit patterns.
 - Added Faculty Portal `Class List Change Request` workflow for the existing class master list page, so faculty can request add/remove actions without mutating the roster directly. Requests are campus-scoped, land in an admin review queue, and are applied only after Campus Admin or Superadmin approval using the existing safe enrollment create/deactivate services.
 - Refined the Faculty Portal class list change request panel so Request Add Student, Request Remove Student, and the pending-request Remove button now submit by AJAX and refresh only the request area instead of reloading the whole page.
 - Hid cancelled class list change requests from the Admin Portal request queue so requests removed by the faculty requester no longer appear in the admin review list.

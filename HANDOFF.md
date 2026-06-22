@@ -1,11 +1,24 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-06-21
+Last updated by Codex: 2026-06-22
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+- Date: 2026-06-22
+- Current pass: added the Django backend foundation for the future online-only Flutter Faculty Companion App in `apps/mobile_api`, mounted at `/api/mobile/v1/`, without changing the Faculty Portal web UI.
+- Current pass: mobile endpoints reuse existing faculty assignment scope, campus permission scope, grading services, grade explanation service, submission readiness, encoding lock enforcement, validation, and audit patterns; Flutter remains UI-only and never connects directly to the database.
+- Validation performed: `python manage.py check` passed; `python manage.py test apps.mobile_api.tests` passed with 10 tests.
+
+## Faculty Companion Mobile API Foundation
+- Completed work: added `apps/mobile_api` with JSON response helpers and endpoints for auth/login/logout/me, dashboard, notifications, assigned classes, class snapshot, students/search, student summary, consultation summary, grade explanation, attendance today/save, quick activity options/create, activity scores/save, missing scores, and submission readiness.
+- Security confirmations: all non-login endpoints require authenticated faculty access, class reads/writes verify accepted faculty assignment plus scoped faculty permission, student endpoints verify enrollment in the requested class, score writes validate range and preserve blank versus zero using the existing clear/write service path, and attendance writes validate status before calling existing services.
+- Lock/audit confirmations: mobile score, attendance, and activity writes go through existing `FacultyGradingService` and `GradingGovernanceService.assert_encoding_allowed()` paths; write operations add audit rows through `AuditService` with `metadata_json.source = mobile_api`.
+- Changed files: `apps/mobile_api/__init__.py`, `apps/mobile_api/apps.py`, `apps/mobile_api/urls.py`, `apps/mobile_api/views.py`, `apps/mobile_api/tests.py`, `config/settings/base.py`, `config/urls.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Pending work / risk: authentication is session-cookie based for the MVP foundation; production Flutter integration still needs a final decision on CSRF/token transport, HTTPS/mobile client storage, and deployment hardening. Offline mode, final grade submission, correction requests, admin functions, parent/student access, and AI suggestions were intentionally deferred.
+- Exact next step: have the Flutter app call `/api/mobile/v1/auth/login/`, then `/api/mobile/v1/auth/me/` and `/api/mobile/v1/classes/` against a dev backend, and decide whether the mobile client will use session+CSRF or a token layer in a later security pass.
+
 - Date: 2026-06-21
 - Current pass: refined the Faculty Portal class list change request panel so it now sits below the class master list, uses a gray recent-requests header, lets faculty remove pending requests, and excludes already-enrolled students from the add-request matched-student selector.
 - Current pass: converted the Faculty Portal class list change request add/remove/cancel actions to AJAX so the request area refreshes in place without reloading the page.

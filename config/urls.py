@@ -9,6 +9,7 @@ urlpatterns = [
     path("", include("apps.admin_portal.urls")),
     path("", include("apps.faculty_portal.urls")),
     path("", include("apps.student_portal.urls")),
+    path("api/mobile/v1/", include("apps.mobile_api.urls")),
 ]
 
 if settings.DEBUG:

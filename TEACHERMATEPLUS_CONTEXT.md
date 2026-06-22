@@ -5,6 +5,16 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 
 ## 2. Current Operating Modules
 
+### Faculty Companion Mobile API
+- A backend-only foundation for the future online-only Flutter Faculty Companion App now exists in `apps/mobile_api` under `/api/mobile/v1/`.
+- Flutter is treated as UI only. Django remains the source of truth, mobile clients do not connect directly to the database, and official grading behavior stays in existing TeacherMate+ services.
+- The MVP API provides faculty login/logout/me, dashboard, notifications, assigned classes, class snapshots, student list/search/summary, consultation summary, grade explanation, attendance today/save, quick activity options/create, score entry, missing scores, and submission readiness.
+- Mobile endpoints return consistent JSON envelopes and require authenticated faculty access except login. Class-scoped endpoints verify accepted faculty assignment plus scoped faculty permission, and student-scoped endpoints verify enrollment in the requested offering.
+- Score, attendance, and quick-activity writes call the existing `FacultyGradingService` and `GradingGovernanceService.assert_encoding_allowed()` paths, so Grade Encoding Access Control, period locks, submitted/reopened states, validation, recomputation, and audit expectations remain server-side.
+- Score entry preserves the TeacherMate+ distinction that blank means not encoded while `0` means encoded zero. The API validates score range before delegating to existing grading services.
+- Consultation and grade explanation endpoints are read-only in MVP. Grade explanation delegates to `GradeExplanationService`, and Flutter is not expected to compute official grades.
+- Deliberately deferred for MVP: offline mode, final grade submission, correction requests, admin functions, parent/student access, and AI suggestions.
+
 ### Student Portal
 - A local-only Student Portal foundation now exists under the intentionally ignored `apps/student_portal/` prototype app.
 - Initial routes use the `/student/` prefix:
