@@ -75,6 +75,7 @@ Legend: `X` means the permission is directly assigned to the role. Blank means i
 | `roles.create` |  |  |  |  |  |  |  |  | X |  |  |  |
 | `roles.read` | X |  |  |  |  |  |  |  | X |  |  |  |
 | `roles.update` |  |  |  |  |  |  |  |  | X |  |  |  |
+| `user_roles.update` |  |  |  |  |  |  |  |  | X |  |  |  |
 | `sections.create` |  |  |  |  |  |  |  |  | X |  |  |  |
 | `sections.import` |  |  |  |  |  |  |  |  | X |  |  |  |
 | `sections.read` | X |  | X | X | X | X | X | X | X |  |  |  |

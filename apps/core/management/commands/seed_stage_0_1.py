@@ -30,6 +30,7 @@ class Command(BaseCommand):
         ("users.read", "users", "read"),
         ("users.create", "users", "create"),
         ("users.update", "users", "update"),
+        ("user_roles.update", "user_roles", "update"),
         ("roles.read", "roles", "read"),
         ("roles.create", "roles", "create"),
         ("roles.update", "roles", "update"),

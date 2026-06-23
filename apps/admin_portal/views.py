@@ -193,6 +193,7 @@ CRITICAL_PERMISSION_CODES = {
     "system_settings.update",
     "template_hotfixes.create",
     "template_hotfixes.review",
+    "user_roles.update",
     "users.update",
 }
 CRITICAL_AUDIT_FILTER = (
@@ -6174,7 +6175,7 @@ def user_change_password_view(request, user_id: int):
 
 
 @portal_required("ADMIN")
-@permission_required("roles.update")
+@permission_required("user_roles.update")
 def user_roles_view(request, user_id: int):
     user = get_object_or_404(_scoped_users_queryset(request), id=user_id)
     tenant_qs = AdminScopeService.scoped_tenants(request)
@@ -6643,6 +6644,10 @@ def role_permissions_view(request, role_id: int):
             "label": "Security Roles",
             "description": "Controls role maintenance, including which permission sets can be created, edited, or deactivated.",
         },
+        "user_roles": {
+            "label": "User Role Assignments",
+            "description": "Controls assigning and deactivating scoped role assignments on user accounts.",
+        },
         "sections": {
             "label": "Section Records",
             "description": "Controls class section records used in offerings, enrollments, schedules, and reports.",
@@ -6735,6 +6740,7 @@ def role_permissions_view(request, role_id: int):
             "grading_periods.lock": "Allows closing or locking grading periods.",
             "grading_periods.reopen": "Allows reopening locked grading periods.",
             "template_hotfixes.review": "Allows reviewing grading template hotfix requests.",
+            "user_roles.update": "Allows assigning or deactivating scoped roles on user accounts.",
         }
         if permission.code in specific:
             return specific[permission.code]

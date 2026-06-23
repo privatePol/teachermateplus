@@ -1,13 +1,11 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-06-21
+Last updated by Codex: 2026-06-23
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
-<<<<<<< Updated upstream
-=======
 - Date: 2026-06-22
 - Current pass: split Admin Portal Faculty Assignment management from academic monitoring access. Campus Admin can still open/manage `/admin-portal/academics/faculty-assignments/`, but the Activity Monitor, Final Clearance, Grade Book Monitor, and Prediction buttons/routes now require separate monitor/report permissions.
 - Current pass: added `faculty_activity_monitor.read`, `faculty_gradebook_monitor.read`, and `grade_prediction_monitor.read`, narrowed default academic-monitor grants to AC/Area Chair, Dean/College Dean, CAO, and Superadmin-style oversight, and removed monitor/report grants from Campus Admin/Tenant Admin/Registrar through the new RBAC migration.
@@ -28,6 +26,19 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Current pass: added the Django backend foundation for the future online-only Flutter Faculty Companion App in `apps/mobile_api`, mounted at `/api/mobile/v1/`, without changing the Faculty Portal web UI.
 - Current pass: mobile endpoints reuse existing faculty assignment scope, campus permission scope, grading services, grade explanation service, submission readiness, encoding lock enforcement, validation, and audit patterns; Flutter remains UI-only and never connects directly to the database.
 - Validation performed: `python manage.py check` passed; `python manage.py test apps.mobile_api.tests` passed with 10 tests.
+- Date: 2026-06-23
+- Current pass: split Admin Portal user-role assignment from role-definition management by adding dedicated `user_roles.update` RBAC permission for `Security -> Users -> Roles`.
+- Current pass: `Security -> Users -> Roles` now requires `user_roles.update`, while `Security -> Roles` and role-permission editing remain under `roles.update`.
+- Validation performed: `python manage.py migrate` applied `rbac.0022_seed_user_role_assignment_permission`; `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `python manage.py test apps.admin_portal.tests_users apps.admin_portal.tests_roles` passed with 27 tests.
+
+## User Role Assignment Permission Split
+- Completed work: added RBAC migration `apps/rbac/migrations/0022_seed_user_role_assignment_permission.py` to seed `user_roles.update` and copy existing `roles.update` role/user grants into the new permission for rollout continuity.
+- Completed work: updated the `user_roles_view` gate and the Users table `Manage roles` action to use `user_roles.update` instead of `roles.update`.
+- Completed work: kept role list, role edit, role delete, and role-permission maintenance under `roles.update`, and documented the separation in `docs/ROLE_SETUP.md` and the Admin guide.
+- Validation performed: `python manage.py migrate`, `python manage.py check`, `python manage.py makemigrations --check --dry-run`, and `python manage.py test apps.admin_portal.tests_users apps.admin_portal.tests_roles` all passed.
+- Changed files: `apps/rbac/migrations/0022_seed_user_role_assignment_permission.py`, `apps/admin_portal/views.py`, `templates/admin_portal/security/user_table.html`, `apps/core/management/commands/seed_stage_0_1.py`, `apps/admin_portal/tests_users.py`, `apps/admin_portal/tests_roles.py`, `docs/ROLE_SETUP.md`, `templates/admin_portal/guide.html`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Pending work / risk: existing production custom roles that currently rely on `roles.update` for user-role assignment will keep working after migration, but follow-up RBAC cleanup may still be needed so operational roles keep `user_roles.update` and drop `roles.update` where appropriate.
+- Exact next step: run the migration in each environment, then review operational roles such as Campus Admin and grant `user_roles.update` without `roles.update` where role-permission editing should stay restricted.
 
 ## Faculty Companion Mobile API Foundation
 - Completed work: added `apps/mobile_api` with JSON response helpers and endpoints for auth/login/logout/me, dashboard, notifications, assigned classes, class snapshot, students/search, student summary, consultation summary, grade explanation, attendance today/save, quick activity options/create, activity scores/save, missing scores, and submission readiness.
@@ -37,7 +48,6 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Pending work / risk: authentication is session-cookie based for the MVP foundation; production Flutter integration still needs a final decision on CSRF/token transport, HTTPS/mobile client storage, and deployment hardening. Offline mode, final grade submission, correction requests, admin functions, parent/student access, and AI suggestions were intentionally deferred.
 - Exact next step: have the Flutter app call `/api/mobile/v1/auth/login/`, then `/api/mobile/v1/auth/me/` and `/api/mobile/v1/classes/` against a dev backend, and decide whether the mobile client will use session+CSRF or a token layer in a later security pass.
 
->>>>>>> Stashed changes
 - Date: 2026-06-21
 - Current pass: refined the Faculty Portal class list change request panel so it now sits below the class master list, uses a gray recent-requests header, lets faculty remove pending requests, and excludes already-enrolled students from the add-request matched-student selector.
 - Current pass: converted the Faculty Portal class list change request add/remove/cancel actions to AJAX so the request area refreshes in place without reloading the page.

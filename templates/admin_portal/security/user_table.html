@@ -87,7 +87,7 @@
             </a>
             {% endif %}
             {% endif %}
-            {% if "roles.update" in effective_permissions %}
+            {% if "user_roles.update" in effective_permissions %}
             <a
               class="btn btn-sm btn-outline-secondary user-action-btn"
               href="{% url 'admin_portal:user_roles' row.id %}"

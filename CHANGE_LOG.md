@@ -7,11 +7,8 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
-<<<<<<< Updated upstream
-=======
 - Added separate Admin Portal academic monitor permissions for `faculty_activity_monitor.read`, `faculty_gradebook_monitor.read`, and `grade_prediction_monitor.read`, so Faculty Assignment management can stay available to operations users without also granting faculty activity, gradebook, or prediction monitoring access.
 - Added the backend foundation for the future online-only Flutter Faculty Companion App under `/api/mobile/v1/`. The new `apps/mobile_api` app provides session-based faculty auth, dashboard/classes/students, consultation summary, server-side grade explanation, attendance, quick activity, score entry, missing-score, readiness, and notification endpoints while reusing existing TeacherMate+ faculty assignment scope, grading services, lock enforcement, validation, computation, and audit patterns.
->>>>>>> Stashed changes
 - Added Faculty Portal `Class List Change Request` workflow for the existing class master list page, so faculty can request add/remove actions without mutating the roster directly. Requests are campus-scoped, land in an admin review queue, and are applied only after Campus Admin or Superadmin approval using the existing safe enrollment create/deactivate services.
 - Refined the Faculty Portal class list change request panel so Request Add Student, Request Remove Student, and the pending-request Remove button now submit by AJAX and refresh only the request area instead of reloading the whole page.
 - Hid cancelled class list change requests from the Admin Portal request queue so requests removed by the faculty requester no longer appear in the admin review list.
@@ -32,6 +29,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Added Faculty Portal `Attendance Summary` for `/faculty/my-courses/<offering_id>/periods/<period_id>/attendance/summary/`, showing read-only attendance totals from class start to today, the 2/3/4/5/6-unit allowable-absence policy, status filters, and at-risk sorting with a consecutive-absence warning when a student misses three sessions in a row.
 - Moved the informational `Encoded Zero Scores` metric from Faculty Portal `My Classes` cards into the Summary page `Period Snapshot`, so faculty review zero-score entries together with readiness cards before submission. The metric counts active saved activity-score records with raw score `0`, making valid zero scores visible without treating them as missing/no-grade entries.
 - Increased Faculty Summary grade-table body row padding for a taller, easier-to-scan grade review table.
+- Added dedicated `user_roles.update` RBAC permission for `Security -> Users -> Roles`, separate from `roles.update` role-definition maintenance.
 
 ### Changed
 - Restricted Admin Portal Faculty Assignment monitor shortcuts and routes so Campus Admin can continue managing faculty assignments while Activity Monitor, Final Clearance, Grade Book Monitor, and Prediction Monitor access is limited to explicitly permitted academic-monitor roles such as AC, Dean/College Dean, CAO, and Superadmin.
@@ -72,6 +70,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 - Added focused post-enrollment safety tests covering in-use offering blockers, safe room/schedule edits, in-use enrollment transfer/student-change blockers, status-only enrollment updates, warning panels, and dependency counts.
 - Added Admin Portal `Grade Encoding Access Control` for temporarily pausing faculty grade encoding during enrollment/faculty-loading cleanup. Controls support Academic Year, Term, optional grading period code, optional campus, and optional course offering.
 - Added `GradeEncodingControl` and `GradeEncodingAccessService`. Any active matching `CLOSED` control blocks faculty activity creation/edit/archive, score/attendance writes, and period submission through the existing `GradingGovernanceService.assert_encoding_allowed()` path. No grade computation, score, activity, submission, lock, or correction records are modified by the gate.
+- Split Admin Portal role assignment from role-definition management. `Security -> Users -> Roles` now requires `user_roles.update`, while `Security -> Roles` continues to use `roles.update` for editing role records and permission sets.
 - Added `grading_encoding_control.manage`, RBAC/menu migrations, and seed support. Faculty do not receive this permission; authorized admin roles remain constrained by existing AdminScopeService tenant/campus/course-offering scope.
 - Added faculty dashboard and gradebook notices when encoding is temporarily closed. Faculty can still view assigned classes, but UI actions enter read-only mode and direct POST attempts are blocked server-side.
 - Post-review cleanup for Grade Encoding Access Control now propagates closure notices consistently to Activities, Score Entry, Attendance, and Summary contexts, hides create/manage controls when encoding is closed, and shows the same closure reason/notice after blocked direct POST attempts. The Faculty Dashboard keeps encoding closure as a compact `Encoding Closed` status only; the full reason/notice appears inside the affected gradebook pages.

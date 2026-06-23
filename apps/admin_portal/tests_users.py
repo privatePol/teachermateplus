@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.auditlog.models import AuditLog
-from apps.rbac.models import Permission, Role, UserPermission
+from apps.rbac.models import Permission, Role, RolePermission, UserPermission, UserRole
 from apps.admin_portal.forms import UserCreateForm, UserRoleAssignmentForm, UserUpdateForm
 from apps.admin_portal.views import _send_new_user_credentials_email, _send_user_password_change_credentials_email
 from apps.tenants.models import Campus, Department, Tenant
@@ -508,3 +508,77 @@ class UserListTests(TestCase):
         self.assertIn("ResetCardPass123!", html_body)
         self.assertNotIn("/admin-portal/", html_body)
         self.assertNotIn("/faculty/", html_body)
+
+
+class UserRolePermissionSeparationTests(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(code="NCBA6", name="NCBA6")
+        self.campus = Campus.objects.create(tenant=self.tenant, code="NCBA-06", name="Scope Campus")
+
+        self.admin_access, _ = Permission.objects.get_or_create(
+            code="admin_portal.access", defaults={"module": "admin_portal", "action": "access"}
+        )
+        self.users_read, _ = Permission.objects.get_or_create(
+            code="users.read", defaults={"module": "users", "action": "read"}
+        )
+        self.roles_read, _ = Permission.objects.get_or_create(
+            code="roles.read", defaults={"module": "roles", "action": "read"}
+        )
+        self.roles_update, _ = Permission.objects.get_or_create(
+            code="roles.update", defaults={"module": "roles", "action": "update"}
+        )
+        self.user_roles_update, _ = Permission.objects.get_or_create(
+            code="user_roles.update", defaults={"module": "user_roles", "action": "update"}
+        )
+
+        self.actor_role = Role.objects.create(code="SCOPE_ADMIN", name="Scope Admin")
+        self.assignable_role = Role.objects.create(code="FACULTY", name="Faculty")
+
+        self.actor = User.objects.create_user(
+            username="scope_admin",
+            email="scope_admin@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        self.target = User.objects.create_user(
+            username="managed_user",
+            email="managed_user@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+
+        UserRole.objects.create(user=self.actor, role=self.actor_role, tenant=self.tenant, campus=self.campus)
+        RolePermission.objects.create(role=self.actor_role, permission=self.admin_access)
+        RolePermission.objects.create(role=self.actor_role, permission=self.users_read)
+        RolePermission.objects.create(role=self.actor_role, permission=self.roles_read)
+
+        self.client.force_login(self.actor)
+
+    def test_user_list_shows_manage_roles_action_with_user_roles_update_only(self):
+        RolePermission.objects.create(role=self.actor_role, permission=self.user_roles_update)
+
+        response = self.client.get(reverse("admin_portal:user_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("admin_portal:user_roles", args=[self.target.id]))
+
+    def test_user_roles_page_allows_dedicated_user_roles_update_without_roles_update(self):
+        RolePermission.objects.create(role=self.actor_role, permission=self.user_roles_update)
+
+        response = self.client.get(reverse("admin_portal:user_roles", args=[self.target.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Current Assignments")
+
+    def test_user_roles_page_rejects_roles_update_without_user_roles_update(self):
+        RolePermission.objects.create(role=self.actor_role, permission=self.roles_update)
+
+        response = self.client.get(reverse("admin_portal:user_roles", args=[self.target.id]))
+
+        self.assertEqual(response.status_code, 403)

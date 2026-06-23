@@ -75,6 +75,11 @@ Go to:
 
 `Admin Portal -> Security -> Roles`
 
+If an operational admin should only assign roles on user accounts and should not edit role permission sets, separate the permissions like this:
+
+- `user_roles.update` = manage `Admin Portal -> Security -> Users -> <user> -> Roles`
+- `roles.update` = edit `Admin Portal -> Security -> Roles` and change what each role is allowed to do
+
 For AC / Dean / CAO role, make sure it has the needed permissions, especially:
 
 - Grade Distribution Monitor access

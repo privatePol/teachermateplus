@@ -195,3 +195,36 @@ class RoleManagementTests(TestCase):
         self.assertContains(response, "Temporary access for setup.")
         self.assertContains(response, "3 active user")
         self.assertNotContains(response, "permission_ids")
+
+
+class RolePermissionBoundaryTests(TestCase):
+    def setUp(self):
+        self.admin_access, _ = Permission.objects.get_or_create(
+            code="admin_portal.access", defaults={"module": "admin_portal", "action": "access"}
+        )
+        self.roles_read, _ = Permission.objects.get_or_create(
+            code="roles.read", defaults={"module": "roles", "action": "read"}
+        )
+        self.user_roles_update, _ = Permission.objects.get_or_create(
+            code="user_roles.update", defaults={"module": "user_roles", "action": "update"}
+        )
+        self.actor_role = Role.objects.create(code="BOUNDARY_ROLE", name="Boundary Role")
+        self.target_role = Role.objects.create(code="TARGET_ROLE", name="Target Role", is_active=True)
+
+        self.actor = User.objects.create_user(
+            username="boundary_admin",
+            email="boundary_admin@example.com",
+            password="testpass123",
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(user=self.actor, role=self.actor_role)
+        RolePermission.objects.create(role=self.actor_role, permission=self.admin_access)
+        RolePermission.objects.create(role=self.actor_role, permission=self.roles_read)
+        RolePermission.objects.create(role=self.actor_role, permission=self.user_roles_update)
+        self.client.force_login(self.actor)
+
+    def test_user_role_assignment_permission_does_not_open_role_permissions_page(self):
+        response = self.client.get(reverse("admin_portal:role_permissions", args=[self.target_role.id]))
+
+        self.assertEqual(response.status_code, 403)
