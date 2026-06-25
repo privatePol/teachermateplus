@@ -1,6 +1,7 @@
 # HANDOFF.md
 
 Last updated by Codex: 2026-06-23
+Last updated by Codex: 2026-06-25
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
@@ -39,6 +40,52 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Changed files: `apps/rbac/migrations/0022_seed_user_role_assignment_permission.py`, `apps/admin_portal/views.py`, `templates/admin_portal/security/user_table.html`, `apps/core/management/commands/seed_stage_0_1.py`, `apps/admin_portal/tests_users.py`, `apps/admin_portal/tests_roles.py`, `docs/ROLE_SETUP.md`, `templates/admin_portal/guide.html`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
 - Pending work / risk: existing production custom roles that currently rely on `roles.update` for user-role assignment will keep working after migration, but follow-up RBAC cleanup may still be needed so operational roles keep `user_roles.update` and drop `roles.update` where appropriate.
 - Exact next step: run the migration in each environment, then review operational roles such as Campus Admin and grant `user_roles.update` without `roles.update` where role-permission editing should stay restricted.
+- Date: 2026-06-25
+- Current pass: implemented grading-template governance safety fixes for approved/published template structural locking and exact-term Course Template Assignment override protection.
+- Current pass: approved/published templates are now read-only in the builder and blocked in period/component/subcomponent/detail structural routes, while duplicate and hotfix workflows remain available.
+- Current pass: exact-term course-template assignment creation/reactivation now blocks duplicate active scopes and skips/blocks dangerous overrides when matching offerings already have grading, submission, reopen, lock, or attendance dependencies under a different currently resolved template.
+- Validation performed: `python manage.py check`, `python manage.py makemigrations --check --dry-run`, full `apps.admin_portal.tests_template_governance.TemplateGovernanceWorkflowTests`, course-template assignment safety/bulk/list tests, `apps.grading.tests.FinalGradeFormulaTests`, and focused faculty grading tests all passed.
+
+## Grading Template Governance Safety Fixes
+- Completed work: tightened `GradingTemplateService.ensure_editable()` behind `is_structurally_editable()` so `FOR_APPROVAL`, `APPROVED`, and published templates are locked from normal structural editing.
+- Completed work: wired the lock through builder UI, period/component/subcomponent/detail create/update paths, component soft delete, and inactive hard-delete cleanup for template structure rows.
+- Completed work: added exact-term Course Template Assignment activation checks that reject duplicate active course/effective-term scopes and block/skip late exact-term overrides over existing gradebook-dependent offerings.
+- Completed work: clarified Course Template Assignment list/bulk/edit UI text for default/null-term assignments, exact-term overrides, and separate Summer templates.
+- Safety confirmations: no grade computation logic, faculty score/attendance save path, submissions, locks, corrections, or existing grade records were modified.
+- Changed files: `apps/grading/services.py`, `apps/grading/admin.py`, `apps/grading/tests.py`, `apps/admin_portal/forms.py`, `apps/admin_portal/views.py`, `apps/admin_portal/tests_template_governance.py`, `apps/admin_portal/tests_course_template_assignment_safety.py`, `apps/admin_portal/tests_course_template_assignment_bulk.py`, `templates/admin_portal/grading/template_builder.html`, `templates/admin_portal/grading/course_template_assignment_list.html`, `templates/admin_portal/grading/course_template_assignment_bulk_form.html`, `templates/admin_portal/shared/form_page.html`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` passed; `python manage.py test apps.admin_portal.tests_template_governance.TemplateGovernanceWorkflowTests` passed with 20 tests; `python manage.py test apps.admin_portal.tests_course_template_assignment_safety.CourseTemplateAssignmentSafetyTests apps.admin_portal.tests_course_template_assignment_bulk.BulkCourseTemplateAssignmentTests` passed with 19 tests; `python manage.py test apps.admin_portal.tests_course_template_assignment_list.CourseTemplateAssignmentListTests` passed with 4 tests; `python manage.py test apps.grading.tests.FinalGradeFormulaTests` passed with 17 tests; focused faculty grading tests passed with 4 tests.
+- Pending work / risk: browser smoke is still recommended for the builder read-only alert and Course Template Assignment guidance/skip warning display.
+- Exact next step: in the browser, open an approved/published template builder and confirm Add/Edit structural actions are hidden; then attempt a Summer exact-term bulk assignment for a no-data offering and an in-use offering to confirm allowed vs skipped messaging.
+
+- Current pass: updated Admin help guidance so regular/default and Summer course-template assignments are explained in plain language.
+- Current pass: guide text now says to leave `Effective term` blank for the regular default template, add a separate exact Summer-term row for the Summer template, and rely on the default regular assignment again after Summer.
+- Validation performed: `python manage.py check` passed; focused Admin guide regression test passed; full `apps.admin_portal.tests_help_guide` suite passed with 15 tests.
+
+## Admin Guide Regular/Summer Template Assignment Guidance
+- Completed work: updated the dedicated Grading Template Setup Guide with a simple Regular/Summer assignment example table.
+- Completed work: updated the practical Admin guide Course Template Assignment topic with the same default-vs-exact-term rule.
+- Completed work: added guide-content regression assertions so the plain explanation stays visible.
+- Changed files: `templates/admin_portal/grading/grading_setup_guide.html`, `apps/admin_portal/help_guide.py`, `apps/admin_portal/tests_help_guide.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python manage.py check` passed; `python manage.py test apps.admin_portal.tests_help_guide.AdminHelpGuideTests.test_grading_template_help_names_exact_menu_and_builder_steps` passed; `python manage.py test apps.admin_portal.tests_help_guide` passed with 15 tests.
+- Pending work / risk: browser smoke is optional; this is documentation-only and does not change template resolution, grade computation, database models, or assignments.
+- Exact next step: open `Admin Portal -> Grading -> Grading Template Setup Guide` and `Admin Portal -> Guide` to visually confirm the new explanation reads clearly.
+
+## Grading Template Builder State Preservation
+- Completed work: added stable builder DOM anchors for periods, major components, subcomponents, and detail items.
+- Completed work: added a template-specific `sessionStorage` restore script using key `gradingTemplateBuilderState:<template_id>` to save opened Bootstrap collapse IDs, scroll position, and pending focus target.
+- Completed work: wired Add/Edit builder links with `data-builder-action-link` and `data-builder-focus-target` so returning from form pages can reopen the related period and scroll near the relevant area.
+- Changed files: `templates/admin_portal/grading/template_builder.html`, `apps/admin_portal/tests_template_governance.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` passed; focused builder regression test passed; full `apps.admin_portal.tests_template_governance` suite passed.
+- Pending work / risk: manual browser smoke test is still recommended because sessionStorage, Back-button restoration, and scroll behavior are browser-side concerns.
+- Exact next step: open a builder page, expand a period, scroll to a component/subcomponent/detail, use Add/Edit, save, and confirm the builder returns near the same area with the period still open.
+
+## Average Activities Publish Validation Alignment
+- Completed work: updated `GradingTemplateService.validate_publishable()` so active detail rows under `Average Activities` no longer require a positive total configured detail weight for template publication.
+- Completed work: kept the existing positive active detail-weight validation for `Weighted Details`.
+- Completed work: added regression coverage proving all-zero detail weights pass validation in `Average Activities` mode and still fail in `Weighted Details`, and updated the Admin grading setup guide note.
+- Changed files: `apps/grading/services.py`, `apps/faculty_portal/tests_assignment_acceptance.py`, `templates/admin_portal/grading/grading_setup_guide.html`, `apps/admin_portal/tests_help_guide.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Pending work / risk: browser smoke verification of the grading setup guide text is still optional; no backend grading-risk follow-up is expected because computation paths were not changed.
+- Exact next step: if needed, open `Admin Portal -> Grading -> Grading Setup Guide` and confirm the Average Activities help card now matches the live validation rule.
 
 ## Faculty Companion Mobile API Foundation
 - Completed work: added `apps/mobile_api` with JSON response helpers and endpoints for auth/login/logout/me, dashboard, notifications, assigned classes, class snapshot, students/search, student summary, consultation summary, grade explanation, attendance today/save, quick activity options/create, activity scores/save, missing scores, and submission readiness.

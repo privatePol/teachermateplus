@@ -8,12 +8,14 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
+from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.admin_portal.forms import CourseTemplateAssignmentForm
 from apps.grading.admin import CourseTemplateAssignmentAdminForm
 from apps.grading.models import (
     CourseTemplateAssignment,
     GradeCorrectionRequest,
     GradeActivity,
+    GradeSubmissionReopenRequest,
     GradingPeriodLock,
     GradeSubmission,
     GradingTemplate,
@@ -204,6 +206,56 @@ class CourseTemplateAssignmentSafetyTests(TestCase):
             created_by_user=self.user,
         )
 
+    def _make_exact_override_scenario(self, suffix):
+        course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code=f"OVR{suffix}",
+            title=f"Override Course {suffix}",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=course,
+            section=self.section,
+            status=CourseOffering.Status.OPEN,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=course,
+            grading_template=self.template,
+            effective_from_term=None,
+            is_active=True,
+        )
+        return course, offering
+
+    def _exact_override_form(self, *, course, template=None, term=None, is_active=True):
+        return CourseTemplateAssignmentForm(
+            data={
+                "course": course.id,
+                "grading_template": (template or self.other_template).id,
+                "effective_from_term": (term or self.term).id,
+                "is_active": "on" if is_active else "",
+            },
+            instance=CourseTemplateAssignment(),
+            course_queryset=Course.objects.all(),
+            template_queryset=GradingTemplate.objects.all(),
+            term_queryset=Term.objects.all(),
+        )
+
+    def _assert_exact_override_blocked(self, suffix, dependency_factory):
+        course, offering = self._make_exact_override_scenario(suffix)
+        dependency_factory(offering)
+
+        form = self._exact_override_form(course=course)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("exact-term grading template assignment cannot be created", str(form.errors))
+
     def _assert_template_change_blocked(self):
         form = self._assignment_form(template=self.other_template)
         self.assertFalse(form.is_valid())
@@ -229,6 +281,136 @@ class CourseTemplateAssignmentSafetyTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         row = form.save()
         self.assertEqual(row.grading_template_id, self.other_template.id)
+
+    def test_exact_term_assignment_overrides_default_for_no_data_offering(self):
+        self.assignment.effective_from_term = None
+        self.assignment.save(update_fields=["effective_from_term", "updated_at"])
+
+        form = self._exact_override_form(course=self.course)
+
+        self.assertTrue(form.is_valid(), form.errors)
+        row = form.save()
+        self.assertEqual(row.grading_template_id, self.other_template.id)
+        self.assertEqual(row.effective_from_term_id, self.term.id)
+
+    def test_duplicate_active_course_effective_term_assignment_with_different_template_is_rejected(self):
+        form = self._exact_override_form(course=self.course)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("already exists for this course and effective term scope", str(form.errors))
+
+    def test_exact_term_override_blocks_when_matching_offering_has_gradebook_dependencies(self):
+        def make_activity(offering):
+            return GradeActivity.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=offering,
+                template_period=self.period,
+                template_component=self.component,
+                title="Existing Activity",
+                total_score=Decimal("10.00"),
+                created_by_user=self.user,
+            )
+
+        dependency_factories = {
+            "activity": make_activity,
+            "score": lambda offering: StudentActivityScore.objects.create(
+                activity=make_activity(offering),
+                student=self.student,
+                raw_score=Decimal("5.00"),
+                computed_score=Decimal("75.00"),
+                encoded_by_user=self.user,
+            ),
+            "period_grade": lambda offering: StudentPeriodGrade.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=offering,
+                template_period=self.period,
+                student=self.student,
+                class_standing_grade=Decimal("85.00"),
+                period_grade=Decimal("85.00"),
+                computed_by_user=self.user,
+            ),
+            "final_grade": lambda offering: StudentFinalGrade.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=offering,
+                student=self.student,
+                final_grade=Decimal("88.00"),
+                remarks="PASSED",
+                computed_by_user=self.user,
+            ),
+            "submission": lambda offering: GradeSubmission.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=offering,
+                template_period=self.period,
+                status=GradeSubmission.Status.SUBMITTED,
+                submitted_by_user=self.user,
+                submitted_at=timezone.now(),
+            ),
+            "correction": lambda offering: GradeCorrectionRequest.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=offering,
+                template_period=self.period,
+                requested_by_user=self.user,
+                initiated_by_user=self.user,
+                faculty_department=self.department,
+                status=GradeCorrectionRequest.Status.PENDING,
+                justification="Correction request under current template.",
+            ),
+            "reopen_request": lambda offering: GradeSubmissionReopenRequest.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=offering,
+                template_period=self.period,
+                submission=GradeSubmission.objects.create(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    offering=offering,
+                    template_period=self.period,
+                    status=GradeSubmission.Status.SUBMITTED,
+                    submitted_by_user=self.user,
+                    submitted_at=timezone.now(),
+                ),
+                requested_by_user=self.user,
+                status=GradeSubmissionReopenRequest.Status.PENDING,
+                justification="Need reopen.",
+            ),
+            "period_lock": lambda offering: GradingPeriodLock.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                academic_year=self.academic_year,
+                term=self.term,
+                period_code=self.period.code,
+                scope_type=GradingPeriodLock.ScopeType.COURSE,
+                course_offering=offering,
+                is_locked=True,
+                locked_by_user=self.user,
+                locked_at=timezone.now(),
+            ),
+            "attendance": lambda offering: AttendanceRecord.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                session=AttendanceSession.objects.create(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    offering=offering,
+                    template_period=self.period,
+                    session_date=date(2025, 11, 15),
+                    title="Attendance",
+                    created_by_user=self.user,
+                ),
+                student=self.student,
+                status_code=AttendanceRecord.Status.PRESENT,
+                recorded_by_user=self.user,
+            ),
+        }
+
+        for suffix, factory in dependency_factories.items():
+            with self.subTest(dependency=suffix):
+                self._assert_exact_override_blocked(suffix.upper(), factory)
 
     def test_editing_unused_assignment_to_another_template_is_allowed(self):
         form = self._assignment_form(template=self.other_template)

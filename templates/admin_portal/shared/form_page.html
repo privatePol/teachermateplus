@@ -5,6 +5,11 @@
   <h2 class="h5 mb-0">{{ title }}</h2>
   <a href="javascript:history.back()" class="btn btn-sm btn-outline-secondary">Back</a>
 </div>
+{% if course_template_assignment_help %}
+<div class="alert alert-info border-info shadow-sm" role="alert">
+  {{ course_template_assignment_help }}
+</div>
+{% endif %}
 {% if assignment_usage_summary and assignment_usage_summary.is_in_use %}
 <div class="alert alert-warning border-warning shadow-sm" role="alert">
   <h3 class="h6 mb-2">In use assignment</h3>

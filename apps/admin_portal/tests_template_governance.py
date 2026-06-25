@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -20,7 +21,7 @@ from apps.grading.models import (
     GradingTemplateSubcomponent,
     TemplateHotfixRequest,
 )
-from apps.grading.services import TemplateGovernanceWorkflowService, TemplateHotfixService
+from apps.grading.services import GradingTemplateService, TemplateGovernanceWorkflowService, TemplateHotfixService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.tenants.models import Campus, Department, Program, Tenant
 
@@ -104,6 +105,11 @@ class TemplateGovernanceWorkflowTests(TestCase):
             module="grading_templates",
             action="read",
         )
+        self.permission_template_create = Permission.objects.create(
+            code="grading_templates.create",
+            module="grading_templates",
+            action="create",
+        )
         self.permission_template_submit = Permission.objects.create(
             code="grading_templates.submit_for_approval",
             module="grading_templates",
@@ -124,20 +130,55 @@ class TemplateGovernanceWorkflowTests(TestCase):
             module="template_periods",
             action="update",
         )
+        self.permission_template_period_create = Permission.objects.create(
+            code="template_periods.create",
+            module="template_periods",
+            action="create",
+        )
         self.permission_template_component_read = Permission.objects.create(
             code="template_components.read",
             module="template_components",
             action="read",
+        )
+        self.permission_template_component_create = Permission.objects.create(
+            code="template_components.create",
+            module="template_components",
+            action="create",
+        )
+        self.permission_template_component_update = Permission.objects.create(
+            code="template_components.update",
+            module="template_components",
+            action="update",
         )
         self.permission_template_subcomponent_read = Permission.objects.create(
             code="template_subcomponents.read",
             module="template_subcomponents",
             action="read",
         )
+        self.permission_template_subcomponent_create = Permission.objects.create(
+            code="template_subcomponents.create",
+            module="template_subcomponents",
+            action="create",
+        )
+        self.permission_template_subcomponent_update = Permission.objects.create(
+            code="template_subcomponents.update",
+            module="template_subcomponents",
+            action="update",
+        )
         self.permission_template_detail_read = Permission.objects.create(
             code="template_details.read",
             module="template_details",
             action="read",
+        )
+        self.permission_template_detail_create = Permission.objects.create(
+            code="template_details.create",
+            module="template_details",
+            action="create",
+        )
+        self.permission_template_detail_update = Permission.objects.create(
+            code="template_details.update",
+            module="template_details",
+            action="update",
         )
         self.permission_hotfix_read = Permission.objects.create(
             code="template_hotfixes.read",
@@ -159,13 +200,21 @@ class TemplateGovernanceWorkflowTests(TestCase):
             self.permission_admin_access,
             self.permission_system_settings,
             self.permission_template_read,
+            self.permission_template_create,
             self.permission_template_submit,
             self.permission_template_approve,
             self.permission_template_publish,
+            self.permission_template_period_create,
             self.permission_template_period_update,
             self.permission_template_component_read,
+            self.permission_template_component_create,
+            self.permission_template_component_update,
             self.permission_template_subcomponent_read,
+            self.permission_template_subcomponent_create,
+            self.permission_template_subcomponent_update,
             self.permission_template_detail_read,
+            self.permission_template_detail_create,
+            self.permission_template_detail_update,
             self.permission_hotfix_read,
             self.permission_hotfix_create,
             self.permission_hotfix_review,
@@ -236,6 +285,8 @@ class TemplateGovernanceWorkflowTests(TestCase):
             code=code,
             name=f"Template {code}",
             approval_status=approval_status,
+            approval_requested_by=self.workflow_admin if approval_status == GradingTemplate.ApprovalStatus.FOR_APPROVAL else None,
+            approval_requested_at=timezone.now() if approval_status == GradingTemplate.ApprovalStatus.FOR_APPROVAL else None,
             is_published=published,
             published_at=timezone.now() if published else None,
             published_by=self.super_reviewer if published else None,
@@ -256,6 +307,174 @@ class TemplateGovernanceWorkflowTests(TestCase):
             is_active=True,
         )
         return template
+
+    def _add_subcomponent_and_detail(self, template):
+        component = template.periods.first().components.first()
+        subcomponent = GradingTemplateSubcomponent.objects.create(
+            template_component=component,
+            code="OUTPUTS",
+            name="Outputs",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        detail = GradingTemplateDetail.objects.create(
+            template_subcomponent=subcomponent,
+            code="TASK",
+            name="Task",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        return component, subcomponent, detail
+
+    def test_draft_and_rejected_unpublished_templates_are_structurally_editable(self):
+        draft = self._make_template(code="TMP-DRAFT")
+        rejected = self._make_template(code="TMP-REJECTED", approval_status=GradingTemplate.ApprovalStatus.REJECTED)
+
+        self.assertTrue(GradingTemplateService.is_structurally_editable(draft))
+        self.assertTrue(GradingTemplateService.is_structurally_editable(rejected))
+
+    def test_structural_editing_blocks_for_approval_approved_and_published_templates(self):
+        for template in [
+            self._make_template(code="TMP-FOR-APPROVAL", approval_status=GradingTemplate.ApprovalStatus.FOR_APPROVAL),
+            self._make_template(code="TMP-APPROVED", approval_status=GradingTemplate.ApprovalStatus.APPROVED),
+            self._make_template(
+                code="TMP-PUBLISHED",
+                published=True,
+                approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+            ),
+        ]:
+            self.assertFalse(GradingTemplateService.is_structurally_editable(template))
+            with self.assertRaises(ValidationError):
+                GradingTemplateService.ensure_editable(template)
+
+    def test_draft_template_period_create_still_works(self):
+        template = self._make_template(code="TMP-DRAFT-CREATE")
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+
+        response = self.client.post(
+            reverse("admin_portal:template_period_create"),
+            {
+                "template": template.id,
+                "code": "MIDTERM",
+                "name": "Midterm",
+                "sequence_no": 2,
+                "weight_percentage": "",
+                "is_active": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(template.periods.filter(code="MIDTERM").exists())
+
+    def test_for_approval_template_period_update_remains_blocked(self):
+        template = self._make_template(
+            code="TMP-FOR-APPROVAL-LOCK",
+            approval_status=GradingTemplate.ApprovalStatus.FOR_APPROVAL,
+        )
+        period = template.periods.first()
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+
+        response = self.client.get(
+            reverse("admin_portal:template_period_update", kwargs={"period_id": period.id}),
+            follow=True,
+        )
+
+        self.assertContains(response, "under approval review and cannot be edited")
+
+    def test_approved_unpublished_template_component_update_is_blocked(self):
+        template = self._make_template(
+            code="TMP-APPROVED-LOCK",
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        component = template.periods.first().components.first()
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+
+        response = self.client.post(
+            reverse("admin_portal:template_component_update", kwargs={"component_id": component.id}),
+            {
+                "template_period": component.template_period_id,
+                "code": component.code,
+                "name": "Changed Name",
+                "weight_percentage": "100.00",
+                "sort_order": 1,
+                "score_input_mode": component.score_input_mode,
+                "is_active": "on",
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "locked from structural editing")
+        component.refresh_from_db()
+        self.assertNotEqual(component.name, "Changed Name")
+
+    def test_published_template_structural_routes_are_blocked(self):
+        template = self._make_template(
+            code="TMP-PUBLISHED-LOCK",
+            published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        component, subcomponent, detail = self._add_subcomponent_and_detail(template)
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+
+        checks = [
+            reverse("admin_portal:template_period_create") + f"?template_id={template.id}",
+            reverse("admin_portal:template_component_create") + f"?period_id={component.template_period_id}",
+            reverse("admin_portal:template_subcomponent_create") + f"?component_id={component.id}",
+            reverse("admin_portal:template_detail_create") + f"?subcomponent_id={subcomponent.id}",
+            reverse("admin_portal:template_subcomponent_update", kwargs={"subcomponent_id": subcomponent.id}),
+            reverse("admin_portal:template_detail_update", kwargs={"detail_id": detail.id}),
+        ]
+        for url in checks:
+            response = self.client.get(url, follow=True)
+            self.assertContains(response, "locked from structural editing")
+
+        delete_response = self.client.post(
+            reverse("admin_portal:template_component_delete", kwargs={"component_id": component.id}),
+            follow=True,
+        )
+        self.assertContains(delete_response, "locked from structural editing")
+        component.refresh_from_db()
+        self.assertTrue(component.is_active)
+
+    def test_locked_template_builder_hides_structural_actions_and_shows_read_only_message(self):
+        template = self._make_template(
+            code="TMP-BUILDER-LOCK",
+            published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+
+        response = self.client.get(reverse("admin_portal:grading_template_builder", kwargs={"template_id": template.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Read-only template structure")
+        self.assertContains(response, "locked from structural editing")
+        self.assertNotContains(response, "Add Period")
+        self.assertNotContains(response, "Edit Period")
+        self.assertNotContains(response, "Add Component")
+        self.assertNotContains(response, "Add Subcomponent")
+        self.assertNotContains(response, "Add Detail")
+
+    def test_duplicate_action_remains_available_for_published_templates(self):
+        template = self._make_template(
+            code="TMP-DUPLICATE-PUBLISHED",
+            published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+
+        response = self.client.get(reverse("admin_portal:grading_template_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("admin_portal:grading_template_duplicate", kwargs={"template_id": template.id}))
 
     def test_template_builder_shows_inactive_period_for_reactivation(self):
         template = self._make_template(code="TMP-INACTIVE-PERIOD")
@@ -321,6 +540,16 @@ class TemplateGovernanceWorkflowTests(TestCase):
             sort_order=1,
             is_active=True,
         )
+        for code, module, action in (
+            ("template_components.update", "template_components", "update"),
+            ("template_subcomponents.update", "template_subcomponents", "update"),
+            ("template_details.update", "template_details", "update"),
+        ):
+            permission, _ = Permission.objects.get_or_create(
+                code=code,
+                defaults={"module": module, "action": action},
+            )
+            RolePermission.objects.get_or_create(role=self.tenant_admin_role, permission=permission)
         builder_url = reverse("admin_portal:grading_template_builder", kwargs={"template_id": template.id})
 
         self.client.force_login(self.workflow_admin)
@@ -351,6 +580,15 @@ class TemplateGovernanceWorkflowTests(TestCase):
 
         builder_response = self.client.get(builder_url)
         self.assertEqual(builder_response.status_code, 200)
+        self.assertContains(builder_response, f"gradingTemplateBuilderState:{template.id}")
+        self.assertContains(builder_response, 'sessionStorage.setItem(storageKey', html=False)
+        self.assertContains(builder_response, 'data-builder-action-link', html=False)
+        self.assertContains(builder_response, f'id="builder-period-{period.id}"', html=False)
+        self.assertContains(builder_response, f'id="builder-component-{component.id}"', html=False)
+        self.assertContains(builder_response, f'id="builder-subcomponent-{subcomponent.id}"', html=False)
+        self.assertContains(builder_response, f'id="builder-detail-{subcomponent.details.get().id}"', html=False)
+        self.assertContains(builder_response, f'data-builder-focus-target="builder-component-{component.id}"', html=False)
+        self.assertContains(builder_response, f'data-builder-focus-target="builder-subcomponent-{subcomponent.id}"', html=False)
         self.assertContains(builder_response, "Configured Detail Weight")
         self.assertContains(builder_response, "37.50%")
         self.assertContains(builder_response, "Not used by Average Activities")

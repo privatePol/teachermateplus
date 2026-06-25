@@ -4935,6 +4935,26 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             )
         )
 
+    def test_average_participation_output_zero_detail_weights_pass_template_validation(self):
+        _period, _component, _participation_output, recitation, assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        recitation.weight_percentage = Decimal("0.00")
+        recitation.save(update_fields=["weight_percentage", "updated_at"])
+        assignment.weight_percentage = Decimal("0.00")
+        assignment.save(update_fields=["weight_percentage", "updated_at"])
+
+        errors = GradingTemplateService.validate_publishable(self.template)
+
+        self.assertFalse(
+            any(
+                "Subcomponent PG_CA_PO has details but total weight is 0" in error
+                for error in errors
+            )
+        )
+
     def test_average_mode_does_not_loosen_non_participation_output_details(self):
         period, component, subcomponent, recitation, _assignment = (
             self._create_participation_output_readiness_period(

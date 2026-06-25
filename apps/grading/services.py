@@ -281,6 +281,15 @@ class CourseTemplateAssignmentSafetyService:
         "To use a different template, create a new assignment for a future term with no encoded grades, "
         "or create a separate test course."
     )
+    EXACT_TERM_OVERRIDE_BLOCK_MESSAGE = (
+        "This exact-term grading template assignment cannot be created because existing offerings for this "
+        "course and term already have gradebook records under a different currently resolved template. "
+        "Create the term-specific assignment before faculty starts grading, or use a separate future term/test course."
+    )
+    DUPLICATE_ACTIVE_SCOPE_MESSAGE = (
+        "An active course-template assignment already exists for this course and effective term scope "
+        "with a different grading template. Edit or deactivate the existing assignment first."
+    )
 
     @classmethod
     def affected_offerings_queryset(cls, assignment: CourseTemplateAssignment):
@@ -312,7 +321,11 @@ class CourseTemplateAssignmentSafetyService:
                 "final_grades_count": 0,
                 "submissions_count": 0,
                 "correction_requests_count": 0,
+                "reopen_requests_count": 0,
                 "period_locks_count": 0,
+                "attendance_sessions_count": 0,
+                "attendance_records_count": 0,
+                "attendance_count": 0,
                 "total_dependent_records": 0,
                 "is_in_use": False,
             }
@@ -327,7 +340,11 @@ class CourseTemplateAssignmentSafetyService:
                 "final_grades_count": 0,
                 "submissions_count": 0,
                 "correction_requests_count": 0,
+                "reopen_requests_count": 0,
                 "period_locks_count": 0,
+                "attendance_sessions_count": 0,
+                "attendance_records_count": 0,
+                "attendance_count": 0,
                 "total_dependent_records": 0,
                 "is_in_use": False,
             }
@@ -338,7 +355,10 @@ class CourseTemplateAssignmentSafetyService:
         final_grades_count = StudentFinalGrade.objects.filter(offering_id__in=offering_ids).count()
         submissions_count = GradeSubmission.objects.filter(offering_id__in=offering_ids).count()
         correction_requests_count = GradeCorrectionRequest.objects.filter(offering_id__in=offering_ids).count()
+        reopen_requests_count = GradeSubmissionReopenRequest.objects.filter(offering_id__in=offering_ids).count()
         period_locks_count = GradingPeriodLock.objects.filter(course_offering_id__in=offering_ids).count()
+        attendance_sessions_count = AttendanceSession.objects.filter(offering_id__in=offering_ids).count()
+        attendance_records_count = AttendanceRecord.objects.filter(session__offering_id__in=offering_ids).count()
         total_dependent_records = (
             activities_count
             + scores_count
@@ -346,7 +366,10 @@ class CourseTemplateAssignmentSafetyService:
             + final_grades_count
             + submissions_count
             + correction_requests_count
+            + reopen_requests_count
             + period_locks_count
+            + attendance_sessions_count
+            + attendance_records_count
         )
         return {
             "offering_count": len(offering_ids),
@@ -356,7 +379,11 @@ class CourseTemplateAssignmentSafetyService:
             "final_grades_count": final_grades_count,
             "submissions_count": submissions_count,
             "correction_requests_count": correction_requests_count,
+            "reopen_requests_count": reopen_requests_count,
             "period_locks_count": period_locks_count,
+            "attendance_sessions_count": attendance_sessions_count,
+            "attendance_records_count": attendance_records_count,
+            "attendance_count": attendance_sessions_count + attendance_records_count,
             "total_dependent_records": total_dependent_records,
             "is_in_use": total_dependent_records > 0,
         }
@@ -374,12 +401,135 @@ class CourseTemplateAssignmentSafetyService:
         if cls.is_in_use(assignment):
             raise ValidationError(cls.TEMPLATE_REPLACEMENT_BLOCK_MESSAGE)
 
+    @classmethod
+    def _same_scope_assignments_queryset(cls, *, course, effective_from_term):
+        queryset = CourseTemplateAssignment.objects.filter(course=course, is_active=True)
+        if effective_from_term:
+            return queryset.filter(effective_from_term=effective_from_term)
+        return queryset.filter(effective_from_term__isnull=True)
+
+    @classmethod
+    def validate_no_duplicate_active_scope(
+        cls,
+        *,
+        assignment: CourseTemplateAssignment | None,
+        course,
+        grading_template,
+        effective_from_term,
+        is_active: bool = True,
+    ):
+        if not is_active or not course or not grading_template:
+            return
+        duplicates = cls._same_scope_assignments_queryset(
+            course=course,
+            effective_from_term=effective_from_term,
+        ).exclude(grading_template=grading_template)
+        if assignment and assignment.pk:
+            duplicates = duplicates.exclude(pk=assignment.pk)
+        if duplicates.exists():
+            raise ValidationError(cls.DUPLICATE_ACTIVE_SCOPE_MESSAGE)
+
+    @classmethod
+    def _offering_dependency_count(cls, offering: CourseOffering) -> int:
+        return (
+            GradeActivity.objects.filter(offering=offering).count()
+            + StudentActivityScore.objects.filter(activity__offering=offering).count()
+            + StudentPeriodGrade.objects.filter(offering=offering).count()
+            + StudentFinalGrade.objects.filter(offering=offering).count()
+            + GradeSubmission.objects.filter(offering=offering).count()
+            + GradeCorrectionRequest.objects.filter(offering=offering).count()
+            + GradeSubmissionReopenRequest.objects.filter(offering=offering).count()
+            + GradingPeriodLock.objects.filter(course_offering=offering).count()
+            + AttendanceSession.objects.filter(offering=offering).count()
+            + AttendanceRecord.objects.filter(session__offering=offering).count()
+        )
+
+    @classmethod
+    def validate_exact_term_override_allowed(
+        cls,
+        *,
+        assignment: CourseTemplateAssignment | None,
+        course,
+        grading_template,
+        effective_from_term,
+        is_active: bool = True,
+    ):
+        if not is_active or not course or not grading_template or not effective_from_term:
+            return
+        if (
+            assignment
+            and assignment.pk
+            and assignment.is_active
+            and assignment.course_id == course.id
+            and assignment.grading_template_id == grading_template.id
+            and assignment.effective_from_term_id == effective_from_term.id
+        ):
+            return
+
+        for offering in CourseOffering.objects.filter(course=course, term=effective_from_term).select_related(
+            "course",
+            "term",
+        ):
+            try:
+                current_template = FacultyGradingService.resolve_template_for_offering(offering)
+            except ValidationError:
+                current_template = None
+            if current_template and current_template.id == grading_template.id:
+                continue
+            if cls._offering_dependency_count(offering) > 0:
+                raise ValidationError(cls.EXACT_TERM_OVERRIDE_BLOCK_MESSAGE)
+
+    @classmethod
+    def validate_assignment_activation_allowed(
+        cls,
+        *,
+        assignment: CourseTemplateAssignment | None = None,
+        course,
+        grading_template,
+        effective_from_term,
+        is_active: bool = True,
+    ):
+        cls.validate_no_duplicate_active_scope(
+            assignment=assignment,
+            course=course,
+            grading_template=grading_template,
+            effective_from_term=effective_from_term,
+            is_active=is_active,
+        )
+        cls.validate_exact_term_override_allowed(
+            assignment=assignment,
+            course=course,
+            grading_template=grading_template,
+            effective_from_term=effective_from_term,
+            is_active=is_active,
+        )
+
 
 class GradingTemplateService:
+    STRUCTURAL_LOCK_MESSAGE = (
+        "This grading template is approved or published and is locked from structural editing. "
+        "To make changes, duplicate it into a new draft for a future term or use the approved hotfix workflow "
+        "when a live correction is required."
+    )
+
+    @staticmethod
+    def is_structurally_editable(template):
+        return bool(
+            template
+            and not template.is_published
+            and template.approval_status
+            not in {
+                template.ApprovalStatus.FOR_APPROVAL,
+                template.ApprovalStatus.APPROVED,
+            }
+        )
+
     @staticmethod
     def ensure_editable(template):
-        if template.approval_status == template.ApprovalStatus.FOR_APPROVAL:
-            raise ValidationError("Template is currently under approval review and cannot be edited.")
+        if not GradingTemplateService.is_structurally_editable(template):
+            if template and template.approval_status == template.ApprovalStatus.FOR_APPROVAL:
+                raise ValidationError("Template is currently under approval review and cannot be edited.")
+            raise ValidationError(GradingTemplateService.STRUCTURAL_LOCK_MESSAGE)
 
     @staticmethod
     def _sum_components(period):
@@ -423,7 +573,7 @@ class GradingTemplateService:
                         )
                 for subcomponent in subcomponents:
                     details = list(subcomponent.details.filter(is_active=True))
-                    if details:
+                    if details and subcomponent.detail_computation_mode != DetailComputationMode.AVERAGE_ACTIVITIES:
                         detail_total = cls._sum_details(subcomponent)
                         if detail_total <= Decimal("0"):
                             errors.append(

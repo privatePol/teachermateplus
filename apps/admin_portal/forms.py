@@ -1787,6 +1787,13 @@ class CourseTemplateAssignmentForm(forms.ModelForm):
                 assignment=self.instance,
                 new_template=grading_template,
             )
+            CourseTemplateAssignmentSafetyService.validate_assignment_activation_allowed(
+                assignment=self.instance,
+                course=course,
+                grading_template=grading_template,
+                effective_from_term=effective_from_term,
+                is_active=bool(cleaned.get("is_active")),
+            )
         except DjangoValidationError as exc:
             raise forms.ValidationError(exc.messages) from exc
         return cleaned

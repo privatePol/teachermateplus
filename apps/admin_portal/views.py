@@ -604,12 +604,20 @@ def _can_permanently_delete_inactive_records(request, *, model_key: str) -> bool
 def _attach_inactive_record_metadata(page_obj, *, model_key: str, allow_delete: bool):
     for row in page_obj:
         dependencies = _inactive_record_dependency_rows(row)
+        locked_template = _template_for_structural_record(row)
+        locked_by_governance = locked_template is not None and not GradingTemplateService.is_structurally_editable(
+            locked_template
+        )
         row.hard_delete_model_key = model_key
         row.hard_delete_confirmation_code = _record_delete_confirmation_code(row)
         row.inactive_usage_dependencies = dependencies
-        row.inactive_usage_label = _inactive_record_usage_label(dependencies)
+        row.inactive_usage_label = (
+            GradingTemplateService.STRUCTURAL_LOCK_MESSAGE
+            if locked_by_governance
+            else _inactive_record_usage_label(dependencies)
+        )
         row.can_show_hard_delete = allow_delete
-        row.can_hard_delete = allow_delete and not dependencies
+        row.can_hard_delete = allow_delete and not dependencies and not locked_by_governance
     return page_obj
 
 
@@ -861,6 +869,18 @@ def _inactive_delete_configs():
     }
 
 
+def _template_for_structural_record(row):
+    if isinstance(row, GradingTemplatePeriod):
+        return row.template
+    if isinstance(row, GradingTemplateComponent):
+        return row.template_period.template
+    if isinstance(row, GradingTemplateSubcomponent):
+        return row.template_component.template_period.template
+    if isinstance(row, GradingTemplateDetail):
+        return row.template_subcomponent.template_component.template_period.template
+    return None
+
+
 @portal_required("ADMIN")
 def inactive_record_delete_view(request, model_key: str, object_id: int):
     config = _inactive_delete_configs().get(model_key)
@@ -878,6 +898,16 @@ def inactive_record_delete_view(request, model_key: str, object_id: int):
     if not hasattr(row, "is_active") or row.is_active:
         messages.error(request, "Only inactive records can be permanently deleted.")
         return redirect(config["redirect"])
+
+    locked_template = _template_for_structural_record(row)
+    if locked_template is not None:
+        locked_response = _ensure_template_draft_access_or_forbidden(
+            request,
+            locked_template,
+            back_route=config["redirect"],
+        )
+        if locked_response:
+            return locked_response
 
     confirmation = (request.POST.get("confirmation_code") or "").strip()
     expected_confirmation = _record_delete_confirmation_code(row)
@@ -10393,6 +10423,8 @@ def grading_template_builder_view(request, template_id: int):
     context = {
         "template_obj": template,
         "period_rows": period_rows,
+        "is_structurally_editable": GradingTemplateService.is_structurally_editable(template),
+        "structural_lock_message": GradingTemplateService.STRUCTURAL_LOCK_MESSAGE,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/template_builder.html", context)
@@ -10955,6 +10987,9 @@ def template_period_create_view(request):
     if requested_template_id:
         selected_template = template_qs.filter(id=requested_template_id).first()
         if selected_template:
+            locked_response = _ensure_template_draft_access_or_forbidden(request, selected_template)
+            if locked_response:
+                return locked_response
             template_qs = template_qs.filter(id=selected_template.id)
     form = GradingTemplatePeriodForm(request.POST or None, template_queryset=template_qs)
     if selected_template and request.method == "GET":
@@ -11079,6 +11114,9 @@ def template_component_create_view(request):
     if requested_period_id:
         selected_period = period_qs.filter(id=requested_period_id).first()
         if selected_period:
+            locked_response = _ensure_template_draft_access_or_forbidden(request, selected_period.template)
+            if locked_response:
+                return locked_response
             period_qs = period_qs.filter(id=selected_period.id)
     form = GradingTemplateComponentForm(request.POST or None, period_queryset=period_qs)
     if selected_period and request.method == "GET":
@@ -11262,6 +11300,12 @@ def template_subcomponent_create_view(request):
     if requested_component_id:
         selected_component = component_qs.filter(id=requested_component_id).first()
         if selected_component:
+            locked_response = _ensure_template_draft_access_or_forbidden(
+                request,
+                selected_component.template_period.template,
+            )
+            if locked_response:
+                return locked_response
             component_qs = component_qs.filter(id=selected_component.id)
     form = GradingTemplateSubcomponentForm(request.POST or None, component_queryset=component_qs)
     if selected_component and request.method == "GET":
@@ -11424,6 +11468,12 @@ def template_detail_create_view(request):
     if requested_subcomponent_id:
         selected_subcomponent = subcomponent_qs.filter(id=requested_subcomponent_id).first()
         if selected_subcomponent:
+            locked_response = _ensure_template_draft_access_or_forbidden(
+                request,
+                selected_subcomponent.template_component.template_period.template,
+            )
+            if locked_response:
+                return locked_response
             subcomponent_qs = subcomponent_qs.filter(id=selected_subcomponent.id)
     form = GradingTemplateDetailForm(request.POST or None, subcomponent_queryset=subcomponent_qs)
     if selected_subcomponent and request.method == "GET":
@@ -11873,6 +11923,19 @@ def course_template_assignment_create_view(request):
             if prior_assignment:
                 if prior_assignment.grading_template_id == grading_template.id:
                     if not prior_assignment.is_active and is_active:
+                        try:
+                            CourseTemplateAssignmentSafetyService.validate_assignment_activation_allowed(
+                                assignment=prior_assignment,
+                                course=course,
+                                grading_template=grading_template,
+                                effective_from_term=effective_from_term,
+                                is_active=True,
+                            )
+                        except ValidationError as exc:
+                            skipped_courses.append(
+                                f"{course.title} ({course.code}) was not reactivated: {'; '.join(exc.messages)}"
+                            )
+                            continue
                         before = model_before_after(prior_assignment)
                         prior_assignment.is_active = True
                         prior_assignment.save(update_fields=["is_active", "updated_at"])
@@ -11905,6 +11968,20 @@ def course_template_assignment_create_view(request):
                             f"for {term_scope_label}."
                         )
                     )
+                )
+                continue
+
+            try:
+                CourseTemplateAssignmentSafetyService.validate_assignment_activation_allowed(
+                    assignment=None,
+                    course=course,
+                    grading_template=grading_template,
+                    effective_from_term=effective_from_term,
+                    is_active=is_active,
+                )
+            except ValidationError as exc:
+                skipped_courses.append(
+                    f"{course.title} ({course.code}) was not assigned: {'; '.join(exc.messages)}"
                 )
                 continue
 
@@ -11993,6 +12070,12 @@ def course_template_assignment_update_view(request, assignment_id: int):
         "form": form,
         "title": f"Edit Course Template Assignment #{row.id}",
         "assignment_usage_summary": usage_summary,
+        "course_template_assignment_help": (
+            "This page edits one assignment record. A course may have a blank/default template plus exact-term "
+            "overrides; an exact-term assignment overrides the default only for that term. For summer terms, do not "
+            "replace an in-use regular-term template. Create a separate summer grading template and assign it to the "
+            "summer term using Effective from term."
+        ),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/shared/form_page.html", context)

@@ -40,6 +40,11 @@ class AdminHelpGuideTests(TestCase):
             module="grading_templates",
             action="read",
         )
+        self.course_template_assignment_permission = Permission.objects.create(
+            code="course_template_assignments.read",
+            module="course_template_assignments",
+            action="read",
+        )
         self.hotfix_permission = Permission.objects.create(
             code="template_hotfixes.read",
             module="template_hotfixes",
@@ -254,6 +259,7 @@ class AdminHelpGuideTests(TestCase):
             permissions=[
                 self.portal_permission,
                 self.grading_template_permission,
+                self.course_template_assignment_permission,
             ],
         )
         self.client.force_login(user)
@@ -263,6 +269,8 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, "Admin Portal -&gt; Grading -&gt; Grading Templates")
         self.assertContains(response, "Click the Builder icon on the template row.")
         self.assertContains(response, "Detail Computation to Average Activities")
+        self.assertContains(response, "For the normal regular template, leave Effective term blank")
+        self.assertContains(response, "After Summer, the course automatically uses the blank/default regular template again")
         self.assertNotContains(response, "Do not confuse Direct Percentage")
 
     def test_admin_guides_link_to_dedicated_grading_setup_guide(self):
@@ -320,6 +328,11 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, "If no profile matches")
         self.assertContains(response, "averages every active grading period")
         self.assertContains(response, "Average All Active Template Periods")
+        self.assertContains(response, "Simple Regular and Summer assignment rule")
+        self.assertContains(response, "Regular LA Template")
+        self.assertContains(response, "LA Summer Template")
+        self.assertContains(response, "After Summer, the course automatically goes back to the blank/default regular template")
+        self.assertContains(response, "You do not need to reassign the regular template again for 1st semester")
         self.assertContains(response, "at least one active Participation/Output activity")
         self.assertContains(response, "Unused or inactive detail rows will not block submission")
         self.assertContains(response, "existing strict checks for the weighted setup still apply")
@@ -361,6 +374,7 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, "Details: Recitation, Assignment/Activities, Oral Presentation")
         self.assertContains(response, "Recitation 20%, Assignment 30%, and Oral Presentation 50%")
         self.assertContains(response, "33.34%, 33.33%, and 33.33%")
+        self.assertContains(response, "zero values do not block template publication in this mode")
         self.assertContains(response, "BSA program uses a specific published template")
         self.assertContains(response, "1st and 2nd Semester")
         self.assertContains(response, "PRELIM, MIDTERM, PRE-FINAL, and FINAL")
@@ -368,6 +382,8 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, "MIDTERM, PRE-FINAL, and FINAL")
         self.assertContains(response, "Mark the Summer term as")
         self.assertContains(response, "Course Template Assignments")
+        self.assertContains(response, "Assign the regular template with blank")
+        self.assertContains(response, "exact Summer row is checked first")
 
     def test_grading_setup_guide_requires_grading_template_read_permission(self):
         user = self._make_user(

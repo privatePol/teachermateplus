@@ -461,9 +461,23 @@
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:grading_setup_guide' %}">Setup Guide</a>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:grading_template_list' %}">Back</a>
-    <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_period_create' %}?template_id={{ template_obj.id }}">Add Period</a>
+    {% if is_structurally_editable %}
+      <a
+        class="btn btn-sm btn-primary"
+        href="{% url 'admin_portal:template_period_create' %}?template_id={{ template_obj.id }}"
+        data-builder-action-link
+        data-builder-focus-target="builder-accordion"
+      >Add Period</a>
+    {% endif %}
   </div>
 </div>
+
+{% if not is_structurally_editable %}
+<div class="alert alert-warning border-warning shadow-sm mb-3" role="alert">
+  <strong>Read-only template structure.</strong>
+  {{ structural_lock_message }}
+</div>
+{% endif %}
 
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body">
@@ -530,7 +544,7 @@
 <div class="accordion" id="builder-accordion">
   {% for period in period_rows %}
   {% cycle 'builder-period-theme-teal' 'builder-period-theme-green' 'builder-period-theme-gold' 'builder-period-theme-blue' 'builder-period-theme-plum' 'builder-period-theme-slate' as period_theme silent %}
-  <div class="accordion-item builder-period-item {{ period_theme }} {% if not period.row.is_active %}builder-inactive-period{% endif %}">
+  <div id="builder-period-{{ period.row.id }}" class="accordion-item builder-period-item {{ period_theme }} {% if not period.row.is_active %}builder-inactive-period{% endif %}">
     <h2 class="accordion-header" id="period-heading-{{ period.row.id }}">
       <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#period-collapse-{{ period.row.id }}" aria-expanded="false" aria-controls="period-collapse-{{ period.row.id }}">
         <span class="builder-level-badge builder-level-period me-2">Period Container</span>
@@ -552,20 +566,30 @@
           <strong>What this level means:</strong> This period contains the top-level grading groups for this stage of the term. The combined weight of the major components under this period should define how the period grade is formed.
         </div>
         <div class="d-flex gap-2 mb-3">
-          {% if "template_periods.update" in effective_permissions %}
-          <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_period_update' period.row.id %}">Edit Period</a>
+          {% if is_structurally_editable and "template_periods.update" in effective_permissions %}
+          <a
+            class="btn btn-sm btn-outline-primary"
+            href="{% url 'admin_portal:template_period_update' period.row.id %}"
+            data-builder-action-link
+            data-builder-focus-target="builder-period-{{ period.row.id }}"
+          >Edit Period</a>
           {% endif %}
           {% if "template_components.read" in effective_permissions %}
           <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_component_list' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}">View Components</a>
           {% endif %}
-          {% if "template_components.create" in effective_permissions %}
-          <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_component_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}">Add Component</a>
+          {% if is_structurally_editable and "template_components.create" in effective_permissions %}
+          <a
+            class="btn btn-sm btn-primary"
+            href="{% url 'admin_portal:template_component_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}"
+            data-builder-action-link
+            data-builder-focus-target="builder-period-{{ period.row.id }}"
+          >Add Component</a>
           {% endif %}
         </div>
 
         {% if period.components %}
           {% for component in period.components %}
-          <div class="builder-node builder-component-card">
+          <div id="builder-component-{{ component.row.id }}" class="builder-node builder-component-card">
             <div class="builder-component-body">
               <div class="builder-component-main">
                 <div class="builder-hierarchy-label mb-2"><span>1</span> Major Component</div>
@@ -605,14 +629,24 @@
                   </div>
                 </div>
                 <div class="builder-action-row mt-3">
-                {% if "template_components.update" in effective_permissions %}
-                <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_component_update' component.row.id %}">Edit</a>
+                {% if is_structurally_editable and "template_components.update" in effective_permissions %}
+                <a
+                  class="btn btn-sm btn-outline-primary"
+                  href="{% url 'admin_portal:template_component_update' component.row.id %}"
+                  data-builder-action-link
+                  data-builder-focus-target="builder-component-{{ component.row.id }}"
+                >Edit</a>
                 {% endif %}
                 {% if "template_subcomponents.read" in effective_permissions %}
                 <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_subcomponent_list' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}">Subcomponents</a>
                 {% endif %}
-                {% if "template_subcomponents.create" in effective_permissions %}
-                <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_subcomponent_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}">Add Subcomponent</a>
+                {% if is_structurally_editable and "template_subcomponents.create" in effective_permissions %}
+                <a
+                  class="btn btn-sm btn-primary"
+                  href="{% url 'admin_portal:template_subcomponent_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}"
+                  data-builder-action-link
+                  data-builder-focus-target="builder-component-{{ component.row.id }}"
+                >Add Subcomponent</a>
                 {% endif %}
                 </div>
               </div>
@@ -627,7 +661,7 @@
                 </div>
             {% if component.subcomponents %}
                 {% for sub in component.subcomponents %}
-                <div class="builder-node builder-subcomponent-card">
+                <div id="builder-subcomponent-{{ sub.row.id }}" class="builder-node builder-subcomponent-card">
                   <div class="builder-subcomponent-layout">
                     <div>
                       <div class="builder-node-title">
@@ -666,14 +700,24 @@
                         </div>
                       </div>
                       <div class="builder-action-row mt-3">
-                        {% if "template_subcomponents.update" in effective_permissions %}
-                        <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_subcomponent_update' sub.row.id %}">Edit</a>
+                        {% if is_structurally_editable and "template_subcomponents.update" in effective_permissions %}
+                        <a
+                          class="btn btn-sm btn-outline-primary"
+                          href="{% url 'admin_portal:template_subcomponent_update' sub.row.id %}"
+                          data-builder-action-link
+                          data-builder-focus-target="builder-subcomponent-{{ sub.row.id }}"
+                        >Edit</a>
                         {% endif %}
                         {% if "template_details.read" in effective_permissions %}
                         <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:template_detail_list' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}&subcomponent_id={{ sub.row.id }}">Details</a>
                         {% endif %}
-                        {% if "template_details.create" in effective_permissions %}
-                        <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:template_detail_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}&subcomponent_id={{ sub.row.id }}">Add Detail</a>
+                        {% if is_structurally_editable and "template_details.create" in effective_permissions %}
+                        <a
+                          class="btn btn-sm btn-primary"
+                          href="{% url 'admin_portal:template_detail_create' %}?template_id={{ template_obj.id }}&period_id={{ period.row.id }}&component_id={{ component.row.id }}&subcomponent_id={{ sub.row.id }}"
+                          data-builder-action-link
+                          data-builder-focus-target="builder-subcomponent-{{ sub.row.id }}"
+                        >Add Detail</a>
                         {% endif %}
                       </div>
                     </div>
@@ -686,7 +730,7 @@
                   {% if sub.details %}
                   <div class="builder-detail-card-grid">
                     {% for detail in sub.details %}
-                    <div class="builder-node">
+                    <div id="builder-detail-{{ detail.id }}" class="builder-node">
                       <div class="builder-detail-row">
                         <div class="builder-detail-grid w-100">
                           <div class="builder-detail-main">
@@ -709,8 +753,13 @@
                               <span class="builder-meta-label">Score Entry Method</span>
                               <span class="builder-meta-value">{{ detail.get_score_input_mode_display }}</span>
                             </div>
-                            {% if "template_details.update" in effective_permissions %}
-                            <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:template_detail_update' detail.id %}">Edit</a>
+                            {% if is_structurally_editable and "template_details.update" in effective_permissions %}
+                            <a
+                              class="btn btn-sm btn-outline-primary"
+                              href="{% url 'admin_portal:template_detail_update' detail.id %}"
+                              data-builder-action-link
+                              data-builder-focus-target="builder-detail-{{ detail.id }}"
+                            >Edit</a>
                             {% endif %}
                           </div>
                         </div>
@@ -743,4 +792,131 @@
   <div class="alert alert-info">No periods yet. Start by adding template periods.</div>
   {% endfor %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const accordion = document.getElementById("builder-accordion");
+    if (!accordion) return;
+
+    const storageKey = "gradingTemplateBuilderState:{{ template_obj.id }}";
+    const collapseSelector = ".accordion-collapse[id^='period-collapse-']";
+
+    function readState() {
+      try {
+        return JSON.parse(sessionStorage.getItem(storageKey) || "{}") || {};
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function writeState(nextState) {
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify(nextState));
+      } catch (error) {
+        // Ignore storage failures and keep the builder usable.
+      }
+    }
+
+    function currentOpenCollapseIds() {
+      return Array.from(document.querySelectorAll(collapseSelector + ".show")).map(function (collapse) {
+        return collapse.id;
+      });
+    }
+
+    function rememberState(patch) {
+      const state = Object.assign({}, readState(), {
+        openedCollapseIds: currentOpenCollapseIds(),
+        scrollY: window.scrollY || 0,
+      }, patch || {});
+      writeState(state);
+    }
+
+    function setToggleExpanded(collapse, expanded) {
+      const toggle = document.querySelector('[data-bs-target="#' + collapse.id + '"]');
+      if (!toggle) return;
+      toggle.classList.toggle("collapsed", !expanded);
+      toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    }
+
+    function openCollapse(collapse) {
+      if (!collapse) return;
+      if (window.bootstrap && window.bootstrap.Collapse) {
+        window.bootstrap.Collapse.getOrCreateInstance(collapse, { toggle: false }).show();
+      } else {
+        collapse.classList.add("show");
+        setToggleExpanded(collapse, true);
+      }
+    }
+
+    function targetFromHash() {
+      const hash = (window.location.hash || "").replace(/^#/, "");
+      if (!hash) return null;
+      try {
+        return document.getElementById(decodeURIComponent(hash));
+      } catch (error) {
+        return document.getElementById(hash);
+      }
+    }
+
+    const savedState = readState();
+    const hashTarget = targetFromHash();
+    const pendingTarget = savedState.pendingFocusId ? document.getElementById(savedState.pendingFocusId) : null;
+    const focusTarget = pendingTarget || hashTarget;
+    const openedIds = Array.isArray(savedState.openedCollapseIds) ? savedState.openedCollapseIds.slice() : [];
+
+    if (focusTarget) {
+      const owningCollapse = focusTarget.closest(collapseSelector);
+      if (owningCollapse && !openedIds.includes(owningCollapse.id)) {
+        openedIds.push(owningCollapse.id);
+      }
+    }
+
+    openedIds.forEach(function (collapseId) {
+      openCollapse(document.getElementById(collapseId));
+    });
+
+    setTimeout(function () {
+      if (focusTarget) {
+        focusTarget.scrollIntoView({ behavior: "auto", block: "center" });
+        rememberState({ pendingFocusId: "" });
+        return;
+      }
+      if (!hashTarget && Number.isFinite(Number(savedState.scrollY))) {
+        window.scrollTo(0, Number(savedState.scrollY));
+      }
+    }, 120);
+
+    document.querySelectorAll(collapseSelector).forEach(function (collapse) {
+      collapse.addEventListener("shown.bs.collapse", function () {
+        rememberState();
+      });
+      collapse.addEventListener("hidden.bs.collapse", function () {
+        rememberState();
+      });
+    });
+
+    let scrollQueued = false;
+    window.addEventListener("scroll", function () {
+      if (scrollQueued) return;
+      scrollQueued = true;
+      window.requestAnimationFrame(function () {
+        scrollQueued = false;
+        rememberState();
+      });
+    }, { passive: true });
+
+    document.querySelectorAll("[data-builder-action-link]").forEach(function (link) {
+      link.addEventListener("click", function () {
+        rememberState({ pendingFocusId: link.dataset.builderFocusTarget || "" });
+      });
+    });
+
+    window.addEventListener("beforeunload", function () {
+      rememberState();
+    });
+  });
+</script>
 {% endblock %}

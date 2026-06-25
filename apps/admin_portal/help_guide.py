@@ -311,8 +311,11 @@ ADMIN_HELP_SECTIONS = [
                 "steps": [
                     "Open Grading -> Course Template Assignments.",
                     "Click Bulk Assign Template.",
-                    "Choose the published grading template, the intended courses, and the effective term.",
+                    "Choose the published grading template and the intended courses.",
+                    "For the normal regular template, leave Effective term blank. This makes it the default template for the course.",
+                    "For a Summer-only template, choose the exact Summer term. That Summer row overrides the default only during that Summer term.",
                     "Save the assignment and use the missing-template filters to confirm coverage.",
+                    "After Summer, the course automatically uses the blank/default regular template again. Do not reassign the regular template unless a later term needs a different rule.",
                     "If institution-wide formula or final-grade behavior is needed, open Grading -> Tenant Grading Profiles and review the matching profile.",
                     "Open a sample faculty class and confirm that it resolves to the intended template.",
                 ],
@@ -330,6 +333,14 @@ ADMIN_HELP_SECTIONS = [
                         "avoid": "Do not create conflicting assignments for the same scope.",
                         "result": "Affected classes resolve to the selected grading template.",
                         "editable": "Changes after encoding starts require careful impact review.",
+                    },
+                    {
+                        "name": "Regular and Summer Templates",
+                        "does": "Keeps the regular template as the blank/default assignment and uses a separate exact-term row for Summer.",
+                        "when": "Use it when the same course is offered in regular terms and Summer with different grading periods.",
+                        "avoid": "Do not edit the regular four-period template just to make it fit Summer.",
+                        "result": "Summer classes use the Summer template; later regular classes return to the regular default template.",
+                        "editable": "Create these rows before faculty creates activities, scores, submissions, or locks.",
                     },
                     {
                         "name": "Base-Value Exception",

@@ -42,6 +42,12 @@
   {% endif %}
 </div>
 
+<div class="alert alert-info border-info shadow-sm">
+  A course may have a blank/default grading template plus exact-term overrides. Exact-term assignment overrides the
+  default assignment only for that term. For summer terms, do not replace an in-use regular-term template. Create a
+  separate summer grading template and assign it to the summer term using Effective from term.
+</div>
+
 <div class="assignment-metrics mb-3">
   {% for card in metric_cards %}
   <div class="assignment-metric-card">

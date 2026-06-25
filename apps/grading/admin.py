@@ -42,6 +42,13 @@ class CourseTemplateAssignmentAdminForm(forms.ModelForm):
                 assignment=self.instance,
                 new_template=cleaned.get("grading_template"),
             )
+            CourseTemplateAssignmentSafetyService.validate_assignment_activation_allowed(
+                assignment=self.instance,
+                course=cleaned.get("course"),
+                grading_template=cleaned.get("grading_template"),
+                effective_from_term=cleaned.get("effective_from_term"),
+                is_active=bool(cleaned.get("is_active")),
+            )
         except ValidationError as exc:
             raise forms.ValidationError(exc.messages) from exc
         return cleaned

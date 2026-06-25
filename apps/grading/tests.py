@@ -1294,6 +1294,132 @@ class FinalGradeFormulaTests(TestCase):
         final_grade = StudentFinalGrade.objects.get(offering=self.offering, student=self.student)
         self.assertEqual(final_grade.final_grade, Decimal("45.00"))
 
+    def test_regular_four_period_template_final_grade_fallback_divides_by_four(self):
+        self._create_period_grade(self.prelim, "80.00")
+        self._create_period_grade(self.midterm, "84.00")
+        self._create_period_grade(self.prefinal, "88.00")
+        self._create_period_grade(self.final_period, "92.00")
+
+        FacultyGradingService.recompute_final_grades_from_stored_periods(
+            user=self.faculty_user,
+            offering=self.offering,
+            template=self.template,
+        )
+
+        final_grade = StudentFinalGrade.objects.get(offering=self.offering, student=self.student)
+        self.assertEqual(final_grade.final_grade, Decimal("86.00"))
+
+    def test_exact_term_assignment_overrides_default_for_no_data_offering(self):
+        summer_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="SUMMER",
+            name="Summer",
+            sequence_no=3,
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 5, 31),
+        )
+        summer_offering = self._create_offering_for_term(summer_term)
+        summer_template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TMP-SUMMER",
+            name="Summer Template",
+            is_published=True,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=summer_template,
+            effective_from_term=summer_term,
+            is_active=True,
+        )
+
+        resolved = FacultyGradingService.resolve_template_for_offering(summer_offering)
+
+        self.assertEqual(resolved, summer_template)
+
+    def test_summer_three_period_template_final_grade_fallback_divides_by_three(self):
+        summer_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="SUMMER-3P",
+            name="Summer 3 Period",
+            sequence_no=4,
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 5, 31),
+        )
+        summer_offering = self._create_offering_for_term(summer_term)
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=summer_term,
+            course_offering=summer_offering,
+            student=self.student,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            is_active=True,
+        )
+        summer_template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TMP-SUMMER-3P",
+            name="Summer 3 Period Template",
+            is_published=True,
+            is_active=True,
+        )
+        summer_midterm = GradingTemplatePeriod.objects.create(
+            template=summer_template,
+            code="MIDTERM",
+            name="Midterm",
+            sequence_no=1,
+            is_active=True,
+        )
+        summer_prefinal = GradingTemplatePeriod.objects.create(
+            template=summer_template,
+            code="PREFINAL",
+            name="Pre-Final",
+            sequence_no=2,
+            is_active=True,
+        )
+        summer_final = GradingTemplatePeriod.objects.create(
+            template=summer_template,
+            code="FINAL",
+            name="Final",
+            sequence_no=3,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=summer_template,
+            effective_from_term=summer_term,
+            is_active=True,
+        )
+        for period, value in [
+            (summer_midterm, "90.00"),
+            (summer_prefinal, "87.00"),
+            (summer_final, "84.00"),
+        ]:
+            StudentPeriodGrade.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=summer_offering,
+                template_period=period,
+                student=self.student,
+                period_grade=Decimal(value),
+                class_standing_grade=Decimal(value),
+                exam_grade=Decimal(value),
+                computed_by_user=self.faculty_user,
+                is_finalized=True,
+            )
+
+        FacultyGradingService.recompute_final_grades_from_stored_periods(
+            user=self.faculty_user,
+            offering=summer_offering,
+            template=summer_template,
+        )
+
+        final_grade = StudentFinalGrade.objects.get(offering=summer_offering, student=self.student)
+        self.assertEqual(final_grade.final_grade, Decimal("87.00"))
+
     def test_weighted_final_grade_uses_profile_configuration(self):
         TenantGradingProfile.objects.create(
             tenant=self.tenant,

@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from django.conf import settings
 from django.test import TestCase
@@ -6,10 +7,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.academics.models import AcademicYear, Course, Term
-from apps.grading.models import CourseTemplateAssignment, GradingTemplate
+from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
+from apps.grading.models import CourseTemplateAssignment, GradeActivity, GradingTemplate, GradingTemplateComponent, GradingTemplatePeriod
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
-from apps.tenants.models import Campus, Department, Tenant
+from apps.tenants.models import Campus, Department, Program, Tenant
 
 
 class BulkCourseTemplateAssignmentTests(TestCase):
@@ -21,6 +22,13 @@ class BulkCourseTemplateAssignmentTests(TestCase):
             campus=self.campus,
             code="FVW_COLL_IS",
             name="Fairview Information Systems",
+        )
+        self.program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="BSIS",
+            name="Information Systems",
         )
         self.academic_year = AcademicYear.objects.create(
             tenant=self.tenant,
@@ -59,6 +67,14 @@ class BulkCourseTemplateAssignmentTests(TestCase):
             department=self.department,
             code="A103",
             title="Course 3",
+        )
+        self.section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIS-1A",
+            name="BSIS 1A",
         )
 
         self.template_target = GradingTemplate.objects.create(
@@ -155,6 +171,72 @@ class BulkCourseTemplateAssignmentTests(TestCase):
         self.assertFalse(
             CourseTemplateAssignment.objects.filter(
                 course=self.course_1,
+                grading_template=self.template_target,
+                effective_from_term=self.term,
+            ).exists()
+        )
+
+    def test_bulk_exact_term_assignment_skips_in_use_override(self):
+        CourseTemplateAssignment.objects.create(
+            course=self.course_2,
+            grading_template=self.template_other,
+            effective_from_term=None,
+            is_active=True,
+        )
+        period = GradingTemplatePeriod.objects.create(
+            template=self.template_other,
+            code="MIDTERM",
+            name="Midterm",
+            sequence_no=1,
+            is_active=True,
+        )
+        component = GradingTemplateComponent.objects.create(
+            template_period=period,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            is_active=True,
+        )
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course_2,
+            section=self.section,
+        )
+        GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=offering,
+            template_period=period,
+            template_component=component,
+            title="Existing Quiz",
+            total_score=Decimal("10.00"),
+            created_by_user=self.user,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("admin_portal:course_template_assignment_create"),
+            {
+                "courses": [self.course_2.id],
+                "grading_template": self.template_target.id,
+                "effective_from_term": self.term.id,
+                "is_active": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "was not assigned")
+        self.assertContains(response, "exact-term grading template assignment cannot be created")
+        self.assertFalse(
+            CourseTemplateAssignment.objects.filter(
+                course=self.course_2,
                 grading_template=self.template_target,
                 effective_from_term=self.term,
             ).exists()

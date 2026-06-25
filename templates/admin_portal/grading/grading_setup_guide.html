@@ -204,8 +204,8 @@
       <div class="guide-grid mt-3">
         <article class="guide-card">
           <h3>Should I enter a weight when using Average Activities?</h3>
-          <p><strong>Yes. The form still requires a number.</strong> Enter positive percentages that total 100% so the setup is complete and easy to review.</p>
-          <p>For three details, you may enter 33.34%, 33.33%, and 33.33%. TeacherMate+ will ignore these detail percentages while Average Activities is selected.</p>
+          <p><strong>Yes. The form still requires a number.</strong> TeacherMate+ ignores detail percentages during Average Activities computation, and zero values do not block template publication in this mode.</p>
+          <p>For clearer records, you may still enter equal percentages such as 33.34%, 33.33%, and 33.33% for three details. When using Weighted Details instead, keep positive percentages that total 100%.</p>
         </article>
         <article class="guide-card">
           <h3>Which weight still matters?</h3>
@@ -228,10 +228,46 @@
         <li>Return to <strong>Grading Templates</strong> and open <strong>Test Calculator</strong>. Try high, average, low, zero, and missing-score examples.</li>
         <li>Submit the draft for approval. Complete the required review steps. Publish it only after approval.</li>
         <li>Decide whether this template needs a <strong>Tenant Grading Profile</strong>. Its main purpose is to tell TeacherMate+ how the grading periods will be combined to compute the official final grade for a campus, department, program, course group, or other approved scope.</li>
-        <li>Open <strong>Grading &rarr; Course Template Assignments</strong>. Assign the published template to the correct courses and starting term.</li>
+        <li>Open <strong>Grading &rarr; Course Template Assignments</strong>. Assign the published template to the correct courses. Leave <strong>Effective term</strong> blank for the regular default template, or choose one exact term when the template is only for that term.</li>
         <li>Create a <strong>Course Base Value Override</strong> only when one course has an approved exception to the normal Base-50 rule.</li>
         <li>Check that all courses have the correct template. Open one sample faculty class and confirm the setup before encoding begins.</li>
       </ol>
+
+      <div class="guide-example">
+        <strong>Simple Regular and Summer assignment rule:</strong>
+        <div class="guide-table-wrap mt-2">
+          <table class="guide-table">
+            <thead>
+              <tr>
+                <th>Course</th>
+                <th>Template</th>
+                <th>Effective term</th>
+                <th>What it means</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>ENGLISH-101</td>
+                <td>Regular LA Template</td>
+                <td>Blank</td>
+                <td>This is the normal template. TeacherMate+ uses it for regular terms unless a term-specific row exists.</td>
+              </tr>
+              <tr>
+                <td>ENGLISH-101</td>
+                <td>LA Summer Template</td>
+                <td>Summer AY 2025-2026</td>
+                <td>This overrides the regular template for that Summer term only.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>After Summer, the course automatically goes back to the blank/default regular template.</li>
+          <li>You do not need to reassign the regular template again for 1st semester.</li>
+          <li>Create the Summer assignment before faculty creates activities, scores, submissions, or locks.</li>
+          <li>Do not edit the regular 4-period template just to make it fit Summer. Use a separate 3-period Summer template.</li>
+        </ul>
+      </div>
     </div>
   </section>
 
@@ -256,7 +292,7 @@
           <li><strong>Summer:</strong> Create a separate Summer template containing MIDTERM, PRE-FINAL, and FINAL. The final grade is the average of the three period grades.</li>
           <li>Mark 1st and 2nd Semester terms as <strong>Regular</strong>. Mark the Summer term as <strong>Summer</strong>.</li>
           <li>For explicit governance, create a Regular profile and a Summer profile for the department or other approved scope. Set both to <strong>Average All Active Template Periods</strong>.</li>
-          <li>Assign the correct published template to the correct courses and terms through <strong>Course Template Assignments</strong>. A course assignment for the exact term is checked before a profile is used to choose the template.</li>
+          <li>Assign the regular template with blank <strong>Effective term</strong>. Assign the Summer template with the exact Summer term. The exact Summer row is checked first, then TeacherMate+ returns to the blank/default row after Summer.</li>
         </ul>
       </div>
       <div class="guide-callout warning"><strong>Important:</strong> Do not use the four-period Regular template for Summer if PRELIM must not be included. Average All Active Template Periods includes every active period in the template.</div>
