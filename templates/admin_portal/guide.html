@@ -1113,7 +1113,7 @@
               <tr>
                 <td>Approval Notifications</td>
                 <td><strong>Correction Governance</strong> and notification settings</td>
-                <td>Email approvers when correction notification is enabled.</td>
+                <td>Email the current approver step and final faculty decision when correction notification is enabled.</td>
               </tr>
               <tr>
                 <td>Manual Only Mode</td>
@@ -1126,13 +1126,13 @@
           <ol class="guide-steps">
             <li>Faculty files the correction request in the portal.</li>
             <li>If the faculty member is inactive or unavailable, an authorized admin can file the request on their behalf.</li>
-            <li>Approvers review it based on the configured route matrix and permissions.</li>
+            <li>Approvers review it based on the configured ordered route matrix and permissions, such as Area Chair -> CAO or Area Chair -> College Dean -> CAO.</li>
             <li>Faculty may include multiple students or the entire class plus multiple grading items in one request.</li>
             <li>Original values are shown in the request, and faculty enters only the corrected values.</li>
             <li>Final approval updates the gradebook and recomputes the affected grades.</li>
             <li>No extra faculty finalize step is needed for this direct correction flow.</li>
             <li>If enabled, approved requests can open as official PDFs for registrar or AIMS reference.</li>
-            <li>If enabled, the system emails the selected approvers when the request is submitted.</li>
+            <li>If enabled, the system emails the current approver step and the final decision to the faculty requester.</li>
           </ol>
 
           <div class="guide-subhead">Manual Only Mode</div>

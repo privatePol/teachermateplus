@@ -112,6 +112,37 @@
     color: #5c7366;
   }
 
+  .feature-settings-form .settings-card-toggle.has-subtitle {
+    align-items: flex-start;
+  }
+
+  .feature-settings-form .settings-card-toggle-copy {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    min-width: 0;
+  }
+
+  .feature-settings-form .settings-card-toggle-topline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  .feature-settings-form .settings-card-toggle-subtitle {
+    display: block;
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 0.86rem;
+    font-weight: 400;
+    line-height: 1.35;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
   .feature-settings-form .settings-card.is-collapsed .settings-card-summary {
     display: block;
   }
@@ -143,6 +174,9 @@
   .feature-settings-form .settings-card:nth-of-type(14) .card-header { background: linear-gradient(135deg, #7a4e7d, #c083ba) !important; }
   .feature-settings-form .settings-card:nth-of-type(15) .card-header { background: linear-gradient(135deg, #8a5a20, #d39a4a) !important; }
   .feature-settings-form .settings-card:nth-of-type(16) .card-header { background: linear-gradient(135deg, #365f7c, #6aa5c8) !important; }
+  .feature-settings-form .settings-card:nth-of-type(17) .card-header { background: linear-gradient(135deg, #2f6a54, #67b488) !important; }
+  .feature-settings-form .settings-card:nth-of-type(18) .card-header { background: linear-gradient(135deg, #305f87, #6ca1d6) !important; }
+  .feature-settings-form .settings-card:nth-of-type(19) .card-header { background: linear-gradient(135deg, #7b5b18, #d7b24f) !important; }
 
   .feature-settings-form .settings-card .card-header .text-muted,
   .feature-settings-form .settings-card .card-header .small {
@@ -1238,10 +1272,13 @@
   </div>
 
   <div class="card border-0 shadow-sm settings-card is-collapsed">
-    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-campus-recipients" aria-expanded="false" aria-controls="feature-card-campus-recipients">
-      <span>
-        <strong>Campus / Branch Recipient Emails</strong>
-        <span class="text-muted small ms-2">{{ campus_count }} campus{% if campus_count != 1 %}es{% endif %}</span>
+    <button class="card-header settings-card-toggle collapsed has-subtitle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-campus-recipients" aria-expanded="false" aria-controls="feature-card-campus-recipients">
+      <span class="settings-card-toggle-copy">
+        <span class="settings-card-toggle-topline">
+          <strong>Campus / Branch Recipient Emails</strong>
+          <span class="text-muted small ms-2">{{ campus_count }} campus{% if campus_count != 1 %}es{% endif %}</span>
+        </span>
+        <span class="settings-card-toggle-subtitle">Maintain branch-specific registrar recipient lists when email routing differs by campus.</span>
       </span>
       <span class="toggle-indicator" aria-hidden="true">⌄</span>
     </button>
@@ -1269,8 +1306,13 @@
   </div>
 
   <div class="card border-0 shadow-sm settings-card is-collapsed">
-    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-release" aria-expanded="false" aria-controls="feature-card-grade-release">
-      <strong>Official Grade Release to Faculty</strong>
+    <button class="card-header settings-card-toggle collapsed has-subtitle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-release" aria-expanded="false" aria-controls="feature-card-grade-release">
+      <span class="settings-card-toggle-copy">
+        <span class="settings-card-toggle-topline">
+          <strong>Official Grade Release to Faculty</strong>
+        </span>
+        <span class="settings-card-toggle-subtitle">Control when official periodic grades and final grades may appear in the Faculty Portal.</span>
+      </span>
       <span class="toggle-indicator" aria-hidden="true">âŒ„</span>
     </button>
     <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-grade-release" aria-expanded="false" aria-controls="feature-card-grade-release">
@@ -1319,8 +1361,13 @@
     </div>
   </div>
   <div class="card border-0 shadow-sm settings-card is-collapsed">
-    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-help-guide" aria-expanded="false" aria-controls="feature-card-help-guide">
-      <strong>Help Guide Version</strong>
+    <button class="card-header settings-card-toggle collapsed has-subtitle" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-help-guide" aria-expanded="false" aria-controls="feature-card-help-guide">
+      <span class="settings-card-toggle-copy">
+        <span class="settings-card-toggle-topline">
+          <strong>Role-Based Help Guide</strong>
+        </span>
+        <span class="settings-card-toggle-subtitle">Use the revised practical guide or restore the previous guide pages without removing either version.</span>
+      </span>
       <span class="toggle-indicator" aria-hidden="true">&#8964;</span>
     </button>
     <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-help-guide" aria-expanded="false" aria-controls="feature-card-help-guide">

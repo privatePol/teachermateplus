@@ -21,11 +21,14 @@ from apps.enrollment.models import Enrollment
 from apps.faculty_portal.forms import GradeCorrectionRequestForm
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
+    CorrectionApprovalRouteStep,
+    CorrectionPetitionWindowPolicy,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
     DetailComputationMode,
     FacultyFinalClearanceReport,
     GradeActivity,
+    GradeCorrectionApprovalStep,
     GradeCorrectionRequest,
     GradeCorrectionRequestItem,
     GradeEncodingControl,
@@ -518,6 +521,804 @@ class CorrectionWorkflowTests(TestCase):
         self.assertTrue(can_review)
         self.assertIsNotNone(pending_step)
         self.assertIsNone(reason)
+
+    def test_department_scoped_reviewer_role_must_cover_correction_department(self):
+        parent_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="COLLEGE",
+            name="College",
+            unit_type=Department.UnitType.DIVISION,
+        )
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="BA",
+            name="Business Administration",
+        )
+        self.department.parent = parent_department
+        self.department.save(update_fields=["parent", "updated_at"])
+        self.reviewer_user.default_department = parent_department
+        self.reviewer_user.save(update_fields=["default_department", "updated_at"])
+        UserRole.objects.filter(user=self.reviewer_user, role=self.reviewer_role).update(department=other_department)
+        self.route_rule.step1_requires_same_department = True
+        self.route_rule.save(update_fields=["step1_requires_same_department", "updated_at"])
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Reviewer role department should control approval scope.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "40",
+                }
+            ],
+        )
+
+        can_review, pending_step, reason = GradingGovernanceService.can_user_review_correction_request(
+            request_obj=correction,
+            user=self.reviewer_user,
+        )
+
+        self.assertFalse(can_review)
+        self.assertIsNotNone(pending_step)
+        self.assertIn("Only users assigned to approver role", reason)
+
+    def test_three_step_correction_route_applies_only_after_cao_final_approval(self):
+        area_role = Role.objects.create(code="AREA_CHAIR", name="Area Chair")
+        area_user = User.objects.create_user(
+            username="area1",
+            email="area1@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        UserRole.objects.create(user=area_user, role=area_role, tenant=self.tenant, campus=self.campus)
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=1,
+            approver_role=area_role,
+            approver_label="Area Chair",
+            requires_same_department=True,
+        )
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=2,
+            approver_role=self.reviewer_role,
+            approver_label="College Dean",
+            requires_same_department=True,
+        )
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=3,
+            approver_role=self.cao_role,
+            approver_label="CAO",
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Three approvals before applying the score.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "45",
+                }
+            ],
+        )
+
+        self.assertEqual(
+            list(correction.approval_steps.order_by("step_order").values_list("approver_role__code", flat=True)),
+            ["AREA_CHAIR", "DEAN", "CAO"],
+        )
+        first_review = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=area_user,
+            approved=True,
+            review_remarks="Area chair endorsed.",
+        )
+        self.assertEqual(first_review.status, GradeCorrectionRequest.Status.PENDING)
+        self.assertEqual(
+            StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True).raw_score,
+            Decimal("30.00"),
+        )
+
+        second_review = GradingGovernanceService.review_correction_request(
+            request_obj=first_review,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Dean endorsed.",
+        )
+        self.assertEqual(second_review.status, GradeCorrectionRequest.Status.PENDING)
+        self.assertEqual(
+            StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True).raw_score,
+            Decimal("30.00"),
+        )
+
+        final_review = GradingGovernanceService.review_correction_request(
+            request_obj=second_review,
+            reviewer=self.cao_user,
+            approved=True,
+            review_remarks="CAO approved.",
+        )
+
+        self.assertEqual(final_review.status, GradeCorrectionRequest.Status.CLOSED)
+        self.assertEqual(
+            StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True).raw_score,
+            Decimal("45.00"),
+        )
+
+    def test_ordered_correction_route_can_skip_dean_when_not_configured(self):
+        area_role = Role.objects.create(code="AREA_CHAIR", name="Area Chair")
+        area_user = User.objects.create_user(
+            username="area2",
+            email="area2@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        UserRole.objects.create(user=area_user, role=area_role, tenant=self.tenant, campus=self.campus)
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=1,
+            approver_role=area_role,
+            approver_label="Area Chair",
+            requires_same_department=True,
+        )
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=2,
+            approver_role=self.cao_role,
+            approver_label="CAO",
+        )
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="No dean step for this department.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "44",
+                }
+            ],
+        )
+
+        self.assertEqual(
+            list(correction.approval_steps.order_by("step_order").values_list("approver_role__code", flat=True)),
+            ["AREA_CHAIR", "CAO"],
+        )
+        GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=area_user,
+            approved=True,
+            review_remarks="Area chair endorsed.",
+        )
+        updated = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.cao_user,
+            approved=True,
+            review_remarks="CAO approved.",
+        )
+
+        self.assertEqual(updated.status, GradeCorrectionRequest.Status.CLOSED)
+        self.assertEqual(
+            StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True).raw_score,
+            Decimal("44.00"),
+        )
+
+    def test_correction_route_uses_offering_department_before_faculty_default_department(self):
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="GENED",
+            name="General Education",
+        )
+        self.faculty_user.default_department = other_department
+        self.faculty_user.save(update_fields=["default_department", "updated_at"])
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Offering department should govern the route.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "40",
+                }
+            ],
+        )
+
+        self.assertEqual(correction.faculty_department_id, self.department.id)
+        self.assertEqual(correction.approval_route_id, self.route_rule.id)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_step_approval_notification_is_scoped_to_current_step_and_deduped(self):
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        area_role = Role.objects.create(code="AREA_CHAIR", name="Area Chair")
+        area_user = User.objects.create_user(
+            username="area3",
+            email="area3@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        UserRole.objects.create(user=area_user, role=area_role, tenant=self.tenant, campus=self.campus)
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=1,
+            approver_role=area_role,
+            approver_label="Area Chair",
+            requires_same_department=True,
+        )
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=2,
+            approver_role=self.cao_role,
+            approver_label="CAO",
+        )
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Notify only the current approval step.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "40",
+                }
+            ],
+        )
+        pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
+
+        first_result = CorrectionNotificationService.send_correction_step_approval_notifications(
+            request_obj=correction,
+            step=pending_step,
+        )
+        second_result = CorrectionNotificationService.send_correction_step_approval_notifications(
+            request_obj=correction,
+            step=pending_step,
+        )
+
+        self.assertEqual(first_result["sent"], 1)
+        self.assertEqual(first_result["recipients"], ["area3@example.com"])
+        self.assertEqual(second_result["reason"], "already_sent")
+        self.assertEqual(len(mail.outbox), 1)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_step_notification_respects_department_scoped_role_assignment(self):
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="BA",
+            name="Business Administration",
+        )
+        area_role = Role.objects.create(code="AREA_CHAIR", name="Area Chair")
+        area_user = User.objects.create_user(
+            username="area-wrong-scope",
+            email="area-wrong-scope@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        UserRole.objects.create(
+            user=area_user,
+            role=area_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=other_department,
+        )
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=1,
+            approver_role=area_role,
+            approver_label="Area Chair",
+            requires_same_department=True,
+        )
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Wrong department role assignment should not receive email.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "40",
+                }
+            ],
+        )
+        pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
+
+        result = CorrectionNotificationService.send_correction_step_approval_notifications(
+            request_obj=correction,
+            step=pending_step,
+        )
+
+        self.assertEqual(result["attempted"], 0)
+        self.assertEqual(result["reason"], "no_matching_step_recipients")
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_correction_route_form_commit_false_saves_ordered_steps(self):
+        from apps.admin_portal.forms import CorrectionApprovalRouteRuleForm
+
+        area_role = Role.objects.create(code="AREA_CHAIR", name="Area Chair")
+        form = CorrectionApprovalRouteRuleForm(
+            data={
+                "faculty_department": self.department.id,
+                "step_1_role": area_role.id,
+                "step_1_requires_same_department": "on",
+                "step_2_role": self.reviewer_role.id,
+                "step_2_requires_same_department": "on",
+                "final_role_ordered": self.cao_role.id,
+                "notes": "Area chair, dean, then CAO.",
+                "is_active": "on",
+            },
+            instance=self.route_rule,
+            tenant=self.tenant,
+            department_queryset=Department.objects.filter(id=self.department.id),
+            role_queryset=Role.objects.filter(id__in=[area_role.id, self.reviewer_role.id, self.cao_role.id]),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        route = form.save(commit=False)
+        route.tenant = self.tenant
+        route.save()
+        form.save_ordered_steps(route)
+
+        self.assertEqual(
+            list(route.ordered_steps.order_by("step_order").values_list("approver_role__code", flat=True)),
+            ["AREA_CHAIR", "DEAN", "CAO"],
+        )
+
+    def test_correction_route_form_rejects_duplicate_ordered_roles(self):
+        from apps.admin_portal.forms import CorrectionApprovalRouteRuleForm
+
+        form = CorrectionApprovalRouteRuleForm(
+            data={
+                "faculty_department": self.department.id,
+                "step_1_role": self.reviewer_role.id,
+                "step_2_role": self.reviewer_role.id,
+                "final_role_ordered": self.cao_role.id,
+                "is_active": "on",
+            },
+            tenant=self.tenant,
+            department_queryset=Department.objects.filter(id=self.department.id),
+            role_queryset=Role.objects.filter(id__in=[self.reviewer_role.id, self.cao_role.id]),
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("Each correction approval step must use a different approver role", str(form.errors))
+
+    def test_correction_petition_policy_form_rejects_duplicate_active_scope(self):
+        from apps.admin_portal.forms import CorrectionPetitionWindowPolicyForm
+
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=None,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+        form = CorrectionPetitionWindowPolicyForm(
+            data={
+                "campus": "",
+                "academic_year": self.academic_year.id,
+                "term": self.term.id,
+                "grading_period": self.period.id,
+                "policy_mode": CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+                "manual_notice": "Use the approved channel.",
+                "is_active": "on",
+            },
+            tenant=self.tenant,
+            campus_queryset=Campus.objects.filter(id=self.campus.id),
+            academic_year_queryset=AcademicYear.objects.filter(id=self.academic_year.id),
+            term_queryset=Term.objects.filter(id=self.term.id),
+            grading_period_queryset=GradingTemplatePeriod.objects.filter(id=self.period.id),
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("active correction petition window policy already exists", str(form.errors))
+
+    def test_correction_petition_policy_form_requires_days_for_days_after_mode(self):
+        from apps.admin_portal.forms import CorrectionPetitionWindowPolicyForm
+
+        form = CorrectionPetitionWindowPolicyForm(
+            data={
+                "campus": self.campus.id,
+                "academic_year": self.academic_year.id,
+                "term": self.term.id,
+                "grading_period": self.period.id,
+                "policy_mode": CorrectionPetitionWindowPolicy.PolicyMode.DAYS_AFTER_PERIOD_END,
+                "allowed_days_after_period_end": "",
+                "manual_notice": "",
+                "is_active": "on",
+            },
+            tenant=self.tenant,
+            campus_queryset=Campus.objects.filter(id=self.campus.id),
+            academic_year_queryset=AcademicYear.objects.filter(id=self.academic_year.id),
+            term_queryset=Term.objects.filter(id=self.term.id),
+            grading_period_queryset=GradingTemplatePeriod.objects.filter(id=self.period.id),
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("Allowed days is required", str(form.errors))
+
+    def test_correction_petition_policy_open_anytime_allows_submission(self):
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            manual_notice="Follow the published correction route.",
+            is_active=True,
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Open policy should allow filing.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "41",
+                }
+            ],
+        )
+
+        self.assertEqual(correction.status, GradeCorrectionRequest.Status.PENDING)
+        self.assertEqual(correction.approval_route_id, self.route_rule.id)
+
+    def test_correction_petition_policy_days_after_deadline_blocks_submission(self):
+        lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.period.code,
+            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
+            is_locked=False,
+            deadline_at=timezone.now() - timedelta(days=2),
+        )
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.DAYS_AFTER_PERIOD_END,
+            allowed_days_after_period_end=1,
+            manual_notice="Late petitions are not allowed anymore.",
+            is_active=True,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "Correction petitions are closed for this grading period."):
+            GradingGovernanceService.create_correction_request(
+                user=self.faculty_user,
+                offering=self.offering,
+                template_period=self.period,
+                justification="This should be blocked by the petition window.",
+                items=[
+                    {
+                        "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                        "student_id": self.student1.id,
+                        "grade_activity_id": self.activity.id,
+                        "new_value": "41",
+                    }
+                ],
+            )
+
+        self.assertTrue(lock.deadline_at < timezone.now())
+        self.assertEqual(GradeCorrectionRequest.objects.count(), 0)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_period_corrections_view_blocks_submission_when_policy_closed(self):
+        faculty_access, _ = Permission.objects.get_or_create(
+            code="faculty_portal.access",
+            defaults={"module": "faculty_portal", "action": "access"},
+        )
+        corrections_create, _ = Permission.objects.get_or_create(
+            code="corrections.create",
+            defaults={"module": "corrections", "action": "create"},
+        )
+        role, _ = Role.objects.get_or_create(code="FACULTY_CORRECTION_WINDOW", defaults={"name": "Faculty Correction Window"})
+        RolePermission.objects.get_or_create(role=role, permission=faculty_access)
+        RolePermission.objects.get_or_create(role=role, permission=corrections_create)
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        GradeSubmission.objects.update_or_create(
+            offering=self.offering,
+            template_period=self.period,
+            defaults={
+                "tenant": self.tenant,
+                "campus": self.campus,
+                "status": GradeSubmission.Status.SUBMITTED,
+                "submitted_by_user": self.faculty_user,
+                "submission_snapshot_json": {},
+                "template_snapshot_json": {},
+            },
+        )
+        FacultyAssignment.objects.filter(
+            offering=self.offering,
+            faculty_user=self.faculty_user,
+        ).update(
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            responded_at=timezone.now(),
+            updated_at=timezone.now(),
+        )
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.CLOSED,
+            manual_notice="Use the paper petition route.",
+            is_active=True,
+        )
+        self.faculty_user.privacy_consent_version = getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03")
+        self.faculty_user.privacy_consent_at = timezone.now()
+        self.faculty_user.save(update_fields=["privacy_consent_version", "privacy_consent_at", "updated_at"])
+        self.client.force_login(self.faculty_user)
+
+        before_count = GradeCorrectionRequest.objects.count()
+        response = self.client.post(
+            reverse("faculty_portal:period_corrections", args=[self.offering.id, self.period.id]),
+            {
+                "students": [self.student1.id],
+                "grade_activities": [self.activity.id],
+                "correction_payload": (
+                    f'[{{"student_id":"{self.student1.id}","grade_activity_id":"{self.activity.id}","new_value":"41"}}]'
+                ),
+                "justification": "Blocked by policy.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Correction petitions are closed for this grading period.")
+        self.assertEqual(GradeCorrectionRequest.objects.count(), before_count)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_correction_governance_page_renders_policy_section(self):
+        admin_access, _ = Permission.objects.get_or_create(
+            code="admin_portal.access",
+            defaults={"module": "admin_portal", "action": "access"},
+        )
+        governance_update, _ = Permission.objects.get_or_create(
+            code="grading_governance_settings.update",
+            defaults={"module": "grading_governance_settings", "action": "update"},
+        )
+        admin_role, _ = Role.objects.get_or_create(code="ADMIN_CORRECTION_WINDOW", defaults={"name": "Admin Correction Window"})
+        RolePermission.objects.get_or_create(role=admin_role, permission=admin_access)
+        RolePermission.objects.get_or_create(role=admin_role, permission=governance_update)
+        admin_user = User.objects.create_user(
+            username="admin-correction-window",
+            email="admin-correction-window@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(
+            user=admin_user,
+            role=admin_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        self.client.force_login(admin_user)
+
+        response = self.client.get(reverse("admin_portal:correction_governance_settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Correction Petition Window Policy")
+        self.assertContains(response, "No petition window policy configured yet.")
+
+    def test_repeated_final_approval_with_stale_request_is_rejected(self):
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Repeated approval should not apply twice.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "45",
+                }
+            ],
+        )
+        stale_request = correction
+
+        updated = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Approved once.",
+        )
+
+        self.assertEqual(updated.status, GradeCorrectionRequest.Status.CLOSED)
+        with self.assertRaisesMessage(ValidationError, "Only pending correction requests can be reviewed."):
+            GradingGovernanceService.review_correction_request(
+                request_obj=stale_request,
+                reviewer=self.reviewer_user,
+                approved=True,
+                review_remarks="Duplicate submit.",
+            )
+        self.assertEqual(
+            StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True).raw_score,
+            Decimal("45.00"),
+        )
+
+    def test_correction_progress_includes_step_timestamps_reviewers_and_remarks(self):
+        area_role = Role.objects.create(code="AREA_CHAIR", name="Area Chair")
+        area_user = User.objects.create_user(
+            username="area-progress",
+            email="area-progress@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        UserRole.objects.create(user=area_user, role=area_role, tenant=self.tenant, campus=self.campus)
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=1,
+            approver_role=area_role,
+            approver_label="Area Chair",
+            requires_same_department=True,
+        )
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=2,
+            approver_role=self.cao_role,
+            approver_label="CAO",
+        )
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Progress should show review history.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "45",
+                }
+            ],
+        )
+
+        initial_progress = GradingGovernanceService.correction_progress(request_obj=correction)
+        self.assertEqual(initial_progress["status_label"], "Pending Area Chair")
+        self.assertTrue(initial_progress["steps"][0]["is_current"])
+
+        GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=area_user,
+            approved=True,
+            review_remarks="Area chair endorsed.",
+        )
+        correction.refresh_from_db()
+        intermediate_progress = GradingGovernanceService.correction_progress(request_obj=correction)
+
+        self.assertEqual(intermediate_progress["status_label"], "Pending CAO")
+        self.assertEqual(intermediate_progress["steps"][0]["status"], GradeCorrectionApprovalStep.Status.APPROVED)
+        self.assertEqual(intermediate_progress["steps"][0]["reviewer_name"], area_user.username)
+        self.assertIsNotNone(intermediate_progress["steps"][0]["reviewed_at"])
+        self.assertEqual(intermediate_progress["steps"][0]["remarks"], "Area chair endorsed.")
+        self.assertTrue(intermediate_progress["steps"][1]["is_current"])
+
+        updated = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.cao_user,
+            approved=True,
+            review_remarks="CAO approved.",
+        )
+        final_progress = GradingGovernanceService.correction_progress(request_obj=updated)
+
+        self.assertEqual(final_progress["status_label"], "Approved")
+        self.assertEqual(final_progress["steps"][1]["status"], GradeCorrectionApprovalStep.Status.APPROVED)
+        self.assertEqual(final_progress["steps"][1]["reviewer_name"], self.cao_user.username)
+        self.assertEqual(final_progress["steps"][1]["remarks"], "CAO approved.")
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_step_notification_reports_missing_step_recipient_email(self):
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        no_email_role = Role.objects.create(code="AREA_CHAIR", name="Area Chair")
+        no_email_user = User.objects.create_user(
+            username="area-no-email",
+            email="",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        UserRole.objects.create(user=no_email_user, role=no_email_role, tenant=self.tenant, campus=self.campus)
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=1,
+            approver_role=no_email_role,
+            approver_label="Area Chair",
+            requires_same_department=True,
+        )
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Approver has no email.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "40",
+                }
+            ],
+        )
+        pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
+
+        result = CorrectionNotificationService.send_correction_step_approval_notifications(
+            request_obj=correction,
+            step=pending_step,
+        )
+
+        self.assertEqual(result["attempted"], 0)
+        self.assertEqual(result["reason"], "no_matching_step_recipients")
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_correction_request_form_rejects_corrected_value_above_activity_total(self):
         form = GradeCorrectionRequestForm(

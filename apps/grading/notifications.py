@@ -10,6 +10,7 @@ from django.utils import timezone
 from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
+from apps.auditlog.models import AuditLog
 from apps.grading.models import GradeCorrectionRequest, GradeSubmissionReopenRequest
 from apps.grading.reporting import CorrectionOfficialReportService
 from apps.rbac.models import UserPermission, UserRole
@@ -20,6 +21,7 @@ User = get_user_model()
 class CorrectionNotificationService:
     SCHOOL_NAME = "NATIONAL COLLEGE OF BUSINESS AND ARTS"
     SUBJECT_MESSAGE = "Petition for Correction of Grades Awaiting Your Approval"
+    FACULTY_DECISION_SUBJECT = "Petition for Correction of Grades Decision"
 
     @classmethod
     def _logo_context(cls) -> dict[str, str]:
@@ -80,6 +82,72 @@ class CorrectionNotificationService:
                     }
                 )
         return recipients
+
+    @classmethod
+    def _step_recipient_rows(cls, *, request_obj: GradeCorrectionRequest, step):
+        assignments = (
+            UserRole.objects.filter(
+                role_id=step.approver_role_id,
+                is_active=True,
+                role__is_active=True,
+                user__is_active=True,
+            )
+            .filter(Q(tenant_id=request_obj.tenant_id) | Q(tenant__isnull=True))
+            .filter(Q(campus_id=request_obj.campus_id) | Q(campus__isnull=True))
+            .select_related("user", "role", "department")
+            .order_by("user__last_name", "user__first_name", "user__id")
+        )
+        recipients = []
+        seen_keys = set()
+        for row in assignments:
+            email = (row.user.email or "").strip()
+            if not email:
+                continue
+            if row.department_id:
+                if not request_obj.faculty_department_id:
+                    continue
+                from apps.core.services.scope import ScopeService
+
+                if not ScopeService.department_scope_covers(row.department_id, request_obj.faculty_department_id):
+                    continue
+            elif step.requires_same_department:
+                user_dept_id = getattr(row.user, "default_department_id", None)
+                if not user_dept_id:
+                    continue
+                from apps.core.services.scope import ScopeService
+
+                if not ScopeService.department_scope_covers(user_dept_id, request_obj.faculty_department_id):
+                    continue
+            dedupe_key = (row.user_id, email.lower())
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            recipients.append({"user": row.user, "role": row.role, "email": email})
+        return recipients
+
+    @staticmethod
+    def _email_event_exists(*, action: str, request_obj: GradeCorrectionRequest, event_key: str):
+        return AuditLog.objects.filter(
+            action=action,
+            entity_type="GradeCorrectionRequest",
+            entity_id=str(request_obj.id),
+            metadata_json__event_key=event_key,
+        ).exists()
+
+    @staticmethod
+    def _record_email_event(*, action: str, request_obj: GradeCorrectionRequest, event_key: str, recipients: list[str]):
+        AuditLog.objects.create(
+            portal=AuditLog.Portal.SYSTEM,
+            action=action,
+            entity_type="GradeCorrectionRequest",
+            entity_id=str(request_obj.id),
+            tenant_id=request_obj.tenant_id,
+            campus_id=request_obj.campus_id,
+            metadata_json={
+                "event_key": event_key,
+                "recipients": recipients,
+            },
+        )
 
     @classmethod
     def send_correction_submission_approval_notifications(cls, *, request_obj: GradeCorrectionRequest):
@@ -152,6 +220,127 @@ class CorrectionNotificationService:
             "recipients": notified_emails,
             "reason": None if recipients else "no_matching_role_recipients",
         }
+
+    @classmethod
+    def send_correction_step_approval_notifications(cls, *, request_obj: GradeCorrectionRequest, step):
+        if not step:
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_pending_step"}
+        if not FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=request_obj.tenant_id):
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "feature_disabled"}
+
+        event_key = f"step:{step.id}:pending"
+        if cls._email_event_exists(
+            action="EMAIL_CORRECTION_STEP_APPROVER",
+            request_obj=request_obj,
+            event_key=event_key,
+        ):
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "already_sent"}
+
+        recipients = cls._step_recipient_rows(request_obj=request_obj, step=step)
+        if not recipients:
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_matching_step_recipients"}
+
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
+        subject = format_email_subject(cls.SUBJECT_MESSAGE)
+        petitioner_name = (
+            getattr(request_obj.requested_by_user, "full_name", None)
+            or request_obj.requested_by_user.get_full_name()
+            or request_obj.requested_by_user.username
+        )
+        sent = 0
+        errors = []
+        notified_emails = []
+        for recipient in recipients:
+            text_body = (
+                f"Petition for Correction of Grades CGR-{request_obj.id:06d} is awaiting "
+                f"{step.approver_label or recipient['role'].name or recipient['role'].code} review.\n\n"
+                f"Petitioner: {petitioner_name}\n"
+                f"Course: {request_obj.offering.course.title}\n"
+                f"Section: {request_obj.offering.section.name or request_obj.offering.section.code}\n"
+                f"Period: {request_obj.template_period.name or request_obj.template_period.code}\n"
+            )
+            message = EmailMultiAlternatives(
+                subject=subject,
+                body=text_body,
+                from_email=from_email,
+                to=[recipient["email"]],
+            )
+            try:
+                result = message.send(fail_silently=False)
+            except Exception as exc:  # pragma: no cover - defensive branch for SMTP/runtime failures
+                errors.append({"email": recipient["email"], "error": str(exc)})
+                continue
+            if result:
+                sent += 1
+                notified_emails.append(recipient["email"])
+
+        if notified_emails:
+            cls._record_email_event(
+                action="EMAIL_CORRECTION_STEP_APPROVER",
+                request_obj=request_obj,
+                event_key=event_key,
+                recipients=notified_emails,
+            )
+        return {
+            "attempted": len(recipients),
+            "sent": sent,
+            "errors": errors,
+            "recipients": notified_emails,
+            "reason": None if recipients else "no_matching_step_recipients",
+        }
+
+    @classmethod
+    def send_correction_faculty_decision_notification(cls, *, request_obj: GradeCorrectionRequest):
+        if not FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=request_obj.tenant_id):
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "feature_disabled"}
+        if request_obj.status not in {
+            GradeCorrectionRequest.Status.APPROVED,
+            GradeCorrectionRequest.Status.CLOSED,
+            GradeCorrectionRequest.Status.REJECTED,
+        }:
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "not_final"}
+        email = (request_obj.requested_by_user.email or "").strip()
+        if not email:
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "requester_has_no_email"}
+
+        event_key = f"faculty:{request_obj.status}"
+        if cls._email_event_exists(
+            action="EMAIL_CORRECTION_FACULTY_DECISION",
+            request_obj=request_obj,
+            event_key=event_key,
+        ):
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "already_sent"}
+
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
+        subject = format_email_subject(cls.FACULTY_DECISION_SUBJECT)
+        decision = "approved" if request_obj.status in {GradeCorrectionRequest.Status.APPROVED, GradeCorrectionRequest.Status.CLOSED} else "rejected"
+        text_body = (
+            f"Your Petition for Correction of Grades CGR-{request_obj.id:06d} was {decision}.\n\n"
+            f"Course: {request_obj.offering.course.title}\n"
+            f"Section: {request_obj.offering.section.name or request_obj.offering.section.code}\n"
+            f"Period: {request_obj.template_period.name or request_obj.template_period.code}\n"
+            f"Remarks: {request_obj.review_remarks or '-'}\n"
+        )
+        message = EmailMultiAlternatives(subject=subject, body=text_body, from_email=from_email, to=[email])
+        try:
+            sent = message.send(fail_silently=False)
+        except Exception as exc:  # pragma: no cover - defensive branch for SMTP/runtime failures
+            return {
+                "attempted": 1,
+                "sent": 0,
+                "errors": [{"email": email, "error": str(exc)}],
+                "recipients": [],
+                "reason": "send_failed",
+            }
+        recipients = [email] if sent else []
+        if recipients:
+            cls._record_email_event(
+                action="EMAIL_CORRECTION_FACULTY_DECISION",
+                request_obj=request_obj,
+                event_key=event_key,
+                recipients=recipients,
+            )
+        return {"attempted": 1, "sent": sent, "errors": [], "recipients": recipients, "reason": None}
 
     @classmethod
     def _registrar_recipient_emails(cls, *, request_obj: GradeCorrectionRequest) -> list[str]:

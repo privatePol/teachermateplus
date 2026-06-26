@@ -39,6 +39,7 @@ from apps.admin_portal.forms import (
     ConfigurableFeatureSettingForm,
     CorrectionApprovalRouteRuleForm,
     CorrectionGovernanceSettingForm,
+    CorrectionPetitionWindowPolicyForm,
     CourseForm,
     CourseOfferingForm,
     CourseBaseValueOverrideForm,
@@ -139,6 +140,7 @@ from apps.grading.models import (
     GradingTemplateDetail,
     GradingTemplatePeriod,
     GradingTemplateSubcomponent,
+    CorrectionPetitionWindowPolicy,
     StudentActivityScore,
     StudentFinalGrade,
     StudentPeriodGrade,
@@ -3368,6 +3370,12 @@ def correction_governance_settings_view(request):
     tenant_obj = Tenant.objects.filter(id=tenant_id).first()
     department_qs = AdminScopeService.active_scoped_departments(request).filter(tenant_id=tenant_id)
     role_qs = Role.objects.filter(is_active=True).order_by("name")
+    campus_qs = AdminScopeService.active_scoped_campuses(request).filter(tenant_id=tenant_id)
+    academic_year_qs = AdminScopeService.active_scoped_academic_years(request).filter(tenant_id=tenant_id)
+    term_qs = AdminScopeService.active_scoped_terms(request).filter(tenant_id=tenant_id)
+    grading_period_qs = GradingTemplatePeriod.objects.filter(template__tenant_id=tenant_id, is_active=True).select_related(
+        "template"
+    )
 
     mode_form = CorrectionGovernanceSettingForm(
         initial={
@@ -3387,8 +3395,22 @@ def correction_governance_settings_view(request):
         role_queryset=role_qs,
         prefix="route",
     )
+    edit_policy_id = request.GET.get("edit_policy")
+    edit_policy = None
+    if edit_policy_id:
+        edit_policy = CorrectionPetitionWindowPolicy.objects.filter(id=edit_policy_id, tenant_id=tenant_id).first()
+    policy_form = CorrectionPetitionWindowPolicyForm(
+        instance=edit_policy,
+        tenant=tenant_obj,
+        campus_queryset=campus_qs,
+        academic_year_queryset=academic_year_qs,
+        term_queryset=term_qs,
+        grading_period_queryset=grading_period_qs,
+        prefix="policy",
+    )
     _style_form(mode_form)
     _style_form(route_form)
+    _style_form(policy_form)
 
     if request.method == "POST":
         action = request.POST.get("form_action")
@@ -3450,6 +3472,7 @@ def correction_governance_settings_view(request):
                 route_row = route_form.save(commit=False)
                 route_row.tenant_id = tenant_id
                 route_row.save()
+                route_form.save_ordered_steps(route_row)
                 action_name = "UPDATE" if route_instance else "CREATE"
                 AuditService.log_event(
                     action=action_name,
@@ -3464,6 +3487,42 @@ def correction_governance_settings_view(request):
                     request=request,
                 )
                 messages.success(request, "Correction approval route saved.")
+                return _redirect_back_or_default(request, "admin_portal:correction_governance_settings")
+        elif action == "save_policy":
+            policy_id = request.POST.get("policy_id")
+            policy_instance = None
+            if policy_id:
+                policy_instance = get_object_or_404(CorrectionPetitionWindowPolicy, id=policy_id, tenant_id=tenant_id)
+            policy_form = CorrectionPetitionWindowPolicyForm(
+                request.POST,
+                instance=policy_instance,
+                tenant=tenant_obj,
+                campus_queryset=campus_qs,
+                academic_year_queryset=academic_year_qs,
+                term_queryset=term_qs,
+                grading_period_queryset=grading_period_qs,
+                prefix="policy",
+            )
+            _style_form(policy_form)
+            if policy_form.is_valid():
+                before = model_before_after(policy_instance) if policy_instance else None
+                policy_row = policy_form.save(commit=False)
+                policy_row.tenant_id = tenant_id
+                policy_row.save()
+                action_name = "UPDATE" if policy_instance else "CREATE"
+                AuditService.log_event(
+                    action=action_name,
+                    portal="ADMIN",
+                    entity_type="CorrectionPetitionWindowPolicy",
+                    entity_id=policy_row.id,
+                    actor=request.user,
+                    tenant=tenant_id,
+                    campus=getattr(request, "scope", {}).get("campus_id"),
+                    before_data=before,
+                    after_data=model_before_after(policy_row),
+                    request=request,
+                )
+                messages.success(request, "Correction petition window policy saved.")
                 return _redirect_back_or_default(request, "admin_portal:correction_governance_settings")
         elif action == "delete_route":
             route_id = request.POST.get("route_id")
@@ -3483,18 +3542,45 @@ def correction_governance_settings_view(request):
             )
             messages.success(request, "Correction approval route removed.")
             return _redirect_back_or_default(request, "admin_portal:correction_governance_settings")
+        elif action == "delete_policy":
+            policy_id = request.POST.get("policy_id")
+            policy_row = get_object_or_404(CorrectionPetitionWindowPolicy, id=policy_id, tenant_id=tenant_id)
+            before = model_before_after(policy_row)
+            policy_row.delete()
+            AuditService.log_event(
+                action="DELETE",
+                portal="ADMIN",
+                entity_type="CorrectionPetitionWindowPolicy",
+                entity_id=policy_id,
+                actor=request.user,
+                tenant=tenant_id,
+                campus=getattr(request, "scope", {}).get("campus_id"),
+                before_data=before,
+                request=request,
+            )
+            messages.success(request, "Correction petition window policy removed.")
+            return _redirect_back_or_default(request, "admin_portal:correction_governance_settings")
 
     routes = (
         CorrectionApprovalRouteRule.objects.filter(tenant_id=tenant_id)
         .select_related("faculty_department", "step1_role", "final_role")
+        .prefetch_related("ordered_steps", "ordered_steps__approver_role")
         .order_by("faculty_department__name", "id")
+    )
+    policies = (
+        CorrectionPetitionWindowPolicy.objects.filter(tenant_id=tenant_id)
+        .select_related("campus", "academic_year", "term", "grading_period")
+        .order_by("academic_year__code", "term__code", "grading_period__code", "campus__name", "id")
     )
 
     context = {
         "mode_form": mode_form,
         "route_form": route_form,
+        "policy_form": policy_form,
         "routes": routes,
+        "policies": policies,
         "edit_route": edit_route,
+        "edit_policy": edit_policy,
         "title": "Correction Governance",
     }
     context.update(_scope_context(request))
@@ -13078,6 +13164,7 @@ def grade_correction_request_list_view(request):
         pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=row)
         row.current_approval_step = pending_step
         row.current_approver_label = pending_step.approver_label if pending_step else None
+        row.progress = GradingGovernanceService.correction_progress(request_obj=row)
 
     context = {
         "page_obj": page_obj,
@@ -13324,8 +13411,10 @@ def grade_correction_request_create_on_behalf_view(request):
                         },
                         request=request,
                     )
-                notification_result = CorrectionNotificationService.send_correction_submission_approval_notifications(
-                    request_obj=correction
+                pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
+                notification_result = CorrectionNotificationService.send_correction_step_approval_notifications(
+                    request_obj=correction,
+                    step=pending_step,
                 )
                 AuditService.log_event(
                     action="CREATE_ON_BEHALF",
@@ -13480,6 +13569,7 @@ def grade_correction_request_review_view(request, request_id: int):
                 "auto_apply_on_final_approval": auto_apply_on_final_approval,
                 "official_report_enabled": official_report_enabled,
                 "correction_window_hours": GradingGovernanceService.CORRECTION_WINDOW_HOURS,
+                "progress": GradingGovernanceService.correction_progress(request_obj=correction_request),
             }
             context.update(_scope_context(request))
             return render(request, "admin_portal/grading/correction_request_review.html", context)
@@ -13533,6 +13623,8 @@ def grade_correction_request_review_view(request, request_id: int):
                 request=request,
             )
             registrar_email_result = None
+            handoff_email_result = None
+            faculty_decision_email_result = None
             if approved and is_final_step and updated.status in {
                 GradeCorrectionRequest.Status.APPROVED,
                 GradeCorrectionRequest.Status.CLOSED,
@@ -13540,6 +13632,19 @@ def grade_correction_request_review_view(request, request_id: int):
                 registrar_email_result = CorrectionNotificationService.send_registrar_official_report_email(
                     request_obj=updated,
                     trigger_role_code=pending_step.approver_role.code if pending_step and pending_step.approver_role_id else None,
+                )
+                faculty_decision_email_result = CorrectionNotificationService.send_correction_faculty_decision_notification(
+                    request_obj=updated
+                )
+            elif approved and not is_final_step:
+                next_step = GradingGovernanceService.get_pending_correction_step(request_obj=updated)
+                handoff_email_result = CorrectionNotificationService.send_correction_step_approval_notifications(
+                    request_obj=updated,
+                    step=next_step,
+                )
+            elif not approved:
+                faculty_decision_email_result = CorrectionNotificationService.send_correction_faculty_decision_notification(
+                    request_obj=updated
                 )
             messages.success(
                 request,
@@ -13569,6 +13674,29 @@ def grade_correction_request_review_view(request, request_id: int):
                         "Correction request was approved, but no registrar email recipient matched the current configuration "
                         "for this campus or trigger role.",
                     )
+            if handoff_email_result and handoff_email_result["errors"]:
+                messages.warning(request, "Step approved, but the next approver notification email could not be sent.")
+            elif (
+                handoff_email_result
+                and FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=updated.tenant_id)
+                and handoff_email_result["attempted"] == 0
+            ):
+                messages.warning(
+                    request,
+                    "Step approved, but no email recipient matched the next approver step. "
+                    "Please verify role assignments and email addresses.",
+                )
+            if faculty_decision_email_result and faculty_decision_email_result["errors"]:
+                messages.warning(request, "Decision saved, but the faculty decision notification email could not be sent.")
+            elif (
+                faculty_decision_email_result
+                and FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=updated.tenant_id)
+                and faculty_decision_email_result["attempted"] == 0
+            ):
+                messages.warning(
+                    request,
+                    "Decision saved, but the faculty decision notification email was not sent because no faculty email address is available.",
+                )
             return _redirect_back_or_default(request, "admin_portal:grade_correction_request_list")
 
     context = {
@@ -13582,6 +13710,7 @@ def grade_correction_request_review_view(request, request_id: int):
         "correction_window_hours": GradingGovernanceService.CORRECTION_WINDOW_HOURS,
         "review_guard_message": review_guard_message,
         "can_review": can_review,
+        "progress": GradingGovernanceService.correction_progress(request_obj=correction_request),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/correction_request_review.html", context)

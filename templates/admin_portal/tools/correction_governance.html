@@ -29,6 +29,85 @@
         </form>
       </div>
     </div>
+
+    <div class="card border-0 shadow-sm mt-3">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <strong>Correction Petition Window Policy</strong>
+        {% if edit_policy %}
+          <a href="{% url 'admin_portal:correction_governance_settings' %}" class="btn btn-sm btn-outline-secondary">Clear Edit</a>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <form method="post" novalidate>
+          {% csrf_token %}
+          <input type="hidden" name="form_action" value="save_policy">
+          {% if edit_policy %}
+            <input type="hidden" name="policy_id" value="{{ edit_policy.id }}">
+          {% endif %}
+          {% if policy_form.non_field_errors %}
+            <div class="alert alert-danger">{{ policy_form.non_field_errors }}</div>
+          {% endif %}
+          <div class="row g-3">
+            {% for field in policy_form %}
+              <div class="col-12 {% if field.name in 'manual_notice' %}col-12{% endif %}">
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                {% for error in field.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+              </div>
+            {% endfor %}
+          </div>
+          <div class="mt-3">
+            <button class="btn btn-primary" type="submit">{% if edit_policy %}Update Policy{% else %}Add Policy{% endif %}</button>
+          </div>
+        </form>
+      </div>
+      <div class="table-responsive border-top">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Scope</th>
+              <th>Period</th>
+              <th>Mode</th>
+              <th>Days</th>
+              <th>Status</th>
+              <th class="text-end">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in policies %}
+              <tr>
+                <td>
+                  <div>{{ row.campus.code|default:"(Tenant Default)" }}</div>
+                  <div class="small text-muted">{{ row.academic_year.code }} / {{ row.term.code }}</div>
+                </td>
+                <td>{{ row.grading_period.template.code }} / {{ row.grading_period.code }}</td>
+                <td>{{ row.get_policy_mode_display }}</td>
+                <td>{% if row.allowed_days_after_period_end is not None %}{{ row.allowed_days_after_period_end }}{% else %}-{% endif %}</td>
+                <td>
+                  {% if row.is_active %}
+                    <span class="badge text-bg-success">Active</span>
+                  {% else %}
+                    <span class="badge text-bg-secondary">Inactive</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="{% url 'admin_portal:correction_governance_settings' %}?edit_policy={{ row.id }}">Edit</a>
+                  <form method="post" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="form_action" value="delete_policy">
+                    <input type="hidden" name="policy_id" value="{{ row.id }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Remove this policy?')">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="6" class="text-center text-muted py-3">No petition window policy configured yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
   <div class="col-lg-7">
     <div class="card border-0 shadow-sm">
@@ -72,9 +151,7 @@
           <thead>
             <tr>
               <th>Faculty Department</th>
-              <th>Route Mode</th>
-              <th>Step 1</th>
-              <th>Final Approver</th>
+              <th>Approval Steps</th>
               <th>Status</th>
               <th class="text-end">Action</th>
             </tr>
@@ -83,22 +160,22 @@
             {% for row in routes %}
               <tr>
                 <td>{{ row.faculty_department.code|default:"(Tenant Default)" }}</td>
-                <td>{{ row.get_route_mode_display }}</td>
                 <td>
-                  {{ row.step1_role.code }}
-                  {% if row.step1_requires_same_department %}
-                    <span class="badge text-bg-secondary">Same Dept</span>
-                  {% endif %}
-                </td>
-                <td>
-                  {% if row.route_mode == "TWO_STEP" %}
-                    {{ row.final_role.code }}
-                    {% if row.final_requires_same_department %}
-                      <span class="badge text-bg-secondary">Same Dept</span>
+                  {% for step in row.ordered_steps.all %}
+                    {% if step.is_active %}
+                      <div>
+                        Step {{ step.step_order }} - {{ step.approver_label|default:step.approver_role.code }}
+                        {% if step.requires_same_department %}
+                          <span class="badge text-bg-secondary">Dept Scope</span>
+                        {% endif %}
+                      </div>
                     {% endif %}
-                  {% else %}
-                    Step 1 is final
-                  {% endif %}
+                  {% empty %}
+                    {{ row.step1_role.code }}
+                    {% if row.route_mode == "TWO_STEP" and row.final_role %}
+                      <div>Final - {{ row.final_role.code }}</div>
+                    {% endif %}
+                  {% endfor %}
                 </td>
                 <td>
                   {% if row.is_active %}
@@ -118,7 +195,7 @@
                 </td>
               </tr>
             {% empty %}
-              <tr><td colspan="6" class="text-center text-muted py-3">No route rows configured yet.</td></tr>
+              <tr><td colspan="5" class="text-center text-muted py-3">No route rows configured yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>

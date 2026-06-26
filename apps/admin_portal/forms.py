@@ -28,6 +28,8 @@ from apps.enrollment.services import EnrollmentService
 from apps.imports.services import BulkImportService
 from apps.grading.models import (
     CorrectionApprovalRouteRule,
+    CorrectionApprovalRouteStep,
+    CorrectionPetitionWindowPolicy,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
     GradeEncodingControl,
@@ -2855,16 +2857,152 @@ class CorrectionGovernanceSettingForm(forms.Form):
     )
 
 
+class CorrectionPetitionWindowPolicyForm(forms.ModelForm):
+    class Meta:
+        model = CorrectionPetitionWindowPolicy
+        fields = [
+            "campus",
+            "academic_year",
+            "term",
+            "grading_period",
+            "policy_mode",
+            "allowed_days_after_period_end",
+            "manual_notice",
+            "is_active",
+        ]
+
+    def __init__(
+        self,
+        *args,
+        tenant=None,
+        campus_queryset=None,
+        academic_year_queryset=None,
+        term_queryset=None,
+        grading_period_queryset=None,
+        **kwargs,
+    ):
+        self.tenant = tenant
+        super().__init__(*args, **kwargs)
+        if campus_queryset is not None:
+            self.fields["campus"].queryset = campus_queryset
+        if academic_year_queryset is not None:
+            self.fields["academic_year"].queryset = academic_year_queryset
+        if term_queryset is not None:
+            self.fields["term"].queryset = term_queryset
+        if grading_period_queryset is not None:
+            self.fields["grading_period"].queryset = grading_period_queryset
+        self.fields["campus"].required = False
+        self.fields["campus"].help_text = "Leave blank to apply the policy across the entire tenant."
+        self.fields["manual_notice"].required = False
+        self.fields["manual_notice"].widget = forms.Textarea(attrs={"rows": 3})
+        self.fields["manual_notice"].help_text = (
+            "Optional note shown to faculty when this policy limits new correction petitions."
+        )
+        self.fields["allowed_days_after_period_end"].required = False
+        self.fields["allowed_days_after_period_end"].help_text = (
+            "Required only for the Days After Period End policy mode."
+        )
+        _set_choice_label(self.fields.get("campus"), lambda obj: getattr(obj, "name", None) or getattr(obj, "code", str(obj)))
+        _set_choice_label(self.fields.get("academic_year"), _academic_year_label)
+        _set_choice_label(self.fields.get("term"), _term_label)
+        _set_choice_label(self.fields.get("grading_period"), _period_label)
+        _enforce_active_reference_choices(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        tenant = self.tenant or getattr(self.instance, "tenant", None)
+        campus = cleaned.get("campus")
+        academic_year = cleaned.get("academic_year")
+        term = cleaned.get("term")
+        grading_period = cleaned.get("grading_period")
+        policy_mode = cleaned.get("policy_mode")
+        allowed_days = cleaned.get("allowed_days_after_period_end")
+        is_active = bool(cleaned.get("is_active"))
+
+        if tenant and campus and campus.tenant_id != tenant.id:
+            self.add_error("campus", "Campus must belong to the selected tenant scope.")
+        if tenant and academic_year and academic_year.tenant_id != tenant.id:
+            self.add_error("academic_year", "Academic year must belong to the selected tenant scope.")
+        if tenant and term and term.tenant_id != tenant.id:
+            self.add_error("term", "Term must belong to the selected tenant scope.")
+        if academic_year and term and term.academic_year_id != academic_year.id:
+            self.add_error("term", "Selected term does not belong to the selected academic year.")
+        if not grading_period:
+            self.add_error("grading_period", "Grading period is required.")
+
+        if policy_mode == CorrectionPetitionWindowPolicy.PolicyMode.DAYS_AFTER_PERIOD_END:
+            if allowed_days in (None, ""):
+                self.add_error(
+                    "allowed_days_after_period_end",
+                    "Allowed days is required when using the days-after-period-end policy mode.",
+                )
+        else:
+            cleaned["allowed_days_after_period_end"] = None
+
+        if is_active and tenant and academic_year and term and grading_period:
+            duplicate_qs = CorrectionPetitionWindowPolicy.objects.filter(
+                tenant=tenant,
+                academic_year=academic_year,
+                term=term,
+                grading_period=grading_period,
+                is_active=True,
+            )
+            if campus:
+                duplicate_qs = duplicate_qs.filter(campus=campus)
+            else:
+                duplicate_qs = duplicate_qs.filter(campus__isnull=True)
+            if self.instance and self.instance.pk:
+                duplicate_qs = duplicate_qs.exclude(pk=self.instance.pk)
+            if duplicate_qs.exists():
+                self.add_error(
+                    None,
+                    "An active correction petition window policy already exists for this scope.",
+                )
+
+        return cleaned
+
+
 class CorrectionApprovalRouteRuleForm(forms.ModelForm):
+    step_1_role = forms.ModelChoiceField(
+        queryset=Role.objects.none(),
+        label="Step 1 approver role",
+        help_text="Usually Area Chair / AC for department-level review.",
+    )
+    step_1_requires_same_department = forms.BooleanField(
+        required=False,
+        label="Step 1 requires department scope",
+    )
+    step_2_role = forms.ModelChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Step 2 approver role",
+        help_text="Optional. Use College Dean / Dean when this department has a dean step.",
+    )
+    step_2_requires_same_department = forms.BooleanField(
+        required=False,
+        label="Step 2 requires department scope",
+    )
+    final_role_ordered = forms.ModelChoiceField(
+        queryset=Role.objects.none(),
+        required=False,
+        label="Final approver role",
+        help_text="Usually CAO. Leave blank only when Step 1 is the final approver.",
+    )
+    final_requires_same_department_ordered = forms.BooleanField(
+        required=False,
+        label="Final approver requires department scope",
+    )
+
     class Meta:
         model = CorrectionApprovalRouteRule
         fields = [
             "faculty_department",
-            "route_mode",
-            "step1_role",
-            "step1_requires_same_department",
-            "final_role",
-            "final_requires_same_department",
+            "step_1_role",
+            "step_1_requires_same_department",
+            "step_2_role",
+            "step_2_requires_same_department",
+            "final_role_ordered",
+            "final_requires_same_department_ordered",
             "notes",
             "is_active",
         ]
@@ -2882,34 +3020,138 @@ class CorrectionApprovalRouteRuleForm(forms.ModelForm):
         if department_queryset is not None:
             self.fields["faculty_department"].queryset = department_queryset
         if role_queryset is not None:
-            self.fields["step1_role"].queryset = role_queryset
-            self.fields["final_role"].queryset = role_queryset
+            self.fields["step_1_role"].queryset = role_queryset
+            self.fields["step_2_role"].queryset = role_queryset
+            self.fields["final_role_ordered"].queryset = role_queryset
         self.fields["faculty_department"].required = False
         self.fields["faculty_department"].help_text = "Leave blank to configure tenant default route."
-        self.fields["final_role"].required = False
+        self._load_ordered_step_initials()
         _enforce_active_reference_choices(self)
+
+    def _load_ordered_step_initials(self):
+        if not self.instance or not self.instance.pk or self.is_bound:
+            return
+        ordered_steps = list(self.instance.ordered_steps.filter(is_active=True).order_by("step_order", "id"))
+        if ordered_steps:
+            self.fields["step_1_role"].initial = ordered_steps[0].approver_role_id
+            self.fields["step_1_requires_same_department"].initial = ordered_steps[0].requires_same_department
+            if len(ordered_steps) == 2:
+                self.fields["final_role_ordered"].initial = ordered_steps[1].approver_role_id
+                self.fields["final_requires_same_department_ordered"].initial = ordered_steps[1].requires_same_department
+            elif len(ordered_steps) >= 3:
+                self.fields["step_2_role"].initial = ordered_steps[1].approver_role_id
+                self.fields["step_2_requires_same_department"].initial = ordered_steps[1].requires_same_department
+                self.fields["final_role_ordered"].initial = ordered_steps[-1].approver_role_id
+                self.fields["final_requires_same_department_ordered"].initial = ordered_steps[-1].requires_same_department
+            return
+        self.fields["step_1_role"].initial = self.instance.step1_role_id
+        self.fields["step_1_requires_same_department"].initial = self.instance.step1_requires_same_department
+        if self.instance.route_mode == CorrectionApprovalRouteRule.RouteMode.TWO_STEP:
+            self.fields["final_role_ordered"].initial = self.instance.final_role_id
+            self.fields["final_requires_same_department_ordered"].initial = self.instance.final_requires_same_department
 
     def clean(self):
         cleaned = super().clean()
-        route_mode = cleaned.get("route_mode")
-        step1_role = cleaned.get("step1_role")
-        final_role = cleaned.get("final_role")
+        step1_role = cleaned.get("step_1_role")
+        step2_role = cleaned.get("step_2_role")
+        final_role = cleaned.get("final_role_ordered")
         faculty_department = cleaned.get("faculty_department")
 
         if not step1_role:
-            self.add_error("step1_role", "First approver role is required.")
+            self.add_error("step_1_role", "Step 1 approver role is required.")
 
-        if route_mode == CorrectionApprovalRouteRule.RouteMode.TWO_STEP and not final_role:
-            self.add_error("final_role", "Final approver role is required for two-step route.")
-        if route_mode == CorrectionApprovalRouteRule.RouteMode.DIRECT_TO_FINAL:
-            cleaned["final_role"] = None
-            cleaned["final_requires_same_department"] = False
+        if step2_role and not final_role:
+            self.add_error("final_role_ordered", "Final approver role is required when Step 2 is configured.")
+
+        role_steps = [
+            ("step_1_role", step1_role),
+            ("step_2_role", step2_role),
+            ("final_role_ordered", final_role),
+        ]
+        seen_role_ids = {}
+        for field_name, role in role_steps:
+            if not role:
+                continue
+            if role.id in seen_role_ids:
+                self.add_error(
+                    field_name,
+                    "Each correction approval step must use a different approver role. "
+                    "Leave later steps blank for a direct route.",
+                )
+                self.add_error(
+                    seen_role_ids[role.id],
+                    "Each correction approval step must use a different approver role.",
+                )
+            else:
+                seen_role_ids[role.id] = field_name
 
         tenant = self.tenant or getattr(self.instance, "tenant", None)
         if tenant and faculty_department and faculty_department.tenant_id != tenant.id:
             self.add_error("faculty_department", "Faculty department must belong to the selected tenant scope.")
 
         return cleaned
+
+    def _ordered_step_payload(self):
+        cleaned = self.cleaned_data
+        payload = [
+            {
+                "role": cleaned["step_1_role"],
+                "requires_same_department": bool(cleaned.get("step_1_requires_same_department")),
+            }
+        ]
+        if cleaned.get("step_2_role"):
+            payload.append(
+                {
+                    "role": cleaned["step_2_role"],
+                    "requires_same_department": bool(cleaned.get("step_2_requires_same_department")),
+                }
+            )
+        if cleaned.get("final_role_ordered"):
+            payload.append(
+                {
+                    "role": cleaned["final_role_ordered"],
+                    "requires_same_department": bool(cleaned.get("final_requires_same_department_ordered")),
+                }
+            )
+        return payload
+
+    def save(self, commit=True):
+        route = super().save(commit=False)
+        payload = self._ordered_step_payload()
+        route.step1_role = payload[0]["role"]
+        route.step1_requires_same_department = payload[0]["requires_same_department"]
+        route.route_mode = (
+            CorrectionApprovalRouteRule.RouteMode.TWO_STEP
+            if len(payload) > 1
+            else CorrectionApprovalRouteRule.RouteMode.DIRECT_TO_FINAL
+        )
+        if len(payload) > 1:
+            route.final_role = payload[-1]["role"]
+            route.final_requires_same_department = payload[-1]["requires_same_department"]
+        else:
+            route.final_role = None
+            route.final_requires_same_department = False
+        if commit:
+            route.save()
+            self.save_ordered_steps(route)
+        return route
+
+    def save_ordered_steps(self, route):
+        payload = self._ordered_step_payload()
+        route.ordered_steps.all().delete()
+        CorrectionApprovalRouteStep.objects.bulk_create(
+            [
+                CorrectionApprovalRouteStep(
+                    route_rule=route,
+                    step_order=index,
+                    approver_role=row["role"],
+                    approver_label=row["role"].name or row["role"].code,
+                    requires_same_department=row["requires_same_department"],
+                    is_active=True,
+                )
+                for index, row in enumerate(payload, start=1)
+            ]
+        )
 
 class DocumentPrintSettingForm(forms.Form):
     school_name = forms.CharField(

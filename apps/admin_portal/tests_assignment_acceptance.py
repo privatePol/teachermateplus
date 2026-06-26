@@ -537,6 +537,15 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertContains(response, "Allow only one active login session per user")
         self.assertContains(response, "a new login signs out the same user from any other browser or device")
 
+    def test_configurable_features_renders_card_headings_for_targeted_sections(self):
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("admin_portal:configurable_features_settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Campus / Branch Recipient Emails")
+        self.assertContains(response, "Official Grade Release to Faculty")
+        self.assertContains(response, "Role-Based Help Guide")
+
     def test_assignment_dashboard_view_loads(self):
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse("admin_portal:faculty_assignment_dashboard"))

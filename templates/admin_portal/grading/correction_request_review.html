@@ -55,7 +55,7 @@
         <div class="mb-2"><strong>On-Behalf Reason:</strong><br>{{ correction_request.on_behalf_reason }}</div>
         {% endif %}
         <div class="mb-2"><strong>Faculty Department:</strong> {{ correction_request.faculty_department.name|default:"-" }}</div>
-        <div class="mb-2"><strong>Status:</strong> {{ correction_request.status }}</div>
+        <div class="mb-2"><strong>Status:</strong> {{ progress.status_label|default:correction_request.status }}</div>
         <div class="mb-2">
           <strong>Current Approval Step:</strong>
           {% if pending_step %}
@@ -71,9 +71,9 @@
         <div class="mb-2">
           <strong>Route Steps:</strong>
           <ul class="mb-0">
-            {% for step in correction_request.approval_steps.all %}
+            {% for step in progress.steps %}
               <li>
-                Step {{ step.step_order }} - {{ step.approver_label }}:
+                Step {{ step.step_order }} - {{ step.label }}:
                 {% if step.status == "APPROVED" %}
                   <span class="badge text-bg-success">Approved</span>
                 {% elif step.status == "REJECTED" %}
@@ -82,6 +82,14 @@
                   <span class="badge text-bg-secondary">Skipped</span>
                 {% else %}
                   <span class="badge text-bg-warning text-dark">Pending</span>
+                {% endif %}
+                {% if step.reviewer_name %}
+                  <span class="small text-muted">by {{ step.reviewer_name }}{% if step.reviewed_at %} on {{ step.reviewed_at|date:"Y-m-d H:i" }}{% endif %}</span>
+                {% elif step.is_current %}
+                  <span class="small text-muted">current step</span>
+                {% endif %}
+                {% if step.remarks %}
+                  <div class="small text-muted">Remarks: {{ step.remarks }}</div>
                 {% endif %}
               </li>
             {% endfor %}

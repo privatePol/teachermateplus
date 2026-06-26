@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 from django.core.validators import MinValueValidator
 from uuid import uuid4
 
@@ -1091,6 +1092,97 @@ class CorrectionApprovalRouteRule(TimeStampedModel, ActivatableModel):
     def __str__(self):
         scope = self.faculty_department.code if self.faculty_department_id else "DEFAULT"
         return f"{self.tenant.code}:{scope}:{self.route_mode}"
+
+
+class CorrectionApprovalRouteStep(TimeStampedModel, ActivatableModel):
+    route_rule = models.ForeignKey(
+        "grading.CorrectionApprovalRouteRule",
+        on_delete=models.CASCADE,
+        related_name="ordered_steps",
+    )
+    step_order = models.PositiveSmallIntegerField(default=1)
+    approver_role = models.ForeignKey(
+        "rbac.Role",
+        on_delete=models.PROTECT,
+        related_name="correction_route_ordered_steps",
+    )
+    approver_label = models.CharField(max_length=150, blank=True, null=True)
+    requires_same_department = models.BooleanField(
+        default=False,
+        help_text="When enabled, approver must cover the requesting faculty department.",
+    )
+
+    class Meta:
+        db_table = "correction_approval_route_steps"
+        ordering = ["route_rule_id", "step_order"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["route_rule", "step_order"],
+                name="uq_correction_route_steps_order",
+            ),
+        ]
+
+    def __str__(self):
+        label = self.approver_label or self.approver_role.name or self.approver_role.code
+        return f"{self.route_rule_id}:S{self.step_order}:{label}"
+
+
+class CorrectionPetitionWindowPolicy(TimeStampedModel, ActivatableModel):
+    class PolicyMode(models.TextChoices):
+        OPEN_ANYTIME = "OPEN_ANYTIME", "Open Anytime"
+        DAYS_AFTER_PERIOD_END = "DAYS_AFTER_PERIOD_END", "Days After Period End"
+        CLOSED = "CLOSED", "Closed Manually"
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="correction_petition_policies")
+    campus = models.ForeignKey(
+        "tenants.Campus",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="correction_petition_policies",
+        help_text="Leave blank to apply this policy tenant-wide.",
+    )
+    academic_year = models.ForeignKey(
+        "academics.AcademicYear",
+        on_delete=models.PROTECT,
+        related_name="correction_petition_policies",
+    )
+    term = models.ForeignKey("academics.Term", on_delete=models.PROTECT, related_name="correction_petition_policies")
+    grading_period = models.ForeignKey(
+        "grading.GradingTemplatePeriod",
+        on_delete=models.PROTECT,
+        related_name="correction_petition_policies",
+    )
+    policy_mode = models.CharField(max_length=32, choices=PolicyMode.choices, default=PolicyMode.OPEN_ANYTIME)
+    allowed_days_after_period_end = models.PositiveIntegerField(blank=True, null=True)
+    manual_notice = models.TextField(blank=True, null=True)
+
+    class Meta:
+        db_table = "correction_petition_window_policies"
+        ordering = ["tenant__name", "campus__name", "academic_year__code", "term__code", "grading_period__code", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "academic_year", "term", "grading_period"],
+                condition=Q(is_active=True, campus__isnull=True),
+                name="uq_correction_petition_policy_tenant_scope",
+            ),
+            models.UniqueConstraint(
+                fields=["tenant", "campus", "academic_year", "term", "grading_period"],
+                condition=Q(is_active=True, campus__isnull=False),
+                name="uq_correction_petition_policy_campus_scope",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.policy_mode == self.PolicyMode.DAYS_AFTER_PERIOD_END and self.allowed_days_after_period_end is None:
+            raise ValidationError({"allowed_days_after_period_end": "Allowed days is required for this policy mode."})
+        if self.policy_mode != self.PolicyMode.DAYS_AFTER_PERIOD_END:
+            self.allowed_days_after_period_end = None
+
+    def __str__(self):
+        campus = self.campus.code if self.campus_id else "TENANT"
+        return f"{self.tenant.code}:{campus}:{self.academic_year.code}:{self.term.code}:{self.grading_period.code}:{self.policy_mode}"
 
 
 class GradeCorrectionRequest(TimeStampedModel):

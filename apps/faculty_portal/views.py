@@ -6180,6 +6180,10 @@ def period_corrections_view(request, offering_id: int, period_id: int):
             "Please follow the manual paper approval process and request authorized admin reopen.",
         )
         return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+    petition_window_state = GradingGovernanceService.get_correction_petition_window_state(
+        offering=offering,
+        template_period=period,
+    )
     enrollments = list(FacultyGradingService.get_active_enrollments(offering))
     student_ids = [row.student_id for row in enrollments]
     student_qs = Student.objects.filter(id__in=student_ids).order_by("last_name", "first_name", "student_no")
@@ -6212,6 +6216,9 @@ def period_corrections_view(request, offering_id: int, period_id: int):
     )
 
     if request.method == "POST":
+        if not petition_window_state["is_allowed"]:
+            messages.error(request, petition_window_state["message"])
+            return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
         if not state["is_submitted"]:
             messages.error(request, "You can request correction only after period submission.")
             return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
@@ -6256,8 +6263,10 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                         },
                         request=request,
                     )
-                notification_result = CorrectionNotificationService.send_correction_submission_approval_notifications(
-                    request_obj=correction
+                pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
+                notification_result = CorrectionNotificationService.send_correction_step_approval_notifications(
+                    request_obj=correction,
+                    step=pending_step,
                 )
                 AuditService.log_event(
                     action="CREATE",
@@ -6319,6 +6328,9 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                 ),
             ),
             "attachments",
+            "approval_steps",
+            "approval_steps__approver_role",
+            "approval_steps__reviewed_by_user",
         )
         .order_by("-created_at")
     )
@@ -6336,6 +6348,7 @@ def period_corrections_view(request, offering_id: int, period_id: int):
             GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE
         }
         req.requires_manual_finalize = bool(action_codes) and not req.is_direct_score_request
+        req.progress = GradingGovernanceService.correction_progress(request_obj=req)
     context = {
         "offering": offering,
         "template": template,
@@ -6348,6 +6361,7 @@ def period_corrections_view(request, offering_id: int, period_id: int):
         "submission_deadline": state["submission_deadline"],
         "is_correction_active": state["is_correction_active"],
         "active_correction_request": state["active_correction_request"],
+        "petition_window_state": petition_window_state,
         "official_report_enabled": official_report_enabled,
         "correction_students": [
             {

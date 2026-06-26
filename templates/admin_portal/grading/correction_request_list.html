@@ -91,6 +91,9 @@
             {% else %}
               <span class="badge text-bg-info">{{ row.status }}</span>
             {% endif %}
+            {% if row.progress.status_label %}
+              <div class="small text-muted">{{ row.progress.status_label }}</div>
+            {% endif %}
           </td>
           <td>
             {% if row.current_approver_label %}
