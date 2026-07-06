@@ -35,9 +35,17 @@ class CourseTemplateAssignmentAdminForm(forms.ModelForm):
         model = CourseTemplateAssignment
         fields = "__all__"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["grading_template"].required = not bool(self.instance and self.instance.pk)
+
     def clean(self):
         cleaned = super().clean()
         try:
+            CourseTemplateAssignmentSafetyService.validate_template_clear_allowed(
+                assignment=self.instance,
+                new_template=cleaned.get("grading_template"),
+            )
             CourseTemplateAssignmentSafetyService.validate_template_replacement_allowed(
                 assignment=self.instance,
                 new_template=cleaned.get("grading_template"),

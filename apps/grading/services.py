@@ -283,6 +283,10 @@ class CourseTemplateAssignmentSafetyService:
         "To use a different template, create a new assignment for a future term with no encoded grades, "
         "or create a separate test course."
     )
+    TEMPLATE_CLEAR_BLOCK_MESSAGE = (
+        "This grading template assignment is already in use and cannot be cleared. "
+        "Existing grading records must be reviewed first."
+    )
     EXACT_TERM_OVERRIDE_BLOCK_MESSAGE = (
         "This exact-term grading template assignment cannot be created because existing offerings for this "
         "course and term already have gradebook records under a different currently resolved template. "
@@ -404,6 +408,13 @@ class CourseTemplateAssignmentSafetyService:
             raise ValidationError(cls.TEMPLATE_REPLACEMENT_BLOCK_MESSAGE)
 
     @classmethod
+    def validate_template_clear_allowed(cls, *, assignment: CourseTemplateAssignment, new_template):
+        if not assignment or not assignment.pk or new_template or not assignment.grading_template_id:
+            return
+        if cls.is_in_use(assignment):
+            raise ValidationError(cls.TEMPLATE_CLEAR_BLOCK_MESSAGE)
+
+    @classmethod
     def _same_scope_assignments_queryset(cls, *, course, effective_from_term):
         queryset = CourseTemplateAssignment.objects.filter(course=course, is_active=True)
         if effective_from_term:
@@ -420,12 +431,14 @@ class CourseTemplateAssignmentSafetyService:
         effective_from_term,
         is_active: bool = True,
     ):
-        if not is_active or not course or not grading_template:
+        if not is_active or not course:
             return
         duplicates = cls._same_scope_assignments_queryset(
             course=course,
             effective_from_term=effective_from_term,
-        ).exclude(grading_template=grading_template)
+        )
+        if grading_template:
+            duplicates = duplicates.exclude(grading_template=grading_template)
         if assignment and assignment.pk:
             duplicates = duplicates.exclude(pk=assignment.pk)
         if duplicates.exists():

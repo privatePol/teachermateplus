@@ -488,7 +488,11 @@ class CourseTemplateAssignment(TimeStampedModel, ActivatableModel):
         "academics.Course", on_delete=models.PROTECT, related_name="template_assignments"
     )
     grading_template = models.ForeignKey(
-        "grading.GradingTemplate", on_delete=models.PROTECT, related_name="course_assignments"
+        "grading.GradingTemplate",
+        on_delete=models.PROTECT,
+        related_name="course_assignments",
+        blank=True,
+        null=True,
     )
     effective_from_term = models.ForeignKey(
         "academics.Term",
@@ -509,7 +513,8 @@ class CourseTemplateAssignment(TimeStampedModel, ActivatableModel):
         ]
 
     def __str__(self):
-        return f"{self.course.code}->{self.grading_template.code}"
+        template_code = self.grading_template.code if self.grading_template_id else "UNASSIGNED"
+        return f"{self.course.code}->{template_code}"
 
 
 class CourseBaseValueOverride(TimeStampedModel, ActivatableModel):

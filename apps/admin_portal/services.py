@@ -689,7 +689,8 @@ class AdminScopeService:
         templates = AdminScopeService.scoped_grading_templates(request).values_list("id", flat=True)
         terms = AdminScopeService.active_scoped_terms(request).values_list("id", flat=True)
         queryset = (
-            CourseTemplateAssignment.objects.filter(course_id__in=courses, grading_template_id__in=templates)
+            CourseTemplateAssignment.objects.filter(course_id__in=courses)
+            .filter(models.Q(grading_template_id__in=templates) | models.Q(grading_template__isnull=True))
             .filter(models.Q(effective_from_term_id__in=terms) | models.Q(effective_from_term__isnull=True))
             .select_related("course", "grading_template", "effective_from_term", "course__tenant")
             .order_by("-created_at")
@@ -702,7 +703,8 @@ class AdminScopeService:
         templates = AdminScopeService.maintenance_scoped_grading_templates(request).values_list("id", flat=True)
         terms = AdminScopeService.active_scoped_terms(request).values_list("id", flat=True)
         return (
-            CourseTemplateAssignment.objects.filter(course_id__in=courses, grading_template_id__in=templates)
+            CourseTemplateAssignment.objects.filter(course_id__in=courses)
+            .filter(models.Q(grading_template_id__in=templates) | models.Q(grading_template__isnull=True))
             .filter(models.Q(effective_from_term_id__in=terms) | models.Q(effective_from_term__isnull=True))
             .select_related("course", "grading_template", "effective_from_term", "course__tenant")
             .order_by("-created_at")

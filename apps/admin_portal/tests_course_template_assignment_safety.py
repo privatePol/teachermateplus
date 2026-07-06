@@ -31,6 +31,9 @@ from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
 
 
+UNSET = object()
+
+
 class CourseTemplateAssignmentSafetyTests(TestCase):
     def setUp(self):
         self.tenant = Tenant.objects.create(code="NCBA", name="NCBA")
@@ -169,16 +172,17 @@ class CourseTemplateAssignmentSafetyTests(TestCase):
             department=self.department,
         )
 
-    def _form_data(self, *, assignment=None, template=None, course=None, term=None, is_active=True):
+    def _form_data(self, *, assignment=None, template=UNSET, course=None, term=None, is_active=True):
         assignment = assignment or self.assignment
+        template_obj = assignment.grading_template if template is UNSET else template
         return {
             "course": (course or assignment.course).id,
-            "grading_template": (template or assignment.grading_template).id,
+            "grading_template": template_obj.id if template_obj else "",
             "effective_from_term": (term if term is not None else assignment.effective_from_term).id,
             "is_active": "on" if is_active else "",
         }
 
-    def _assignment_form(self, *, assignment=None, template=None, course=None, term=None, is_active=True):
+    def _assignment_form(self, *, assignment=None, template=UNSET, course=None, term=None, is_active=True):
         assignment = assignment or self.assignment
         return CourseTemplateAssignmentForm(
             data=self._form_data(
@@ -419,6 +423,16 @@ class CourseTemplateAssignmentSafetyTests(TestCase):
         row = form.save()
         self.assertEqual(row.grading_template_id, self.other_template.id)
 
+    def test_editing_unused_assignment_can_clear_template(self):
+        form = self._assignment_form(template=None)
+
+        self.assertTrue(form.is_valid(), form.errors)
+        row = form.save()
+
+        self.assertIsNone(row.grading_template_id)
+        self.assertTrue(GradingTemplate.objects.filter(id=self.template.id).exists())
+        self.assertTrue(Course.objects.filter(id=self.course.id).exists())
+
     def test_editing_in_use_assignment_without_changing_template_is_allowed(self):
         self._create_activity()
         form = self._assignment_form(is_active=False)
@@ -432,6 +446,29 @@ class CourseTemplateAssignmentSafetyTests(TestCase):
         self._create_activity()
 
         self._assert_template_change_blocked()
+
+    def test_grade_activity_records_block_template_clear(self):
+        self._create_activity()
+        form = self._assignment_form(template=None)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("already in use and cannot be cleared", str(form.errors))
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.grading_template_id, self.template.id)
+
+    def test_duplicate_active_scope_blocks_clearing_to_blank_assignment(self):
+        other_assignment = CourseTemplateAssignment.objects.create(
+            course=self.course,
+            grading_template=self.other_template,
+            effective_from_term=self.term,
+            is_active=True,
+        )
+        form = self._assignment_form(assignment=other_assignment, template=None)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("already exists for this course and effective term scope", str(form.errors))
+        other_assignment.refresh_from_db()
+        self.assertEqual(other_assignment.grading_template_id, self.other_template.id)
 
     def test_student_activity_score_records_block_template_replacement(self):
         activity = self._create_activity()
@@ -594,6 +631,77 @@ class CourseTemplateAssignmentSafetyTests(TestCase):
         self.assertEqual(score.raw_score, Decimal("0.00"))
         self.assertEqual(GradeActivity.objects.count(), before_counts["activities"])
         self.assertEqual(StudentActivityScore.objects.count(), before_counts["scores"])
+
+    def test_admin_portal_post_clears_unused_template_assignment_and_redirects(self):
+        next_url = f"{reverse('admin_portal:course_template_assignment_list')}?without_template=1"
+        before_counts = {
+            "templates": GradingTemplate.objects.count(),
+            "courses": Course.objects.count(),
+            "activities": GradeActivity.objects.count(),
+            "scores": StudentActivityScore.objects.count(),
+            "submissions": GradeSubmission.objects.count(),
+        }
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("admin_portal:course_template_assignment_update", args=[self.assignment.id]),
+            {
+                **self._form_data(template=None),
+                "next": next_url,
+            },
+        )
+
+        self.assertRedirects(response, next_url, fetch_redirect_response=False)
+        self.assignment.refresh_from_db()
+        self.assertIsNone(self.assignment.grading_template_id)
+        self.assertEqual(GradingTemplate.objects.count(), before_counts["templates"])
+        self.assertEqual(Course.objects.count(), before_counts["courses"])
+        self.assertEqual(GradeActivity.objects.count(), before_counts["activities"])
+        self.assertEqual(StudentActivityScore.objects.count(), before_counts["scores"])
+        self.assertEqual(GradeSubmission.objects.count(), before_counts["submissions"])
+
+    def test_admin_portal_post_blocks_in_use_template_clear_without_deleting_records(self):
+        activity = self._create_activity()
+        score = StudentActivityScore.objects.create(
+            activity=activity,
+            student=self.student,
+            raw_score=Decimal("0.00"),
+            computed_score=Decimal("50.00"),
+            encoded_by_user=self.user,
+        )
+        before_counts = {
+            "activities": GradeActivity.objects.count(),
+            "scores": StudentActivityScore.objects.count(),
+        }
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("admin_portal:course_template_assignment_update", args=[self.assignment.id]),
+            self._form_data(template=None),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already in use and cannot be cleared")
+        self.assignment.refresh_from_db()
+        score.refresh_from_db()
+        self.assertEqual(self.assignment.grading_template_id, self.template.id)
+        self.assertEqual(score.raw_score, Decimal("0.00"))
+        self.assertEqual(GradeActivity.objects.count(), before_counts["activities"])
+        self.assertEqual(StudentActivityScore.objects.count(), before_counts["scores"])
+
+    def test_cleared_assignment_remains_visible_and_editable_in_assignment_list(self):
+        self.assignment.grading_template = None
+        self.assignment.save(update_fields=["grading_template", "updated_at"])
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("admin_portal:course_template_assignment_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No grading template assigned")
+        self.assertContains(
+            response,
+            reverse("admin_portal:course_template_assignment_update", args=[self.assignment.id]),
+        )
 
     def test_django_admin_form_blocks_in_use_template_replacement(self):
         self._create_activity()

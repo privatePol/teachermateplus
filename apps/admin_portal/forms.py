@@ -1766,6 +1766,11 @@ class CourseTemplateAssignmentForm(forms.ModelForm):
             self.fields["grading_template"].queryset = template_queryset
         if term_queryset is not None:
             self.fields["effective_from_term"].queryset = term_queryset
+        self.fields["grading_template"].required = not bool(self.instance and self.instance.pk)
+        if self.instance and self.instance.pk:
+            self.fields["grading_template"].help_text = (
+                "Leave blank to clear this assignment when it has no protected grading records."
+            )
         _set_choice_label(self.fields.get("course"), _course_label)
         _set_choice_label(
             self.fields.get("grading_template"),
@@ -1785,6 +1790,10 @@ class CourseTemplateAssignmentForm(forms.ModelForm):
         if effective_from_term and course and effective_from_term.tenant_id != course.tenant_id:
             raise forms.ValidationError("Effective term does not belong to the course tenant.")
         try:
+            CourseTemplateAssignmentSafetyService.validate_template_clear_allowed(
+                assignment=self.instance,
+                new_template=grading_template,
+            )
             CourseTemplateAssignmentSafetyService.validate_template_replacement_allowed(
                 assignment=self.instance,
                 new_template=grading_template,
