@@ -281,6 +281,103 @@ class UserListTests(TestCase):
         self.assertContains(response, "rebuildDepartmentOptions")
         self.assertContains(response, "NCBA-01 | COLLEGE")
         self.assertContains(response, "NCBA-02 | COLLEGE")
+        self.assertContains(response, "SAVE")
+        self.assertContains(response, "SAVE AND EMAIL PASSWORD")
+        self.assertContains(response, 'name="credential_action" value="save"')
+        self.assertContains(response, 'name="credential_action" value="save_and_email"')
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        ALLOWED_HOSTS=["testserver"],
+    )
+    def test_user_create_save_creates_user_without_emailing_credentials(self):
+        next_url = reverse("admin_portal:user_list")
+
+        response = self.client.post(
+            reverse("admin_portal:user_create"),
+            {
+                "username": "plain_save_user",
+                "email": "plain_save_user@ncba.edu.ph",
+                "first_name": "Plain",
+                "middle_name": "",
+                "last_name": "Save",
+                "default_tenant": "",
+                "default_campus": "",
+                "default_department": "",
+                "is_active": "on",
+                "password": "PlainSavePass123!",
+                "credential_action": "save",
+                "next": next_url,
+            },
+            follow=True,
+        )
+
+        self.assertRedirects(response, next_url)
+        user = User.objects.get(username="plain_save_user")
+        self.assertTrue(user.check_password("PlainSavePass123!"))
+        self.assertTrue(user.must_change_password)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertContains(response, "User created without emailing credentials/password.")
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="CREATE",
+                entity_type="User",
+                entity_id=str(user.id),
+            ).exists()
+        )
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="SEND_CREDENTIALS_EMAIL",
+                entity_type="User",
+                entity_id=str(user.id),
+            ).exists()
+        )
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        ALLOWED_HOSTS=["tmp.ncba.edu.ph"],
+    )
+    def test_user_create_save_and_email_creates_user_and_emails_credentials(self):
+        response = self.client.post(
+            reverse("admin_portal:user_create"),
+            {
+                "username": "email_save_user",
+                "email": "email_save_user@ncba.edu.ph",
+                "first_name": "Email",
+                "middle_name": "",
+                "last_name": "Save",
+                "default_tenant": "",
+                "default_campus": "",
+                "default_department": "",
+                "is_active": "on",
+                "password": "EmailSavePass123!",
+                "credential_action": "save_and_email",
+            },
+            HTTP_HOST="tmp.ncba.edu.ph",
+            secure=True,
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user = User.objects.get(username="email_save_user")
+        self.assertTrue(user.check_password("EmailSavePass123!"))
+        self.assertTrue(user.must_change_password)
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(email.to, ["email_save_user@ncba.edu.ph"])
+        self.assertIn("Username: email_save_user", email.body)
+        self.assertIn("Temporary Password: EmailSavePass123!", email.body)
+        self.assertContains(
+            response,
+            "User created and credentials/password were emailed to email_save_user@ncba.edu.ph.",
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="SEND_CREDENTIALS_EMAIL",
+                entity_type="User",
+                entity_id=str(user.id),
+            ).exists()
+        )
 
     def test_user_change_password_page_has_generate_password_button(self):
         user = User.objects.create_user(
@@ -297,12 +394,58 @@ class UserListTests(TestCase):
         self.assertContains(response, "generatePassword")
         self.assertContains(response, "id_new_password1")
         self.assertContains(response, "id_new_password2")
-        self.assertContains(response, "Save and Email Password")
+        self.assertContains(response, "SAVE")
+        self.assertContains(response, "SAVE AND EMAIL PASSWORD")
+        self.assertContains(response, 'name="credential_action" value="save"')
+        self.assertContains(response, 'name="credential_action" value="save_and_email"')
         self.assertContains(response, 'const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"')
         self.assertContains(response, 'const lower = "abcdefghijkmnopqrstuvwxyz"')
         self.assertContains(response, 'const digits = "23456789"')
         self.assertContains(response, 'const symbols = "!@#$%^&*()-_=+"')
         self.assertContains(response, "generatePassword(14)")
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_user_change_password_save_updates_password_without_emailing_credentials(self):
+        user = User.objects.create_user(
+            username="reset_no_email_user",
+            email="reset_no_email_user@example.com",
+            password="OldPass123!",
+            must_change_password=False,
+        )
+
+        response = self.client.post(
+            reverse("admin_portal:user_change_password", args=[user.id]),
+            {
+                "new_password1": "NoEmailResetPass123!",
+                "new_password2": "NoEmailResetPass123!",
+                "credential_action": "save",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("NoEmailResetPass123!"))
+        self.assertTrue(user.must_change_password)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertContains(
+            response,
+            "Password updated for reset_no_email_user without emailing credentials/password.",
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="CHANGE_PASSWORD",
+                entity_type="User",
+                entity_id=str(user.id),
+            ).exists()
+        )
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="SEND_PASSWORD_CHANGE_EMAIL",
+                entity_type="User",
+                entity_id=str(user.id),
+            ).exists()
+        )
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
@@ -321,6 +464,7 @@ class UserListTests(TestCase):
             {
                 "new_password1": "NewResetPass123!",
                 "new_password2": "NewResetPass123!",
+                "credential_action": "save_and_email",
             },
             HTTP_HOST="tmp.ncba.edu.ph",
             secure=True,
@@ -346,6 +490,10 @@ class UserListTests(TestCase):
         self.assertIn("NewResetPass123!", html_body)
         self.assertNotIn("/admin-portal/", html_body)
         self.assertNotIn("/faculty/", html_body)
+        self.assertContains(
+            response,
+            "Password updated for reset_email_user and credentials/password were emailed to reset_email_user@example.com.",
+        )
         self.assertTrue(
             AuditLog.objects.filter(
                 action="SEND_PASSWORD_CHANGE_EMAIL",

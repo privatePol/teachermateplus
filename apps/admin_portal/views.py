@@ -6063,6 +6063,7 @@ def user_create_view(request):
     )
     _style_form(form)
     if request.method == "POST" and form.is_valid():
+        should_email_credentials = request.POST.get("credential_action") == "save_and_email"
         raw_password = form.cleaned_data["password"]
         user = form.save()
         AuditService.log_event(
@@ -6074,12 +6075,19 @@ def user_create_view(request):
             after_data=model_before_after(user),
             request=request,
         )
+        if not should_email_credentials:
+            messages.success(
+                request,
+                "User created without emailing credentials/password.",
+            )
+            return _redirect_back_or_default(request, "admin_portal:user_list")
+
         try:
             sent_count = _send_new_user_credentials_email(request, user, raw_password)
             if sent_count:
                 messages.success(
                     request,
-                    f"User created and credentials email sent to {user.email}.",
+                    f"User created and credentials/password were emailed to {user.email}.",
                 )
                 AuditService.log_event(
                     action="SEND_CREDENTIALS_EMAIL",
@@ -6093,7 +6101,7 @@ def user_create_view(request):
             else:
                 messages.warning(
                     request,
-                    f"User created, but credentials email was not sent (no message accepted by SMTP).",
+                    "User created, but credentials/password email was not sent (no message accepted by SMTP).",
                 )
                 AuditService.log_event(
                     action="SEND_CREDENTIALS_EMAIL_FAILED",
@@ -6107,7 +6115,7 @@ def user_create_view(request):
         except Exception as exc:
             messages.warning(
                 request,
-                f"User created, but credentials email failed: {exc}",
+                f"User created, but credentials/password email failed: {exc}",
             )
             AuditService.log_event(
                 action="SEND_CREDENTIALS_EMAIL_FAILED",
@@ -6226,6 +6234,7 @@ def user_change_password_view(request, user_id: int):
     _style_form(form)
 
     if request.method == "POST" and form.is_valid():
+        should_email_credentials = request.POST.get("credential_action") == "save_and_email"
         raw_password = form.cleaned_data["new_password1"]
         user.set_password(raw_password)
         user.must_change_password = True
@@ -6239,12 +6248,19 @@ def user_change_password_view(request, user_id: int):
             metadata={"target_username": user.username},
             request=request,
         )
+        if not should_email_credentials:
+            messages.success(
+                request,
+                f"Password updated for {user.username} without emailing credentials/password.",
+            )
+            return _redirect_back_or_default(request, "admin_portal:user_list")
+
         try:
             sent_count = _send_user_password_change_credentials_email(request, user, raw_password)
             if sent_count:
                 messages.success(
                     request,
-                    f"Password updated for {user.username} and credentials email sent to {user.email}.",
+                    f"Password updated for {user.username} and credentials/password were emailed to {user.email}.",
                 )
                 AuditService.log_event(
                     action="SEND_PASSWORD_CHANGE_EMAIL",
@@ -6258,7 +6274,7 @@ def user_change_password_view(request, user_id: int):
             else:
                 messages.warning(
                     request,
-                    f"Password updated for {user.username}, but credentials email was not sent (no message accepted by SMTP).",
+                    f"Password updated for {user.username}, but credentials/password email was not sent (no message accepted by SMTP).",
                 )
                 AuditService.log_event(
                     action="SEND_PASSWORD_CHANGE_EMAIL_FAILED",
@@ -6272,7 +6288,7 @@ def user_change_password_view(request, user_id: int):
         except Exception as exc:
             messages.warning(
                 request,
-                f"Password updated for {user.username}, but credentials email failed: {exc}",
+                f"Password updated for {user.username}, but credentials/password email failed: {exc}",
             )
             AuditService.log_event(
                 action="SEND_PASSWORD_CHANGE_EMAIL_FAILED",

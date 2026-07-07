@@ -41,7 +41,10 @@
         {% for error in form.password.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
 
-      <button class="btn btn-primary" type="submit">Save</button>
+      <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-primary" type="submit" name="credential_action" value="save">SAVE</button>
+        <button class="btn btn-primary" type="submit" name="credential_action" value="save_and_email">SAVE AND EMAIL PASSWORD</button>
+      </div>
     </form>
   </div>
 </div>
