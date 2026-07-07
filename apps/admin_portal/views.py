@@ -6456,6 +6456,81 @@ def role_list_view(request):
 
 
 @portal_required("ADMIN")
+@permission_required("roles.read")
+def role_permission_compare_view(request):
+    role_ids = []
+    for raw_value in request.GET.getlist("role_ids"):
+        parsed = _safe_int(raw_value)
+        if parsed and parsed not in role_ids:
+            role_ids.append(parsed)
+
+    selected_roles = list(
+        Role.objects.filter(id__in=role_ids)
+        .annotate(permission_count=Count("role_permissions", distinct=True))
+        .order_by("name", "code")
+    )
+    selected_role_ids = {role.id for role in selected_roles}
+    missing_role_count = len([role_id for role_id in role_ids if role_id not in selected_role_ids])
+
+    if len(selected_roles) < 2:
+        messages.warning(request, "Select at least two roles to compare permissions.")
+        return redirect("admin_portal:role_list")
+
+    selected_role_permissions = {
+        role.id: set(
+            RolePermission.objects.filter(role=role, permission__is_active=True).values_list("permission_id", flat=True)
+        )
+        for role in selected_roles
+    }
+    module_groups = {}
+    for permission in Permission.objects.filter(is_active=True).order_by("module", "action", "code"):
+        module_groups.setdefault(permission.module, []).append(permission)
+
+    def _compare_title(value):
+        return str(value or "").replace("_", " ").replace(".", " ").title()
+
+    permission_groups = []
+    difference_count = 0
+    for module_number, (module, permissions) in enumerate(module_groups.items(), start=1):
+        rows = []
+        for permission_number, permission in enumerate(permissions, start=1):
+            granted_role_ids = [
+                role.id for role in selected_roles if permission.id in selected_role_permissions.get(role.id, set())
+            ]
+            is_different = len(granted_role_ids) not in {0, len(selected_roles)}
+            if is_different:
+                difference_count += 1
+            rows.append(
+                {
+                    "number": f"{module_number}.{permission_number}",
+                    "permission": permission,
+                    "granted_role_ids": set(granted_role_ids),
+                    "is_different": is_different,
+                }
+            )
+        permission_groups.append(
+            {
+                "number": module_number,
+                "key": module,
+                "label": _compare_title(module),
+                "rows": rows,
+                "total_count": len(rows),
+            }
+        )
+
+    context = {
+        "selected_roles": selected_roles,
+        "permission_groups": permission_groups,
+        "total_permission_count": Permission.objects.filter(is_active=True).count(),
+        "permission_group_count": len(permission_groups),
+        "difference_count": difference_count,
+        "missing_role_count": missing_role_count,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/security/role_permission_compare.html", context)
+
+
+@portal_required("ADMIN")
 @permission_required("roles.create")
 def role_create_view(request):
     role_queryset = Role.objects.filter(is_active=True).order_by("name")

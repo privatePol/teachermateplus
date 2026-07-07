@@ -41,7 +41,13 @@
   {% endif %}
 </div>
 
-{% include "admin_portal/security/role_table.html" with title="Active Records" roles=active_roles empty_text="No active roles found." show_delete=False %}
+<form method="get" action="{% url 'admin_portal:role_permission_compare' %}" class="mb-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+    <div class="small text-muted">Select two or more active roles, then compare granted permissions side by side.</div>
+    <button class="btn btn-sm btn-outline-primary" type="submit">Compare Permissions</button>
+  </div>
+  {% include "admin_portal/security/role_table.html" with title="Active Records" roles=active_roles empty_text="No active roles found." show_delete=False compare_enabled=True %}
+</form>
 
 {% include "admin_portal/security/role_table.html" with title="Inactive Records" roles=inactive_roles empty_text="No inactive roles found." show_delete=True %}
 

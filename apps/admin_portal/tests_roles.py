@@ -36,6 +36,65 @@ class RoleManagementTests(TestCase):
         self.assertIn("ACTIVE_ROLE", content)
         self.assertIn("INACTIVE_ROLE", content)
         self.assertIn("Type INACTIVE_ROLE", content)
+        self.assertContains(response, "Compare Permissions")
+        self.assertContains(response, 'name="role_ids"', html=False)
+        self.assertContains(response, reverse("admin_portal:role_permission_compare"))
+
+    def test_role_permission_compare_page_shows_side_by_side_grants(self):
+        campus_admin = Role.objects.create(code="CAMPUS_ADMIN", name="Campus Admin", is_active=True)
+        dean = Role.objects.create(code="DEAN", name="Dean", is_active=True)
+        shared = Permission.objects.create(
+            code="compare.shared",
+            module="compare",
+            action="read",
+            description="Shared permission",
+        )
+        campus_only = Permission.objects.create(
+            code="compare.campus_only",
+            module="compare",
+            action="update",
+            description="Campus-only permission",
+        )
+        dean_only = Permission.objects.create(
+            code="compare.dean_only",
+            module="compare",
+            action="approve",
+            description="Dean-only permission",
+        )
+        RolePermission.objects.create(role=campus_admin, permission=shared)
+        RolePermission.objects.create(role=campus_admin, permission=campus_only)
+        RolePermission.objects.create(role=dean, permission=shared)
+        RolePermission.objects.create(role=dean, permission=dean_only)
+
+        response = self.client.get(
+            reverse("admin_portal:role_permission_compare"),
+            {"role_ids": [campus_admin.id, dean.id]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["selected_roles"]), 2)
+        self.assertGreaterEqual(response.context["difference_count"], 2)
+        self.assertContains(response, "Compare Role Permissions")
+        self.assertContains(response, "Campus Admin")
+        self.assertContains(response, "Dean")
+        self.assertContains(response, "Shared permission")
+        self.assertContains(response, "Campus-only permission")
+        self.assertContains(response, "Dean-only permission")
+        self.assertContains(response, "Granted")
+        self.assertContains(response, "Not granted")
+        self.assertContains(response, "Show Differences Only")
+        self.assertContains(response, 'data-different="1"', html=False)
+        self.assertNotContains(response, 'name="permissions"', html=False)
+
+    def test_role_permission_compare_requires_at_least_two_roles(self):
+        role = Role.objects.create(code="ONE_ROLE", name="One Role", is_active=True)
+
+        response = self.client.get(
+            reverse("admin_portal:role_permission_compare"),
+            {"role_ids": [role.id]},
+        )
+
+        self.assertRedirects(response, reverse("admin_portal:role_list"))
 
     def test_inactive_role_hard_delete_requires_exact_role_code(self):
         role = Role.objects.create(code="OLD_ROLE", name="Old Role", is_active=False)
