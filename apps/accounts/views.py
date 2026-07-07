@@ -40,6 +40,8 @@ from apps.core.services.audit import AuditService
 from apps.core.services.email_assets import format_email_subject
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
+from apps.rbac.models import UserRole
+from apps.tenants.models import Tenant
 
 User = get_user_model()
 
@@ -83,14 +85,52 @@ def _resolve_security_redirect(user, portal_code: str) -> str | None:
     return None
 
 
+def _single_device_session_enforcement_tenant_ids(user) -> list[int]:
+    tenant_ids = []
+    default_tenant_id = getattr(user, "default_tenant_id", None)
+    if default_tenant_id:
+        tenant_ids.append(default_tenant_id)
+
+    for tenant_id in (
+        UserRole.objects.filter(
+            user=user,
+            is_active=True,
+            role__is_active=True,
+            tenant_id__isnull=False,
+        )
+        .values_list("tenant_id", flat=True)
+        .distinct()
+    ):
+        if tenant_id not in tenant_ids:
+            tenant_ids.append(tenant_id)
+
+    if not tenant_ids:
+        active_tenant_ids = list(Tenant.objects.filter(is_active=True).values_list("id", flat=True)[:2])
+        if len(active_tenant_ids) == 1:
+            tenant_ids.append(active_tenant_ids[0])
+    return tenant_ids
+
+
+def _single_device_session_enforcement_enabled_for_user(user) -> bool:
+    tenant_ids = _single_device_session_enforcement_tenant_ids(user)
+    if not tenant_ids:
+        return FeatureSettingsService.is_single_device_session_enforcement_enabled(
+            tenant_id=None,
+            default=True,
+        )
+    return all(
+        FeatureSettingsService.is_single_device_session_enforcement_enabled(
+            tenant_id=tenant_id,
+            default=True,
+        )
+        for tenant_id in tenant_ids
+    )
+
+
 def _enforce_single_device_session(request, user, portal_code: str):
     if not getattr(settings, "ENFORCE_SINGLE_DEVICE_SESSION", True):
         return
-    tenant_id = getattr(user, "default_tenant_id", None)
-    if not FeatureSettingsService.is_single_device_session_enforcement_enabled(
-        tenant_id=tenant_id,
-        default=True,
-    ):
+    if not _single_device_session_enforcement_enabled_for_user(user):
         return
     if not request.session.session_key:
         request.session.save()

@@ -9,7 +9,7 @@ from django.utils import timezone
 from apps.accounts.models import PortalLoginLockoutState, User
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
-from apps.rbac.models import Permission
+from apps.rbac.models import Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
 
@@ -137,6 +137,32 @@ class LoginLockoutTests(TestCase):
         self.assertFalse(Session.objects.filter(session_key=first_session_key).exists())
 
     def test_single_device_session_enforcement_can_be_disabled_per_tenant(self):
+        SystemSettingService.set(
+            FeatureSettingsService.SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        first_browser = Client()
+        second_browser = Client()
+        login_url = reverse("accounts:faculty_login")
+
+        first_response = first_browser.post(login_url, {"username": self.user.username, "password": self.password})
+        self.assertEqual(first_response.status_code, 302)
+        first_session_key = first_browser.session.session_key
+
+        second_response = second_browser.post(login_url, {"username": self.user.username, "password": self.password})
+        self.assertEqual(second_response.status_code, 302)
+
+        self.assertTrue(Session.objects.filter(session_key=first_session_key).exists())
+
+    def test_single_device_session_enforcement_uses_active_role_tenant_when_default_differs(self):
+        other_tenant = Tenant.objects.create(code="OTHER", name="Other Tenant")
+        self.user.default_tenant = other_tenant
+        self.user.save(update_fields=["default_tenant"])
+        role = Role.objects.create(code="FACULTY", name="Faculty")
+        UserRole.objects.create(user=self.user, role=role, tenant=self.tenant)
         SystemSettingService.set(
             FeatureSettingsService.SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY,
             False,
