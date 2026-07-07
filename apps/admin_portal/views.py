@@ -6941,14 +6941,15 @@ def role_permissions_view(request, role_id: int):
     saved_module = (request.GET.get("saved_module") or "").strip()
     for perm in Permission.objects.filter(is_active=True).order_by("module", "action", "code"):
         module_groups.setdefault(perm.module, []).append(perm)
-    for module, perms in module_groups.items():
+    for module_number, (module, perms) in enumerate(module_groups.items(), start=1):
         module_display = _module_display(module)
         dom_id = _module_dom_id(module)
         permission_rows = []
-        for perm in perms:
+        for permission_number, perm in enumerate(perms, start=1):
             permission_rows.append(
                 {
                     "id": perm.id,
+                    "number": f"{module_number}.{permission_number}",
                     "code": perm.code,
                     "action": perm.action,
                     "action_label": _permission_label(perm),
@@ -6962,6 +6963,7 @@ def role_permissions_view(request, role_id: int):
         permissions_by_module.append(
             {
                 "key": module,
+                "number": module_number,
                 "dom_id": dom_id,
                 "card_dom_id": _module_card_dom_id(module),
                 "label": module_display["label"],
@@ -6969,16 +6971,21 @@ def role_permissions_view(request, role_id: int):
                 "is_saved": module == saved_module,
                 "permissions": permission_rows,
                 "selected_count": sum(1 for item in permission_rows if item["is_selected"]),
+                "assigned_count": sum(1 for item in permission_rows if item["is_saved_selected"]),
                 "total_count": len(permission_rows),
             }
         )
 
+    total_permission_count = Permission.objects.filter(is_active=True).count()
+    role_assigned_permission_count = len(current_role_permission_ids)
     context = {
         "role": role,
         "form": form,
         "permissions_by_module": permissions_by_module,
         "selected_permission_count": len(selected_permission_ids),
-        "total_permission_count": Permission.objects.filter(is_active=True).count(),
+        "role_assigned_permission_count": role_assigned_permission_count,
+        "total_permission_count": total_permission_count,
+        "permission_group_count": len(permissions_by_module),
         "critical_role_confirmation": CRITICAL_ROLE_CONFIRMATION,
         "critical_permission_codes": sorted(CRITICAL_PERMISSION_CODES),
         "critical_permission_impact": critical_permission_impact,

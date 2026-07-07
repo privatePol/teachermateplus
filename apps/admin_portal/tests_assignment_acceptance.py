@@ -417,6 +417,228 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertNotContains(response, "Old IS Project Management 2")
         self.assertNotContains(response, "Old Scope Unassigned Course")
 
+    def test_faculty_assignment_page_hides_exact_old_production_assignment_when_no_active_load(self):
+        self.assignment.is_active = False
+        self.assignment.save(update_fields=["is_active", "updated_at"])
+        old_academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="AY2526",
+            name="2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        old_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=old_academic_year,
+            code="2ND-SEM",
+            name="2nd-Semester (2025-2026)",
+            sequence_no=2,
+            start_date=date(2025, 11, 1),
+            end_date=date(2026, 3, 31),
+        )
+        active_academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="AY2627",
+            name="2026-2027",
+            start_date=date(2026, 6, 1),
+            end_date=date(2027, 5, 31),
+        )
+        active_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=active_academic_year,
+            code="1ST-SEM",
+            name="1ST-SEM 2026-2027",
+            sequence_no=1,
+            start_date=date(2026, 6, 1),
+            end_date=date(2026, 10, 31),
+        )
+        old_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="IS327-IPM2",
+            title="IS Project Management 2",
+        )
+        old_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIS-TEST",
+            name="BSIS TEST SECTION",
+        )
+        old_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=old_academic_year,
+            term=old_term,
+            course=old_course,
+            section=old_section,
+        )
+        old_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=old_offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+            responded_at=timezone.now(),
+        )
+        AcademicGovernanceService.set_active_scope(
+            tenant_id=self.tenant.id,
+            academic_year=active_academic_year,
+            term=active_term,
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            reverse("admin_portal:faculty_assignment_list"),
+            {"faculty_user_id": self.faculty_user.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_academic_year_id"], active_academic_year.id)
+        self.assertEqual(response.context["selected_term_id"], active_term.id)
+        self.assertEqual(response.context["assigned_count"], 0)
+        self.assertEqual(response.context["accepted_count"], 0)
+        self.assertEqual(response.context["pending_acceptance_count"], 0)
+        self.assertEqual(response.context["due_soon_count"], 0)
+        self.assertEqual(response.context["expired_count"], 0)
+        self.assertEqual(response.context["clarification_count"], 0)
+        primary_card = next(
+            card for card in response.context["assignment_metric_cards"] if card["label"] == "Primary Load"
+        )
+        self.assertEqual(primary_card["value"], 0)
+        self.assertFalse(response.context["selected_faculty_assignments"].exists())
+        self.assertTrue(FacultyAssignment.objects.filter(id=old_assignment.id, is_active=True).exists())
+        self.assertNotContains(response, "IS Project Management 2")
+        self.assertNotContains(response, "IS327-IPM2")
+        self.assertNotContains(response, "BSIS TEST SECTION")
+
+    def test_faculty_assignment_page_shows_active_scope_assignment_when_active_scope_is_newer(self):
+        old_academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="AY2526",
+            name="2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        old_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=old_academic_year,
+            code="2ND-SEM",
+            name="2nd-Semester (2025-2026)",
+            sequence_no=2,
+            start_date=date(2025, 11, 1),
+            end_date=date(2026, 3, 31),
+        )
+        active_academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="AY2627",
+            name="2026-2027",
+            start_date=date(2026, 6, 1),
+            end_date=date(2027, 5, 31),
+        )
+        active_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=active_academic_year,
+            code="1ST-SEM",
+            name="1ST-SEM 2026-2027",
+            sequence_no=1,
+            start_date=date(2026, 6, 1),
+            end_date=date(2026, 10, 31),
+        )
+        old_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="IS327-IPM2",
+            title="IS Project Management 2",
+        )
+        old_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIS-TEST",
+            name="BSIS TEST SECTION",
+        )
+        old_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=old_academic_year,
+            term=old_term,
+            course=old_course,
+            section=old_section,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=old_offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+        )
+        active_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="IS401-ACTIVE",
+            title="Active Scope Systems Course",
+        )
+        active_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIS-ACTIVE",
+            name="BSIS ACTIVE SECTION",
+        )
+        active_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=active_academic_year,
+            term=active_term,
+            course=active_course,
+            section=active_section,
+        )
+        active_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=active_offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+        )
+        AcademicGovernanceService.set_active_scope(
+            tenant_id=self.tenant.id,
+            academic_year=active_academic_year,
+            term=active_term,
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            reverse("admin_portal:faculty_assignment_list"),
+            {"faculty_user_id": self.faculty_user.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["assigned_count"], 1)
+        assignment_ids = {assignment.id for assignment in response.context["selected_faculty_assignments"]}
+        self.assertIn(active_assignment.id, assignment_ids)
+        self.assertContains(response, "Active Scope Systems Course")
+        self.assertContains(response, "IS401-ACTIVE")
+        self.assertContains(response, "BSIS ACTIVE SECTION")
+        self.assertNotContains(response, "IS Project Management 2")
+        self.assertNotContains(response, "IS327-IPM2")
+        self.assertNotContains(response, "BSIS TEST SECTION")
+
     def test_faculty_assignment_assign_post_rejects_offerings_outside_active_scope(self):
         old_academic_year = AcademicYear.objects.create(
             tenant=self.tenant,

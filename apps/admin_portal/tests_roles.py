@@ -105,6 +105,37 @@ class RoleManagementTests(TestCase):
             html=False,
         )
 
+    def test_role_permissions_page_shows_comparison_summary_index_and_numbering(self):
+        role = Role.objects.create(code="COMPARE_ROLE", name="Compare Role", is_active=True)
+        roles_read = Permission.objects.get(code="roles.read")
+        RolePermission.objects.create(role=role, permission=roles_read)
+
+        response = self.client.get(reverse("admin_portal:role_permissions", args=[role.id]))
+
+        self.assertEqual(response.status_code, 200)
+        roles_module = next(module for module in response.context["permissions_by_module"] if module["key"] == "roles")
+        roles_read_row = next(item for item in roles_module["permissions"] if item["code"] == "roles.read")
+        roles_update_row = next(item for item in roles_module["permissions"] if item["code"] == "roles.update")
+        self.assertEqual(response.context["role_assigned_permission_count"], 1)
+        self.assertGreaterEqual(response.context["total_permission_count"], 4)
+        self.assertGreaterEqual(response.context["permission_group_count"], 3)
+        self.assertContains(response, "Module Index")
+        self.assertContains(response, 'id="permission-module-jump"', html=False)
+        self.assertContains(response, 'value="card_module_admin_portal"', html=False)
+        self.assertContains(response, 'value="card_module_roles"', html=False)
+        self.assertContains(response, "permission-card-header-alt-a")
+        self.assertContains(response, "permission-card-header-alt-b")
+        self.assertContains(response, f'{roles_module["number"]}. Security Roles')
+        self.assertContains(response, f'1 of {response.context["total_permission_count"]}')
+        self.assertContains(response, f'{response.context["permission_group_count"]}')
+        self.assertEqual(roles_module["assigned_count"], 1)
+        self.assertGreaterEqual(roles_module["total_count"], 2)
+        self.assertContains(response, "assigned")
+        self.assertContains(response, roles_read_row["number"])
+        self.assertContains(response, roles_update_row["number"])
+        self.assertContains(response, "Assigned")
+        self.assertContains(response, "Not assigned")
+
     def test_role_permissions_section_save_updates_only_selected_module(self):
         role = Role.objects.create(code="PARTIAL_SAVE", name="Partial Save", is_active=True)
         alpha_read = Permission.objects.create(code="alpha.read", module="alpha", action="read")

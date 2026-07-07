@@ -7,18 +7,101 @@
     top: 0.75rem;
     z-index: 5;
   }
+  .permission-summary-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 1.35fr) repeat(3, minmax(120px, 0.7fr));
+    gap: 0.75rem;
+  }
+  .permission-summary-item {
+    border: 1px solid #dbe7db;
+    border-radius: 0.65rem;
+    background: #fbfdfb;
+    padding: 0.85rem 1rem;
+  }
+  .permission-summary-label {
+    color: #607064;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .permission-summary-value {
+    color: #173b24;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .permission-module-index {
+    border: 1px solid #dce8dc;
+    border-radius: 0.65rem;
+    background: #ffffff;
+  }
+  .permission-module-index-title {
+    border-bottom: 1px solid #e9f0e8;
+    background: #f7faf6;
+    border-radius: 0.65rem 0.65rem 0 0;
+    color: #2f5137;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.65rem 0.85rem;
+    text-transform: uppercase;
+  }
+  .permission-module-index-body {
+    padding: 0.75rem;
+  }
+  .permission-module-index-select {
+    max-width: 34rem;
+  }
   .permission-card {
     border: 1px solid #dde7dc;
     border-radius: 0.75rem;
     background: #ffffff;
   }
   .permission-card-header {
-    border-bottom: 1px solid #edf2ec;
-    background: #f8fbf8;
+    border-bottom: 1px solid #dbe9d9;
+    background: #edf6ed;
     border-radius: 0.75rem 0.75rem 0 0;
+  }
+  .permission-card-header-alt-a {
+    background: #edf6ed;
+  }
+  .permission-card-header-alt-b {
+    background: #eef4fb;
+    border-bottom-color: #d6e4f0;
+  }
+  .permission-card-header-alt-b .permission-module-number {
+    background: #2f647d;
+  }
+  .permission-card-header-alt-b .permission-count-badge {
+    border-color: #c6d9e6;
+    color: #24526a;
+  }
+  .permission-module-number {
+    align-items: center;
+    background: #2d6d37;
+    border-radius: 999px;
+    color: #ffffff;
+    display: inline-flex;
+    font-size: 0.82rem;
+    font-weight: 700;
+    height: 1.75rem;
+    justify-content: center;
+    min-width: 1.75rem;
+    padding: 0 0.45rem;
+  }
+  .permission-module-title {
+    color: #173b24;
+    font-size: 1.02rem;
+    font-weight: 800;
+  }
+  .permission-count-badge {
+    border: 1px solid #c8dbc8;
+    background: #ffffff;
+    color: #285331;
   }
   .permission-row {
     border: 1px solid #edf2ec;
+    border-left: 4px solid #d8e4d7;
     border-radius: 0.65rem;
     background: #ffffff;
     transition: border-color 0.15s ease, background 0.15s ease;
@@ -29,7 +112,30 @@
   }
   .permission-row.is-selected {
     border-color: #8abd8b;
+    border-left-color: #2d8a3d;
     background: #f2fbf2;
+  }
+  .permission-number {
+    align-items: center;
+    background: #eef3ef;
+    border: 1px solid #d8e4d7;
+    border-radius: 0.45rem;
+    color: #2d5034;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 0.78rem;
+    font-weight: 800;
+    justify-content: center;
+    min-width: 2.3rem;
+    padding: 0.18rem 0.35rem;
+  }
+  .permission-row.is-selected .permission-number {
+    background: #dff3df;
+    border-color: #9dca9f;
+    color: #1d6528;
+  }
+  .permission-state-badge {
+    min-width: 6.25rem;
   }
   .permission-code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -43,6 +149,16 @@
     border-top: 1px solid #dbe6d9;
     backdrop-filter: blur(6px);
   }
+  @media (max-width: 992px) {
+    .permission-summary-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 576px) {
+    .permission-summary-grid {
+      grid-template-columns: 1fr;
+    }
+  }
 </style>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
@@ -51,6 +167,42 @@
     <div class="text-muted small">{{ role.name }} | Choose only the permissions this role truly needs.</div>
   </div>
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:role_list' %}">Back to Roles</a>
+</div>
+
+<div class="permission-summary-grid mb-3">
+  <div class="permission-summary-item">
+    <div class="permission-summary-label">Role</div>
+    <div class="permission-summary-value">{{ role.name }}</div>
+    <div class="small text-muted">{{ role.code }}</div>
+  </div>
+  <div class="permission-summary-item">
+    <div class="permission-summary-label">Assigned</div>
+    <div class="permission-summary-value">{{ role_assigned_permission_count }} of {{ total_permission_count }}</div>
+    <div class="small text-muted">permissions assigned</div>
+  </div>
+  <div class="permission-summary-item">
+    <div class="permission-summary-label">Available</div>
+    <div class="permission-summary-value">{{ total_permission_count }}</div>
+    <div class="small text-muted">active permissions</div>
+  </div>
+  <div class="permission-summary-item">
+    <div class="permission-summary-label">Groups</div>
+    <div class="permission-summary-value">{{ permission_group_count }}</div>
+    <div class="small text-muted">permission groups</div>
+  </div>
+</div>
+
+<div class="permission-module-index mb-3">
+  <div class="permission-module-index-title">Module Index</div>
+  <div class="permission-module-index-body">
+    <label class="form-label small text-muted mb-1" for="permission-module-jump">Jump to permission group</label>
+    <select class="form-select permission-module-index-select" id="permission-module-jump">
+      <option value="">Select a module...</option>
+      {% for module in permissions_by_module %}
+        <option value="{{ module.card_dom_id }}">{{ module.number }}. {{ module.label }} - {{ module.selected_count }} of {{ module.total_count }} assigned</option>
+      {% endfor %}
+    </select>
+  </div>
 </div>
 
 <form method="post" id="role-permissions-form">
@@ -107,15 +259,18 @@
 
   {% for module in permissions_by_module %}
   <section id="{{ module.card_dom_id }}" class="permission-card mb-3" data-module-card data-module="{{ module.label|lower }}">
-    <div class="permission-card-header p-3">
+    <div class="permission-card-header {% if module.number|divisibleby:2 %}permission-card-header-alt-b{% else %}permission-card-header-alt-a{% endif %} p-3">
       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
         <div>
-          <div class="fw-semibold">
-            {{ module.label }}
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <span class="permission-module-number">{{ module.number }}</span>
+            <span class="permission-module-title">{{ module.number }}. {{ module.label }}</span>
+            <span class="badge permission-count-badge">
+              <span data-module-selected>{{ module.selected_count }}</span> of {{ module.total_count }} assigned
+            </span>
             {% if module.is_saved %}<span class="badge text-bg-success ms-2">Changes saved</span>{% endif %}
           </div>
           <div class="small text-muted mt-1">{{ module.description }}</div>
-          <div class="small text-muted"><span data-module-selected>{{ module.selected_count }}</span> of {{ module.total_count }} selected</div>
         </div>
         <div class="d-flex flex-wrap gap-2">
           <button class="btn btn-sm btn-outline-success" type="button" data-module-select="{{ module.dom_id }}">Select Module</button>
@@ -131,9 +286,11 @@
              data-permission-item
              data-search="{{ module.label|lower }} {{ perm.code|lower }} {{ perm.action_label|lower }} {{ perm.description|lower }}">
           <label class="permission-row d-flex align-items-start gap-2 p-3 h-100 {% if perm.is_selected %}is-selected{% endif %}" for="perm_{{ perm.id }}">
+            <span class="permission-number">{{ perm.number }}</span>
             <input class="form-check-input mt-1 permission-checkbox" type="checkbox" name="permissions" value="{{ perm.id }}" id="perm_{{ perm.id }}" data-critical="{% if perm.is_critical %}1{% else %}0{% endif %}" data-initial-checked="{% if perm.is_saved_selected %}1{% else %}0{% endif %}" {% if perm.is_selected %}checked{% endif %}>
             <span class="flex-grow-1">
               <span class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                <span class="badge permission-state-badge {% if perm.is_selected %}text-bg-success{% else %}text-bg-light text-dark border{% endif %}" data-permission-state>{% if perm.is_selected %}Assigned{% else %}Not assigned{% endif %}</span>
                 <span class="badge {{ perm.badge_class }}">{{ perm.action_label }}</span>
                 {% if perm.is_critical %}<span class="badge text-bg-warning">Critical</span>{% endif %}
                 <span class="permission-code">{{ perm.code }}</span>
@@ -166,6 +323,7 @@
     const selectedCount = document.getElementById("selected-count");
     const selectedCountBottom = document.getElementById("selected-count-bottom");
     const showSelectedToggle = document.getElementById("show-selected-toggle");
+    const moduleJump = document.getElementById("permission-module-jump");
     const criticalSafeguard = document.getElementById("critical-access-safeguard");
     const checkboxes = Array.from(document.querySelectorAll(".permission-checkbox"));
     const scrollStorageKey = "TeacherMate+_role_permissions_scroll_{{ role.id }}";
@@ -186,8 +344,9 @@
       document.querySelectorAll("[data-module-card]").forEach((card) => {
         const moduleBoxes = Array.from(card.querySelectorAll(".permission-checkbox"));
         const moduleSelected = moduleBoxes.filter((checkbox) => checkbox.checked).length;
-        const target = card.querySelector("[data-module-selected]");
-        if (target) target.textContent = moduleSelected;
+        card.querySelectorAll("[data-module-selected]").forEach((target) => {
+          target.textContent = moduleSelected;
+        });
       });
     }
 
@@ -195,6 +354,14 @@
       checkboxes.forEach((checkbox) => {
         const row = checkbox.closest(".permission-row");
         if (row) row.classList.toggle("is-selected", checkbox.checked);
+        const stateBadge = row ? row.querySelector("[data-permission-state]") : null;
+        if (stateBadge) {
+          stateBadge.textContent = checkbox.checked ? "Assigned" : "Not assigned";
+          stateBadge.classList.toggle("text-bg-success", checkbox.checked);
+          stateBadge.classList.toggle("text-bg-light", !checkbox.checked);
+          stateBadge.classList.toggle("text-dark", !checkbox.checked);
+          stateBadge.classList.toggle("border", !checkbox.checked);
+        }
       });
     }
 
@@ -251,6 +418,15 @@
     });
 
     searchInput.addEventListener("input", applyFilter);
+    if (moduleJump) {
+      moduleJump.addEventListener("change", function () {
+        const target = moduleJump.value ? document.getElementById(moduleJump.value) : null;
+        if (!target) return;
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        window.history.replaceState(null, "", "#" + moduleJump.value);
+        moduleJump.value = "";
+      });
+    }
     showSelectedToggle.addEventListener("click", function () {
       const isActive = showSelectedToggle.dataset.active === "1";
       showSelectedToggle.dataset.active = isActive ? "0" : "1";
