@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
-from apps.academics.services import FacultyAssignmentWorkflowService
+from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
@@ -304,6 +304,178 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertEqual(response.context["pending_acceptance_count"], 1)
         self.assertContains(response, "Pending Acceptance")
         self.assertContains(response, "Due Within 24 Hours")
+
+    def test_faculty_assignment_page_defaults_to_active_academic_scope(self):
+        old_academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2024-2025",
+            name="AY 2024-2025",
+            start_date=date(2024, 6, 1),
+            end_date=date(2025, 5, 31),
+        )
+        old_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=old_academic_year,
+            code="2ND",
+            name="Second Term",
+            sequence_no=2,
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 5, 31),
+        )
+        old_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="OLD327-IPM2",
+            title="Old IS Project Management 2",
+        )
+        old_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=old_academic_year,
+            term=old_term,
+            course=old_course,
+            section=self.section,
+        )
+        old_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=old_offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+            responded_at=timezone.now(),
+        )
+        active_unassigned_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="ACTIVE134",
+            title="Active Scope Unassigned Course",
+        )
+        active_unassigned_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=active_unassigned_course,
+            section=self.second_section,
+        )
+        old_unassigned_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="OLD134",
+            title="Old Scope Unassigned Course",
+        )
+        old_unassigned_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=old_academic_year,
+            term=old_term,
+            course=old_unassigned_course,
+            section=self.second_section,
+        )
+        AcademicGovernanceService.set_active_scope(
+            tenant_id=self.tenant.id,
+            academic_year=self.academic_year,
+            term=self.term,
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            reverse("admin_portal:faculty_assignment_list"),
+            {"faculty_user_id": self.faculty_user.id, "assign": "1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_academic_year_id"], self.academic_year.id)
+        self.assertEqual(response.context["selected_term_id"], self.term.id)
+        self.assertEqual(response.context["assigned_count"], 1)
+        self.assertEqual(response.context["accepted_count"], 0)
+        self.assertEqual(response.context["pending_acceptance_count"], 1)
+        primary_card = next(
+            card for card in response.context["assignment_metric_cards"] if card["label"] == "Primary Load"
+        )
+        self.assertEqual(primary_card["value"], 1)
+        assigned_ids = {assignment.id for assignment in response.context["selected_faculty_assignments"]}
+        self.assertIn(self.assignment.id, assigned_ids)
+        self.assertNotIn(old_assignment.id, assigned_ids)
+        assignable_ids = {offering.id for offering in response.context["assignable_offerings"]}
+        self.assertIn(active_unassigned_offering.id, assignable_ids)
+        self.assertNotIn(old_unassigned_offering.id, assignable_ids)
+        self.assertContains(response, "IT Application Tools")
+        self.assertContains(response, "Active Scope Unassigned Course")
+        self.assertNotContains(response, "Old IS Project Management 2")
+        self.assertNotContains(response, "Old Scope Unassigned Course")
+
+    def test_faculty_assignment_assign_post_rejects_offerings_outside_active_scope(self):
+        old_academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2024-2025",
+            name="AY 2024-2025",
+            start_date=date(2024, 6, 1),
+            end_date=date(2025, 5, 31),
+        )
+        old_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=old_academic_year,
+            code="2ND",
+            name="Second Term",
+            sequence_no=2,
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 5, 31),
+        )
+        old_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="OLD-POST",
+            title="Old Direct Post Course",
+        )
+        old_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=old_academic_year,
+            term=old_term,
+            course=old_course,
+            section=self.second_section,
+        )
+        AcademicGovernanceService.set_active_scope(
+            tenant_id=self.tenant.id,
+            academic_year=self.academic_year,
+            term=self.term,
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("admin_portal:faculty_assignment_assign"),
+            {
+                "faculty_user_id": self.faculty_user.id,
+                "offering_ids": [old_offering.id],
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No offerings were assigned. They may already be assigned or out of scope.")
+        self.assertFalse(
+            FacultyAssignment.objects.filter(
+                offering=old_offering,
+                faculty_user=self.faculty_user,
+                is_active=True,
+            ).exists()
+        )
 
     def test_campus_admin_assignment_page_hides_academic_monitor_actions(self):
         self.client.force_login(self.admin_user)

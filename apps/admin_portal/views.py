@@ -406,6 +406,28 @@ def _scope_context(request):
     }
 
 
+def _admin_active_academic_scope_ids(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    if not tenant_id:
+        return None, None
+    active_academic_year, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
+    if not active_academic_year or not active_term:
+        return None, None
+    return active_academic_year.id, active_term.id
+
+
+def _filter_to_admin_active_academic_scope(request, queryset, *, prefix=""):
+    active_academic_year_id, active_term_id = _admin_active_academic_scope_ids(request)
+    if active_academic_year_id and active_term_id:
+        return queryset.filter(
+            **{
+                f"{prefix}academic_year_id": active_academic_year_id,
+                f"{prefix}term_id": active_term_id,
+            }
+        )
+    return queryset
+
+
 def _style_form(form):
     for field in form.fields.values():
         widget = field.widget
@@ -7685,9 +7707,14 @@ def faculty_assignment_list_view(request):
     offering_q = request.GET.get("offering_q", "").strip()
     selected_section_id = _safe_int(request.GET.get("section_id"))
     assignment_note = (request.GET.get("assignment_note") or "").strip()
+    selected_academic_year_id, selected_term_id = _admin_active_academic_scope_ids(request)
     sections = AdminScopeService.active_scoped_sections(request).order_by("code")
-    assignable_offerings = AdminScopeService.scoped_course_offerings(request).filter(is_active=True).exclude(
-        faculty_assignments__is_active=True
+    assignable_offerings = (
+        _filter_to_admin_active_academic_scope(
+            request,
+            AdminScopeService.scoped_course_offerings(request).filter(is_active=True),
+        )
+        .exclude(faculty_assignments__is_active=True)
     )
     if selected_section_id:
         assignable_offerings = assignable_offerings.filter(section_id=selected_section_id)
@@ -7711,7 +7738,11 @@ def faculty_assignment_list_view(request):
     assignment_metric_cards = []
     if selected_faculty:
         selected_faculty_assignments = (
-            AdminScopeService.scoped_faculty_assignments(request)
+            _filter_to_admin_active_academic_scope(
+                request,
+                AdminScopeService.scoped_faculty_assignments(request),
+                prefix="offering__",
+            )
             .filter(
                 faculty_user_id=selected_faculty.id,
                 is_active=True,
@@ -7781,6 +7812,8 @@ def faculty_assignment_list_view(request):
         "selected_faculty": selected_faculty,
         "show_assign_box": show_assign_box,
         "offering_q": offering_q,
+        "selected_academic_year_id": selected_academic_year_id,
+        "selected_term_id": selected_term_id,
         "selected_section_id": selected_section_id,
         "assignment_note": assignment_note,
         "sections": sections,
@@ -8747,7 +8780,10 @@ def faculty_assignment_assign_view(request):
     )
     offerings_map = {
         row.id: row
-        for row in AdminScopeService.scoped_course_offerings(request)
+        for row in _filter_to_admin_active_academic_scope(
+            request,
+            AdminScopeService.scoped_course_offerings(request),
+        )
         .filter(is_active=True, id__in=selected_ids)
         .select_related("course", "section", "term")
     }
