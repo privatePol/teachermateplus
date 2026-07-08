@@ -2,7 +2,9 @@ from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -143,6 +145,172 @@ class BulkCourseTemplateAssignmentTests(TestCase):
             campus=self.campus,
             department=self.department,
         )
+
+    def test_create_page_shows_active_assignment_badges(self):
+        template_extra = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TMP3",
+            name="Template 3",
+            is_published=True,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course_2,
+            grading_template=self.template_target,
+            effective_from_term=None,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=self.course_2,
+            grading_template=template_extra,
+            effective_from_term=self.term,
+            is_active=True,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("admin_portal:course_template_assignment_create"))
+
+        self.assertEqual(response.status_code, 200)
+        rows = {row["id"]: row for row in response.context["course_rows"]}
+        self.assertEqual(rows[self.course_1.id]["badges"], ["Template 2"])
+        self.assertEqual(rows[self.course_2.id]["badges"], ["Template 1", "Template 3"])
+        self.assertEqual(rows[self.course_3.id]["badges"], [])
+        self.assertContains(response, "course-template-badge")
+        self.assertContains(response, "Template 2")
+        self.assertContains(response, "Template 3")
+
+    def test_create_page_badges_respect_scope_and_tenant(self):
+        other_tenant = Tenant.objects.create(code="OTHER", name="Other Tenant")
+        other_campus = Campus.objects.create(tenant=other_tenant, code="OTHER-CAMPUS", name="Other Campus")
+        other_department = Department.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            code="OTHER-DEPT",
+            name="Other Department",
+        )
+        other_course = Course.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            department=other_department,
+            code="OTHER101",
+            title="Other Tenant Course",
+        )
+        other_template = GradingTemplate.objects.create(
+            tenant=other_tenant,
+            code="OTHER-TMP",
+            name="Other Tenant Template",
+            is_published=True,
+            is_active=True,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=other_course,
+            grading_template=other_template,
+            effective_from_term=None,
+            is_active=True,
+        )
+        hidden_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="OTHER-SCOPE",
+            name="Other Scoped Department",
+        )
+        hidden_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=hidden_department,
+            code="HID101",
+            title="Hidden Department Course",
+        )
+        CourseTemplateAssignment.objects.create(
+            course=hidden_course,
+            grading_template=self.template_other,
+            effective_from_term=None,
+            is_active=True,
+        )
+        other_campus = Campus.objects.create(tenant=self.tenant, code="NCBA-CUBAO", name="Cubao")
+        other_campus_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="CUB-DEPT",
+            name="Cubao Department",
+        )
+        other_campus_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_campus_department,
+            code="CUB101",
+            title="Other Campus Course",
+        )
+        CourseTemplateAssignment.objects.create(
+            course=other_campus_course,
+            grading_template=self.template_other,
+            effective_from_term=None,
+            is_active=True,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("admin_portal:course_template_assignment_create"))
+
+        self.assertEqual(response.status_code, 200)
+        row_ids = {row["id"] for row in response.context["course_rows"]}
+        self.assertNotIn(other_course.id, row_ids)
+        self.assertNotIn(hidden_course.id, row_ids)
+        self.assertNotIn(other_campus_course.id, row_ids)
+        self.assertNotContains(response, "Other Tenant Template")
+        self.assertNotContains(response, "Hidden Department Course")
+        self.assertNotContains(response, "Other Campus Course")
+
+    def test_create_page_collapses_assignment_badges_after_five_templates(self):
+        for index in range(6):
+            template = GradingTemplate.objects.create(
+                tenant=self.tenant,
+                code=f"MANY{index}",
+                name=f"Many Template {index}",
+                is_published=True,
+                is_active=True,
+            )
+            CourseTemplateAssignment.objects.create(
+                course=self.course_2,
+                grading_template=template,
+                effective_from_term=None,
+                is_active=True,
+            )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("admin_portal:course_template_assignment_create"))
+
+        self.assertEqual(response.status_code, 200)
+        row = next(row for row in response.context["course_rows"] if row["id"] == self.course_2.id)
+        self.assertEqual(len(row["badges"]), 5)
+        self.assertEqual(row["more_count"], 1)
+        self.assertContains(response, "+1 more")
+
+    def test_create_page_assignment_badges_avoid_per_course_queries(self):
+        bulk_courses = [
+            Course(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                code=f"BULK{index:04d}",
+                title=f"Bulk Course {index:04d}",
+            )
+            for index in range(1000)
+        ]
+        Course.objects.bulk_create(bulk_courses)
+        self.client.force_login(self.user)
+
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(reverse("admin_portal:course_template_assignment_create"))
+
+        self.assertEqual(response.status_code, 200)
+        assignment_selects = [
+            query["sql"]
+            for query in captured.captured_queries
+            if query["sql"].lstrip().upper().startswith("SELECT")
+            and "course_template_assignments" in query["sql"].lower()
+        ]
+        self.assertLessEqual(len(assignment_selects), 1)
+        self.assertGreaterEqual(len(response.context["course_rows"]), 1000)
 
     def test_bulk_course_template_assignment_creates_reactivates_and_skips(self):
         self.client.force_login(self.user)

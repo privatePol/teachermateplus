@@ -15,7 +15,45 @@
     padding: 0.85rem 0.95rem;
   }
   .course-pickbox {
+    border: 1px solid #d9e4dc;
+    border-radius: 0.75rem;
+    max-height: 460px;
     min-height: 340px;
+    overflow-y: auto;
+    padding: 0.4rem;
+  }
+  .course-choice-row {
+    align-items: flex-start;
+    border: 1px solid #edf2ee;
+    border-radius: 0.65rem;
+    display: flex;
+    gap: 0.65rem;
+    padding: 0.65rem 0.75rem;
+  }
+  .course-choice-row + .course-choice-row {
+    margin-top: 0.4rem;
+  }
+  .course-choice-row:hover {
+    background: #fbfdfb;
+    border-color: #d2e3d6;
+  }
+  .course-choice-title {
+    color: #244832;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  .course-template-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.35rem;
+  }
+  .course-template-badge {
+    background: #eef3f7;
+    border: 1px solid #d4dde7;
+    color: #52616f;
+    font-size: 0.72rem;
+    font-weight: 600;
   }
   .bulk-help-list {
     margin: 0;
@@ -74,15 +112,36 @@
         <div class="col-lg-8">
           <label class="form-label" for="course-search">Search Courses</label>
           <input id="course-search" class="form-control" type="text" placeholder="Type course title or code to filter the list">
-          <div class="form-text">Tip: hold <strong>Ctrl</strong> while clicking to select multiple courses.</div>
+          <div class="form-text">Check one or more courses. Existing active grading templates appear as badges.</div>
         </div>
         <div class="col-lg-4">
-          <label class="form-label" for="{{ form.courses.id_for_label }}">{{ form.courses.label }}</label>
+          <label class="form-label" for="course-pickbox">{{ form.courses.label }}</label>
           <div class="form-text mb-2">Selected count updates automatically while you choose courses.</div>
           <div class="fw-semibold text-success" id="selected-count">0 course(s) selected</div>
         </div>
         <div class="col-12">
-          {{ form.courses }}
+          <div class="course-pickbox" id="course-pickbox">
+            {% for row in course_rows %}
+            <label class="course-choice-row" data-course-row data-search-text="{{ row.label|lower }} {% for badge in row.badges %}{{ badge|lower }} {% endfor %}">
+              <input class="form-check-input mt-1 course-choice-input" type="checkbox" name="courses" value="{{ row.id }}" {% if row.selected %}checked{% endif %}>
+              <span class="flex-grow-1">
+                <span class="course-choice-title">{{ row.label }}</span>
+                {% if row.badges %}
+                <span class="course-template-badges">
+                  {% for badge in row.badges %}
+                  <span class="badge rounded-pill course-template-badge">{{ badge }}</span>
+                  {% endfor %}
+                  {% if row.more_count %}
+                  <span class="badge rounded-pill text-bg-light border">+{{ row.more_count }} more</span>
+                  {% endif %}
+                </span>
+                {% endif %}
+              </span>
+            </label>
+            {% empty %}
+            <div class="text-muted p-3">No courses are available in the current scope.</div>
+            {% endfor %}
+          </div>
           {% if form.courses.help_text %}<div class="form-text">{{ form.courses.help_text }}</div>{% endif %}
           {% for error in form.courses.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
         </div>
@@ -107,32 +166,34 @@
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const searchField = document.getElementById("course-search");
-    const courseField = document.getElementById("id_courses");
+    const coursePickbox = document.getElementById("course-pickbox");
+    const courseInputs = coursePickbox ? Array.from(coursePickbox.querySelectorAll("input[name='courses']")) : [];
+    const courseRows = coursePickbox ? Array.from(coursePickbox.querySelectorAll("[data-course-row]")) : [];
     const selectedCount = document.getElementById("selected-count");
 
-    if (!courseField) {
+    if (!coursePickbox) {
       return;
     }
 
-    courseField.classList.add("course-pickbox");
-
     function updateCount() {
-      const count = Array.from(courseField.options).filter(function (option) {
-        return option.selected;
+      const count = courseInputs.filter(function (input) {
+        return input.checked;
       }).length;
       selectedCount.textContent = count + " course(s) selected";
     }
 
     function filterCourses() {
       const query = (searchField.value || "").trim().toLowerCase();
-      Array.from(courseField.options).forEach(function (option) {
-        const text = (option.textContent || "").toLowerCase();
-        option.hidden = query && !text.includes(query);
+      courseRows.forEach(function (row) {
+        const text = (row.dataset.searchText || row.textContent || "").toLowerCase();
+        row.hidden = Boolean(query && !text.includes(query));
       });
     }
 
     updateCount();
-    courseField.addEventListener("change", updateCount);
+    courseInputs.forEach(function (input) {
+      input.addEventListener("change", updateCount);
+    });
     if (searchField) {
       searchField.addEventListener("input", filterCourses);
     }

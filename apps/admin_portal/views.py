@@ -12113,9 +12113,10 @@ def course_template_assignment_create_view(request):
     visible_template_ids = set(
         AdminScopeService.scoped_grading_templates(request).values_list("id", flat=True)
     )
+    course_queryset = AdminScopeService.active_scoped_courses(request)
     form = BulkCourseTemplateAssignmentForm(
         request.POST or None,
-        course_queryset=AdminScopeService.active_scoped_courses(request),
+        course_queryset=course_queryset,
         template_queryset=GradingTemplate.objects.filter(
             id__in=visible_template_ids,
             is_published=True,
@@ -12244,10 +12245,43 @@ def course_template_assignment_create_view(request):
         if not created_rows and not reactivated_rows and not skipped_courses:
             messages.info(request, "No course assignments were changed.")
         return _redirect_back_or_default(request, "admin_portal:course_template_assignment_list")
+    course_rows = []
+    course_list = list(form.fields["courses"].queryset)
+    course_ids = [course.id for course in course_list]
+    active_assignment_map = defaultdict(list)
+    if course_ids:
+        active_assignments = (
+            CourseTemplateAssignment.objects.filter(
+                course_id__in=course_ids,
+                grading_template_id__in=visible_template_ids,
+                grading_template__isnull=False,
+                grading_template__is_active=True,
+                is_active=True,
+            )
+            .select_related("grading_template")
+            .order_by("course_id", "grading_template__name", "grading_template__code", "id")
+        )
+        for assignment in active_assignments:
+            active_assignment_map[assignment.course_id].append(
+                assignment.grading_template.name or assignment.grading_template.code
+            )
+    selected_course_ids = set(request.POST.getlist("courses")) if request.method == "POST" else set()
+    for course in course_list:
+        template_names = active_assignment_map.get(course.id, [])
+        course_rows.append(
+            {
+                "id": course.id,
+                "label": f"{course.title} ({course.code})" if course.title and course.code else course.title or course.code,
+                "badges": template_names[:5],
+                "more_count": max(len(template_names) - 5, 0),
+                "selected": str(course.id) in selected_course_ids,
+            }
+        )
     context = {
         "form": form,
         "title": "Bulk Assign Course Templates",
         "term_scope_help": "TeacherMate+ will skip courses that already have a prior assignment in the same term scope.",
+        "course_rows": course_rows,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/course_template_assignment_bulk_form.html", context)

@@ -41,7 +41,7 @@ from apps.core.services.email_assets import format_email_subject
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 from apps.rbac.models import UserRole
-from apps.tenants.models import Tenant
+from apps.tenants.models import SystemSetting, Tenant
 
 User = get_user_model()
 
@@ -114,6 +114,13 @@ def _single_device_session_enforcement_tenant_ids(user) -> list[int]:
 def _single_device_session_enforcement_enabled_for_user(user) -> bool:
     tenant_ids = _single_device_session_enforcement_tenant_ids(user)
     if not tenant_ids:
+        explicit_settings = SystemSetting.objects.filter(
+            setting_key=FeatureSettingsService.SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY,
+            is_active=True,
+        )
+        for setting in explicit_settings:
+            if str(setting.setting_value).strip().lower() in {"0", "false", "no", "off", ""}:
+                return False
         return FeatureSettingsService.is_single_device_session_enforcement_enabled(
             tenant_id=None,
             default=True,

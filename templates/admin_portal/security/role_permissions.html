@@ -6,6 +6,7 @@
     position: sticky;
     top: 0.75rem;
     z-index: 5;
+    background: #e9ecef;
   }
   .permission-summary-grid {
     display: grid;
@@ -228,9 +229,6 @@
           <button class="btn btn-outline-secondary" type="button" id="show-selected-toggle" data-active="0">Show Selected Only</button>
           <button class="btn btn-outline-success" type="submit">Save Permissions</button>
         </div>
-      </div>
-      <div class="alert alert-light border small mb-0 mt-3">
-        Tip: use module buttons to select or clear a whole area, then fine-tune individual permissions. Use <strong>Save Section</strong> to save only one section, or <strong>Save Permissions</strong> to save the whole page.
       </div>
       <div id="critical-access-safeguard" class="alert alert-warning border small mb-0 mt-3 {% if not form.change_reason.errors and not form.confirmation_phrase.errors and not critical_permission_impact.has_critical_change %}d-none{% endif %}">
         <div class="fw-semibold mb-1">Critical Access Safeguard</div>
