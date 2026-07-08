@@ -913,7 +913,7 @@ class Command(BaseCommand):
             "template_hotfixes.read",
             "template_hotfixes.create",
         ]
-        for role_code in ["DEAN", "REGISTRAR", "CAMPUS_ADMIN"]:
+        for role_code in ["COLLEGE_DEAN", "DEAN", "REGISTRAR", "CAMPUS_ADMIN"]:
             role_obj = role_map[role_code]
             for perm_code in approver_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
@@ -935,13 +935,13 @@ class Command(BaseCommand):
             role_obj = role_map[role_code]
             for perm_code in correction_monitor_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
-        for role_code in ["AC", "DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN"]:
+        for role_code in ["AC", "COLLEGE_DEAN", "DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN"]:
             role_obj = role_map.get(role_code)
             if not role_obj:
                 continue
             for perm_code in correction_on_behalf_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
-        for role_code in ["SUPER_ADMIN", "DEAN"]:
+        for role_code in ["SUPER_ADMIN", "COLLEGE_DEAN", "DEAN"]:
             role_obj = role_map.get(role_code)
             if not role_obj:
                 continue
@@ -986,7 +986,7 @@ class Command(BaseCommand):
                 continue
             for perm_code in academic_monitor_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
-        for role_code in ["DEAN", "CAMPUS_ADMIN"]:
+        for role_code in ["COLLEGE_DEAN", "DEAN", "CAMPUS_ADMIN"]:
             role_obj = role_map[role_code]
             for perm_code in reopen_reviewer_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])

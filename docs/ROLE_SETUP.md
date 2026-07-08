@@ -55,7 +55,7 @@ For the same user, assign an admin/governance role:
 | User Type | Example Role | Scope |
 |---|---|---|
 | Area Chairman | `NCBA_FAIRVIEW_AC`, `NCBA_CUBAO_AC` | Usually campus + department |
-| Dean | `DEAN` or campus-specific dean role | Usually campus + college/department |
+| College Dean | `COLLEGE_DEAN` current, `DEAN` legacy-compatible, or campus-specific dean role | Usually campus + college/department |
 | CAO | `CAO` | Campus-wide or tenant-wide, depending on policy |
 
 Example for `ac`:

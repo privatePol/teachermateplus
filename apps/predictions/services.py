@@ -57,7 +57,15 @@ class PredictionAccessService:
     @classmethod
     def primary_role_code(cls, user) -> str:
         role_codes = cls.active_role_codes(user)
-        for preferred in ("SUPER_ADMIN", "TENANT_ADMIN", "CAMPUS_ADMIN", "DEAN", "REGISTRAR", "FACULTY"):
+        for preferred in (
+            "SUPER_ADMIN",
+            "TENANT_ADMIN",
+            "CAMPUS_ADMIN",
+            "COLLEGE_DEAN",
+            "DEAN",
+            "REGISTRAR",
+            "FACULTY",
+        ):
             if preferred in role_codes:
                 return preferred
         return next(iter(sorted(role_codes)), "")

@@ -89,6 +89,10 @@ class TemplateGovernanceWorkflowTests(TestCase):
         self.tenant_admin_role = Role.objects.create(code="TENANT_ADMIN", name="Tenant Admin")
         self.cao_role = Role.objects.create(code="CAO", name="Chief Academic Officer")
         self.dean_role = Role.objects.create(code="DEAN", name="Academic Dean")
+        self.college_dean_role, _ = Role.objects.get_or_create(
+            code="COLLEGE_DEAN",
+            defaults={"name": "College Dean"},
+        )
 
         self.permission_admin_access = Permission.objects.create(
             code="admin_portal.access",
@@ -223,6 +227,7 @@ class TemplateGovernanceWorkflowTests(TestCase):
             RolePermission.objects.create(role=self.tenant_admin_role, permission=permission)
             RolePermission.objects.create(role=self.cao_role, permission=permission)
             RolePermission.objects.create(role=self.dean_role, permission=permission)
+            RolePermission.objects.create(role=self.college_dean_role, permission=permission)
 
         self.workflow_admin = self._make_user("workflow_admin", "Workflow Admin")
         UserRole.objects.create(
@@ -245,6 +250,14 @@ class TemplateGovernanceWorkflowTests(TestCase):
         UserRole.objects.create(
             user=self.dean_reviewer,
             role=self.dean_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        self.college_dean_reviewer = self._make_user("workflow_college_dean", "College Dean")
+        UserRole.objects.create(
+            user=self.college_dean_reviewer,
+            role=self.college_dean_role,
             tenant=self.tenant,
             campus=self.campus,
             department=self.department,
@@ -1005,6 +1018,75 @@ class TemplateGovernanceWorkflowTests(TestCase):
         self.assertEqual(template.approval_status, GradingTemplate.ApprovalStatus.APPROVED)
         self.assertEqual(workflow.status, "APPROVED")
         self.assertEqual(second_step.status, "APPROVED")
+
+    def test_template_hotfix_personalities_display_college_dean_label(self):
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+
+        response = self.client.get(reverse("admin_portal:template_hotfix_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<strong>College Dean</strong>: Academic policy approver")
+        self.assertNotContains(response, "<strong>DEAN</strong>: Academic policy approver")
+
+    def test_sequential_hotfix_default_review_allows_college_dean_role(self):
+        template = self._make_template(
+            code="TMP-HOTFIX-COLLEGE-DEAN",
+            published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.SEQUENTIAL_HOTFIX_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.HOTFIX_APPLY_STEP_ROLE_CODES_KEY,
+            ["CAO"],
+            tenant_id=self.tenant.id,
+            value_type="JSON",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            TemplateGovernanceWorkflowService.STAGE_ROLE_KEYS[TemplateGovernanceWorkflowService.STAGE_HOTFIX_REQUEST],
+            ["TENANT_ADMIN"],
+            tenant_id=self.tenant.id,
+            value_type="JSON",
+            is_active=True,
+        )
+
+        self.client.force_login(self.workflow_admin)
+        self._set_scope()
+        create_response = self.client.post(
+            reverse("admin_portal:template_hotfix_create", kwargs={"template_id": template.id}),
+            {
+                "apply_mode": TemplateHotfixRequest.ApplyMode.FUTURE_ONLY,
+                "justification": "Need College Dean review.",
+            },
+        )
+        self.assertEqual(create_response.status_code, 302)
+        hotfix = TemplateHotfixRequest.objects.get(template=template)
+        first_step, second_step = hotfix.workflow_steps.order_by("step_no")
+        self.assertIn("COLLEGE_DEAN", first_step.role_codes_json)
+        self.assertEqual(first_step.status, "PENDING")
+        self.assertEqual(second_step.status, "QUEUED")
+
+        self.client.force_login(self.college_dean_reviewer)
+        self._set_scope()
+        review_response = self.client.post(
+            reverse("admin_portal:template_hotfix_review", kwargs={"hotfix_id": hotfix.id}),
+            {"decision": "APPROVE", "review_remarks": "College Dean reviewed."},
+            follow=True,
+        )
+
+        self.assertEqual(review_response.status_code, 200)
+        self.assertContains(review_response, "advanced to the next workflow step")
+        first_step.refresh_from_db()
+        second_step.refresh_from_db()
+        self.assertEqual(first_step.status, "APPROVED")
+        self.assertEqual(second_step.status, "PENDING")
 
     def test_sequential_hotfix_workflow_advances_then_applies(self):
         template = self._make_template(

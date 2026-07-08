@@ -10,7 +10,7 @@ from apps.rbac.models import Permission, Role, RolePermission
 class RepairSeededRbacNavigationCommandTests(TestCase):
     CORRECTION_PERMISSION = "corrections.create_on_behalf"
     CORRECTION_MENU_ITEM = "GRADE_CORRECTION_ON_BEHALF"
-    CORRECTION_ROLES = ("AC", "DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN")
+    CORRECTION_ROLES = ("AC", "DEAN", "COLLEGE_DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN")
     STUDENT_QUERY_PERMISSION = "student_enrollment_query.read"
     STUDENT_QUERY_MENU_ITEM = "STUDENT_ENROLLMENT_QUERY"
     STUDENT_QUERY_ROLES = ("SUPER_ADMIN", "TENANT_ADMIN", "CAMPUS_ADMIN", "REGISTRAR")
@@ -94,6 +94,22 @@ class RepairSeededRbacNavigationCommandTests(TestCase):
             role = Role.objects.get(code=role_code)
             self.assertTrue(RolePermission.objects.filter(role=role, permission=permission).exists())
             self.assertTrue(RolePermission.objects.filter(role=role, permission=read_permission).exists())
+
+    def test_college_dean_receives_correction_permissions_when_dean_is_missing(self):
+        self._remove_seeded_targets()
+        Role.objects.filter(code="DEAN").update(is_active=False)
+
+        output = self._run_command()
+
+        college_dean = Role.objects.get(code="COLLEGE_DEAN")
+        correction_permission = Permission.objects.get(code=self.CORRECTION_PERMISSION)
+        read_permission = Permission.objects.get(code="corrections.read")
+        self.assertTrue(
+            RolePermission.objects.filter(role=college_dean, permission=correction_permission).exists()
+        )
+        self.assertTrue(RolePermission.objects.filter(role=college_dean, permission=read_permission).exists())
+        self.assertIn("WARNING: Role DEAN is missing", output)
+        self.assertIn("Repair complete", output)
 
     def test_creates_student_enrollment_query_permission_menu_and_links(self):
         self._remove_seeded_targets()

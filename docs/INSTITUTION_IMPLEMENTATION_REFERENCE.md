@@ -432,7 +432,7 @@ Use separate roles for teaching and governance.
 Example:
 
 - `FACULTY` role gives Faculty Portal class access.
-- `AC`, `DEAN`, `CAO`, or similar admin role gives Admin Portal monitoring access.
+- `AC`, `COLLEGE_DEAN` (or legacy `DEAN`), `CAO`, or similar admin role gives Admin Portal monitoring access.
 
 A person may have both, but Admin Portal visibility should come from the active admin/governance role, not from the teaching role.
 

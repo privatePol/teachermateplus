@@ -1441,7 +1441,7 @@ class TemplateHotfixService:
     def involved_personalities():
         return [
             {"role": "FACULTY", "responsibility": "Raise grading impact concerns to admin."},
-            {"role": "DEAN", "responsibility": "Academic policy approver for template hotfixes."},
+            {"role": "College Dean", "responsibility": "Academic policy approver for template hotfixes."},
             {"role": "REGISTRAR", "responsibility": "Records governance approver and compliance check."},
             {"role": "CAMPUS_ADMIN", "responsibility": "Campus operations approver and execution monitor."},
             {"role": "SUPER_ADMIN", "responsibility": "Cross-campus oversight and emergency override."},
@@ -1775,9 +1775,9 @@ class TemplateGovernanceWorkflowService:
     }
 
     DEFAULT_SEQUENTIAL_STEP_ROLE_CODES = {
-        STEP_TEMPLATE_REVIEW: ["DEAN", "CAO"],
+        STEP_TEMPLATE_REVIEW: ["COLLEGE_DEAN", "DEAN", "CAO"],
         STEP_TEMPLATE_APPROVAL: ["CAO", "SUPER_ADMIN"],
-        STEP_HOTFIX_REVIEW: ["DEAN", "CAO"],
+        STEP_HOTFIX_REVIEW: ["COLLEGE_DEAN", "DEAN", "CAO"],
         STEP_HOTFIX_APPLY: ["CAO", "SUPER_ADMIN"],
     }
 
@@ -2741,7 +2741,7 @@ class GradingGovernanceService:
         if route_rule:
             steps = cls._build_correction_route_steps(route_rule=route_rule)
         else:
-            fallback_role_codes = ["CAO", "REGISTRAR", "DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN"]
+            fallback_role_codes = ["CAO", "REGISTRAR", "COLLEGE_DEAN", "DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN"]
             fallback_role = None
             for role_code in fallback_role_codes:
                 role_candidate = Role.objects.filter(code=role_code, is_active=True).first()

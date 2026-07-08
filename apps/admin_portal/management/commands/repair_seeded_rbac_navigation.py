@@ -39,7 +39,7 @@ class Command(BaseCommand):
             route_name="admin_portal:grade_correction_request_create_on_behalf",
             preferred_menu_group_code="GRADING",
             sort_order=91,
-            role_codes=("AC", "DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN"),
+            role_codes=("AC", "DEAN", "COLLEGE_DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN"),
             extra_role_permission_codes=("corrections.read",),
         ),
         SeededNavigationRepair(
