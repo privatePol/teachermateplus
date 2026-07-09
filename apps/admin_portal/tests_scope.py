@@ -7,6 +7,7 @@ from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.test import RequestFactory, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -1576,3 +1577,248 @@ class FacultyMonitoringScopeTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("/admin-portal/login/", response["Location"])
+
+
+class EnrollmentScopeOptimizationTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.tenant = Tenant.objects.create(code="ENR-TEN", name="Enrollment Tenant")
+        self.campus = Campus.objects.create(tenant=self.tenant, code="MAIN", name="Main")
+        self.other_campus = Campus.objects.create(tenant=self.tenant, code="OTHER", name="Other")
+        self.department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="CS",
+            name="Computer Studies",
+        )
+        self.other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            code="BUS",
+            name="Business",
+        )
+        self.program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="BSCS",
+            name="BSCS",
+        )
+        self.other_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            code="BSBA",
+            name="BSBA",
+        )
+        self.academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="AY2526",
+            name="AY 2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        self.term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="1ST",
+            name="First Term",
+            sequence_no=1,
+            start_date=date(2025, 6, 1),
+            end_date=date(2025, 10, 31),
+        )
+        self.course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="CS101",
+            title="Programming 1",
+        )
+        self.other_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            code="BA101",
+            title="Business 1",
+        )
+        self.inactive_offering_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="CS102",
+            title="Programming 2",
+        )
+        self.section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSCS-1A",
+            name="BSCS 1A",
+        )
+        self.other_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=self.other_program,
+            code="BSBA-1A",
+            name="BSBA 1A",
+        )
+        self.offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=self.section,
+        )
+        self.other_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=self.other_program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.other_course,
+            section=self.other_section,
+        )
+        self.inactive_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.inactive_offering_course,
+            section=self.section,
+            is_active=False,
+        )
+        self.student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-ENR-001",
+            last_name="Visible",
+            first_name="Student",
+        )
+        self.other_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=self.other_program,
+            student_no="2025-ENR-002",
+            last_name="Other",
+            first_name="Student",
+        )
+        self.inactive_offering_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-ENR-003",
+            last_name="Inactive",
+            first_name="Offering",
+        )
+        self.enrollment = Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=self.student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+        )
+        self.other_enrollment = Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=self.other_student,
+            course_offering=self.other_offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+        )
+        self.inactive_offering_enrollment = Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=self.inactive_offering_student,
+            course_offering=self.inactive_offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+        )
+        self.super_admin = User.objects.create_superuser(
+            username="enrollment-superadmin",
+            email="enrollment-superadmin@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        self.campus_admin = User.objects.create_user(
+            username="enrollment-campus-admin",
+            email="enrollment-campus-admin@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        self.campus_admin_role = Role.objects.create(code="ENR_CAMPUS_ADMIN", name="Enrollment Campus Admin")
+        UserRole.objects.create(
+            user=self.campus_admin,
+            role=self.campus_admin_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        for code in ("admin_portal.access", "enrollment.read"):
+            permission, _ = Permission.objects.get_or_create(
+                code=code,
+                defaults={"module": code.split(".")[0], "action": code.split(".")[-1]},
+            )
+            RolePermission.objects.get_or_create(role=self.campus_admin_role, permission=permission)
+
+    def _build_request(self, user):
+        request = self.factory.get("/admin-portal/enrollment/")
+        request.user = user
+        request.session = {}
+        ScopeService.attach_scope_to_request(request)
+        return request
+
+    def test_scoped_enrollments_is_admin_scope_service_method(self):
+        self.assertTrue(callable(getattr(AdminScopeService, "scoped_enrollments", None)))
+
+    def test_scoped_enrollments_does_not_use_course_offering_subquery(self):
+        request = self._build_request(self.campus_admin)
+
+        sql = " ".join(str(AdminScopeService.scoped_enrollments(request).query).upper().split())
+
+        self.assertNotIn('COURSE_OFFERING_ID" IN (SELECT', sql)
+        self.assertNotIn("COURSE_OFFERING_ID IN (SELECT", sql)
+
+    def test_scoped_enrollments_preserves_superadmin_and_campus_admin_scope(self):
+        super_request = self._build_request(self.super_admin)
+        campus_request = self._build_request(self.campus_admin)
+
+        superadmin_ids = set(AdminScopeService.scoped_enrollments(super_request).values_list("id", flat=True))
+        campus_admin_ids = set(AdminScopeService.scoped_enrollments(campus_request).values_list("id", flat=True))
+
+        self.assertIn(self.enrollment.id, superadmin_ids)
+        self.assertIn(self.other_enrollment.id, superadmin_ids)
+        self.assertNotIn(self.inactive_offering_enrollment.id, superadmin_ids)
+        self.assertEqual(campus_admin_ids, {self.enrollment.id})
+
+    def test_enrollment_list_page_loads_successfully(self):
+        self.client.force_login(self.super_admin)
+
+        response = self.client.get(reverse("admin_portal:enrollment_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enrollment Records")
+        self.assertContains(response, "Visible, Student")

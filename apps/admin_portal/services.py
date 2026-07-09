@@ -336,14 +336,48 @@ class AdminScopeService:
 
     @staticmethod
     def scoped_enrollments(request):
-        offerings = AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True)
+        tenants, campuses, departments = AdminScopeService._scoped_tenant_campus_department_ids(request)
+        academic_years = list(AdminScopeService.active_scoped_academic_years(request).values_list("id", flat=True))
+        terms = list(AdminScopeService.active_scoped_terms(request).values_list("id", flat=True))
         queryset = (
-            Enrollment.objects.filter(course_offering_id__in=offerings)
+            Enrollment.objects.filter(
+                tenant_id__in=tenants,
+                campus_id__in=campuses,
+                academic_year_id__in=academic_years,
+                term_id__in=terms,
+                student__tenant_id__in=tenants,
+                student__campus_id__in=campuses,
+                student__department_id__in=departments,
+                course_offering__tenant_id__in=tenants,
+                course_offering__campus_id__in=campuses,
+                course_offering__department_id__in=departments,
+                course_offering__section__department_id__in=departments,
+                course_offering__academic_year_id__in=academic_years,
+                course_offering__term_id__in=terms,
+            )
             .filter(
+                academic_year__is_active=True,
+                term__is_active=True,
+                term__academic_year__is_active=True,
                 student__is_active=True,
                 student__department__is_active=True,
+                course_offering__is_active=True,
+                course_offering__academic_year__is_active=True,
+                course_offering__term__is_active=True,
+                course_offering__term__academic_year__is_active=True,
+                course_offering__department__is_active=True,
+                course_offering__course__is_active=True,
+                course_offering__section__is_active=True,
+                course_offering__section__department__is_active=True,
+                course_offering__section__program__is_active=True,
+                course_offering__section__program__department__is_active=True,
             )
             .filter(models.Q(student__program__isnull=True) | models.Q(student__program__is_active=True))
+            .filter(models.Q(course_offering__program__isnull=True) | models.Q(course_offering__program__is_active=True))
+            .filter(
+                models.Q(course_offering__course__department__isnull=True)
+                | models.Q(course_offering__course__department__is_active=True)
+            )
             .select_related(
                 "tenant",
                 "campus",
