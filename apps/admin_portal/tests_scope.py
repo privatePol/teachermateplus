@@ -1822,3 +1822,67 @@ class EnrollmentScopeOptimizationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Enrollment Records")
         self.assertContains(response, "Visible, Student")
+
+    def test_enrollment_list_offering_dropdown_uses_direct_query(self):
+        self.client.force_login(self.campus_admin)
+
+        response = self.client.get(reverse("admin_portal:enrollment_list"))
+
+        self.assertEqual(response.status_code, 200)
+        sql = " ".join(str(response.context["offerings"].query).upper().split())
+        self.assertIn("COURSE_OFFERINGS", sql)
+        self.assertNotIn(" IN (SELECT", sql)
+        self.assertNotIn('ID" IN (SELECT', sql)
+
+    def test_enrollment_list_offering_dropdown_is_scoped(self):
+        self.client.force_login(self.campus_admin)
+
+        response = self.client.get(reverse("admin_portal:enrollment_list"))
+
+        offering_ids = set(response.context["offerings"].values_list("id", flat=True))
+        self.assertEqual(offering_ids, {self.offering.id})
+
+    def test_enrollment_list_offering_dropdown_preserves_filters(self):
+        second_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="CS201",
+            title="Data Structures",
+        )
+        second_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSCS-2A",
+            name="BSCS 2A",
+        )
+        second_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=second_course,
+            section=second_section,
+        )
+        self.client.force_login(self.campus_admin)
+
+        unfiltered_response = self.client.get(reverse("admin_portal:enrollment_list"))
+        unfiltered_ids = set(unfiltered_response.context["offerings"].values_list("id", flat=True))
+
+        filtered_response = self.client.get(
+            reverse("admin_portal:enrollment_list"),
+            {
+                "academic_year_id": self.academic_year.id,
+                "term_id": self.term.id,
+                "section_id": self.section.id,
+                "course_id": self.course.id,
+            },
+        )
+        filtered_ids = set(filtered_response.context["offerings"].values_list("id", flat=True))
+
+        self.assertEqual(unfiltered_ids, {self.offering.id, second_offering.id})
+        self.assertEqual(filtered_ids, {self.offering.id})

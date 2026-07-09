@@ -562,6 +562,45 @@ def _active_inactive_pages(request, queryset, per_page=20):
     }
 
 
+def _enrollment_list_offering_options_queryset(request):
+    tenant_ids = list(AdminScopeService.scoped_tenants(request).values_list("id", flat=True))
+    campus_ids = list(AdminScopeService.scoped_campuses(request).values_list("id", flat=True))
+    department_ids = list(AdminScopeService.scoped_departments(request).values_list("id", flat=True))
+    queryset = (
+        CourseOffering.objects.filter(
+            is_active=True,
+            tenant_id__in=tenant_ids,
+            campus_id__in=campus_ids,
+            department_id__in=department_ids,
+        )
+        .filter(
+            tenant__is_active=True,
+            campus__is_active=True,
+            department__is_active=True,
+            academic_year__is_active=True,
+            term__is_active=True,
+            term__academic_year__is_active=True,
+            course__is_active=True,
+            section__is_active=True,
+            section__department__is_active=True,
+            section__program__is_active=True,
+            section__program__department__is_active=True,
+        )
+        .filter(Q(program__isnull=True) | Q(program__is_active=True))
+        .filter(Q(course__department__isnull=True) | Q(course__department__is_active=True))
+        .select_related(
+            "course",
+            "section",
+            "term",
+            "academic_year",
+            "campus",
+            "department",
+        )
+        .order_by("course__code", "section__code", "term__sequence_no")
+    )
+    return AdminScopeService._visible_queryset(request, queryset)
+
+
 def _record_delete_confirmation_code(row) -> str:
     for attr in (
         "code",
@@ -9816,7 +9855,7 @@ def enrollment_list_view(request):
     if status:
         queryset = queryset.filter(enrollment_status=status)
 
-    offerings = AdminScopeService.scoped_course_offerings(request)
+    offerings = _enrollment_list_offering_options_queryset(request)
     if campus_id:
         offerings = offerings.filter(campus_id=campus_id)
     if academic_year_id:
@@ -9833,14 +9872,15 @@ def enrollment_list_view(request):
     if campus_id:
         section_options = section_options.filter(campus_id=campus_id)
     if academic_year_id or term_id:
-        offering_scope = AdminScopeService.scoped_course_offerings(request)
+        offering_scope = _enrollment_list_offering_options_queryset(request)
         if campus_id:
             offering_scope = offering_scope.filter(campus_id=campus_id)
         if academic_year_id:
             offering_scope = offering_scope.filter(academic_year_id=academic_year_id)
         if term_id:
             offering_scope = offering_scope.filter(term_id=term_id)
-        section_options = section_options.filter(id__in=offering_scope.values_list("section_id", flat=True))
+        section_ids = list(offering_scope.values_list("section_id", flat=True).distinct())
+        section_options = section_options.filter(id__in=section_ids)
     section_options = section_options.distinct()
 
     context = {"q": q}
