@@ -67,6 +67,30 @@ class Command(BaseCommand):
             sort_order=65,
             role_codes=("SUPER_ADMIN", "TENANT_ADMIN"),
         ),
+        SeededNavigationRepair(
+            permission_code="faculty_feedback.read",
+            permission_module="faculty_feedback",
+            permission_action="read",
+            permission_description="Read scoped Faculty Portal feedback submissions.",
+            menu_item_code="FACULTY_FEEDBACK",
+            menu_item_label="Faculty Feedback",
+            route_name="admin_portal:faculty_feedback",
+            preferred_menu_group_code="IMPORTS",
+            sort_order=66,
+            role_codes=("SUPER_ADMIN", "TENANT_ADMIN", "CAMPUS_ADMIN"),
+        ),
+        SeededNavigationRepair(
+            permission_code="faculty_feedback.export",
+            permission_module="faculty_feedback",
+            permission_action="export",
+            permission_description="Export scoped Faculty Portal feedback submissions to CSV.",
+            menu_item_code="FACULTY_FEEDBACK",
+            menu_item_label="Faculty Feedback",
+            route_name="admin_portal:faculty_feedback",
+            preferred_menu_group_code="IMPORTS",
+            sort_order=66,
+            role_codes=("SUPER_ADMIN", "TENANT_ADMIN"),
+        ),
     )
 
     def handle(self, *args, **options):

@@ -213,6 +213,67 @@
     object-fit: contain;
     display: block;
   }
+  .faculty-feedback-fab {
+    position: fixed;
+    right: 18px;
+    bottom: 76px;
+    border: 1px solid #2e6a45;
+    border-radius: 999px;
+    background: #1f6b40;
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.48rem 0.78rem;
+    font-size: 0.88rem;
+    font-weight: 700;
+    line-height: 1;
+    box-shadow: 0 8px 18px rgba(24, 59, 37, 0.18);
+    z-index: 1060;
+  }
+  .faculty-feedback-fab:hover,
+  .faculty-feedback-fab:focus {
+    background: #185532;
+    color: #ffffff;
+  }
+  .faculty-feedback-backdrop {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: flex-end;
+    justify-content: flex-end;
+    background: rgba(10, 36, 22, 0.26);
+    z-index: 1085;
+    padding: 1rem;
+  }
+  .faculty-feedback-backdrop.is-visible {
+    display: flex;
+  }
+  .faculty-feedback-dialog {
+    width: min(100%, 420px);
+    background: #ffffff;
+    border: 1px solid #d5e2d5;
+    border-radius: 0.5rem;
+    box-shadow: 0 18px 42px rgba(16, 56, 34, 0.24);
+  }
+  .faculty-feedback-rating {
+    width: 100%;
+    border: 1px solid #d7e2d8;
+    border-radius: 0.45rem;
+    background: #f8fbf8;
+    padding: 0.8rem 0.55rem;
+    font-weight: 700;
+  }
+  .faculty-feedback-rating.is-selected,
+  .faculty-feedback-rating[aria-pressed="true"] {
+    border-color: #237244;
+    background: #e5f3e8;
+    color: #173e27;
+    box-shadow: inset 0 0 0 1px #237244;
+  }
+  .faculty-feedback-error {
+    min-height: 1.25rem;
+  }
   .privacy-chip {
     position: fixed;
     left: 14px;
@@ -361,6 +422,13 @@
       left: 10px;
       bottom: 66px;
       font-size: 0.72rem;
+    }
+    .faculty-feedback-fab {
+      right: 12px;
+      bottom: 78px;
+    }
+    .faculty-feedback-backdrop {
+      padding: 0.75rem;
     }
   }
   @media (max-width: 575.98px) {
@@ -530,6 +598,14 @@
   </div>
 
   {% if not privacy_consent_pending and not password_change_required %}
+    <button
+      class="faculty-feedback-fab"
+      type="button"
+      id="faculty-feedback-open"
+      aria-label="Open Faculty Feedback"
+      data-submit-url="{% url 'faculty_portal:feedback_submit' %}"
+      data-route-name="{{ request.resolver_match.view_name|default:'' }}"
+    ><span aria-hidden="true">&#128522;</span><span>Feedback</span></button>
     <a
       class="help-fab"
       href="{% url 'faculty_portal:guide' %}"
@@ -539,6 +615,67 @@
       title="Faculty Quick Guide"
       data-tour-id="user-guide"
     ><img src="{% get_media_prefix %}logos/teacher_star.png" alt="" aria-hidden="true"></a>
+    <div class="faculty-feedback-backdrop" id="faculty-feedback-backdrop" aria-hidden="true">
+      <section
+        class="faculty-feedback-dialog"
+        id="faculty-feedback-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="faculty-feedback-title"
+        tabindex="-1"
+      >
+        <form id="faculty-feedback-form" class="p-3" novalidate>
+          {% csrf_token %}
+          <input type="hidden" name="rating" id="faculty-feedback-rating-value">
+          <input type="hidden" name="page_path" id="faculty-feedback-page-path">
+          <input type="hidden" name="route_name" id="faculty-feedback-route-name">
+          <input type="hidden" name="referrer_path" id="faculty-feedback-referrer-path">
+          <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+            <div>
+              <h2 class="h6 mb-1" id="faculty-feedback-title">How was your experience on this page?</h2>
+              <p class="small text-muted mb-0">Do not include student names, grades, passwords, or other confidential information.</p>
+            </div>
+            <button class="btn-close" type="button" id="faculty-feedback-close" aria-label="Close"></button>
+          </div>
+          <div class="row g-2 mb-3" role="group" aria-label="Feedback rating">
+            <div class="col-4">
+              <button class="faculty-feedback-rating" type="button" data-rating="HAPPY" aria-pressed="false">
+                <span aria-hidden="true">&#128522;</span><br>Happy
+              </button>
+            </div>
+            <div class="col-4">
+              <button class="faculty-feedback-rating" type="button" data-rating="NEUTRAL" aria-pressed="false">
+                <span aria-hidden="true">&#128528;</span><br>Neutral
+              </button>
+            </div>
+            <div class="col-4">
+              <button class="faculty-feedback-rating" type="button" data-rating="SAD" aria-pressed="false">
+                <span aria-hidden="true">&#9785;</span><br>Sad
+              </button>
+            </div>
+          </div>
+          <div class="mb-2" id="faculty-feedback-suggestion-wrap" hidden>
+            <label class="form-label fw-semibold" for="faculty-feedback-suggestion">What can we improve?</label>
+            <textarea
+              class="form-control"
+              id="faculty-feedback-suggestion"
+              name="suggestion"
+              rows="3"
+              maxlength="500"
+              aria-describedby="faculty-feedback-helper faculty-feedback-count"
+            ></textarea>
+            <div class="form-text" id="faculty-feedback-helper">Optional. Please do not include student grades, passwords, or other confidential information.</div>
+            <div class="small text-muted text-end" id="faculty-feedback-count">0 / 500</div>
+          </div>
+          <div class="faculty-feedback-error text-danger small mb-2" id="faculty-feedback-error" role="alert"></div>
+          <div class="faculty-feedback-success alert alert-success py-2 mb-2 d-none" id="faculty-feedback-success" role="status"></div>
+          <div class="d-flex justify-content-end gap-2">
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="faculty-feedback-cancel">Cancel</button>
+            <button class="btn btn-success btn-sm" type="submit" id="faculty-feedback-submit">Submit Feedback</button>
+          </div>
+        </form>
+      </section>
+    </div>
   {% endif %}
   <a
     class="privacy-chip"
@@ -611,6 +748,165 @@
         }
         layout.classList.toggle("sidebar-collapsed");
         localStorage.setItem(storageKey, layout.classList.contains("sidebar-collapsed") ? "1" : "0");
+      });
+    }
+
+    const feedbackOpen = document.getElementById("faculty-feedback-open");
+    const feedbackBackdrop = document.getElementById("faculty-feedback-backdrop");
+    const feedbackDialog = document.getElementById("faculty-feedback-dialog");
+    const feedbackForm = document.getElementById("faculty-feedback-form");
+    if (feedbackOpen && feedbackBackdrop && feedbackDialog && feedbackForm) {
+      const closeBtn = document.getElementById("faculty-feedback-close");
+      const cancelBtn = document.getElementById("faculty-feedback-cancel");
+      const submitBtn = document.getElementById("faculty-feedback-submit");
+      const ratingInput = document.getElementById("faculty-feedback-rating-value");
+      const suggestionWrap = document.getElementById("faculty-feedback-suggestion-wrap");
+      const suggestionInput = document.getElementById("faculty-feedback-suggestion");
+      const countEl = document.getElementById("faculty-feedback-count");
+      const errorEl = document.getElementById("faculty-feedback-error");
+      const successEl = document.getElementById("faculty-feedback-success");
+      const pagePathInput = document.getElementById("faculty-feedback-page-path");
+      const routeNameInput = document.getElementById("faculty-feedback-route-name");
+      const referrerPathInput = document.getElementById("faculty-feedback-referrer-path");
+      const ratingButtons = feedbackForm.querySelectorAll(".faculty-feedback-rating");
+      let lastFocus = null;
+
+      function feedbackCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(";").shift();
+        return "";
+      }
+
+      function resetFeedbackForm() {
+        feedbackForm.reset();
+        ratingInput.value = "";
+        suggestionWrap.hidden = true;
+        errorEl.textContent = "";
+        successEl.textContent = "";
+        successEl.classList.add("d-none");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Submit Feedback";
+        ratingButtons.forEach((button) => {
+          button.classList.remove("is-selected");
+          button.setAttribute("aria-pressed", "false");
+        });
+        countEl.textContent = "0 / 500";
+      }
+
+      function openFeedback() {
+        lastFocus = document.activeElement;
+        resetFeedbackForm();
+        pagePathInput.value = window.location.pathname;
+        routeNameInput.value = feedbackOpen.dataset.routeName || "";
+        referrerPathInput.value = "";
+        if (document.referrer) {
+          try {
+            const referrerUrl = new URL(document.referrer);
+            if (referrerUrl.origin === window.location.origin) {
+              referrerPathInput.value = referrerUrl.pathname;
+            }
+          } catch (e) {
+            referrerPathInput.value = "";
+          }
+        }
+        feedbackBackdrop.classList.add("is-visible");
+        feedbackBackdrop.setAttribute("aria-hidden", "false");
+        feedbackDialog.focus();
+      }
+
+      function closeFeedback() {
+        feedbackBackdrop.classList.remove("is-visible");
+        feedbackBackdrop.setAttribute("aria-hidden", "true");
+        if (lastFocus && typeof lastFocus.focus === "function") {
+          lastFocus.focus();
+        } else {
+          feedbackOpen.focus();
+        }
+      }
+
+      function showFeedbackError(message) {
+        errorEl.textContent = message || "Feedback could not be submitted. Please try again.";
+      }
+
+      feedbackOpen.addEventListener("click", openFeedback);
+      closeBtn.addEventListener("click", closeFeedback);
+      cancelBtn.addEventListener("click", closeFeedback);
+      feedbackBackdrop.addEventListener("click", function (event) {
+        if (event.target === feedbackBackdrop) closeFeedback();
+      });
+      ratingButtons.forEach((button) => {
+        button.addEventListener("click", function () {
+          ratingInput.value = button.dataset.rating || "";
+          ratingButtons.forEach((option) => {
+            const selected = option === button;
+            option.classList.toggle("is-selected", selected);
+            option.setAttribute("aria-pressed", selected ? "true" : "false");
+          });
+          suggestionWrap.hidden = false;
+          suggestionInput.focus();
+          errorEl.textContent = "";
+        });
+      });
+      suggestionInput.addEventListener("input", function () {
+        countEl.textContent = `${suggestionInput.value.length} / 500`;
+      });
+      document.addEventListener("keydown", function (event) {
+        if (!feedbackBackdrop.classList.contains("is-visible")) return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeFeedback();
+          return;
+        }
+        if (event.key !== "Tab") return;
+        const focusable = feedbackDialog.querySelectorAll("button, textarea, input, [tabindex]:not([tabindex='-1'])");
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      });
+      feedbackForm.addEventListener("submit", function (event) {
+        event.preventDefault();
+        if (!ratingInput.value) {
+          showFeedbackError("Select a rating.");
+          return;
+        }
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Submitting...";
+        errorEl.textContent = "";
+        fetch(feedbackOpen.dataset.submitUrl, {
+          method: "POST",
+          headers: {
+            "X-CSRFToken": feedbackCookie("csrftoken") || "{{ csrf_token }}",
+            "X-Requested-With": "XMLHttpRequest"
+          },
+          body: new FormData(feedbackForm)
+        })
+          .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+          .then((result) => {
+            if (!result.ok || !result.data.success) {
+              const errors = result.data.errors || {};
+              const firstError = Object.keys(errors).length ? errors[Object.keys(errors)[0]][0] : result.data.message;
+              showFeedbackError(firstError);
+              submitBtn.disabled = false;
+              submitBtn.textContent = "Submit Feedback";
+              return;
+            }
+            successEl.textContent = result.data.message || "Thank you. Your feedback has been submitted.";
+            successEl.classList.remove("d-none");
+            window.setTimeout(closeFeedback, 1300);
+          })
+          .catch(() => {
+            showFeedbackError("Feedback could not be submitted. Please try again.");
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Submit Feedback";
+          });
       });
     }
 

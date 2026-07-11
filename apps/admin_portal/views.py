@@ -26,6 +26,7 @@ from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidd
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
+from django.utils.dateparse import parse_date
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
@@ -91,6 +92,8 @@ from apps.admin_portal.forms import (
     UserUpdateForm,
 )
 from apps.faculty_portal.forms import GradeCorrectionRequestForm
+from apps.faculty_portal.feedback import feature_for_route
+from apps.faculty_portal.models import FacultyFeedback
 from apps.academics.services import (
     AcademicGovernanceService,
     FacultyAssignmentSafetyService,
@@ -3066,6 +3069,208 @@ def admin_guide_view(request):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/guide_role_based.html", context)
+
+
+def _csv_safe(value):
+    text = "" if value is None else str(value)
+    if text[:1] in {"=", "+", "-", "@"}:
+        return f"'{text}"
+    return text
+
+
+def _faculty_feedback_scoped_queryset(request):
+    tenant_ids = list(AdminScopeService.scoped_tenants(request).values_list("id", flat=True))
+    campus_ids = list(AdminScopeService.scoped_campuses(request).values_list("id", flat=True))
+    queryset = (
+        FacultyFeedback.objects.select_related("faculty_user", "tenant", "campus")
+        .filter(tenant_id__in=tenant_ids)
+        .order_by("-created_at", "-id")
+    )
+    if not request.user.is_superuser:
+        queryset = queryset.filter(Q(campus__isnull=True) | Q(campus_id__in=campus_ids))
+    return queryset
+
+
+def _faculty_feedback_filtered_queryset(request):
+    queryset = _faculty_feedback_scoped_queryset(request)
+    scoped_tenant_ids = set(AdminScopeService.scoped_tenants(request).values_list("id", flat=True))
+    scoped_campus_ids = set(AdminScopeService.scoped_campuses(request).values_list("id", flat=True))
+
+    tenant_id = request.GET.get("tenant_id")
+    if tenant_id:
+        try:
+            tenant_id_int = int(tenant_id)
+        except (TypeError, ValueError):
+            tenant_id_int = None
+        queryset = queryset.filter(tenant_id=tenant_id_int) if tenant_id_int in scoped_tenant_ids else queryset.none()
+
+    campus_id = request.GET.get("campus_id")
+    if campus_id:
+        try:
+            campus_id_int = int(campus_id)
+        except (TypeError, ValueError):
+            campus_id_int = None
+        queryset = queryset.filter(campus_id=campus_id_int) if campus_id_int in scoped_campus_ids else queryset.none()
+
+    rating = request.GET.get("rating")
+    if rating in FacultyFeedback.Rating.values:
+        queryset = queryset.filter(rating=rating)
+
+    date_from = parse_date(request.GET.get("date_from") or "")
+    if date_from:
+        queryset = queryset.filter(created_at__date__gte=date_from)
+    date_to = parse_date(request.GET.get("date_to") or "")
+    if date_to:
+        queryset = queryset.filter(created_at__date__lte=date_to)
+
+    faculty_q = (request.GET.get("faculty_q") or "").strip()
+    if faculty_q:
+        queryset = queryset.filter(
+            Q(faculty_user__username__icontains=faculty_q)
+            | Q(faculty_user__email__icontains=faculty_q)
+            | Q(faculty_user__first_name__icontains=faculty_q)
+            | Q(faculty_user__last_name__icontains=faculty_q)
+        )
+
+    feature_code = (request.GET.get("feature_code") or "").strip()
+    if feature_code:
+        queryset = queryset.filter(feature_code=feature_code[:80])
+
+    has_suggestion = request.GET.get("has_suggestion")
+    if has_suggestion == "yes":
+        queryset = queryset.exclude(suggestion="")
+    elif has_suggestion == "no":
+        queryset = queryset.filter(suggestion="")
+    return queryset
+
+
+def _faculty_feedback_summary(queryset):
+    totals = queryset.aggregate(
+        total=Count("id"),
+        happy=Count("id", filter=Q(rating=FacultyFeedback.Rating.HAPPY)),
+        neutral=Count("id", filter=Q(rating=FacultyFeedback.Rating.NEUTRAL)),
+        sad=Count("id", filter=Q(rating=FacultyFeedback.Rating.SAD)),
+        with_suggestion=Count("id", filter=~Q(suggestion="")),
+    )
+    total = totals["total"] or 0
+    happy = totals["happy"] or 0
+    totals["positive_percentage"] = round((happy / total) * 100, 1) if total else 0
+    return totals
+
+
+def _faculty_feedback_filter_summary(request):
+    keys = ["tenant_id", "campus_id", "rating", "date_from", "date_to", "faculty_q", "feature_code", "has_suggestion"]
+    return {key: request.GET.get(key) for key in keys if request.GET.get(key)}
+
+
+def _faculty_feedback_export_response(request, queryset):
+    AuditService.log_event(
+        action="FACULTY_FEEDBACK_CSV_EXPORTED",
+        portal="ADMIN",
+        entity_type="FacultyFeedback",
+        actor=request.user,
+        metadata={"filters": _faculty_feedback_filter_summary(request), "row_count": queryset.count()},
+        request=request,
+    )
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="faculty_feedback.csv"'
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response["Pragma"] = "no-cache"
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "submitted_at",
+            "rating",
+            "suggestion",
+            "faculty_user_id",
+            "faculty_name",
+            "faculty_email",
+            "tenant_code",
+            "campus_code",
+            "route_name",
+            "page_path",
+            "feature_code",
+            "app_version",
+        ]
+    )
+    for feedback in queryset:
+        writer.writerow(
+            [
+                feedback.created_at.isoformat(),
+                feedback.rating,
+                _csv_safe(feedback.suggestion),
+                feedback.faculty_user_id,
+                _csv_safe(feedback.faculty_user.full_name),
+                _csv_safe(feedback.faculty_user.email),
+                _csv_safe(feedback.tenant.code),
+                _csv_safe(feedback.campus.code if feedback.campus else ""),
+                _csv_safe(feedback.route_name),
+                _csv_safe(feedback.page_path),
+                _csv_safe(feedback.feature_code),
+                _csv_safe(feedback.app_version),
+            ]
+        )
+    return response
+
+
+@never_cache
+@portal_required("ADMIN")
+@permission_required("faculty_feedback.read")
+def faculty_feedback_dashboard_view(request):
+    queryset = _faculty_feedback_filtered_queryset(request)
+    if request.GET.get("export") == "csv":
+        if not PermissionService.has_permission(
+            request.user,
+            "faculty_feedback.export",
+            tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+            campus_id=getattr(request, "scope", {}).get("campus_id"),
+        ):
+            return HttpResponseForbidden("You do not have permission to export faculty feedback.")
+        return _faculty_feedback_export_response(request, queryset)
+
+    if request.method == "GET":
+        AuditService.log_event(
+            action="FACULTY_FEEDBACK_DASHBOARD_ACCESSED",
+            portal="ADMIN",
+            entity_type="FacultyFeedback",
+            actor=request.user,
+            metadata={"filters": _faculty_feedback_filter_summary(request)},
+            request=request,
+        )
+
+    feature_options = sorted(
+        {
+            (code, feature_for_route(feedback_route)[1] if feedback_route else code.replace("_", " ").title())
+            for code, feedback_route in queryset.exclude(feature_code="")
+            .values_list("feature_code", "route_name")
+            .distinct()
+        },
+        key=lambda item: item[1],
+    )
+    page_obj = _get_page(request, queryset, per_page=25)
+    context = {
+        "summary": _faculty_feedback_summary(queryset),
+        "page_obj": page_obj,
+        "feedback_rows": page_obj.object_list,
+        "rating_choices": FacultyFeedback.Rating.choices,
+        "tenant_options": AdminScopeService.active_scoped_tenants(request),
+        "campus_options": AdminScopeService.active_scoped_campuses(request),
+        "feature_options": feature_options,
+        "selected": {
+            "tenant_id": request.GET.get("tenant_id", ""),
+            "campus_id": request.GET.get("campus_id", ""),
+            "rating": request.GET.get("rating", ""),
+            "date_from": request.GET.get("date_from", ""),
+            "date_to": request.GET.get("date_to", ""),
+            "faculty_q": request.GET.get("faculty_q", ""),
+            "feature_code": request.GET.get("feature_code", ""),
+            "has_suggestion": request.GET.get("has_suggestion", ""),
+        },
+        "export_query": request.GET.copy(),
+    }
+    context["export_query"]["export"] = "csv"
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/tools/faculty_feedback.html", context)
 
 
 @never_cache

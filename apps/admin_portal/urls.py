@@ -54,6 +54,7 @@ from .views import (
     enrollment_list_view,
     enrollment_update_view,
     faculty_activity_monitor_view,
+    faculty_feedback_dashboard_view,
     faculty_final_clearance_view,
     faculty_final_clearance_verify_view,
     faculty_deactivation_schedule_view,
@@ -211,6 +212,11 @@ urlpatterns = [
         "admin-portal/tools/tenant-data-export/",
         tenant_data_export_view,
         name="tenant_data_export",
+    ),
+    path(
+        "admin-portal/tools/faculty-feedback/",
+        faculty_feedback_dashboard_view,
+        name="faculty_feedback",
     ),
     path(
         "admin-portal/maintenance/inactive/<str:model_key>/<int:object_id>/delete/",

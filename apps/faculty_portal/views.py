@@ -15,6 +15,7 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.http import require_POST
 
 from apps.accounts.forms import FacultyLoginForm
 from apps.accounts.views import process_valid_portal_login_form
@@ -34,6 +35,7 @@ from apps.enrollment.forms import ClassListAddRequestForm, ClassListRemoveReques
 from apps.faculty_portal.forms import (
     AttendanceSessionForm,
     FacultyMemoForm,
+    FacultyFeedbackForm,
     FacultyReminderForm,
     FacultyTemplateIssueReportForm,
     GradeActivityForm,
@@ -45,6 +47,7 @@ from apps.faculty_portal.services import (
     FacultyPerformanceService,
     StudentInterventionService,
 )
+from apps.faculty_portal.feedback import create_feedback_submission
 from apps.faculty_portal.help_guide import FACULTY_HELP_SECTIONS
 from apps.grading.models import (
     CourseTemplateAssignment,
@@ -118,6 +121,21 @@ def _has_active_published_course_template_assignment(offering):
         .filter(Q(effective_from_term_id=offering.term_id) | Q(effective_from_term__isnull=True))
         .exists()
     )
+
+
+@require_POST
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def feedback_submit_view(request):
+    form = FacultyFeedbackForm(request.POST)
+    result = create_feedback_submission(request=request, form=form)
+    payload = {
+        "success": result.success,
+        "message": result.message,
+    }
+    if not result.success:
+        payload["errors"] = result.errors or {}
+    return JsonResponse(payload, status=200 if result.success else 400)
 
 
 def _faculty_offering_has_submitted_grades(offering, template):

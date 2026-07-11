@@ -50,6 +50,22 @@ FACULTY_HELP_SECTIONS = [
                 "next_step": "Resolve Pending Grade Issues or open View Performance for one class.",
             },
             {
+                "code": "feedback",
+                "title": "Send Page Feedback",
+                "purpose": "Lets you quickly tell the system team whether the current Faculty Portal page felt helpful, neutral, or difficult.",
+                "how_to_open": ["Click Feedback near the bottom-right corner of an authenticated Faculty Portal page."],
+                "check_first": [
+                    "Stay on the page you want to comment about.",
+                    "Choose Happy, Neutral, or Sad.",
+                    "Add a short suggestion only if it helps explain the rating.",
+                ],
+                "actions": [
+                    {"name": "Submit Feedback", "does": "Sends your selected rating and optional suggestion without leaving the current page.", "when": "Use it when a page is confusing, helpful, or could be improved.", "avoid": "Do not include student names, grades, passwords, or other confidential information.", "result": "TeacherMate+ records the feedback for authorized admin review.", "editable": "Feedback is append-only from the Faculty Portal."},
+                ],
+                "avoid": "Do not use Feedback for urgent grade corrections, enrollment changes, or password problems. Use the official workflow for those requests.",
+                "next_step": "Continue your class, activity, score, attendance, or summary work on the same page.",
+            },
+            {
                 "code": "classlist",
                 "title": "Class List and Student Status",
                 "purpose": "Shows the official students included in your assigned class and the status used for grading readiness.",

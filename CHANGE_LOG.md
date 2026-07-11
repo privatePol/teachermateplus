@@ -7,6 +7,7 @@ This project follows a practical changelog format inspired by Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added lightweight Faculty Feedback across the authenticated Faculty Portal: a floating Feedback button above Faculty Quick Guide, Happy/Neutral/Sad rating, optional 500-character suggestion, scoped server-side submission, five-minute same-page cooldown, admin dashboard, scoped CSV export, RBAC/menu seeds, audit events, and guide documentation.
 - Added ordered approval-step support for Petition/Application for Correction of Grades routes, enabling department routes such as Area Chair -> College Dean -> CAO and Area Chair -> CAO while preserving existing direct/two-step route rows.
 - Added separate Admin Portal academic monitor permissions for `faculty_activity_monitor.read`, `faculty_gradebook_monitor.read`, and `grade_prediction_monitor.read`, so Faculty Assignment management can stay available to operations users without also granting faculty activity, gradebook, or prediction monitoring access.
 - Added the backend foundation for the future online-only Flutter Faculty Companion App under `/api/mobile/v1/`. The new `apps/mobile_api` app provides session-based faculty auth, dashboard/classes/students, consultation summary, server-side grade explanation, attendance, quick activity, score entry, missing-score, readiness, and notification endpoints while reusing existing TeacherMate+ faculty assignment scope, grading services, lock enforcement, validation, computation, and audit patterns.

@@ -92,6 +92,8 @@ class Command(BaseCommand):
         ("import_batches.read", "import_batches", "read"),
         ("actual_data_reset.run", "actual_data_reset", "run"),
         ("tenant_data_export.execute", "tenant_data_export", "execute"),
+        ("faculty_feedback.read", "faculty_feedback", "read"),
+        ("faculty_feedback.export", "faculty_feedback", "export"),
         ("inactive_records.delete", "inactive_records", "delete"),
         ("system_settings.update", "system_settings", "update"),
         ("grading_governance_settings.update", "grading_governance_settings", "update"),
@@ -631,6 +633,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "FACULTY_FEEDBACK",
+                groups["IMPORTS"],
+                "Faculty Feedback",
+                "admin_portal:faculty_feedback",
+                66,
+                "faculty_feedback.read",
+            ),
+            (
+                "ADMIN",
                 "GRADING_TEMPLATES",
                 groups["GRADING"],
                 "Grading Templates",
@@ -934,6 +945,15 @@ class Command(BaseCommand):
         RolePermission.objects.get_or_create(
             role=role_map["TENANT_ADMIN"],
             permission=perm_map["tenant_data_export.execute"],
+        )
+        for role_code in ["TENANT_ADMIN", "CAMPUS_ADMIN"]:
+            RolePermission.objects.get_or_create(
+                role=role_map[role_code],
+                permission=perm_map["faculty_feedback.read"],
+            )
+        RolePermission.objects.get_or_create(
+            role=role_map["TENANT_ADMIN"],
+            permission=perm_map["faculty_feedback.export"],
         )
 
         correction_monitor_permissions = ["corrections.read"]

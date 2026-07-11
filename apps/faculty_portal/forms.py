@@ -16,6 +16,7 @@ from apps.grading.models import (
 )
 from apps.notifications.models import FacultyMemo
 from apps.students.models import Student
+from apps.faculty_portal.models import FacultyFeedback
 
 
 def _active_only_queryset(queryset):
@@ -58,6 +59,17 @@ def _student_label(obj):
     if student_no and name:
         return f"{student_no} - {name}"
     return student_no or name or str(obj)
+
+
+class FacultyFeedbackForm(forms.Form):
+    rating = forms.ChoiceField(choices=FacultyFeedback.Rating.choices)
+    suggestion = forms.CharField(required=False, max_length=500)
+    page_path = forms.CharField(required=False, max_length=1000)
+    route_name = forms.CharField(required=False, max_length=180)
+    referrer_path = forms.CharField(required=False, max_length=1000)
+
+    def clean_suggestion(self):
+        return (self.cleaned_data.get("suggestion") or "").strip()
 
 
 class FacultyEnrollmentForm(forms.Form):
