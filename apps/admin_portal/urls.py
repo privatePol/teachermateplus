@@ -131,6 +131,7 @@ from .views import (
     student_list_view,
     student_update_view,
     tenant_create_view,
+    tenant_data_export_view,
     tenant_grading_profile_create_view,
     tenant_grading_profile_duplicate_view,
     tenant_grading_profile_list_view,
@@ -205,6 +206,11 @@ urlpatterns = [
         "admin-portal/tools/template-governance/",
         template_governance_settings_view,
         name="template_governance_settings",
+    ),
+    path(
+        "admin-portal/tools/tenant-data-export/",
+        tenant_data_export_view,
+        name="tenant_data_export",
     ),
     path(
         "admin-portal/maintenance/inactive/<str:model_key>/<int:object_id>/delete/",

@@ -687,6 +687,55 @@ ADMIN_HELP_SECTIONS = [
             },
         ],
     },
+    {
+        "code": "tools-data-control",
+        "title": "Tools and Data Control",
+        "summary": "High-risk tools that require extra verification before data leaves or changes the system.",
+        "topics": [
+            {
+                "code": "secure-tenant-data-export",
+                "title": "Secure Tenant Data Export",
+                "audience": "Superadmin and authorized Tenant Admin users",
+                "permissions": ["tenant_data_export.execute"],
+                "purpose": (
+                    "Creates a tenant-scoped SQLite investigation file after password confirmation and email OTP verification."
+                ),
+                "menu_path": "Admin Portal -> Tools -> Secure Tenant Data Export",
+                "steps": [
+                    "Set the correct tenant scope before opening the tool.",
+                    "Choose only the tenant approved for investigation.",
+                    "Confirm the confidentiality acknowledgement and enter your own current password.",
+                    "Open your registered account email and enter the six-digit verification code.",
+                    "Download the SQLite file and store it only in an approved secure location.",
+                ],
+                "check_first": [
+                    "Confirm written authorization and the exact tenant to export.",
+                    "Confirm your Admin account has a working registered email address.",
+                    "Confirm where the file will be stored, who may access it, and when it must be deleted.",
+                ],
+                "actions": [
+                    {
+                        "name": "Verify Password and Send Code",
+                        "does": "Checks your current password and sends a short-lived code to your registered email.",
+                        "when": "Use it only when you are ready to complete the export.",
+                        "avoid": "Do not use another user's account or email to approve the export.",
+                        "result": "A one-time verification challenge is created and audited.",
+                        "editable": "No tenant data is exported until the email code is verified.",
+                    },
+                    {
+                        "name": "Verify and Download",
+                        "does": "Verifies the email code and streams the tenant SQLite export once.",
+                        "when": "Use it after confirming the selected tenant and code.",
+                        "avoid": "Do not email the file or place it in public/shared storage.",
+                        "result": "The challenge is consumed and the download is audited.",
+                        "editable": "The exported file is read-only evidence; changes to it do not update TeacherMate+.",
+                    },
+                ],
+                "avoid": "Do not use this tool for routine reports, backups, or cross-tenant browsing.",
+                "next_step": "Review the exported manifest and row-count tables before using the file for investigation.",
+            },
+        ],
+    },
 ]
 
 

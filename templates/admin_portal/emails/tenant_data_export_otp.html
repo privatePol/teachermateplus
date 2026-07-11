@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f4f7f5;font-family:Arial,sans-serif;color:#1f3528;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f7f5;padding:24px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #dfe8e2;border-radius:8px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px;">
+                {% if email_logo_src %}
+                <img src="{{ email_logo_src }}" alt="TeacherMate+" style="height:48px;margin-bottom:16px;">
+                {% endif %}
+                <h1 style="font-size:20px;margin:0 0 12px;">Tenant Export Verification Code</h1>
+                <p style="margin:0 0 12px;">Hello {{ user.full_name|default:user.username }},</p>
+                <p style="margin:0 0 12px;">Use this TeacherMate+ tenant export verification code:</p>
+                <p style="font-size:28px;letter-spacing:6px;font-weight:700;margin:0 0 16px;">{{ otp_code }}</p>
+                <p style="margin:0 0 8px;"><strong>Tenant:</strong> {{ tenant.code }} - {{ tenant.name }}</p>
+                <p style="margin:0 0 16px;">This code expires in {{ expires_in_minutes }} minute(s) and can be used once.</p>
+                <p style="margin:0;color:#6c7a70;">If you did not initiate this export, ignore this email and notify the system administrator.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

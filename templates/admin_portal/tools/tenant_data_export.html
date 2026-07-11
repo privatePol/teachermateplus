@@ -1,0 +1,120 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+  <div>
+    <h1 class="h4 mb-1">Secure Tenant Data Export</h1>
+    <p class="text-muted mb-0">Create a tenant-scoped SQLite file for authorized investigation and troubleshooting.</p>
+  </div>
+</div>
+
+<div class="alert alert-warning border-warning shadow-sm">
+  <strong>Confidential institutional data.</strong>
+  This export may contain personal, academic, operational, and audit information. Use it only for authorized investigation in a controlled development environment. Do not share it through public storage, email attachments, or unmanaged devices.
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="small text-uppercase text-muted">Step 1</div>
+        <div class="fw-semibold">Select Tenant</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="small text-uppercase text-muted">Step 2</div>
+        <div class="fw-semibold">Confirm Password</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="small text-uppercase text-muted">Step 3</div>
+        <div class="fw-semibold">Verify Email OTP</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="small text-uppercase text-muted">Step 4</div>
+        <div class="fw-semibold">Download SQLite</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white">
+    <strong>Start Export Verification</strong>
+  </div>
+  <div class="card-body">
+    <form method="post" novalidate autocomplete="off">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="start">
+      {% if start_form.non_field_errors %}<div class="alert alert-danger">{{ start_form.non_field_errors }}</div>{% endif %}
+      <div class="mb-3">
+        <label class="form-label" for="{{ start_form.tenant.id_for_label }}">{{ start_form.tenant.label }}</label>
+        {{ start_form.tenant }}
+        {% for error in start_form.tenant.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="{{ start_form.password.id_for_label }}">{{ start_form.password.label }}</label>
+        {{ start_form.password }}
+        <div class="form-text">Enter your own current Admin Portal password. It is checked once and is not stored.</div>
+        {% for error in start_form.password.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="form-check mb-3">
+        {{ start_form.acknowledgement }}
+        <label class="form-check-label" for="{{ start_form.acknowledgement.id_for_label }}">{{ start_form.acknowledgement.label }}</label>
+        {% for error in start_form.acknowledgement.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <button class="btn btn-danger" type="submit">Verify Password and Send Code</button>
+    </form>
+  </div>
+</div>
+
+{% if active_challenge %}
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <strong>Email OTP Verification</strong>
+    <span class="badge text-bg-light border">{{ active_challenge.selected_tenant.code }}</span>
+  </div>
+  <div class="card-body">
+    <p class="mb-2">
+      A six-digit verification code was sent to <strong>{{ masked_email }}</strong>.
+      The code expires in about {{ otp_expiry_minutes }} minutes and can be used once.
+    </p>
+    <p class="text-muted small mb-3">
+      Attempts used: {{ active_challenge.failed_attempt_count }} of {{ max_otp_attempts }}.
+      Resends used: {{ active_challenge.resend_count }} of {{ max_resends }}.
+    </p>
+    <form method="post" class="row g-2 align-items-end" novalidate autocomplete="off">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="verify_otp">
+      {{ otp_form.challenge_token }}
+      <div class="col-md-5">
+        <label class="form-label" for="{{ otp_form.otp_code.id_for_label }}">{{ otp_form.otp_code.label }}</label>
+        {{ otp_form.otp_code }}
+        {% for error in otp_form.otp_code.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-md-auto">
+        <button class="btn btn-success" type="submit">Verify and Download</button>
+      </div>
+    </form>
+    <form method="post" class="mt-3">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="resend">
+      <input type="hidden" name="challenge_token" value="{{ active_challenge.token }}">
+      <button class="btn btn-outline-secondary" type="submit" {% if cooldown_seconds > 0 %}disabled{% endif %}>
+        Resend Code{% if cooldown_seconds > 0 %} (wait {{ cooldown_seconds }}s){% endif %}
+      </button>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

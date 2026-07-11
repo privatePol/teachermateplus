@@ -28,6 +28,7 @@ from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 
 from apps.accounts.models import PortalLoginLockoutState, UserDeactivationSchedule
 from apps.accounts.services import UserDeactivationService
@@ -75,6 +76,8 @@ from apps.admin_portal.forms import (
     StudentAccountProvisioningForm,
     StudentForm,
     TenantForm,
+    TenantDataExportOtpForm,
+    TenantDataExportStartForm,
     TenantTermGradingPeriodForm,
     TemplateGovernanceSettingForm,
     TemplateHotfixRequestForm,
@@ -96,6 +99,7 @@ from apps.academics.services import (
 from apps.admin_portal.data_reset import ActualDataResetService
 from apps.admin_portal.academic_performance import AcademicPerformanceInsightService
 from apps.admin_portal.services import AdminScopeService, model_before_after
+from apps.admin_portal.tenant_data_export import TenantDataExportChallengeService, TenantSQLiteExportService
 from apps.admin_portal.grade_distribution import GradeDistributionMonitorService
 from apps.admin_portal.help_guide import build_admin_help_sections
 from apps.academics.models import (
@@ -3062,6 +3066,119 @@ def admin_guide_view(request):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/guide_role_based.html", context)
+
+
+@never_cache
+@portal_required("ADMIN")
+@permission_required("tenant_data_export.execute")
+def tenant_data_export_view(request):
+    tenant_qs = AdminScopeService.active_scoped_tenants(request)
+    start_form = TenantDataExportStartForm(
+        request.POST if request.method == "POST" and request.POST.get("action") == "start" else None,
+        tenant_queryset=tenant_qs,
+    )
+    otp_form = TenantDataExportOtpForm(
+        request.POST if request.method == "POST" and request.POST.get("action") == "verify_otp" else None
+    )
+    active_challenge = None
+
+    if request.method == "GET":
+        AuditService.log_event(
+            action="TENANT_EXPORT_PAGE_ACCESSED",
+            portal="ADMIN",
+            entity_type="TenantDataExport",
+            actor=request.user,
+            tenant=getattr(request, "scope", {}).get("tenant_id"),
+            request=request,
+        )
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "start" and start_form.is_valid():
+            tenant = start_form.cleaned_data["tenant"]
+            if not tenant_qs.filter(id=tenant.id).exists():
+                raise PermissionDenied("Selected tenant is outside your authorized scope.")
+            result = TenantDataExportChallengeService.start_challenge(
+                request=request,
+                user=request.user,
+                tenant=tenant,
+                password=start_form.cleaned_data["password"],
+            )
+            if result.success:
+                active_challenge = result.challenge
+                otp_form = TenantDataExportOtpForm(initial={"challenge_token": active_challenge.token})
+                messages.success(request, "Password verified. A verification code was sent to your account email.")
+            else:
+                messages.error(request, result.message)
+        elif action == "resend":
+            token = request.POST.get("challenge_token")
+            try:
+                result = TenantDataExportChallengeService.resend(request=request, user=request.user, token=token)
+            except PermissionDenied as exc:
+                raise PermissionDenied("Invalid export verification challenge.") from exc
+            active_challenge = result.challenge
+            if active_challenge:
+                otp_form = TenantDataExportOtpForm(initial={"challenge_token": active_challenge.token})
+            if result.success:
+                messages.success(request, "A new verification code was sent. The previous code is no longer valid.")
+            else:
+                messages.error(request, result.message)
+        elif action == "verify_otp" and otp_form.is_valid():
+            token = otp_form.cleaned_data["challenge_token"]
+            try:
+                result = TenantDataExportChallengeService.verify_otp(
+                    request=request,
+                    user=request.user,
+                    token=token,
+                    code=otp_form.cleaned_data["otp_code"],
+                )
+            except PermissionDenied as exc:
+                raise PermissionDenied("Invalid export verification challenge.") from exc
+            if result.success:
+                try:
+                    return TenantSQLiteExportService.create_download_response(
+                        request=request,
+                        challenge=result.challenge,
+                    )
+                except ValidationError as exc:
+                    messages.error(request, str(exc))
+                    active_challenge = result.challenge
+            else:
+                active_challenge = result.challenge
+                if active_challenge:
+                    otp_form = TenantDataExportOtpForm(initial={"challenge_token": active_challenge.token})
+                messages.error(request, result.message)
+
+    if active_challenge is None:
+        token = request.POST.get("challenge_token") if request.method == "POST" else None
+        if token:
+            try:
+                active_challenge = TenantDataExportChallengeService.get_user_challenge(user=request.user, token=token)
+                otp_form = TenantDataExportOtpForm(initial={"challenge_token": active_challenge.token})
+            except PermissionDenied:
+                active_challenge = None
+
+    cooldown_seconds = 0
+    if active_challenge and active_challenge.last_sent_at:
+        cooldown_until = active_challenge.last_sent_at + timedelta(
+            seconds=TenantDataExportChallengeService.RESEND_COOLDOWN_SECONDS
+        )
+        cooldown_seconds = max(0, int((cooldown_until - timezone.now()).total_seconds()))
+
+    context = {
+        "start_form": start_form,
+        "otp_form": otp_form,
+        "active_challenge": active_challenge,
+        "masked_email": TenantDataExportChallengeService.masked_email(active_challenge.sent_to_email)
+        if active_challenge
+        else "",
+        "cooldown_seconds": cooldown_seconds,
+        "otp_expiry_minutes": TenantDataExportChallengeService.OTP_EXPIRY_MINUTES,
+        "max_otp_attempts": TenantDataExportChallengeService.MAX_OTP_ATTEMPTS,
+        "max_resends": TenantDataExportChallengeService.MAX_RESENDS,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/tools/tenant_data_export.html", context)
 
 
 @portal_required("ADMIN")

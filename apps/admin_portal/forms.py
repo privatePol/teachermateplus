@@ -76,6 +76,57 @@ def _set_choice_label(field, formatter):
         field.label_from_instance = formatter
 
 
+class TenantDataExportStartForm(forms.Form):
+    tenant = forms.ModelChoiceField(
+        queryset=Tenant.objects.none(),
+        label="Tenant to export",
+        empty_label="Select tenant",
+    )
+    acknowledgement = forms.BooleanField(
+        required=True,
+        label="I understand that this export contains confidential institutional data and must only be used for authorized investigation.",
+    )
+    password = forms.CharField(
+        label="Current account password",
+        strip=False,
+        widget=forms.PasswordInput(
+            attrs={
+                "autocomplete": "current-password",
+                "class": "form-control",
+            }
+        ),
+    )
+
+    def __init__(self, *args, tenant_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["tenant"].queryset = tenant_queryset if tenant_queryset is not None else Tenant.objects.none()
+        self.fields["tenant"].widget.attrs["class"] = "form-select"
+        self.fields["acknowledgement"].widget.attrs["class"] = "form-check-input"
+
+
+class TenantDataExportOtpForm(forms.Form):
+    challenge_token = forms.UUIDField(widget=forms.HiddenInput())
+    otp_code = forms.CharField(
+        label="Email verification code",
+        max_length=6,
+        min_length=6,
+        widget=forms.TextInput(
+            attrs={
+                "autocomplete": "one-time-code",
+                "inputmode": "numeric",
+                "pattern": "[0-9]*",
+                "class": "form-control",
+            }
+        ),
+    )
+
+    def clean_otp_code(self):
+        code = (self.cleaned_data.get("otp_code") or "").strip().replace(" ", "")
+        if not code.isdigit():
+            raise forms.ValidationError("Enter the six-digit verification code.")
+        return code
+
+
 class EnrollmentAdjustmentForm(forms.Form):
     academic_year = forms.ModelChoiceField(queryset=AcademicYear.objects.none(), required=True)
     term = forms.ModelChoiceField(queryset=Term.objects.none(), required=True)

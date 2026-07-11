@@ -1,0 +1,10 @@
+Hello {{ user.full_name|default:user.username }},
+
+Use this TeacherMate+ tenant export verification code:
+
+{{ otp_code }}
+
+Tenant: {{ tenant.code }} - {{ tenant.name }}
+This code expires in {{ expires_in_minutes }} minute(s) and can be used once.
+
+If you did not initiate this export, ignore this email and notify the system administrator.

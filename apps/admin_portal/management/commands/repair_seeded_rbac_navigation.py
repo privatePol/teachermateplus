@@ -55,6 +55,18 @@ class Command(BaseCommand):
             sort_order=20,
             role_codes=("SUPER_ADMIN", "TENANT_ADMIN", "CAMPUS_ADMIN", "REGISTRAR"),
         ),
+        SeededNavigationRepair(
+            permission_code="tenant_data_export.execute",
+            permission_module="tenant_data_export",
+            permission_action="execute",
+            permission_description="Run secure tenant-scoped SQLite data exports after password and email OTP verification.",
+            menu_item_code="TENANT_DATA_EXPORT",
+            menu_item_label="Secure Tenant Data Export",
+            route_name="admin_portal:tenant_data_export",
+            preferred_menu_group_code="IMPORTS",
+            sort_order=65,
+            role_codes=("SUPER_ADMIN", "TENANT_ADMIN"),
+        ),
     )
 
     def handle(self, *args, **options):

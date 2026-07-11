@@ -91,6 +91,7 @@ class Command(BaseCommand):
         ("enrollment_adjustment.process", "enrollment_adjustment", "process"),
         ("import_batches.read", "import_batches", "read"),
         ("actual_data_reset.run", "actual_data_reset", "run"),
+        ("tenant_data_export.execute", "tenant_data_export", "execute"),
         ("inactive_records.delete", "inactive_records", "delete"),
         ("system_settings.update", "system_settings", "update"),
         ("grading_governance_settings.update", "grading_governance_settings", "update"),
@@ -621,6 +622,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "TENANT_DATA_EXPORT",
+                groups["IMPORTS"],
+                "Secure Tenant Data Export",
+                "admin_portal:tenant_data_export",
+                65,
+                "tenant_data_export.execute",
+            ),
+            (
+                "ADMIN",
                 "GRADING_TEMPLATES",
                 groups["GRADING"],
                 "Grading Templates",
@@ -921,6 +931,10 @@ class Command(BaseCommand):
             role_obj = role_map[role_code]
             for perm_code in requestor_permissions:
                 RolePermission.objects.get_or_create(role=role_obj, permission=perm_map[perm_code])
+        RolePermission.objects.get_or_create(
+            role=role_map["TENANT_ADMIN"],
+            permission=perm_map["tenant_data_export.execute"],
+        )
 
         correction_monitor_permissions = ["corrections.read"]
         correction_on_behalf_permissions = ["corrections.read", "corrections.create_on_behalf"]

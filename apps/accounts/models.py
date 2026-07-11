@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
@@ -289,6 +291,63 @@ class LoginOtpChallenge(models.Model):
     @property
     def is_expired(self):
         return self.expires_at <= timezone.now()
+
+    @property
+    def is_consumed(self):
+        return self.consumed_at is not None
+
+
+class TenantDataExportChallenge(models.Model):
+    class Status(models.TextChoices):
+        OTP_SENT = "OTP_SENT", "OTP Sent"
+        OTP_VERIFIED = "OTP_VERIFIED", "OTP Verified"
+        CONSUMED = "CONSUMED", "Consumed"
+        EXPIRED = "EXPIRED", "Expired"
+        LOCKED = "LOCKED", "Locked"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    requesting_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="tenant_data_export_challenges",
+    )
+    selected_tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="tenant_data_export_challenges",
+    )
+    otp_hash = models.CharField(max_length=128, blank=True)
+    sent_to_email = models.EmailField()
+    password_verified_at = models.DateTimeField()
+    otp_sent_at = models.DateTimeField(blank=True, null=True)
+    otp_expires_at = models.DateTimeField(blank=True, null=True)
+    otp_verified_at = models.DateTimeField(blank=True, null=True)
+    consumed_at = models.DateTimeField(blank=True, null=True)
+    failed_attempt_count = models.PositiveIntegerField(default=0)
+    resend_count = models.PositiveIntegerField(default=0)
+    last_sent_at = models.DateTimeField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OTP_SENT)
+    request_ip = models.GenericIPAddressField(blank=True, null=True)
+    user_agent = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "tenant_data_export_challenges"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["token"], name="idx_tenant_export_token"),
+            models.Index(fields=["requesting_user", "status"], name="idx_tenant_export_user_status"),
+            models.Index(fields=["selected_tenant", "created_at"], name="idx_tenant_export_tenant_time"),
+        ]
+
+    def __str__(self):
+        return f"tenant-export:{self.selected_tenant_id}:{self.requesting_user_id}:{self.status}"
+
+    @property
+    def is_expired(self):
+        return bool(self.otp_expires_at and self.otp_expires_at <= timezone.now())
 
     @property
     def is_consumed(self):
