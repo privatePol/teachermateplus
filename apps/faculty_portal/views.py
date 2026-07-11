@@ -12,6 +12,7 @@ from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.template.loader import render_to_string
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 
@@ -340,6 +341,64 @@ def _safe_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _faculty_activity_last_selection_session_key(*, user_id, offering_id, period_id):
+    return f"faculty_activity_last_selection:{user_id}:{offering_id}:{period_id}"
+
+
+def _validate_faculty_activity_last_selection(selection, *, component_qs, subcomponent_qs, detail_qs):
+    if not isinstance(selection, dict):
+        return {}
+
+    component_id = _safe_int(selection.get("component_id"))
+    subcomponent_id = _safe_int(selection.get("subcomponent_id"))
+    detail_id = _safe_int(selection.get("detail_id"))
+    if not component_id or not component_qs.filter(id=component_id).exists():
+        return {}
+
+    valid_selection = {
+        "component_id": component_id,
+        "subcomponent_id": None,
+        "detail_id": None,
+    }
+    if not subcomponent_id:
+        return valid_selection
+    if not subcomponent_qs.filter(id=subcomponent_id, template_component_id=component_id).exists():
+        return valid_selection
+
+    valid_selection["subcomponent_id"] = subcomponent_id
+    if not detail_id:
+        return valid_selection
+    if not detail_qs.filter(id=detail_id, template_subcomponent_id=subcomponent_id).exists():
+        return valid_selection
+
+    valid_selection["detail_id"] = detail_id
+    return valid_selection
+
+
+def _safe_faculty_activity_query_string(request):
+    query = request.GET.copy()
+    next_url = (query.get("next") or "").strip()
+    if next_url and not url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        query.pop("next", None)
+    return query.urlencode()
+
+
+def _faculty_activity_url(request, view_name, *, offering_id, period_id, activity_id=None):
+    if activity_id is None:
+        url = reverse(view_name, kwargs={"offering_id": offering_id, "period_id": period_id})
+    else:
+        url = reverse(
+            view_name,
+            kwargs={"offering_id": offering_id, "period_id": period_id, "activity_id": activity_id},
+        )
+    query_string = _safe_faculty_activity_query_string(request)
+    return f"{url}?{query_string}" if query_string else url
 
 
 def _faculty_offering_scope_state(offering):
@@ -4159,9 +4218,39 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
             template_period_id=period.id,
             is_active=True,
         )
+    remembered_selection = {}
+    if request.method == "GET" and editing_activity is None:
+        remembered_key = _faculty_activity_last_selection_session_key(
+            user_id=request.user.id,
+            offering_id=offering.id,
+            period_id=period.id,
+        )
+        remembered_selection = _validate_faculty_activity_last_selection(
+            request.session.get(remembered_key),
+            component_qs=component_qs,
+            subcomponent_qs=subcomponent_qs,
+            detail_qs=detail_qs,
+        )
+        if remembered_selection:
+            stored_selection = request.session.get(remembered_key)
+            if stored_selection != remembered_selection:
+                request.session[remembered_key] = remembered_selection
+                request.session.modified = True
+        elif remembered_key in request.session:
+            request.session.pop(remembered_key, None)
+            request.session.modified = True
     form = GradeActivityForm(
         request.POST or None,
         instance=editing_activity,
+        initial=(
+            {
+                "template_component": remembered_selection["component_id"],
+                "template_subcomponent": remembered_selection["subcomponent_id"],
+                "template_detail": remembered_selection["detail_id"],
+            }
+            if remembered_selection
+            else None
+        ),
         component_queryset=component_qs,
         subcomponent_queryset=subcomponent_qs,
         detail_queryset=detail_qs,
@@ -4181,6 +4270,12 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
             str(editing_activity.template_subcomponent_id) if editing_activity.template_subcomponent_id else None
         )
         selected_detail_id = str(editing_activity.template_detail_id) if editing_activity.template_detail_id else None
+    elif remembered_selection:
+        selected_component_id = str(remembered_selection["component_id"])
+        selected_subcomponent_id = (
+            str(remembered_selection["subcomponent_id"]) if remembered_selection["subcomponent_id"] else None
+        )
+        selected_detail_id = str(remembered_selection["detail_id"]) if remembered_selection["detail_id"] else None
 
     subcomponents = list(subcomponent_qs)
     details = list(detail_qs)
@@ -4228,10 +4323,24 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
                 request,
                 state["encoding_control_message"] if state["encoding_control_closed"] else "This period is locked or already submitted.",
             )
-            return redirect("faculty_portal:period_activities", offering_id=offering.id, period_id=period.id)
+            return redirect(
+                _faculty_activity_url(
+                    request,
+                    "faculty_portal:period_activities",
+                    offering_id=offering.id,
+                    period_id=period.id,
+                )
+            )
         if state["is_correction_active"] and editing_activity is None:
             messages.error(request, "New activities cannot be created inside a correction window.")
-            return redirect("faculty_portal:period_activities", offering_id=offering.id, period_id=period.id)
+            return redirect(
+                _faculty_activity_url(
+                    request,
+                    "faculty_portal:period_activities",
+                    offering_id=offering.id,
+                    period_id=period.id,
+                )
+            )
         component = form.cleaned_data["template_component"]
         subcomponent = form.cleaned_data["template_subcomponent"]
         detail = form.cleaned_data["template_detail"]
@@ -4318,7 +4427,26 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
                         request=request,
                     )
                     messages.success(request, "Activity created.")
-                return redirect("faculty_portal:period_activities", offering_id=offering.id, period_id=period.id)
+                    request.session[
+                        _faculty_activity_last_selection_session_key(
+                            user_id=request.user.id,
+                            offering_id=offering.id,
+                            period_id=period.id,
+                        )
+                    ] = {
+                        "component_id": component.id,
+                        "subcomponent_id": subcomponent.id if subcomponent else None,
+                        "detail_id": detail.id if detail else None,
+                    }
+                    request.session.modified = True
+                return redirect(
+                    _faculty_activity_url(
+                        request,
+                        "faculty_portal:period_activities",
+                        offering_id=offering.id,
+                        period_id=period.id,
+                    )
+                )
 
     activities = (
         GradeActivity.objects.filter(offering_id=offering.id, template_period_id=period.id, is_active=True)
@@ -4374,6 +4502,13 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         "can_request_late_completion": state["can_request_late_completion"],
         "can_create_activity": state["is_editable"],
         "editing_activity": editing_activity,
+        "activity_form_action_url": _faculty_activity_url(
+            request,
+            "faculty_portal:period_activity_edit" if editing_activity else "faculty_portal:period_activities",
+            offering_id=offering.id,
+            period_id=period.id,
+            activity_id=editing_activity.id if editing_activity else None,
+        ),
         "component_option_data": component_option_data,
         "subcomponent_option_data": subcomponent_option_data,
         "detail_option_data": detail_option_data,

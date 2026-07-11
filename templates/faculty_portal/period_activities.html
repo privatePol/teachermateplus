@@ -204,7 +204,7 @@
       Updating <strong>{{ editing_activity.title }}</strong>. If encoded scores already exist, TeacherMate+ will recompute them using the updated activity settings.
     </div>
     {% endif %}
-    <form method="post" class="row g-2" novalidate id="activity-edit-form" action="{% if editing_activity %}{% url 'faculty_portal:period_activity_edit' offering.id period.id editing_activity.id %}{% else %}{% url 'faculty_portal:period_activities' offering.id period.id %}{% endif %}">
+    <form method="post" class="row g-2" novalidate id="activity-edit-form" action="{{ activity_form_action_url }}">
       {% csrf_token %}
       {% if form.non_field_errors %}
       <div class="col-12">
