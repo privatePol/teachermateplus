@@ -1,5 +1,5 @@
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import re
@@ -404,6 +404,9 @@ def _safe_faculty_activity_query_string(request):
         require_https=request.is_secure(),
     ):
         query.pop("next", None)
+    view_mode = (query.get("view") or "").strip()
+    if view_mode and view_mode not in {"grouped", "flat"}:
+        query.pop("view", None)
     return query.urlencode()
 
 
@@ -417,6 +420,123 @@ def _faculty_activity_url(request, view_name, *, offering_id, period_id, activit
         )
     query_string = _safe_faculty_activity_query_string(request)
     return f"{url}?{query_string}" if query_string else url
+
+
+def _faculty_activity_view_mode(request):
+    requested_mode = (request.GET.get("view") or "").strip()
+    return requested_mode if requested_mode in {"grouped", "flat"} else "grouped"
+
+
+def _faculty_activity_view_switch_url(request, *, view_mode):
+    query = request.GET.copy()
+    query["view"] = view_mode
+    next_url = (query.get("next") or "").strip()
+    if next_url and not url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        query.pop("next", None)
+    return f"?{query.urlencode()}"
+
+
+def _faculty_activity_sort_key(activity):
+    component = activity.template_component
+    subcomponent = activity.template_subcomponent
+    detail = activity.template_detail
+    return (
+        component.sort_order if component else 999999,
+        component.id if component else 0,
+        subcomponent.sort_order if subcomponent else -1,
+        subcomponent.id if subcomponent else 0,
+        detail.sort_order if detail else -1,
+        detail.id if detail else 0,
+        activity.activity_date or date.max,
+        (activity.title or "").lower(),
+        activity.id,
+    )
+
+
+def _new_activity_group(label_key, item):
+    return {
+        label_key: item,
+        "activity_count": 0,
+        "encoded_count": 0,
+        "expected_count": 0,
+        "activities": [],
+    }
+
+
+def _add_activity_group_counts(group, activity, active_enrollment_count):
+    group["activity_count"] += 1
+    group["encoded_count"] += int(getattr(activity, "score_count", 0) or 0)
+    group["expected_count"] += active_enrollment_count
+
+
+def _build_faculty_activity_groups(activities, *, active_enrollment_count):
+    component_groups = []
+    component_lookup = {}
+
+    for activity in sorted(activities, key=_faculty_activity_sort_key):
+        component = activity.template_component
+        component_group = component_lookup.get(component.id)
+        if component_group is None:
+            component_group = _new_activity_group("component", component)
+            component_group.update(
+                {
+                    "html_id": f"activity-component-{component.id}",
+                    "subcomponent_groups": [],
+                    "_subcomponent_lookup": {},
+                }
+            )
+            component_lookup[component.id] = component_group
+            component_groups.append(component_group)
+
+        _add_activity_group_counts(component_group, activity, active_enrollment_count)
+
+        subcomponent = activity.template_subcomponent
+        if subcomponent is None:
+            component_group["activities"].append(activity)
+            continue
+
+        subcomponent_lookup = component_group["_subcomponent_lookup"]
+        subcomponent_group = subcomponent_lookup.get(subcomponent.id)
+        if subcomponent_group is None:
+            subcomponent_group = _new_activity_group("subcomponent", subcomponent)
+            subcomponent_group.update(
+                {
+                    "html_id": f"activity-subcomponent-{subcomponent.id}",
+                    "detail_groups": [],
+                    "_detail_lookup": {},
+                }
+            )
+            subcomponent_lookup[subcomponent.id] = subcomponent_group
+            component_group["subcomponent_groups"].append(subcomponent_group)
+
+        _add_activity_group_counts(subcomponent_group, activity, active_enrollment_count)
+
+        detail = activity.template_detail
+        if detail is None:
+            subcomponent_group["activities"].append(activity)
+            continue
+
+        detail_lookup = subcomponent_group["_detail_lookup"]
+        detail_group = detail_lookup.get(detail.id)
+        if detail_group is None:
+            detail_group = _new_activity_group("detail", detail)
+            detail_group["html_id"] = f"activity-detail-{detail.id}"
+            detail_lookup[detail.id] = detail_group
+            subcomponent_group["detail_groups"].append(detail_group)
+
+        _add_activity_group_counts(detail_group, activity, active_enrollment_count)
+        detail_group["activities"].append(activity)
+
+    for component_group in component_groups:
+        component_group.pop("_subcomponent_lookup", None)
+        for subcomponent_group in component_group["subcomponent_groups"]:
+            subcomponent_group.pop("_detail_lookup", None)
+
+    return component_groups
 
 
 def _faculty_offering_scope_state(offering):
@@ -4466,11 +4586,12 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
                     )
                 )
 
-    activities = (
+    activity_view_mode = _faculty_activity_view_mode(request)
+    activities = list(
         GradeActivity.objects.filter(offering_id=offering.id, template_period_id=period.id, is_active=True)
         .select_related("template_component", "template_subcomponent", "template_detail")
         .annotate(score_count=Count("student_scores", filter=Q(student_scores__is_active=True)))
-        .order_by("-activity_date", "-created_at")
+        .order_by("-activity_date", "-created_at", "-id")
     )
     for row in activities:
         row.resolved_score_input_mode = FacultyGradingService.resolve_score_input_mode(
@@ -4487,12 +4608,23 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         and row.template_subcomponent.detail_computation_mode != "AVERAGE_ACTIVITIES"
         for row in activities
     )
+    active_enrollment_count = FacultyGradingService.get_active_enrollments(offering).filter(
+        enrollment_status=Enrollment.Status.ACTIVE
+    ).count()
+    activity_groups = _build_faculty_activity_groups(
+        activities,
+        active_enrollment_count=active_enrollment_count,
+    )
     context = {
         "offering": offering,
         "template": template,
         "period": period,
         "form": form,
         "activities": activities,
+        "activity_groups": activity_groups,
+        "activity_view_mode": activity_view_mode,
+        "activity_grouped_view_url": _faculty_activity_view_switch_url(request, view_mode="grouped"),
+        "activity_flat_view_url": _faculty_activity_view_switch_url(request, view_mode="flat"),
         "show_detail_weight_column": show_detail_weight_column,
         "is_locked": state["is_locked"],
         "is_submitted": state["is_submitted"],
@@ -4533,9 +4665,7 @@ def period_activities_view(request, offering_id: int, period_id: int, activity_i
         "selected_component_id": selected_component_id,
         "selected_subcomponent_id": selected_subcomponent_id,
         "selected_detail_id": selected_detail_id,
-        "active_enrollment_count": FacultyGradingService.get_active_enrollments(offering).filter(
-            enrollment_status=Enrollment.Status.ACTIVE
-        ).count(),
+        "active_enrollment_count": active_enrollment_count,
     }
     return render(request, "faculty_portal/period_activities.html", context)
 

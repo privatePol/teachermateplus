@@ -574,6 +574,135 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             activity_date=self.term.start_date,
         )
 
+    def _create_period_activity_grouping_fixture(self):
+        self._accept_assignment()
+        students = [
+            self._create_active_student(
+                student_no="2025-GRP-001",
+                last_name="Grouped",
+                first_name="One",
+            ),
+            self._create_active_student(
+                student_no="2025-GRP-002",
+                last_name="Grouped",
+                first_name="Two",
+            ),
+        ]
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        exam = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
+        exam.is_exam_component = True
+        exam.save(update_fields=["is_exam_component", "updated_at"])
+        quizzes = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="QUIZZES",
+            name="Quizzes",
+            weight_percentage=Decimal("50.00"),
+            sort_order=1,
+        )
+        participation = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="PARTICIPATION",
+            name="Participation/Output",
+            weight_percentage=Decimal("50.00"),
+            sort_order=2,
+        )
+        unused_subcomponent = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="UNUSED",
+            name="Unused Subcomponent",
+            weight_percentage=Decimal("0.00"),
+            sort_order=3,
+        )
+        unused_detail = GradingTemplateDetail.objects.create(
+            template_subcomponent=unused_subcomponent,
+            code="UNUSED_DETAIL",
+            name="Unused Detail",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        recitation = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="RECITATION",
+            name="Recitation",
+            weight_percentage=Decimal("50.00"),
+            sort_order=1,
+        )
+        assignment = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="ASSIGNMENT",
+            name="Assignment",
+            weight_percentage=Decimal("50.00"),
+            sort_order=2,
+        )
+        q2 = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            template_subcomponent=quizzes,
+            title="Q2",
+            total_score=Decimal("10.00"),
+            activity_date=date(2025, 6, 2),
+        )
+        q1 = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            template_subcomponent=quizzes,
+            title="Q1",
+            total_score=Decimal("10.00"),
+            activity_date=date(2025, 6, 1),
+        )
+        r1 = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            template_subcomponent=participation,
+            template_detail=recitation,
+            title="R1",
+            total_score=Decimal("10.00"),
+            activity_date=date(2025, 6, 3),
+        )
+        a1 = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            template_subcomponent=participation,
+            template_detail=assignment,
+            title="A1",
+            total_score=Decimal("10.00"),
+            activity_date=date(2025, 6, 4),
+        )
+        pex = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=exam,
+            title="PEX",
+            total_score=Decimal("100.00"),
+            activity_date=date(2025, 6, 5),
+        )
+        StudentActivityScore.objects.create(activity=q1, student=students[0], raw_score=Decimal("0.00"))
+        StudentActivityScore.objects.create(activity=q1, student=students[1], raw_score=Decimal("8.00"))
+        StudentActivityScore.objects.create(activity=q2, student=students[0], raw_score=Decimal("7.00"))
+        return {
+            "quizzes": quizzes,
+            "participation": participation,
+            "recitation": recitation,
+            "assignment": assignment,
+            "unused_subcomponent": unused_subcomponent,
+            "unused_detail": unused_detail,
+            "activities": {"q1": q1, "q2": q2, "r1": r1, "a1": a1, "pex": pex},
+        }
+
     def _complete_final_clearance_for_offering(self, *, offering=None, student=None):
         offering = offering or self.offering
         student = student or self._create_active_student(
@@ -1946,7 +2075,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Faculty:")
         self.assertContains(response, "Course Code:")
         self.assertContains(response, "Course Title:")
-        self.assertContains(response, "Prelim Grade")
+        self.assertContains(response, '<th class="print-grade print-period-grade">PRELIM GRADE</th>', html=True)
 
     def test_class_tabulation_sheet_available_after_all_periods_are_submitted(self):
         self._accept_assignment()
@@ -2225,11 +2354,11 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "PRELIM Grade", count=1)
+        self.assertContains(response, '<th rowspan="4" class="metric-col metric-final">PRELIM GRADE</th>', html=True)
         self.assertNotContains(response, "Official computed grades are currently hidden by admin configuration.")
         table_html = response.content.decode().split('class="table table-hover mb-0 align-middle class-record-table"', 1)[1]
-        self.assertLess(table_html.index(">Status<"), table_html.index(">PRELIM Grade<"))
-        self.assertLess(table_html.index(">PRELIM Grade<"), table_html.index(">CLASS STANDING<"))
+        self.assertLess(table_html.index(">Status<"), table_html.index(">PRELIM GRADE<"))
+        self.assertLess(table_html.index(">PRELIM GRADE<"), table_html.index(">CLASS STANDING<"))
         student_row = table_html.split("2025-DEFAULT-001", 1)[1].split("</tr>", 1)[0]
         self.assertNotIn("status-active-label", student_row)
         self.assertNotIn(">ACTIVE<", student_row)
@@ -2249,7 +2378,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             )
         )
         self.assertEqual(explanation_response.status_code, 200)
-        self.assertContains(explanation_response, "Prelim Grade Summary")
+        self.assertContains(explanation_response, "PRELIM Grade Summary")
         self.assertContains(explanation_response, "Contribution to Period Grade")
         self.assertContains(explanation_response, "Class Standing Breakdown")
         self.assertContains(explanation_response, "Activity Details")
@@ -2288,7 +2417,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         )
         self.assertEqual(changed_setup_response.status_code, 200)
         self.assertContains(changed_setup_response, "Official Submitted Grade")
-        self.assertContains(changed_setup_response, "Official Prelim Grade")
+        self.assertContains(changed_setup_response, "Official PRELIM Grade")
         self.assertContains(changed_setup_response, "71.00")
         self.assertContains(changed_setup_response, "Current Grading Setup Check")
         self.assertContains(changed_setup_response, "Current setup calculation:")
@@ -2667,7 +2796,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "PRELIM Grade", count=1)
+        self.assertContains(response, '<th rowspan="4" class="metric-col metric-final">PRELIM GRADE</th>', html=True)
         self.assertContains(response, "Passed")
         self.assertContains(response, "Failed")
         self.assertContains(response, "93")
@@ -3162,7 +3291,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "PRELIM Grade", count=1)
+        self.assertContains(response, '<th rowspan="4" class="metric-col metric-final">PRELIM GRADE</th>', html=True)
         self.assertContains(response, "Periodic grades are visible for review")
         self.assertContains(response, "93")
         self.assertNotContains(response, "Print Periodic Grades")
@@ -5080,6 +5209,116 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             GradeSubmission.objects.filter(offering=self.offering, template_period=period).exists()
         )
 
+    def test_partial_recitation_scores_leave_unscored_students_blank_and_block_submission(self):
+        period, component, participation_output, recitation, _assignment = (
+            self._create_participation_output_readiness_period(
+                detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+            )
+        )
+        students = [
+            self._create_active_student(
+                student_no=f"2025-PARTIAL-{index:03d}",
+                last_name=f"Partial{index:03d}",
+                first_name="Recitation",
+            )
+            for index in range(1, 41)
+        ]
+        activity = self._create_participation_output_activity(
+            period=period,
+            component=component,
+            participation_output=participation_output,
+            detail=recitation,
+            title="July 6 Recitation",
+        )
+        activity.activity_date = date(2025, 7, 6)
+        activity.save(update_fields=["activity_date", "updated_at"])
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[
+                {"student_id": student.id, "raw_score": Decimal("80.00")}
+                for student in students[:10]
+            ],
+        )
+        self._accept_assignment()
+
+        self.assertEqual(
+            StudentActivityScore.objects.filter(activity=activity, is_active=True).count(),
+            10,
+        )
+        self.assertFalse(
+            StudentActivityScore.objects.filter(activity=activity, student=students[10], is_active=True).exists()
+        )
+
+        summary = FacultyGradingService.recompute_period_summary(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=period,
+        )
+        self.assertEqual(len(summary["rows"]), 40)
+        self.assertEqual(
+            StudentPeriodGrade.objects.filter(offering=self.offering, template_period=period).count(),
+            40,
+        )
+
+        blank_detail = FacultyGradingService.build_period_grade_detail_for_student(
+            offering=self.offering,
+            template_period=period,
+            student_id=students[10].id,
+            include_details=True,
+        )
+        activity_row = (
+            blank_detail["component_breakdown"][0]["subcomponents"][0]["details"][0]["activities"][0]
+        )
+        self.assertIsNone(activity_row["raw_score"])
+        self.assertIsNone(activity_row["computed_score"])
+        self.assertTrue(activity_row["missing"])
+
+        readiness = GradingGovernanceService.evaluate_submission_readiness(
+            offering=self.offering,
+            template_period=period,
+        )
+        self.assertEqual(readiness["eligible_student_count"], 40)
+        self.assertEqual(readiness["students_with_any_grade"], 10)
+        self.assertEqual(readiness["students_missing_any_grade"], 30)
+        self.assertEqual(readiness["students_with_complete_records"], 10)
+        self.assertEqual(readiness["coverage_percent"], Decimal("25.00"))
+        self.assertEqual(readiness["missing_template_bucket_count"], 0)
+        self.assertEqual(readiness["expected_activity_count"], 1)
+        self.assertEqual(
+            sum(row["missing_activity_records"] for row in readiness["missing_students"]),
+            30,
+        )
+
+        self.client.force_login(self.faculty_user)
+        summary_response = self.client.get(
+            reverse("faculty_portal:period_summary", args=[self.offering.id, period.id])
+        )
+        self.assertEqual(summary_response.status_code, 200)
+        self.assertContains(
+            summary_response,
+            "Submission is blocked because some ACTIVE students still do not have a saved score or attendance row for every required item.",
+        )
+        self.assertEqual(summary_response.context["submit_readiness"]["students_missing_any_grade"], 30)
+
+        submit_response = self.client.post(
+            reverse(
+                "faculty_portal:period_submit",
+                kwargs={"offering_id": self.offering.id, "period_id": period.id},
+            ),
+            {"confirm_submit": "1"},
+            follow=True,
+        )
+
+        self.assertEqual(submit_response.status_code, 200)
+        self.assertContains(
+            submit_response,
+            "Submission blocked: some ACTIVE students still have blank required grade or attendance records.",
+        )
+        self.assertFalse(
+            GradeSubmission.objects.filter(offering=self.offering, template_period=period).exists()
+        )
+
     def test_submission_readiness_is_read_only(self):
         period, component, participation_output, recitation, _assignment = (
             self._create_participation_output_readiness_period(
@@ -5383,6 +5622,138 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             response,
             reverse("faculty_portal:period_view_history", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id}),
         )
+
+    def test_period_activities_grouped_view_is_default_and_uses_template_hierarchy(self):
+        self._create_period_activity_grouping_fixture()
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_activities",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["activity_view_mode"], "grouped")
+        groups = response.context["activity_groups"]
+        self.assertEqual([group["component"].name for group in groups], ["Class Standing", "Prelim Exam"])
+        class_standing_group = groups[0]
+        exam_group = groups[1]
+        self.assertEqual(class_standing_group["activity_count"], 4)
+        self.assertEqual(class_standing_group["encoded_count"], 3)
+        self.assertEqual(class_standing_group["expected_count"], 8)
+        self.assertEqual(exam_group["activities"][0].title, "PEX")
+        self.assertEqual([group["subcomponent"].name for group in class_standing_group["subcomponent_groups"]], ["Quizzes", "Participation/Output"])
+        quizzes_group = class_standing_group["subcomponent_groups"][0]
+        participation_group = class_standing_group["subcomponent_groups"][1]
+        self.assertEqual([activity.title for activity in quizzes_group["activities"]], ["Q1", "Q2"])
+        self.assertEqual([group["detail"].name for group in participation_group["detail_groups"]], ["Recitation", "Assignment"])
+        self.assertEqual(participation_group["detail_groups"][0]["activities"][0].title, "R1")
+        self.assertEqual(participation_group["detail_groups"][1]["activities"][0].title, "A1")
+        self.assertContains(response, "4 activities | 3/8 scores encoded")
+        self.assertContains(response, "1 activity | 0/2 scores encoded")
+        self.assertContains(response, 'data-bs-toggle="collapse"', html=False)
+        self.assertContains(response, 'aria-expanded="true"', html=False)
+        self.assertContains(response, 'aria-controls="activity-component-', html=False)
+        self.assertContains(response, "activity-group-toggle")
+        self.assertContains(response, "activity-group-table")
+        rendered_subcomponent_names = [
+            subcomponent_group["subcomponent"].name
+            for group in groups
+            for subcomponent_group in group["subcomponent_groups"]
+        ]
+        rendered_detail_names = [
+            detail_group["detail"].name
+            for group in groups
+            for subcomponent_group in group["subcomponent_groups"]
+            for detail_group in subcomponent_group["detail_groups"]
+        ]
+        self.assertNotIn("Unused Subcomponent", rendered_subcomponent_names)
+        self.assertNotIn("Unused Detail", rendered_detail_names)
+        self.assertNotContains(response, "<th>Component</th>", html=False)
+        self.assertNotContains(response, "<th>Subcomponent</th>", html=False)
+        self.assertNotContains(response, "<th>Detail</th>", html=False)
+
+    def test_period_activities_flat_view_keeps_hierarchy_columns_and_legacy_order(self):
+        self._create_period_activity_grouping_fixture()
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_activities",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+            + "?view=flat"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["activity_view_mode"], "flat")
+        self.assertContains(response, "<th>Component</th>", html=False)
+        self.assertContains(response, "<th>Subcomponent</th>", html=False)
+        self.assertContains(response, "<th>Detail</th>", html=False)
+        self.assertContains(response, "activity-taxonomy-component-standing")
+        self.assertContains(response, "activity-taxonomy-detail-standing")
+        self.assertEqual([row.title for row in response.context["activities"][:3]], ["PEX", "A1", "R1"])
+
+    def test_period_activities_invalid_view_falls_back_and_drops_unsafe_next(self):
+        self._create_period_activity_grouping_fixture()
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_activities",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+            + "?view=calendar&next=https://evil.example/bad"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["activity_view_mode"], "grouped")
+        self.assertNotContains(response, "https://evil.example/bad")
+        self.assertContains(response, "view=flat")
+
+    def test_period_activities_empty_grouped_view_shows_empty_state(self):
+        self._accept_assignment()
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_activities",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["activity_groups"], [])
+        self.assertContains(response, "No activities yet.")
+
+    def test_period_activities_grouped_view_preserves_submitted_view_only_state(self):
+        self._create_period_activity_grouping_fixture()
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_activities",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This period is already submitted. Editing is disabled.")
+        self.assertContains(response, "Encode Scores")
+        self.assertNotContains(response, "Save Activity")
+        self.assertNotContains(response, "Edit Q1")
+        self.assertNotContains(response, "Delete Q1")
 
     def test_period_activities_exposes_score_entry_method_guidance_data(self):
         self._accept_assignment()

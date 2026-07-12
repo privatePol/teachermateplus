@@ -1,11 +1,72 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-07-11
+Last updated by Codex: 2026-07-12
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+- Date: 2026-07-12
+- Current pass: investigated current Faculty Portal blank recitation/activity score behavior for Grade Summary and submission; no production behavior change, migration, commit, or push.
+- Completed work: traced score entry, score storage, summary recompute, readiness evaluation, Grade Summary blocking UI, and period submission blocking for the scenario where 40 ACTIVE students have one July 6 Recitation activity, 10 saved scores, and 30 unsaved/blank scores.
+- Completed work: added a focused characterization test proving current behavior: 10 active `StudentActivityScore` rows are saved, the other 30 students remain without score rows, Grade Summary readiness reports 30 missing students and 25.00% coverage, and period submission is blocked.
+- Key finding: saved raw score `0` is treated as a valid encoded score and is not missing; a truly blank score means no active `StudentActivityScore` row exists, including after a score is cleared or when a student was never saved for that activity.
+- Changed files in this pass: `apps/faculty_portal/tests_assignment_acceptance.py`, `HANDOFF.md`.
+- Validation performed: focused 40-student characterization test passed; related blank-vs-zero/readiness slice passed with 4 tests; `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: no browser smoke was run; current report is code/test-backed. Existing unrelated dirty files remain in the worktree, including prior Faculty Activities visual/grouping files and `logs/system.log`.
+- Exact next step: if a behavior change is desired later, decide explicitly whether blank visible inputs should stay blank/no-row instead of being converted to saved zero during score-entry POST.
+
+- Date: 2026-07-11
+- Current pass: changed Faculty Portal Activities detail-group header color from violet to yellow/gold; no commit or push.
+- Completed work: updated `templates/faculty_portal/period_activities.html` so Detail-level group headers use a darker yellow/gold gradient and matching border instead of violet. Component and subcomponent header colors remain unchanged. This is CSS-only; no behavior, calculations, URLs, permissions, or score data changed.
+- Changed files in this pass: `templates/faculty_portal/period_activities.html`, `HANDOFF.md`.
+- Validation performed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_activities_grouped_view_is_default_and_uses_template_hierarchy` passed; `python manage.py check` passed; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: browser visual smoke is still recommended to confirm the yellow/gold detail headers look balanced against the green component/subcomponent headers. `logs/system.log` remains unrelated/unmanaged.
+- Exact next step: open a real grouped Activities page and confirm detail headers such as Recitation/Assignment/Others now use the preferred yellow/gold color.
+
+- Date: 2026-07-11
+- Current pass: made Faculty Portal Activities grouped-header gradients more prominent; no commit or push.
+- Completed work: darkened the component, subcomponent, and detail header gradient backgrounds and strengthened borders in `templates/faculty_portal/period_activities.html` so the grouped hierarchy is easier to distinguish. This is CSS-only; no behavior, calculations, URLs, permissions, or score data changed.
+- Changed files in this pass: `templates/faculty_portal/period_activities.html`, `HANDOFF.md`.
+- Validation performed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_activities_grouped_view_is_default_and_uses_template_hierarchy` passed; `python manage.py check` passed; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: browser visual smoke is still recommended to verify the darker gradients look balanced on the real page and on mobile. `logs/system.log` remains unrelated/unmanaged.
+- Exact next step: open a real grouped Activities page and confirm the gradient is now prominent enough for Component, Subcomponent, and Detail headers.
+
+- Date: 2026-07-11
+- Current pass: increased top-level Faculty Portal Activities component header font size; no commit or push.
+- Completed work: updated `templates/faculty_portal/period_activities.html` so only top-level Component group titles, such as Class Standing and Prelim Exam, render larger than subcomponent/detail labels. This is CSS-only and leaves grouping, actions, grades, permissions, and score data untouched.
+- Changed files in this pass: `templates/faculty_portal/period_activities.html`, `HANDOFF.md`.
+- Validation performed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_activities_grouped_view_is_default_and_uses_template_hierarchy` passed; `python manage.py check` passed; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: browser visual smoke is still recommended to confirm the larger component headers look balanced with the grouped gradients on desktop and mobile. `logs/system.log` remains unrelated/unmanaged.
+- Exact next step: open a real grouped Activities page and confirm Class Standing / Prelim Exam are now prominent enough without making the nested labels feel cramped.
+
+- Date: 2026-07-11
+- Current pass: darkened Faculty Portal Activities grouped headers again and added subtle gradients; no commit or push.
+- Completed work: updated `templates/faculty_portal/period_activities.html` so component, subcomponent, and detail group headers use slightly darker gradient backgrounds with stronger borders for clearer hierarchy scanning. This remains a CSS-only visual adjustment.
+- Changed files in this pass: `templates/faculty_portal/period_activities.html`, `HANDOFF.md`.
+- Validation performed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_activities_grouped_view_is_default_and_uses_template_hierarchy` passed; `python manage.py check` passed; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: browser visual smoke is still recommended to confirm the gradient strength feels right on the real Faculty Activities page and on mobile. `logs/system.log` remains unrelated/unmanaged.
+- Exact next step: open a real grouped Activities page and adjust the gradient intensity only if the headers still do not separate clearly enough.
+
+- Date: 2026-07-11
+- Current pass: tightened Faculty Portal Activities grouped-header coloring so hierarchy levels are easier to distinguish; no commit or push.
+- Completed work: darkened the grouped Activities section headers in `templates/faculty_portal/period_activities.html`: component headers now use a deeper green, subcomponent headers a slightly lighter green, and detail headers a muted violet with matching borders. No grouping logic, URLs, actions, grade calculations, permissions, or score data behavior changed.
+- Changed files in this pass: `templates/faculty_portal/period_activities.html`, `HANDOFF.md`.
+- Validation performed: `python manage.py test apps.faculty_portal.tests_assignment_acceptance.FacultyAssignmentAcceptanceTests.test_period_activities_grouped_view_is_default_and_uses_template_hierarchy` passed; `python manage.py check` passed; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: browser visual smoke is still recommended to confirm the darker hierarchy headers look right on desktop and mobile. `logs/system.log` remains unrelated/unmanaged.
+- Exact next step: open a real Faculty Activities page with component/subcomponent/detail groups and confirm the darker headers improve scanability without feeling too heavy.
+
+- Date: 2026-07-11
+- Current pass: implemented grouped Faculty Portal Activities view for `/faculty/my-courses/<offering_id>/periods/<period_id>/activities/`; no commit or push.
+- Completed work: replaced the default flat mixed activity list with grouped, Bootstrap-collapsible Component -> Subcomponent -> Detail sections. Component, subcomponent, and detail groups are expanded by default, use real `button` controls with `aria-expanded`/`aria-controls`, hide empty hierarchy branches, and show activity count plus encoded/expected score progress.
+- Completed work: preserved the old hierarchy-column table under `?view=flat`, validated unknown view values back to grouped, preserved safe local `next` values, and dropped unsafe external `next` values from generated activity/view links.
+- Completed work: kept grouping presentation-only. Grade calculations, activity IDs, score records, ownership, create/edit/delete/score URLs, CSRF, period lock/submission/GradeEncodingControl gates, and active-student/encoded-count meanings stay on existing service/query paths.
+- Completed work: grouped view uses configured template order for components/subcomponents/details and oldest activity date then title/id within each leaf group; Flat View keeps the legacy newest-first activity list.
+- Changed files: `apps/faculty_portal/views.py`, `templates/faculty_portal/period_activities.html`, `templates/faculty_portal/partials/activity_row_actions.html`, `apps/faculty_portal/tests_assignment_acceptance.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: focused grouped/flat/view-state tests passed with 5 tests; `python manage.py test apps.faculty_portal.tests_activity_creation_selection` passed with 12 tests; `python manage.py test apps.faculty_portal.tests_grade_encoding_control` passed with 3 tests; targeted legacy page tests for quick jump and average-detail weight hiding passed with 2 tests; `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: browser smoke is still recommended for grouped collapse/expand, keyboard navigation, desktop/mobile readability, Flat View switching, safe `next` behavior, submitted/view-only periods, and score-entry/edit/delete links on real activity data. `logs/system.log` remains unrelated/unmanaged.
+- Exact next step: browser-smoke a class with Quizzes Q1-Q5, Participation/Output -> Recitation/Assignment/Others, and Prelim Exam; confirm counts/progress, collapse controls, Flat View, mobile width, submitted-period read-only behavior, and action links.
+
 - Date: 2026-07-11
 - Current pass: final focused review and test hardening for the lightweight Faculty Feedback implementation; no new feature behavior, commit, or push.
 - Completed work: expanded Faculty Feedback tests for cooldown scope, malformed/external/admin page-path sanitization, blank/unknown route fallback, audit metadata safety, and migration-directory source-file hygiene.

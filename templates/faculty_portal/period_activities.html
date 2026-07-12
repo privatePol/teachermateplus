@@ -25,6 +25,87 @@
   .activities-table thead th {
     white-space: nowrap;
   }
+  .activity-list-toolbar {
+    gap: 0.75rem;
+  }
+  .activity-view-switch .btn {
+    min-width: 5.75rem;
+  }
+  .activity-groups {
+    display: grid;
+    gap: 0.85rem;
+  }
+  .activity-group {
+    border: 1px solid rgba(24, 72, 48, 0.46);
+    border-radius: 0.45rem;
+    background: #fff;
+    overflow: hidden;
+  }
+  .activity-group-toggle {
+    width: 100%;
+    border: 0;
+    background: linear-gradient(135deg, #8fbd99 0%, #c1dcc8 100%);
+    color: #0f2d1b;
+    text-align: left;
+    padding: 0.85rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .activity-group-toggle:focus-visible {
+    outline: 0.2rem solid rgba(13, 110, 253, 0.35);
+    outline-offset: -0.2rem;
+  }
+  .activity-group-toggle .activity-group-title {
+    font-weight: 700;
+    min-width: 0;
+  }
+  .activity-group > h3 .activity-group-title {
+    font-size: 1.12rem;
+    line-height: 1.25;
+  }
+  .activity-group-toggle .activity-group-meta {
+    color: #294c35;
+    font-size: 0.85rem;
+    white-space: normal;
+  }
+  .activity-group-chevron {
+    flex: 0 0 auto;
+    transition: transform 0.15s ease-in-out;
+  }
+  .activity-group-toggle[aria-expanded="true"] .activity-group-chevron {
+    transform: rotate(90deg);
+  }
+  .activity-subgroup {
+    margin: 0.75rem;
+    border: 1px solid rgba(13, 110, 82, 0.42);
+    border-radius: 0.4rem;
+    overflow: hidden;
+  }
+  .activity-subgroup .activity-group-toggle {
+    background: linear-gradient(135deg, #84bca7 0%, #bddbd0 100%);
+    padding: 0.7rem 0.85rem;
+  }
+  .activity-detail-group {
+    margin: 0.75rem;
+    border: 1px solid rgba(154, 111, 0, 0.4);
+    border-radius: 0.35rem;
+    overflow: hidden;
+  }
+  .activity-detail-group .activity-group-toggle {
+    background: linear-gradient(135deg, #d6a933 0%, #f0d97a 100%);
+    padding: 0.6rem 0.75rem;
+  }
+  .activity-group-body {
+    background: #fff;
+  }
+  .activity-group-table {
+    margin-bottom: 0;
+  }
+  .activity-group-table th {
+    white-space: nowrap;
+  }
   .activities-table .activity-title-cell {
     white-space: normal;
     min-width: 220px;
@@ -123,6 +204,23 @@
     }
     .activity-table-shell {
       margin-inline: -0.25rem;
+    }
+    .activity-list-toolbar {
+      align-items: stretch !important;
+    }
+    .activity-view-switch {
+      width: 100%;
+    }
+    .activity-view-switch .btn {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+    .activity-group-toggle {
+      align-items: flex-start;
+    }
+    .activity-subgroup,
+    .activity-detail-group {
+      margin: 0.5rem;
     }
     .activity-row-actions {
       flex-direction: column;
@@ -264,10 +362,18 @@
 {{ detail_option_data|json_script:"activity-detail-options" }}
 
 <div class="card border-0 shadow-sm">
-  <div class="card-header bg-white d-flex justify-content-between align-items-center">
-    <strong>Activities</strong>
-    <small class="text-muted">Active Students: {{ active_enrollment_count }}</small>
+  <div class="card-header bg-white d-flex justify-content-between align-items-center flex-wrap activity-list-toolbar">
+    <div>
+      <strong>Activities</strong>
+      <small class="text-muted d-block">Active Students: {{ active_enrollment_count }}</small>
+    </div>
+    <div class="btn-group btn-group-sm activity-view-switch" role="group" aria-label="Activity list view">
+      <a class="btn {% if activity_view_mode == 'grouped' %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ activity_grouped_view_url }}">Grouped View</a>
+      <a class="btn {% if activity_view_mode == 'flat' %}btn-primary{% else %}btn-outline-primary{% endif %}" href="{{ activity_flat_view_url }}">Flat View</a>
+    </div>
   </div>
+
+  {% if activity_view_mode == "flat" %}
   <div class="table-responsive activity-table-shell">
     <table class="table table-hover mb-0 activities-table">
       <thead>
@@ -328,43 +434,7 @@
           {% endif %}
           <td>{{ row.total_score }}</td>
           <td>{{ row.score_count }}</td>
-          <td class="text-end">
-            <div class="d-flex align-items-center justify-content-end activity-row-actions">
-              <a class="btn btn-sm btn-outline-primary activity-icon-btn" href="{% url 'faculty_portal:activity_scores' offering.id period.id row.id %}" title="Encode Scores" aria-label="Encode scores for {{ row.title }}">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 4h16v16H4z"></path>
-                  <path d="M8 8h8"></path>
-                  <path d="M8 12h3"></path>
-                  <path d="M14 12h2"></path>
-                  <path d="M8 16h2"></path>
-                  <path d="M13 16h3"></path>
-                </svg>
-                <span class="visually-hidden">Encode Scores</span>
-              </a>
-              {% if can_create_activity %}
-              <a class="btn btn-sm btn-outline-secondary activity-icon-btn" href="{% url 'faculty_portal:period_activity_edit' offering.id period.id row.id %}" title="Edit" aria-label="Edit {{ row.title }}">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path>
-                  <path d="M14 7l3 3"></path>
-                </svg>
-                <span class="visually-hidden">Edit</span>
-              </a>
-              <form method="post" action="{% url 'faculty_portal:period_activity_delete' offering.id period.id row.id %}" onsubmit="return confirm('Delete activity {{ row.title|escapejs }}? Existing encoded scores under this activity will be removed from computation.');">
-                {% csrf_token %}
-                <button type="submit" class="btn btn-sm btn-outline-danger activity-icon-btn" title="Delete" aria-label="Delete {{ row.title }}">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 7h16"></path>
-                    <path d="M10 11v6"></path>
-                    <path d="M14 11v6"></path>
-                    <path d="M6 7l1 13h10l1-13"></path>
-                    <path d="M9 7V4h6v3"></path>
-                  </svg>
-                  <span class="visually-hidden">Delete</span>
-                </button>
-              </form>
-              {% endif %}
-            </div>
-          </td>
+          <td class="text-end">{% include "faculty_portal/partials/activity_row_actions.html" %}</td>
         </tr>
       {% empty %}
         <tr><td colspan="{% if show_detail_weight_column %}9{% else %}8{% endif %}" class="text-center text-muted py-4">No activities yet.</td></tr>
@@ -372,6 +442,145 @@
       </tbody>
     </table>
   </div>
+  {% else %}
+  <div class="p-3">
+    {% if activity_groups %}
+    <div class="activity-groups">
+      {% for component_group in activity_groups %}
+      <section class="activity-group">
+        <h3 class="m-0 h6">
+          <button class="activity-group-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#{{ component_group.html_id }}" aria-expanded="true" aria-controls="{{ component_group.html_id }}">
+            <span>
+              <span class="activity-group-title">{{ component_group.component.name }}</span>
+              <span class="activity-group-meta d-block">
+                {{ component_group.activity_count }} activit{% if component_group.activity_count == 1 %}y{% else %}ies{% endif %} | {{ component_group.encoded_count }}/{{ component_group.expected_count }} scores encoded
+              </span>
+            </span>
+            <span class="activity-group-chevron" aria-hidden="true">&rsaquo;</span>
+          </button>
+        </h3>
+        <div id="{{ component_group.html_id }}" class="collapse show activity-group-body">
+          {% if component_group.activities %}
+          <div class="table-responsive activity-table-shell">
+            <table class="table table-hover activity-group-table activities-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th class="activity-title-cell">Title</th>
+                  <th>Total</th>
+                  <th>Encoded</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in component_group.activities %}
+                <tr>
+                  <td>{{ row.activity_date|default:"-" }}</td>
+                  <td class="activity-title-cell">{{ row.title }}</td>
+                  <td>{{ row.total_score }}</td>
+                  <td>{{ row.score_count }}</td>
+                  <td class="text-end">{% include "faculty_portal/partials/activity_row_actions.html" %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+
+          {% for subcomponent_group in component_group.subcomponent_groups %}
+          <section class="activity-subgroup">
+            <h4 class="m-0 h6">
+              <button class="activity-group-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#{{ subcomponent_group.html_id }}" aria-expanded="true" aria-controls="{{ subcomponent_group.html_id }}">
+                <span>
+                  <span class="activity-group-title">{{ subcomponent_group.subcomponent.name }}</span>
+                  <span class="activity-group-meta d-block">
+                    {{ subcomponent_group.activity_count }} activit{% if subcomponent_group.activity_count == 1 %}y{% else %}ies{% endif %} | {{ subcomponent_group.encoded_count }}/{{ subcomponent_group.expected_count }} scores encoded
+                  </span>
+                </span>
+                <span class="activity-group-chevron" aria-hidden="true">&rsaquo;</span>
+              </button>
+            </h4>
+            <div id="{{ subcomponent_group.html_id }}" class="collapse show activity-group-body">
+              {% if subcomponent_group.activities %}
+              <div class="table-responsive activity-table-shell">
+                <table class="table table-hover activity-group-table activities-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th class="activity-title-cell">Title</th>
+                      <th>Total</th>
+                      <th>Encoded</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in subcomponent_group.activities %}
+                    <tr>
+                      <td>{{ row.activity_date|default:"-" }}</td>
+                      <td class="activity-title-cell">{{ row.title }}</td>
+                      <td>{{ row.total_score }}</td>
+                      <td>{{ row.score_count }}</td>
+                      <td class="text-end">{% include "faculty_portal/partials/activity_row_actions.html" %}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% endif %}
+
+              {% for detail_group in subcomponent_group.detail_groups %}
+              <section class="activity-detail-group">
+                <h5 class="m-0 h6">
+                  <button class="activity-group-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#{{ detail_group.html_id }}" aria-expanded="true" aria-controls="{{ detail_group.html_id }}">
+                    <span>
+                      <span class="activity-group-title">{{ detail_group.detail.name }}</span>
+                      <span class="activity-group-meta d-block">
+                        {{ detail_group.activity_count }} activit{% if detail_group.activity_count == 1 %}y{% else %}ies{% endif %} | {{ detail_group.encoded_count }}/{{ detail_group.expected_count }} scores encoded
+                      </span>
+                    </span>
+                    <span class="activity-group-chevron" aria-hidden="true">&rsaquo;</span>
+                  </button>
+                </h5>
+                <div id="{{ detail_group.html_id }}" class="collapse show activity-group-body">
+                  <div class="table-responsive activity-table-shell">
+                    <table class="table table-hover activity-group-table activities-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th class="activity-title-cell">Title</th>
+                          <th>Total</th>
+                          <th>Encoded</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for row in detail_group.activities %}
+                        <tr>
+                          <td>{{ row.activity_date|default:"-" }}</td>
+                          <td class="activity-title-cell">{{ row.title }}</td>
+                          <td>{{ row.total_score }}</td>
+                          <td>{{ row.score_count }}</td>
+                          <td class="text-end">{% include "faculty_portal/partials/activity_row_actions.html" %}</td>
+                        </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+              {% endfor %}
+            </div>
+          </section>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-4">No activities yet.</div>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 
