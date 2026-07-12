@@ -7,6 +7,26 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-07-12
+- Current pass: fixed Faculty Grade Book Monitor exam/grade header alignment; no computation, migration, data modification, commit, or push.
+- Root cause: the shared summary layout correctly included a nested subcomponent-average column in each nested section `colspan`, but Faculty Grade Book Monitor did not render that column. CLASS STANDING therefore declared one more column than its lower headers/body and shifted Exam, Period Grade, and Actions headers to the right. Keeping Explain inside the grade cell also made the visual mismatch harder to read.
+- Completed work: rendered the missing nested subcomponent-average header, highest-score, and student-value cells; added a dedicated Actions column; moved period/final Explain controls into it; increased the empty-table colspan; and centered metric values with a consistent minimum width for exam/grade columns. Header and body cell counts now match.
+- Changed files: `templates/admin_portal/academics/faculty_gradebook_monitor.html`, `apps/admin_portal/views.py`, `apps/admin_portal/tests_scope.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: the masked and authorized-identity Faculty Grade Book Monitor tests passed with 2 tests using a realistic nested Participation/Output plus PRELIM EXAM fixture; regression assertions confirm P/O AVE, PRELIM EXAM, PRELIM Grade, dedicated Actions cells, separated Explain control, and exact equality between the expanded top-header column count and the rendered student-row cell count. `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `git diff --check` passed with line-ending warnings only. An initial command used the wrong test-method suffix and reported the correct available name; the exact tests were then rerun successfully.
+- Pending work / risk: browser visual smoke remains recommended for PRELIM, MIDTERM, PREFINAL, and final-period tables at desktop and narrow widths.
+- Exact next step: open each grading period in Faculty Grade Book Monitor and confirm every exam/grade header sits directly above its numeric values while Explain buttons remain in Actions.
+
+- Date: 2026-07-12
+- Current pass: documented the completed manual staging and production RBAC permission-inventory repair; documentation only, with no migration, seed, application-code, database, commit, or push action in this pass.
+- Repair recorded: development had 125 permission definitions while staging and production had 119 rows even though the defining migrations were already recorded as applied. Six existing definitions were manually created through the Django ORM: `faculty_final_clearance.read`, `gradebook.view_student_identity`, `inactive_records.delete`, `student_account_links.manage`, `student_portal.access`, and `students.import`.
+- Staging result: database `teachermateplus_staging_db`; created permission IDs 120-125; 125 total and 125 active permissions; Role Permissions page confirmed 125 available permissions. Pre-repair backup: `/tmp/staging_rbac_before_permission_repair_20260712_133554.json`.
+- Production result: database `teachermateplus`; created permission IDs 120-125; 125 total and 125 active permissions. Pre-repair backup: `/tmp/production_rbac_before_permission_repair_20260712_134042.json`.
+- Repair boundaries: no source code changed during the database repair; no migration was rolled back, faked, rerun, or newly created; no full seed command or Gunicorn restart occurred; existing role-permission assignments were not changed automatically. The six definitions can now be granted normally through Role Permissions.
+- Changed files in this documentation pass: `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `git diff --check` passed with line-ending warnings only; the documentation diff contains the six expected permission codes, both backup paths, both deployed database results, and the no-migration/no-seed/no-role-assignment boundaries. No migration file appears in the changed-file list.
+- Pending work / risk: the historical cause of the drift remains intentionally unresolved. Role owners must decide which roles, if any, should receive the six repaired permission definitions.
+- Exact next step: review the normal Role Permissions page and grant only the newly available permissions each role genuinely requires.
+
+- Date: 2026-07-12
 - Current pass: simplified only the Admin Portal Active Course Offerings table; no migration, data modification, commit, or push.
 - Completed work: removed the Campus and Term columns from the active table and ordered the replacement presentation exactly as Course, Section, Schedule Text, and Room; blank schedules retain the `-` fallback. The inactive table and all existing campus/academic-year/term filters remain unchanged.
 - Changed files: `templates/admin_portal/academics/offering_table.html`, `apps/admin_portal/tests_department_dropdown_labels.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.

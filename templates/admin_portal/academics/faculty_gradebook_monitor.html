@@ -141,10 +141,17 @@
   .class-record-table .metric-col {
     background: #f1f6f1;
     font-weight: 700;
+    text-align: center;
   }
   .class-record-table .metric-col.metric-final {
     background: #f7efd0;
     color: #4f441a;
+    min-width: 118px;
+  }
+  .class-record-table .grade-actions-col {
+    min-width: 112px;
+    background: #ffffff;
+    text-align: center;
   }
   .class-record-table .perfect-score-row td {
     background: #f9fbf8;
@@ -328,6 +335,7 @@
                 {% if is_final_period_view %}
                 <th rowspan="4" class="metric-col metric-final">FINAL Grade</th>
                 {% endif %}
+                <th rowspan="4" class="grade-actions-col">Actions</th>
               </tr>
               <tr>
                 {% for block in summary_layout.class_standing_blocks %}
@@ -344,6 +352,7 @@
                       {% for group in section.groups %}
                         <th colspan="{{ group.colspan }}" class="band-subsection">{{ group.label }}</th>
                       {% endfor %}
+                      <th class="metric-col"></th>
                     {% else %}
                       <th colspan="{{ section.colspan }}" class="band-subsection"></th>
                     {% endif %}
@@ -361,6 +370,7 @@
                         {% endfor %}
                         <th class="metric-col">{{ group.avg_label }}</th>
                       {% endfor %}
+                      <th class="metric-col">{{ section.avg_label }}</th>
                     {% else %}
                       {% for column in section.activity_columns %}
                         <th>{{ column.label }}</th>
@@ -387,6 +397,7 @@
                         {% endfor %}
                         <td class="metric-col"></td>
                       {% endfor %}
+                      <td class="metric-col"></td>
                     {% else %}
                       {% for column in section.activity_columns %}
                         <td>{{ column.total_score|default:"" }}</td>
@@ -407,6 +418,7 @@
                 {% if is_final_period_view %}
                 <td class="metric-col metric-final"></td>
                 {% endif %}
+                <td class="grade-actions-col"></td>
               </tr>
               {% for row in rows %}
                 <tr>
@@ -423,13 +435,14 @@
                   {% for block in row.class_standing_blocks %}
                     {% for section in block.sections %}
                       {% if section.uses_nested %}
-                        {% for group in section.groups %}
-                          {% for value in group.activity_values %}
-                            <td>{{ value|default:"" }}</td>
-                          {% endfor %}
-                          <td class="metric-col">{{ group.average|default:"" }}</td>
+                      {% for group in section.groups %}
+                        {% for value in group.activity_values %}
+                          <td>{{ value|default:"" }}</td>
                         {% endfor %}
-                      {% else %}
+                        <td class="metric-col">{{ group.average|default:"" }}</td>
+                      {% endfor %}
+                      <td class="metric-col">{{ section.average|default:"" }}</td>
+                    {% else %}
                         {% for value in section.activity_values %}
                           <td>{{ value|default:"" }}</td>
                         {% endfor %}
@@ -443,18 +456,22 @@
                   {% endfor %}
                   <td class="metric-col metric-final">
                     <strong>{{ row.period_grade|default:"" }}</strong>
-                    {% if row.period_explain_url %}
-                    <button type="button" class="btn btn-sm grade-explain-btn ms-1" data-grade-explain-url="{{ row.period_explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
-                    {% endif %}
                   </td>
                   {% if is_final_period_view %}
                   <td class="metric-col metric-final">
                     <strong>{{ row.final_grade|default:"" }}</strong>
-                    {% if row.final_explain_url %}
-                    <button type="button" class="btn btn-sm grade-explain-btn ms-1" data-grade-explain-url="{{ row.final_explain_url }}" aria-label="Explain final grade">&#128269; Explain</button>
-                    {% endif %}
                   </td>
                   {% endif %}
+                  <td class="grade-actions-col">
+                    <div class="d-flex flex-column gap-1 align-items-center">
+                      {% if row.period_explain_url %}
+                      <button type="button" class="btn btn-sm grade-explain-btn" data-grade-explain-url="{{ row.period_explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
+                      {% endif %}
+                      {% if is_final_period_view and row.final_explain_url %}
+                      <button type="button" class="btn btn-sm grade-explain-btn" data-grade-explain-url="{{ row.final_explain_url }}" aria-label="Explain final grade">&#128269; Explain Final</button>
+                      {% endif %}
+                    </div>
+                  </td>
                 </tr>
               {% empty %}
                 <tr>

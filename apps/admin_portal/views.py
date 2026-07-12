@@ -8317,7 +8317,7 @@ def faculty_gradebook_monitor_view(request):
     period_state = None
     submit_readiness = None
     selected_faculty_assignments = FacultyAssignment.objects.none()
-    table_colspan = 5
+    table_colspan = 6
     is_final_period_view = False
 
     if selected_faculty:
@@ -8494,6 +8494,7 @@ def faculty_gradebook_monitor_view(request):
                     + len(visible_exam_components)
                     + 1
                     + (1 if is_final_period_view else 0)
+                    + 1
                 )
                 AuditService.log_event(
                     action="READ",

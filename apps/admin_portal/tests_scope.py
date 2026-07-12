@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+import re
 
 from django.conf import settings
 from django.contrib.sessions.backends.db import SessionStore
@@ -34,7 +35,9 @@ from apps.grading.models import (
     GradeSubmissionReopenRequest,
     GradingTemplate,
     GradingTemplateComponent,
+    GradingTemplateDetail,
     GradingTemplatePeriod,
+    GradingTemplateSubcomponent,
     StudentActivityScore,
     StudentPeriodGrade,
 )
@@ -1016,11 +1019,32 @@ class FacultyMonitoringScopeTests(TestCase):
             sequence_no=1,
             weight_percentage=Decimal("100.00"),
         )
+        GradingTemplatePeriod.objects.create(
+            template=template,
+            code="MIDTERM",
+            name="Midterm",
+            sequence_no=2,
+            weight_percentage=Decimal("100.00"),
+        )
         class_standing = GradingTemplateComponent.objects.create(
             template_period=period,
             code="CS",
             name="Class Standing",
             weight_percentage=Decimal("60.00"),
+            sort_order=1,
+        )
+        participation = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="PART_OUTPUT",
+            name="Participation/Output",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        recitation = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="RECITATION",
+            name="Recitation",
+            weight_percentage=Decimal("100.00"),
             sort_order=1,
         )
         exam = GradingTemplateComponent.objects.create(
@@ -1029,6 +1053,7 @@ class FacultyMonitoringScopeTests(TestCase):
             name="Prelim Exam",
             weight_percentage=Decimal("40.00"),
             sort_order=2,
+            is_exam_component=True,
         )
         CourseTemplateAssignment.objects.create(course=self.course, grading_template=template)
 
@@ -1060,6 +1085,8 @@ class FacultyMonitoringScopeTests(TestCase):
             offering=self.offering,
             template_period=period,
             template_component=class_standing,
+            template_subcomponent=participation,
+            template_detail=recitation,
             title="Q1",
             total_score=Decimal("30.00"),
             created_by_user=self.faculty_user,
@@ -1118,6 +1145,22 @@ class FacultyMonitoringScopeTests(TestCase):
         self.assertIn("Masked Student Identity", content)
         self.assertIn("Active Students", content)
         self.assertIn("Pass Rate", content)
+        self.assertIn('<th rowspan="4" class="band-exam metric-col metric-final">PRELIM EXAM</th>', content)
+        self.assertIn('<th rowspan="4" class="metric-col metric-final">PRELIM Grade</th>', content)
+        self.assertIn('<th rowspan="4" class="grade-actions-col">Actions</th>', content)
+        self.assertIn("P/O AVE", content)
+        self.assertIn('class="grade-actions-col"', content)
+        self.assertIn('aria-label="Explain period grade"', content)
+        table_html = content.split('class="table table-hover mb-0 align-middle class-record-table"', 1)[1]
+        first_header_row = re.search(r"<thead>\s*<tr>(.*?)</tr>", table_html, flags=re.S).group(1)
+        header_column_count = 0
+        for header_tag in re.findall(r"<th\b[^>]*>", first_header_row):
+            colspan_match = re.search(r'colspan="(\d+)"', header_tag)
+            header_column_count += int(colspan_match.group(1)) if colspan_match else 1
+        body_rows = re.findall(r"<tbody>(.*?)</tbody>", table_html, flags=re.S)[0]
+        rendered_rows = re.findall(r"<tr[^>]*>(.*?)</tr>", body_rows, flags=re.S)
+        student_cell_count = len(re.findall(r"<td(?:\s|>)", rendered_rows[1]))
+        self.assertEqual(header_column_count, student_cell_count)
         self.assertIn(_mask_student_number(student.student_no), content)
         self.assertIn(_mask_student_name(student), content)
         self.assertNotIn(student.student_no, content)
