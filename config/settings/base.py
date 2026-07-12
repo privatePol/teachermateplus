@@ -17,6 +17,10 @@ def env_bool(name, default=False):
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "change-this-in-production")
 DEBUG = env_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if h.strip()]
+DJANGO_ADMIN_PATH = (
+    os.getenv("DJANGO_ADMIN_PATH", "django-admin").strip("/")
+    or "django-admin"
+)
 
 INSTALLED_APPS = [
     "django.contrib.admin",

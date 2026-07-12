@@ -4,7 +4,7 @@ from django.conf.urls.static import static
 from django.urls import include, path
 
 urlpatterns = [
-    path("django-admin/", admin.site.urls),
+    path(f"{settings.DJANGO_ADMIN_PATH}/", admin.site.urls),
     path("", include("apps.accounts.urls")),
     path("", include("apps.admin_portal.urls")),
     path("", include("apps.faculty_portal.urls")),
