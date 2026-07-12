@@ -251,7 +251,7 @@ class DepartmentDropdownLabelTests(TestCase):
         self.assertIn("NCBA-01 / COLLEGE", content)
         self.assertIn("NCBA-02 / COLLEGE", content)
 
-    def test_offering_list_columns_and_rows_are_ordered_by_campus_term_section_course(self):
+    def test_active_offering_list_uses_schedule_text_and_orders_rows_by_section_course(self):
         CourseOffering.objects.create(
             tenant=self.tenant,
             campus=self.fairview,
@@ -279,7 +279,10 @@ class DepartmentDropdownLabelTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode("utf-8")
-        self.assertLess(content.index("<th>Campus</th>"), content.index("<th>Term</th>"))
-        self.assertLess(content.index("<th>Term</th>"), content.index("<th>Section</th>"))
-        self.assertLess(content.index("<th>Section</th>"), content.index("<th>Course</th>"))
+        active_content = content.split("Inactive Course Offerings", 1)[0]
+        self.assertIn("<th>Schedule Text</th>", active_content)
+        self.assertNotIn("<th>Campus</th>", active_content)
+        self.assertNotIn("<th>Term</th>", active_content)
+        self.assertLess(active_content.index("<th>Schedule Text</th>"), active_content.index("<th>Section</th>"))
+        self.assertLess(active_content.index("<th>Section</th>"), active_content.index("<th>Course</th>"))
         self.assertLess(content.index("Accounting Basics"), content.index("Intro to IT"))

@@ -7,6 +7,14 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-07-12
+- Current pass: simplified only the Admin Portal Active Course Offerings table; no migration, data modification, commit, or push.
+- Completed work: removed the Campus and Term columns from the active table and added Schedule Text with `-` fallback. The inactive table and all existing campus/academic-year/term filters remain unchanged.
+- Changed files: `templates/admin_portal/academics/offering_table.html`, `apps/admin_portal/tests_department_dropdown_labels.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: focused Course Offering layout and Area Chairman visibility tests passed with 10 tests; `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: browser visual smoke remains recommended to confirm long Schedule Text values wrap acceptably on desktop and mobile.
+- Exact next step: open Admin Portal -> Academics -> Course Offerings and visually check active rows with short, long, and blank schedules.
+
+- Date: 2026-07-12
 - Current pass: expanded only the read-only Admin Course Offerings list for Area Chairmen to show same-campus sibling academic areas under the shared `COLLEGE` parent; no migration, commit, or push.
 - Completed work: added page-specific Area Chairman College-tree resolution so a BA chair can review BA, BSA, HM, IS, and LA offerings within the selected campus when those departments share the active `COLLEGE` parent.
 - Scope safety: Basic Education, Graduate Studies, other campuses, other tenants, inactive records, and non-College department trees remain excluded. The existing `scoped_course_offerings()` service remains department-limited for assignments, grading, corrections, enrollment, monitoring, and all other consumers. Offering create/update permissions and behavior are unchanged.
