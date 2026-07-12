@@ -1,17 +1,19 @@
 <div class="table-responsive">
   <table class="table table-hover mb-0">
-    <thead><tr>{% if show_inactive_tools %}<th>Campus</th><th>Term</th>{% else %}<th>Schedule Text</th>{% endif %}<th>Section</th><th>Course</th><th>Room/Office/Lab</th><th>Status</th><th>Record State</th>{% if show_inactive_tools %}<th>Used In</th>{% endif %}<th></th></tr></thead>
+    <thead><tr>{% if show_inactive_tools %}<th>Campus</th><th>Term</th><th>Section</th><th>Course</th>{% else %}<th>Course</th><th>Section</th><th>Schedule Text</th>{% endif %}<th>Room/Office/Lab</th><th>Status</th><th>Record State</th>{% if show_inactive_tools %}<th>Used In</th>{% endif %}<th></th></tr></thead>
     <tbody>
     {% for row in page_obj %}
       <tr>
         {% if show_inactive_tools %}
         <td>{{ row.campus.name|default:row.campus.code }}</td>
         <td>{{ row.term.name|default:row.term.code }}{% if row.academic_year %} ({{ row.academic_year.name|default:row.academic_year.code }}){% endif %}</td>
-        {% else %}
-        <td>{{ row.schedule_text|default:"-" }}</td>
-        {% endif %}
         <td>{{ row.section.name|default:row.section.code }}</td>
         <td>{{ row.course.title }} <span class="text-muted">({{ row.course.code }})</span></td>
+        {% else %}
+        <td>{{ row.course.title }} <span class="text-muted">({{ row.course.code }})</span></td>
+        <td>{{ row.section.name|default:row.section.code }}</td>
+        <td>{{ row.schedule_text|default:"-" }}</td>
+        {% endif %}
         <td>{{ row.room|default:"-" }}</td>
         <td><span class="badge text-bg-info">{{ row.status }}</span></td>
         <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>

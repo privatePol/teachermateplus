@@ -8,7 +8,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 ## Current Session Summary
 - Date: 2026-07-12
 - Current pass: simplified only the Admin Portal Active Course Offerings table; no migration, data modification, commit, or push.
-- Completed work: removed the Campus and Term columns from the active table and added Schedule Text with `-` fallback. The inactive table and all existing campus/academic-year/term filters remain unchanged.
+- Completed work: removed the Campus and Term columns from the active table and ordered the replacement presentation exactly as Course, Section, Schedule Text, and Room; blank schedules retain the `-` fallback. The inactive table and all existing campus/academic-year/term filters remain unchanged.
 - Changed files: `templates/admin_portal/academics/offering_table.html`, `apps/admin_portal/tests_department_dropdown_labels.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
 - Validation performed: focused Course Offering layout and Area Chairman visibility tests passed with 10 tests; `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `git diff --check` passed with line-ending warnings only.
 - Pending work / risk: browser visual smoke remains recommended to confirm long Schedule Text values wrap acceptably on desktop and mobile.
