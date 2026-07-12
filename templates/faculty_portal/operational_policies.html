@@ -1,0 +1,25 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Faculty Operational Policies | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<div class="container-fluid py-3" id="top">
+  <div class="card border-0 shadow-sm mb-3"><div class="card-body p-4">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3">
+      <div><div class="text-uppercase text-success fw-semibold small mb-1">Faculty Portal</div><h1 class="h3 mb-2">Faculty Operational Policies</h1><p class="text-muted mb-0">Simple rules faculty should observe while using TeacherMate+.</p></div>
+      <div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-success" href="{% url 'faculty_portal:guide' %}">Faculty Help Guide</a><a class="btn btn-outline-secondary" href="{% url 'faculty_portal:dashboard' %}">Back to Dashboard</a></div>
+    </div>
+  </div></div>
+  <div class="alert alert-warning" role="note"><strong>Current status:</strong> {{ policy_status }}</div>
+  <nav class="card border-0 shadow-sm mb-3" aria-label="Operational policy sections"><div class="card-body"><div class="fw-semibold mb-2">Jump to a section</div><div class="d-flex flex-wrap gap-2">
+    {% for section in policy_sections %}<a class="btn btn-sm btn-outline-success" href="#policy-{{ section.code }}">{{ section.title }}</a>{% endfor %}
+  </div></div></nav>
+  <div class="row g-3">
+    {% for section in policy_sections %}<div class="col-12" id="policy-{{ section.code }}"><section class="card border-0 shadow-sm">
+      <div class="card-header bg-success-subtle border-0 py-3"><h2 class="h5 mb-0">{{ forloop.counter }}. {{ section.title }}</h2></div>
+      <div class="card-body"><div class="row g-4">
+        <div class="col-lg-6"><h3 class="h6 text-success">Faculty must</h3><ul class="mb-0">{% for item in section.must %}<li class="mb-2">{{ item }}</li>{% endfor %}</ul></div>
+        <div class="col-lg-6"><h3 class="h6 text-danger">Faculty must not</h3><ul class="mb-0">{% for item in section.must_not %}<li class="mb-2">{{ item }}</li>{% endfor %}</ul></div>
+      </div>{% if section.note %}<div class="alert alert-info mt-3 mb-0"><strong>Important:</strong> {{ section.note }}</div>{% endif %}<div class="text-end mt-2"><a class="small" href="#top">Back to top</a></div></div>
+    </section></div>{% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -8000,7 +8000,7 @@ def section_update_view(request, section_id: int):
 @portal_required("ADMIN")
 @permission_required("offerings.read")
 def offering_list_view(request):
-    queryset = AdminScopeService.scoped_course_offerings(request)
+    queryset = AdminScopeService.scoped_course_offerings_for_list(request)
     if request.GET.get("campus_id"):
         queryset = queryset.filter(campus_id=request.GET.get("campus_id"))
     if request.GET.get("academic_year_id"):
@@ -8036,7 +8036,7 @@ def offering_list_view(request):
     context.update(_scope_context(request))
     context["academic_years"] = AdminScopeService.active_scoped_academic_years(request)
     context["terms"] = AdminScopeService.active_scoped_terms(request)
-    context["departments"] = AdminScopeService.active_scoped_departments(request)
+    context["departments"] = AdminScopeService.course_offering_list_departments(request)
     return render(request, "admin_portal/academics/offering_list.html", context)
 
 

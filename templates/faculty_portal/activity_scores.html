@@ -188,6 +188,11 @@
   {% endif %}
 </div>
 
+<div class="alert alert-info small d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+  <span><strong>Operational reminder:</strong> A saved zero is a recorded score. A blank or cleared score is missing and may block submission.</span>
+  <a class="alert-link text-nowrap" href="{% url 'faculty_portal:operational_policies' %}#policy-activities-scores-attendance" target="_blank" rel="noopener noreferrer">View policy</a>
+</div>
+
 {% if is_editable %}
 <div class="alert alert-secondary small">
   Enter a score only for students you want to record now. Leave the field blank to keep the student unencoded.

@@ -246,6 +246,105 @@ class AdminScopeService:
         return AdminScopeService._visible_queryset(request, queryset)
 
     @staticmethod
+    def _area_chair_college_department_ids(request):
+        """Return the current campus' active College tree for child-area AC roles."""
+        if request.user.is_superuser:
+            return []
+        tenant_id = getattr(request, "scope", {}).get("tenant_id")
+        campus_id = getattr(request, "scope", {}).get("campus_id")
+        if not tenant_id or not campus_id:
+            return []
+        parent_ids = list(
+            UserRole.objects.filter(
+                user=request.user,
+                is_active=True,
+                role__is_active=True,
+                role__code__in=AdminScopeService.AREA_CHAIR_ROLE_CODES,
+                department__is_active=True,
+                department__parent__is_active=True,
+                department__parent__code__iexact="COLLEGE",
+            )
+            .filter(models.Q(tenant_id=tenant_id) | models.Q(tenant__isnull=True))
+            .filter(models.Q(campus_id=campus_id) | models.Q(campus__isnull=True))
+            .filter(department__campus_id=campus_id, department__tenant_id=tenant_id)
+            .values_list("department__parent_id", flat=True)
+            .distinct()
+        )
+        if not parent_ids:
+            return []
+        return ScopeService.expand_department_ids(
+            parent_ids,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+        )
+
+    @staticmethod
+    def course_offering_list_departments(request):
+        college_department_ids = AdminScopeService._area_chair_college_department_ids(request)
+        if not college_department_ids:
+            return AdminScopeService.active_scoped_departments(request)
+        return (
+            Department.objects.filter(
+                id__in=college_department_ids,
+                is_active=True,
+                tenant__is_active=True,
+                campus__is_active=True,
+            )
+            .select_related("tenant", "campus", "parent")
+            .order_by("campus__code", "name")
+        )
+
+    @staticmethod
+    def scoped_course_offerings_for_list(request):
+        """Broaden only the read-only Offering list for child-area College AC roles."""
+        college_department_ids = AdminScopeService._area_chair_college_department_ids(request)
+        if not college_department_ids:
+            return AdminScopeService.scoped_course_offerings(request)
+
+        tenant_id = getattr(request, "scope", {}).get("tenant_id")
+        campus_id = getattr(request, "scope", {}).get("campus_id")
+        terms = AdminScopeService.active_scoped_terms(request).values_list("id", flat=True)
+        queryset = (
+            CourseOffering.objects.filter(
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                term_id__in=terms,
+                department_id__in=college_department_ids,
+                section__department_id__in=college_department_ids,
+                section__program__department_id__in=college_department_ids,
+            )
+            .filter(
+                department__is_active=True,
+                course__is_active=True,
+                section__is_active=True,
+                section__department__is_active=True,
+                section__program__is_active=True,
+                section__program__department__is_active=True,
+            )
+            .filter(
+                models.Q(program__isnull=True)
+                | models.Q(
+                    program__department_id__in=college_department_ids,
+                    program__is_active=True,
+                    program__department__is_active=True,
+                )
+            )
+            .filter(models.Q(course__department__isnull=True) | models.Q(course__department__is_active=True))
+            .select_related(
+                "tenant",
+                "campus",
+                "department",
+                "program",
+                "academic_year",
+                "term",
+                "course",
+                "section",
+            )
+            .order_by("-created_at")
+        )
+        return AdminScopeService._visible_queryset(request, queryset)
+
+    @staticmethod
     def scoped_faculty_assignments(request, *, include_all_campuses=False):
         tenants = list(AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True))
         faculty_ids_by_campus = AdminScopeService._faculty_ids_by_monitoring_campus(

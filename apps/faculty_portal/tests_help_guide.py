@@ -57,6 +57,8 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, reverse("faculty_portal:dashboard"))
         self.assertContains(response, "Full Guide Manual")
         self.assertContains(response, reverse("faculty_portal:guide_manual"))
+        self.assertContains(response, "Operational Policies")
+        self.assertContains(response, reverse("faculty_portal:operational_policies"))
         self.assertContains(response, "Semester Faculty Workflow")
         self.assertContains(response, "Daily Faculty Workflow")
         self.assertContains(response, "portal-img/semester_workflow.png")
@@ -112,6 +114,7 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "Parallel Section Comparison")
         self.assertContains(response, "Request Gradebook Reopen")
         self.assertContains(response, reverse("faculty_portal:guide"))
+        self.assertContains(response, reverse("faculty_portal:operational_policies"))
 
     def test_faculty_guide_can_restore_legacy_template(self):
         SystemSettingService.set(
@@ -129,3 +132,22 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "All created Participation/Output items are averaged equally.")
         self.assertContains(response, "A blank score remains missing.")
         self.assertNotContains(response, "Direct Percentage")
+        self.assertContains(response, reverse("faculty_portal:operational_policies"))
+
+    def test_faculty_operational_policies_are_scannable_and_protected(self):
+        response = self.client.get(reverse("faculty_portal:operational_policies"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "faculty_portal/operational_policies.html")
+        self.assertContains(response, "Faculty Operational Policies")
+        self.assertContains(response, "Faculty must")
+        self.assertContains(response, "Faculty must not")
+        self.assertContains(response, "A saved 0 is a recorded score")
+        self.assertContains(response, "final periodic grades are encoded separately in Pinnacle-AIMS")
+        self.assertContains(response, "Pinnacle-AIMS remains the official source for enrollment information")
+        self.assertContains(response, "does not replace the Registrar&#x27;s enrollment system", html=False)
+        self.assertContains(response, "Institutional academic, registrar, privacy, and records-management policies remain controlling")
+
+        self.client.logout()
+        protected_response = self.client.get(reverse("faculty_portal:operational_policies"))
+        self.assertNotEqual(protected_response.status_code, 200)

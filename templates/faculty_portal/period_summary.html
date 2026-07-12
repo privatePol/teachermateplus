@@ -711,6 +711,10 @@
           You are about to finalize and submit <strong>{{ period.name }}</strong>.
           Submitted periods are locked for normal editing.
         </p>
+        <p class="small text-muted">
+          Review the complete Summary before continuing. Final periodic grades must still be encoded separately in Pinnacle-AIMS through the institution's authorized procedure.
+          <a href="{% url 'faculty_portal:operational_policies' %}#policy-review-submission" target="_blank" rel="noopener noreferrer">View operational policy</a>.
+        </p>
         <ul class="small mb-0">
           <li>ACTIVE students: <strong>{{ submit_readiness.eligible_student_count }}</strong></li>
           <li>With complete records: <strong>{{ submit_readiness.students_with_complete_records }}</strong></li>

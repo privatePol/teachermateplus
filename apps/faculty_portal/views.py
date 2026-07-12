@@ -49,6 +49,10 @@ from apps.faculty_portal.services import (
 )
 from apps.faculty_portal.feedback import create_feedback_submission
 from apps.faculty_portal.help_guide import FACULTY_HELP_SECTIONS
+from apps.faculty_portal.operational_policies import (
+    FACULTY_OPERATIONAL_POLICY_SECTIONS,
+    FACULTY_OPERATIONAL_POLICY_STATUS,
+)
 from apps.grading.models import (
     CourseTemplateAssignment,
     DetailComputationMode,
@@ -245,6 +249,19 @@ def guide_view(request):
 @permission_required("faculty_portal.access")
 def guide_manual_view(request):
     return render(request, "faculty_portal/guide_manual.html")
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+def operational_policies_view(request):
+    return render(
+        request,
+        "faculty_portal/operational_policies.html",
+        {
+            "policy_sections": FACULTY_OPERATIONAL_POLICY_SECTIONS,
+            "policy_status": FACULTY_OPERATIONAL_POLICY_STATUS,
+        },
+    )
 
 
 @portal_required("FACULTY")

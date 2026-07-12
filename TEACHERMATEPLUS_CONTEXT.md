@@ -479,7 +479,10 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
   while keeping the original presentation flow unchanged.
 - Admin left navigation now places the `Tools` group after `Navigation`, and the seeded menu-group sort order has been aligned with that sidebar order.
 
+- The Admin Portal read-only Course Offerings list gives a child-area Area Chairman visibility across active sibling academic areas under the same campus-level `COLLEGE` parent. This is a page-specific orientation/coordination view: Basic Education, Graduate Studies, other campuses/tenants, offering create/update, and all existing assignment, grading, correction, enrollment, and monitoring scopes remain unchanged.
+
 ### Faculty Portal
+- Faculty Portal now includes an authenticated `Faculty Operational Policies` page under the Help Guide. It presents concise must/must-not rules for account security, assignments and rosters, activities/scores/attendance, review and submission, reopen/correction, reports and Pinnacle-AIMS, privacy, and proper system use. It states that final periodic grades must be encoded separately in Pinnacle-AIMS after TeacherMate+ processing and that Pinnacle-AIMS remains the official enrollment-information source; TeacherMate+ only reflects authorized enrollment changes. The page is informational pending institutional approval; it does not add mandatory acknowledgment, alter grade computation, or change existing workflow gates.
 - Public faculty index (`/faculty/`)
 - Faculty login/logout/password flows
 - Faculty login security now includes password complexity validation, forced password change, privacy consent flow, single-device session enforcement, and configurable temporary login lockout for repeated failed attempts.

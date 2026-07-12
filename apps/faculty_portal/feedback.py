@@ -30,6 +30,7 @@ FEATURES_BY_ROUTE = {
     "faculty_portal:student_performance_consultation": ("STUDENT_CONSULTATION", "Student Consultation"),
     "faculty_portal:guide": ("FACULTY_GUIDE", "Faculty Guide"),
     "faculty_portal:guide_manual": ("FACULTY_GUIDE", "Faculty Guide"),
+    "faculty_portal:operational_policies": ("FACULTY_GUIDE", "Faculty Guide"),
 }
 DEFAULT_FEATURE = ("OTHER_FACULTY_PORTAL_PAGE", "Other Faculty Portal Page")
 COOLDOWN_MINUTES = 5

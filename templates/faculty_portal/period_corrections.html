@@ -26,6 +26,10 @@
 {% endif %}
 
 {% if not is_correction_active %}
+<div class="alert alert-info small d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+  <span><strong>Operational reminder:</strong> Use Correction of Grades only for a genuine change to an already submitted grade. A pending request is not yet approved.</span>
+  <a class="alert-link text-nowrap" href="{% url 'faculty_portal:operational_policies' %}#policy-reopen-correction" target="_blank" rel="noopener noreferrer">View policy</a>
+</div>
 <div class="alert alert-info">
   Direct score correction petitions are automatically posted to the gradebook and recomputed by TeacherMate+ after approval.
   No manual re-encoding or finalize step is needed for that direct petition flow.

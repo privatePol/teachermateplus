@@ -84,6 +84,7 @@ ADMIN_HELP_SECTIONS = [
                     "Check for an existing record before creating another one.",
                     "Confirm the campus, academic year, term, department, and program.",
                     "For a scheduled class, confirm its course and section.",
+                    "Area Chairmen may review active Course Offerings across sibling academic areas under the same campus College division; this does not expand their authority on other pages.",
                 ],
                 "actions": [
                     {
