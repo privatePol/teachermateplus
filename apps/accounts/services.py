@@ -29,6 +29,7 @@ from apps.accounts.models import (
     UserSignatureUsageLog,
 )
 from apps.core.services.audit import AuditService
+from apps.core.services.client_ip import resolve_client_ip
 from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 from apps.core.services.features import FeatureSettingsService
 
@@ -377,7 +378,7 @@ class LoginLockoutService:
             state.window_started_at = now
         state.failed_attempt_count += 1
         state.last_failed_at = now
-        state.last_ip = request.META.get("REMOTE_ADDR") if request else None
+        state.last_ip = resolve_client_ip(request)
 
         just_locked = False
         if state.failed_attempt_count >= max_attempts:

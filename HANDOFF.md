@@ -7,6 +7,15 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-07-13
+- Current pass: implemented the trusted-proxy client-IP dependency and the narrowly scoped Login Lockout Monitor IP column; no migration, grade-engine, unrelated Admin Portal, commit, or push change.
+- Completed work: added `resolve_client_ip()` with explicit trusted-proxy IP/CIDR configuration, normalized IPv4/IPv6 output, right-to-left trusted proxy chain handling, untrusted-header rejection, and malformed-chain fail-closed behavior. Existing audit IP capture and failed-login `last_ip` storage now use the resolver. The Login Lockout Monitor uses the already-loaded `last_ip` field in a dedicated `IP Address` column immediately after `Last Failed`, shows `-` for null, and no longer repeats Last IP under Username.
+- Behavior boundaries: the page queryset/view, tenant/campus/permission scope, portal/status/search filters, unlock action, five-attempt/fifteen-minute defaults, retained-IP behavior after clear/expiry, and already-locked no-overwrite behavior remain unchanged. No forwarded-header chain or raw request metadata is rendered.
+- Changed files: `.env.example`, `config/settings/base.py`, `apps/core/services/client_ip.py`, `apps/core/services/audit.py`, `apps/core/tests_client_ip.py`, `apps/accounts/services.py`, `apps/accounts/tests_login_lockout.py`, `templates/admin_portal/security/login_lockout_list.html`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python manage.py test apps.core.tests_client_ip apps.accounts.tests_login_lockout apps.accounts.tests_login_otp` passed with 20 tests; `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: deployment must set `DJANGO_TRUSTED_PROXY_IPS` to only the actual reverse-proxy IPs/CIDRs; leaving it blank safely ignores forwarded headers but records the direct peer. Browser visual smoke remains recommended for the added table column at narrow widths.
+- Exact next step: configure the staging proxy allowlist, trigger a failed login through the real proxy, and confirm the normalized client address appears in Login Lockout Monitor without exposing the forwarded chain.
+
+- Date: 2026-07-13
 - Current pass: changed only the new-user onboarding email branding used by `/admin-portal/security/users/create/`; no other email, page, service, authentication, grading, migration, data, commit, or push change.
 - Completed work: replaced the conditional NCBA image/fallback block in `templates/admin_portal/emails/new_user_credentials.html` with the exact text header `NCBA | TeacherMate+`. All other onboarding content and the existing account-creation/email-sending workflow remain unchanged.
 - Changed files: `templates/admin_portal/emails/new_user_credentials.html`, `apps/admin_portal/tests_users.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.

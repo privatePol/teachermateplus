@@ -67,6 +67,7 @@
           <th>Failures</th>
           <th>Locked Until</th>
           <th>Last Failed</th>
+          <th>IP Address</th>
           <th>Status</th>
           <th></th>
         </tr>
@@ -76,9 +77,6 @@
         <tr>
           <td>
             <div class="fw-semibold">{{ row.username }}</div>
-            {% if row.last_ip %}
-            <div class="text-muted small">Last IP: {{ row.last_ip }}</div>
-            {% endif %}
           </td>
           <td>
             {% if row.portal_code == "ADMIN" %}
@@ -118,6 +116,7 @@
               <span class="text-muted">-</span>
             {% endif %}
           </td>
+          <td data-column="ip-address">{{ row.last_ip|default:"-" }}</td>
           <td>
             {% if row.locked_until and row.locked_until > now %}
             <span class="badge text-bg-danger">Locked</span>
@@ -136,7 +135,7 @@
           </td>
         </tr>
       {% empty %}
-        <tr><td colspan="9" class="text-center text-muted py-4">No login lockout records found.</td></tr>
+        <tr><td colspan="10" class="text-center text-muted py-4">No login lockout records found.</td></tr>
       {% endfor %}
       </tbody>
     </table>

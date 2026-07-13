@@ -7,6 +7,7 @@ from uuid import UUID
 from django.urls import resolve
 
 from apps.auditlog.models import AuditLog
+from apps.core.services.client_ip import resolve_client_ip
 
 
 class AuditService:
@@ -39,7 +40,7 @@ class AuditService:
         return {
             "route_name": route_name,
             "http_method": request.method if request else None,
-            "ip_address": request.META.get("REMOTE_ADDR") if request else None,
+            "ip_address": resolve_client_ip(request),
             "user_agent": request.META.get("HTTP_USER_AGENT", "")[:512] if request else None,
         }
 
