@@ -91,9 +91,17 @@ class LoginLockoutTests(TestCase):
 
         response = self.client.post(login_url, {"username": self.user.username, "password": "wrong-pass"})
         self.assertContains(response, "Invalid username or password.", status_code=200)
+        self.assertContains(response, 'class="login-attempt-message mt-4"')
+        self.assertContains(response, "color: #b02a37;")
+        self.assertContains(response, "Failed login attempt 1 of 2.")
+        self.assertContains(response, "1 attempt remaining.")
+        self.assertContains(response, "login will be temporarily locked for 15 minute(s).")
 
         response = self.client.post(login_url, {"username": self.user.username, "password": "wrong-pass"})
         self.assertContains(response, "Too many failed login attempts.", status_code=200)
+        self.assertContains(response, "Failed login attempt 2 of 2.")
+        self.assertContains(response, "No attempts remaining.")
+        self.assertContains(response, "Login is temporarily locked for 15 minute(s).")
 
         state = PortalLoginLockoutState.objects.get(
             username=self.user.username,
@@ -101,6 +109,20 @@ class LoginLockoutTests(TestCase):
         )
         self.assertEqual(state.failed_attempt_count, 2)
         self.assertIsNotNone(state.locked_until)
+
+    def test_faculty_login_renders_failed_attempt_details_in_red_message_box(self):
+        self._configure_lockout(max_attempts=3, duration_minutes=20)
+
+        response = self.client.post(
+            reverse("accounts:faculty_login"),
+            {"username": self.user.username, "password": "wrong-pass"},
+        )
+
+        self.assertContains(response, 'class="login-attempt-message mt-4"', status_code=200)
+        self.assertContains(response, "color: #b02a37;")
+        self.assertContains(response, "Failed login attempt 1 of 3.")
+        self.assertContains(response, "2 attempts remaining.")
+        self.assertContains(response, "temporarily locked for 20 minute(s).")
 
     def test_successful_login_clears_previous_failure_count(self):
         self._configure_lockout(max_attempts=3)

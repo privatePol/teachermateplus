@@ -1,11 +1,20 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-07-12
+Last updated by Codex: 2026-07-13
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+- Date: 2026-07-13
+- Current pass: adjusted only Admin and Faculty login-page failure feedback and removed the Faculty public-navbar NPC seal; no grade-engine, migration, data modification, commit, or push work.
+- Completed work: invalid logins now show the failed-attempt number, configured maximum, remaining attempts, and the configured temporary-lock duration. Reaching the maximum reports no attempts remaining and the active temporary lock. Admin login, the standalone Faculty login, and the public Faculty navbar render the feedback in red bordered alert boxes in the requested locations; the public-navbar seal was removed while the separate lower Faculty privacy-seal section and Admin seal remain unchanged.
+- Security boundary: messages retain generic `Invalid username or password` wording and use the same response structure for known and unknown usernames; existing tenant lockout settings, audit events, password reset, authentication, and portal scope are unchanged.
+- Changed files: `apps/accounts/forms.py`, `apps/accounts/services.py`, `apps/accounts/tests_login_lockout.py`, `apps/faculty_portal/tests_public_login.py`, `static/faculty_portal/css/public_index.css`, `templates/admin_portal/login.html`, `templates/faculty_portal/login.html`, `templates/faculty_portal/public_index.html`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: `python manage.py test apps.accounts.tests_login_lockout apps.accounts.tests_login_otp apps.faculty_portal.tests_public_login` passed with 18 tests covering Admin/Faculty lockout, OTP, public login, message content, red-box markup, and Faculty navbar-seal removal. `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: desktop and mobile browser visual smoke remains recommended, particularly for long lockout messages in the compact Faculty navbar. The stylesheet cache token was updated so the new layout is not hidden by the prior cached public-page CSS.
+- Exact next step: sign in incorrectly once and then through the configured maximum on both portals, checking the red message placement at desktop and mobile widths before deployment.
+
 - Date: 2026-07-12
 - Current pass: fixed Faculty Grade Book Monitor exam/grade header alignment; no computation, migration, data modification, commit, or push.
 - Root cause: the shared summary layout correctly included a nested subcomponent-average column in each nested section `colspan`, but Faculty Grade Book Monitor did not render that column. CLASS STANDING therefore declared one more column than its lower headers/body and shifted Exam, Period Grade, and Actions headers to the right. Keeping Explain inside the grade cell also made the visual mismatch harder to read.

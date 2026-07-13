@@ -114,6 +114,29 @@ body {
   align-items: center;
 }
 
+.fp-login-panel {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+.fp-login-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.fp-login-attempt-message {
+  border: 1px solid #dc3545;
+  border-radius: 0.25rem;
+  background: #fff7f7;
+  color: #b02a37;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .fp-nav-input {
   min-width: 132px;
   height: 40px;

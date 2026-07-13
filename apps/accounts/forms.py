@@ -40,7 +40,7 @@ class PortalLoginForm(forms.Form):
                     portal_code=self.portal_code,
                     request=self.request,
                 )
-                raise forms.ValidationError(LoginLockoutService.build_lockout_message(lockout_status.locked_until))
+                raise forms.ValidationError(LoginLockoutService.build_failed_login_message(lockout_status))
 
             matched_user = User.objects.filter(username__iexact=normalized_username).first()
             self.user_cache = authenticate(self.request, username=normalized_username, password=password)
@@ -52,9 +52,7 @@ class PortalLoginForm(forms.Form):
                     portal_code=self.portal_code,
                     request=self.request,
                 )
-                if failure_status.is_locked:
-                    raise forms.ValidationError(LoginLockoutService.build_lockout_message(failure_status.locked_until))
-                raise forms.ValidationError(self.error_messages["invalid_login"])
+                raise forms.ValidationError(LoginLockoutService.build_failed_login_message(failure_status))
             if not self.user_cache.is_active:
                 raise forms.ValidationError(self.error_messages["inactive"])
         return cleaned_data

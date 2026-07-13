@@ -71,13 +71,14 @@ class FacultyPublicLoginTests(TestCase):
         self.assertContains(response, "Decorative pen-stroke flourish")
         self.assertContains(response, "fp-logo-orbit fp-logo-orbit-outer")
         self.assertContains(response, "fp-logo-orbit fp-logo-orbit-inner")
-        self.assertContains(response, "20260610-hero2")
+        self.assertContains(response, "20260713-login")
         self.assertContains(response, "animation: fp-logo-float 5.2s ease-in-out infinite")
         self.assertContains(response, "@keyframes fp-logo-orbit")
         self.assertNotContains(response, "fp-logo-starfield")
         self.assertNotContains(response, "your existing SIS")
         self.assertNotContains(response, "TeacherMate+ vs Standalone Grade Files")
         self.assertNotContains(response, "helps institutions")
+        self.assertNotContains(response, "fp-npc-seal-nav")
 
     def test_site_root_redirects_to_faculty_landing_page(self):
         response = self.client.get("/")
@@ -96,6 +97,9 @@ class FacultyPublicLoginTests(TestCase):
         )
 
         self.assertContains(response, "Invalid username or password.", status_code=200)
+        self.assertContains(response, "Failed login attempt 1 of 5.")
+        self.assertContains(response, "4 attempts remaining.")
+        self.assertContains(response, 'class="fp-login-attempt-message"')
         self.assertEqual(response.wsgi_request.path, reverse("faculty_portal:public_index"))
 
     def test_valid_public_faculty_login_uses_normal_dashboard_redirect(self):

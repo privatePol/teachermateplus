@@ -45,6 +45,16 @@
     background: #245826;
     border-color: #245826;
   }
+  .login-attempt-message {
+    border: 1px solid #dc3545;
+    border-radius: 0.35rem;
+    background: #fff7f7;
+    color: #b02a37;
+    padding: 0.65rem 0.75rem;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    font-weight: 600;
+  }
 </style>
 {% endblock %}
 
@@ -72,7 +82,6 @@
               <p class="text-secondary mb-4">Enter your faculty credentials to continue.</p>
               <form method="post" novalidate>
                 {% csrf_token %}
-                {{ form.non_field_errors }}
                 <div class="mb-3">
                   <label class="form-label" for="{{ form.username.id_for_label }}">Username</label>
                   {{ form.username }}
@@ -88,6 +97,13 @@
               <div class="text-center mt-2">
                 <a href="{% url 'accounts:faculty_forgot_password' %}" class="small">Forgot password?</a>
               </div>
+              {% if form.non_field_errors %}
+                <div class="login-attempt-message mt-4" role="alert" aria-live="polite">
+                  {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                  {% endfor %}
+                </div>
+              {% endif %}
               <div class="text-center mt-3">
                 <a href="{% url 'accounts:admin_login' %}" class="small">Go to Admin Login</a>
               </div>

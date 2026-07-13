@@ -197,7 +197,7 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 - Admin Portal login copy identifies access as authorized NCBA TeacherMatePlus use and reminds users without credentials to coordinate with the MIS Department.
 - Admin Portal login page also displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` in a dedicated right-side seal column.
 - Faculty Portal public homepage removes the final `Proceed to Login` call-to-action section and displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` centered in its own soft-gradient section, capped at 150px.
-- Faculty Portal public homepage also shows a 75px-high NCBA NPC seal in the desktop navbar beside the login controls.
+- Faculty Portal public homepage no longer shows the NPC seal beside the desktop-navbar login controls; the separate lower privacy-seal section remains unchanged.
 - Faculty Portal public landing hero and authenticated Faculty Portal header use the official TeacherMate image from `/media/logos/teachermate_logo_official.png`.
 - Faculty Portal public navbar labels the brand as `NCBA | TeacherMate+`, uses `Experience` as the shorter entry-experience nav label, and gives the lower NPC seal section more vertical breathing room.
 - Deployment and local workspace directory/config identifiers now use `teachermateplus`, including `D:\teachermateplus`, `/opt/teachermateplus`, `/etc/teachermateplus`, `/run/teachermateplus`, `/var/log/teachermateplus`, and the matching ops config filenames.
@@ -209,6 +209,7 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
   - configurable tenant-level one-session login control; when enabled, a new login signs out the same user from other browsers/devices
   - configurable tenant-level session timeout with active-use refresh behavior
   - temporary login lockout after repeated failed attempts, configurable from `Tools -> Configuration Management -> Login Security`
+  - Admin and Faculty login failures show the current failed-attempt count, remaining attempts, and configured temporary-lock duration in a red message below the login controls; threshold failures report that no attempts remain and that login is temporarily locked
   - optional email OTP after a successful password check, configurable from `Tools -> Configuration Management -> Login Security`
   - a `Security -> Login Lockouts` monitor page where authorized admins can review active portal lockouts and clear them when operationally justified
 - When a Faculty user has `must_change_password`, `/faculty/change-password/` renders with the left navigation collapsed and server-side locked. The sidebar toggle, portal links, signature action, Help button, quick tour, and Back action remain unavailable until a valid password update clears the requirement; Logout remains available.

@@ -325,6 +325,31 @@ class LoginLockoutService:
         )
 
     @classmethod
+    def build_failed_login_message(cls, status: LoginLockoutStatus) -> str:
+        """Describe the failed attempt without revealing whether the username exists."""
+        if not status.enabled or status.state is None:
+            return "Invalid username or password."
+
+        failed_attempts = status.state.failed_attempt_count
+        remaining_attempts = max(status.max_attempts - failed_attempts, 0)
+        attempt_word = "attempt" if remaining_attempts == 1 else "attempts"
+        message = (
+            "Invalid username or password. "
+            f"Failed login attempt {failed_attempts} of {status.max_attempts}. "
+        )
+        if status.is_locked:
+            return (
+                f"{message}No attempts remaining. "
+                f"Login is temporarily locked for {status.duration_minutes} minute(s). "
+                f"{cls.build_lockout_message(status.locked_until)}"
+            )
+        return (
+            f"{message}{remaining_attempts} {attempt_word} remaining. "
+            f"If the maximum is reached, login will be temporarily locked for "
+            f"{status.duration_minutes} minute(s)."
+        )
+
+    @classmethod
     def register_failure(cls, *, username: str, portal_code: str, request=None) -> LoginLockoutStatus:
         normalized = cls.normalize_username(username)
         enabled, max_attempts, window_minutes, duration_minutes = cls._policy(normalized)
