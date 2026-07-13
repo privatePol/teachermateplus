@@ -36,6 +36,22 @@ def _is_trusted_proxy(value: str, trusted_networks) -> bool:
     return any(address.version == network.version and address in network for network in trusted_networks)
 
 
+def _client_ip_from_unix_proxy_headers(request) -> str | None:
+    real_ip_header = request.META.get("HTTP_X_REAL_IP", "")
+    if str(real_ip_header or "").strip():
+        return _normalized_ip(real_ip_header)
+
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if not str(forwarded_for or "").strip():
+        return None
+    forwarded_chain = [_normalized_ip(item) for item in forwarded_for.split(",")]
+    if not forwarded_chain or not all(forwarded_chain):
+        return None
+    # Nginx uses $proxy_add_x_forwarded_for, so its normalized $remote_addr is
+    # the final address in the chain. Return only that address, never the chain.
+    return forwarded_chain[-1]
+
+
 def resolve_client_ip(request) -> str | None:
     """Return one normalized client IP, honoring proxy headers only from trusted peers."""
     if request is None:
@@ -43,7 +59,9 @@ def resolve_client_ip(request) -> str | None:
 
     remote_addr = _normalized_ip(request.META.get("REMOTE_ADDR"))
     if remote_addr is None:
-        return None
+        if not getattr(settings, "TRUST_UNIX_SOCKET_PROXY", False):
+            return None
+        return _client_ip_from_unix_proxy_headers(request)
 
     trusted_networks = _trusted_proxy_networks()
     if not trusted_networks or not _is_trusted_proxy(remote_addr, trusted_networks):

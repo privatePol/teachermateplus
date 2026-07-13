@@ -22,6 +22,7 @@ TRUSTED_PROXY_IPS = [
     for value in os.getenv("DJANGO_TRUSTED_PROXY_IPS", "").split(",")
     if value.strip()
 ]
+TRUST_UNIX_SOCKET_PROXY = env_bool("DJANGO_TRUST_UNIX_SOCKET_PROXY", False)
 DJANGO_ADMIN_PATH = (
     os.getenv("DJANGO_ADMIN_PATH", "django-admin").strip("/")
     or "django-admin"
