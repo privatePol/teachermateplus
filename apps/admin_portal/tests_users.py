@@ -367,6 +367,9 @@ class UserListTests(TestCase):
         self.assertEqual(email.to, ["email_save_user@ncba.edu.ph"])
         self.assertIn("Username: email_save_user", email.body)
         self.assertIn("Temporary Password: EmailSavePass123!", email.body)
+        html_body = email.alternatives[0].content
+        self.assertIn("NCBA | TeacherMate+", html_body)
+        self.assertNotIn("<img", html_body)
         self.assertContains(
             response,
             "User created and credentials/password were emailed to email_save_user@ncba.edu.ph.",
@@ -607,7 +610,7 @@ class UserListTests(TestCase):
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
         ALLOWED_HOSTS=["tmp.ncba.edu.ph"],
     )
-    def test_new_user_credentials_email_uses_only_neutral_teachermate_link(self):
+    def test_new_user_credentials_email_uses_text_branding_and_neutral_teachermate_link(self):
         user = User.objects.create_user(
             username="neutral_link_user",
             email="neutral_link_user@example.com",
@@ -625,6 +628,9 @@ class UserListTests(TestCase):
         self.assertNotIn("/faculty/", email.body)
         self.assertNotIn("Admin Portal", email.body)
         html_body = email.alternatives[0].content
+        self.assertIn("NCBA | TeacherMate+", html_body)
+        self.assertNotIn("<img", html_body)
+        self.assertNotIn('alt="NCBA"', html_body)
         self.assertIn("Open TeacherMate+", html_body)
         self.assertNotIn("/admin-portal/", html_body)
         self.assertNotIn("/faculty/", html_body)

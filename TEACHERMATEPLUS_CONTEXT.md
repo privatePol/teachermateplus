@@ -195,6 +195,7 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 - Faculty Portal public landing hero copy welcomes users to `NCBA's TeacherMate+` and describes TeacherMate+ as helping `our faculty members` manage grading work.
 - Faculty Portal public landing copy should read as an internal NCBA faculty portal, addressing NCBA faculty members and NCBA operations rather than prospective clients or generic institutions.
 - Admin Portal login copy identifies access as authorized NCBA TeacherMatePlus use and reminds users without credentials to coordinate with the MIS Department.
+- The new-user onboarding email sent by Admin Portal user creation uses the text header `NCBA | TeacherMate+` instead of an NCBA image logo. This is isolated to `admin_portal/emails/new_user_credentials.html`; password-change, password-reset, OTP, and other email templates retain their existing branding and behavior.
 - Admin Portal login page also displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` in a dedicated right-side seal column.
 - Faculty Portal public homepage removes the final `Proceed to Login` call-to-action section and displays the NCBA NPC seal from `/media/logos/ncba_npc_seal.png` centered in its own soft-gradient section, capped at 150px.
 - Faculty Portal public homepage no longer shows the NPC seal beside the desktop-navbar login controls; the separate lower privacy-seal section remains unchanged.

@@ -7,6 +7,14 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
 - Date: 2026-07-13
+- Current pass: changed only the new-user onboarding email branding used by `/admin-portal/security/users/create/`; no other email, page, service, authentication, grading, migration, data, commit, or push change.
+- Completed work: replaced the conditional NCBA image/fallback block in `templates/admin_portal/emails/new_user_credentials.html` with the exact text header `NCBA | TeacherMate+`. All other onboarding content and the existing account-creation/email-sending workflow remain unchanged.
+- Changed files: `templates/admin_portal/emails/new_user_credentials.html`, `apps/admin_portal/tests_users.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, `HANDOFF.md`.
+- Validation performed: the actual Admin user-create/save-and-email test and the dedicated onboarding-email sender test passed with 2 tests. Both assert `NCBA | TeacherMate+` and absence of an HTML `<img>` in the onboarding email. `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `git diff --check` passed with line-ending warnings only.
+- Pending work / risk: visual appearance still depends on email-client HTML/CSS support, but the text header uses the existing header cell and inline styling.
+- Exact next step: send one staging onboarding email from Admin Portal user creation and confirm the text branding in the institution's supported email clients.
+
+- Date: 2026-07-13
 - Current pass: adjusted only Admin and Faculty login-page failure feedback and removed the Faculty public-navbar NPC seal; no grade-engine, migration, data modification, commit, or push work.
 - Completed work: invalid logins now show the failed-attempt number, configured maximum, remaining attempts, and the configured temporary-lock duration. Reaching the maximum reports no attempts remaining and the active temporary lock. Admin login, the standalone Faculty login, and the public Faculty navbar render the feedback in red bordered alert boxes in the requested locations; the public-navbar seal was removed while the separate lower Faculty privacy-seal section and Admin seal remain unchanged.
 - Security boundary: messages retain generic `Invalid username or password` wording and use the same response structure for known and unknown usernames; existing tenant lockout settings, audit events, password reset, authentication, and portal scope are unchanged.
