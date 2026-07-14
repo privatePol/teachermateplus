@@ -900,6 +900,11 @@
                 <td>Assign faculty to offerings in bulk after offerings are already in place.</td>
               </tr>
               <tr>
+                <td>Faculty Users</td>
+                <td><strong>Admin Portal -> Security -> Users -> Import Faculty CSV</strong></td>
+                <td>Create inactive Faculty login accounts, assign the exact scoped Faculty role, and optionally send secure password-setup invitations.</td>
+              </tr>
+              <tr>
                 <td>Enrollment</td>
                 <td><strong>Admin Portal -> Tools -> Bulk Imports</strong></td>
                 <td>Load students into offerings in bulk after academic setup and class offerings are ready.</td>
@@ -929,6 +934,9 @@
           </div>
           <div class="guide-note">
             Enrollment imports follow the tenant's student-handling setting in <strong>Tools -> Configuration Management</strong>.
+          </div>
+          <div class="guide-note">
+            Faculty User imports never keep the raw uploaded CSV. Invitation email remains off unless the deployment enables <strong>FACULTY_IMPORT_EMAIL_ENABLED</strong> and an authorized admin selects the unchecked batch option.
           </div>
           <div class="guide-note">
             Recommended import order:

@@ -82,6 +82,10 @@ class Command(BaseCommand):
         ("students.create", "students", "create"),
         ("students.update", "students", "update"),
         ("students.import", "students", "import"),
+        ("faculty_users.view_import", "faculty_users", "view_import"),
+        ("faculty_users.import", "faculty_users", "import"),
+        ("faculty_users.send_import_invitations", "faculty_users", "send_import_invitations"),
+        ("faculty_users.resend_invitation", "faculty_users", "resend_invitation"),
         ("student_enrollment_query.read", "student_enrollment_query", "read"),
         ("enrollment.read", "enrollment", "read"),
         ("enrollment.create", "enrollment", "create"),
@@ -951,6 +955,16 @@ class Command(BaseCommand):
                 role=role_map[role_code],
                 permission=perm_map["faculty_feedback.read"],
             )
+            for permission_code in [
+                "faculty_users.view_import",
+                "faculty_users.import",
+                "faculty_users.send_import_invitations",
+                "faculty_users.resend_invitation",
+            ]:
+                RolePermission.objects.get_or_create(
+                    role=role_map[role_code],
+                    permission=perm_map[permission_code],
+                )
         RolePermission.objects.get_or_create(
             role=role_map["TENANT_ADMIN"],
             permission=perm_map["faculty_feedback.export"],
@@ -1066,6 +1080,6 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("Stage 0.1 seed complete."))
         self.stdout.write(self.style.SUCCESS(f"Admin login URL: /admin-portal/login/"))
-        self.stdout.write(self.style.SUCCESS(f"Faculty login URL: /faculty/login/"))
+        self.stdout.write(self.style.SUCCESS("Faculty login URL: /faculty/"))
         self.stdout.write(self.style.SUCCESS(f"Seeded user: {default_username}"))
         self.stdout.write(self.style.SUCCESS(f"Seeded password: {default_password}"))

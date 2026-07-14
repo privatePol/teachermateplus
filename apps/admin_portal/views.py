@@ -31,7 +31,8 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 
-from apps.accounts.models import PortalLoginLockoutState, UserDeactivationSchedule
+from apps.accounts.models import FacultyInvitation, PortalLoginLockoutState, UserDeactivationSchedule
+from apps.accounts.faculty_provisioning import FacultyInvitationService, ScopedUserRoleAssignmentService
 from apps.accounts.services import UserDeactivationService
 from apps.admin_portal.forms import (
     ActiveAcademicTermSettingForm,
@@ -119,6 +120,7 @@ from apps.academics.models import (
 from apps.auditlog.models import AuditLog
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
+from apps.core.services.csv_safety import csv_safe
 from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
@@ -3072,10 +3074,7 @@ def admin_guide_view(request):
 
 
 def _csv_safe(value):
-    text = "" if value is None else str(value)
-    if text[:1] in {"=", "+", "-", "@"}:
-        return f"'{text}"
-    return text
+    return csv_safe(value)
 
 
 def _faculty_feedback_scoped_queryset(request):
@@ -5719,7 +5718,6 @@ def _scoped_users_queryset(request):
             | Q(user_roles__campus_id__in=campus_ids)
             | Q(user_roles__tenant__isnull=True)
         )
-        .filter(is_active=True)
         .distinct()
         .order_by("username")
     )
@@ -6520,6 +6518,7 @@ def user_create_view(request):
 def user_update_view(request, user_id: int):
     user = get_object_or_404(_scoped_users_queryset(request), id=user_id)
     before = model_before_after(user)
+    before.pop("password", None)
     tenant_qs = AdminScopeService.scoped_tenants(request)
     campus_qs = AdminScopeService.scoped_campuses(request)
     department_qs = AdminScopeService.active_scoped_departments(request)
@@ -6533,6 +6532,8 @@ def user_update_view(request, user_id: int):
     _style_form(form)
     if request.method == "POST" and form.is_valid():
         user = form.save()
+        after = model_before_after(user)
+        after.pop("password", None)
         AuditService.log_event(
             action="UPDATE",
             portal="ADMIN",
@@ -6540,14 +6541,102 @@ def user_update_view(request, user_id: int):
             entity_id=user.id,
             actor=request.user,
             before_data=before,
-            after_data=model_before_after(user),
+            after_data=after,
             request=request,
         )
         messages.success(request, "User updated.")
         return _redirect_back_or_default(request, "admin_portal:user_list")
-    context = {"form": form, "title": f"Edit User: {user.username}"}
+    faculty_role_assignment = UserRole.objects.filter(
+        user=user,
+        role__code="FACULTY",
+        role__is_active=True,
+        is_active=True,
+        tenant_id=user.default_tenant_id,
+        campus_id=user.default_campus_id,
+        department_id=user.default_department_id,
+    ).first()
+    invitation = FacultyInvitation.objects.filter(user=user).first() if faculty_role_assignment else None
+    invitation_action_label = "Send Invitation"
+    if invitation and (
+        invitation.attempt_count > 0
+        or invitation.effective_status
+        in {
+            FacultyInvitation.Status.SENT,
+            FacultyInvitation.Status.FAILED,
+            FacultyInvitation.Status.EXPIRED,
+        }
+    ):
+        invitation_action_label = "Resend Invitation"
+    invitation_action_allowed = bool(
+        faculty_role_assignment
+        and not (invitation and invitation.status == FacultyInvitation.Status.ACCEPTED)
+        and not (user.is_active and user.has_usable_password())
+    )
+    context = {
+        "form": form,
+        "title": f"Edit User: {user.username}",
+        "target_user": user,
+        "faculty_role_assignment": faculty_role_assignment,
+        "faculty_invitation": invitation,
+        "faculty_invitation_status_label": invitation.status_label if invitation else "Not sent",
+        "faculty_invitation_action_label": invitation_action_label,
+        "faculty_invitation_action_allowed": invitation_action_allowed,
+        "faculty_invitation_email_enabled": bool(getattr(settings, "FACULTY_IMPORT_EMAIL_ENABLED", False)),
+        "can_resend_faculty_invitation": PermissionService.has_permission(
+            request.user,
+            "faculty_users.resend_invitation",
+            tenant_id=user.default_tenant_id,
+            campus_id=user.default_campus_id,
+        ),
+    }
     context.update(_scope_context(request))
-    return render(request, "admin_portal/shared/form_page.html", context)
+    return render(request, "admin_portal/security/user_update.html", context)
+
+
+@portal_required("ADMIN")
+def faculty_user_invitation_send_view(request, user_id: int):
+    if request.method != "POST":
+        return HttpResponseForbidden("Invalid method.")
+    user = get_object_or_404(
+        _scoped_users_queryset(request).select_related(
+            "default_tenant",
+            "default_campus",
+            "default_department",
+        ),
+        id=user_id,
+    )
+    if not PermissionService.has_permission(
+        request.user,
+        "faculty_users.resend_invitation",
+        tenant_id=user.default_tenant_id,
+        campus_id=user.default_campus_id,
+    ):
+        return HttpResponseForbidden("You do not have permission to send this Faculty invitation.")
+    if not UserRole.objects.filter(
+        user=user,
+        role__code="FACULTY",
+        role__is_active=True,
+        is_active=True,
+        tenant_id=user.default_tenant_id,
+        campus_id=user.default_campus_id,
+        department_id=user.default_department_id,
+    ).exists():
+        return HttpResponseForbidden("The user does not have the required scoped Faculty role.")
+    try:
+        result = FacultyInvitationService.send_or_resend(
+            user=user,
+            actor=request.user,
+            request=request,
+            resend=True,
+        )
+    except (ValidationError, PermissionDenied) as exc:
+        messages.error(request, str(exc))
+    else:
+        if result.sent:
+            messages.success(request, f"Invitation sent to {user.email}.")
+        else:
+            messages.warning(request, "Email delivery failed. The account remains available for resend.")
+    return redirect("admin_portal:user_update", user_id=user.id)
 
 
 @portal_required("ADMIN")
@@ -6745,35 +6834,24 @@ def user_roles_view(request, user_id: int):
     )
     _style_form(form)
     if request.method == "POST" and request.POST.get("action") != "deactivate" and form.is_valid():
-        assignment, created = UserRole.objects.get_or_create(
-            user=user,
-            role=form.cleaned_data["role"],
-            tenant=form.cleaned_data["tenant"],
-            campus=form.cleaned_data["campus"],
-            department=form.cleaned_data["department"],
-            defaults={"is_active": True},
-        )
-        if not created and not assignment.is_active:
-            before = model_before_after(assignment)
-            assignment.is_active = True
-            assignment.save(update_fields=["is_active"])
-            after = model_before_after(assignment)
+        try:
+            ScopedUserRoleAssignmentService.assign(
+                actor=request.user,
+                user=user,
+                role=form.cleaned_data["role"],
+                tenant=form.cleaned_data["tenant"],
+                campus=form.cleaned_data["campus"],
+                department=form.cleaned_data["department"],
+                permission_code="user_roles.update",
+                request=request,
+            )
+        except PermissionDenied:
+            return HttpResponseForbidden("Forbidden scope.")
+        except ValidationError as exc:
+            form.add_error(None, exc)
         else:
-            before = None
-            after = model_before_after(assignment)
-
-        AuditService.log_event(
-            action="CREATE" if created else "UPDATE",
-            portal="ADMIN",
-            entity_type="UserRole",
-            entity_id=assignment.id,
-            actor=request.user,
-            before_data=before,
-            after_data=after,
-            request=request,
-        )
-        messages.success(request, "Role assignment saved.")
-        return _redirect_back_or_default(request, "admin_portal:user_roles", user_id=user.id)
+            messages.success(request, "Role assignment saved.")
+            return _redirect_back_or_default(request, "admin_portal:user_roles", user_id=user.id)
 
     assignments = user.user_roles.select_related("role", "tenant", "campus", "department").order_by("-assigned_at")
     if not request.user.is_superuser:

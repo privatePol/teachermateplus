@@ -90,6 +90,23 @@ class FacultyPublicLoginTests(TestCase):
             target_status_code=200,
         )
 
+    def test_legacy_faculty_login_page_is_disabled_and_redirects_to_landing(self):
+        legacy_url = reverse("accounts:faculty_login")
+        landing_url = reverse("faculty_portal:public_index")
+
+        get_response = self.client.get(legacy_url)
+        post_response = self.client.post(
+            legacy_url,
+            {"username": self.user.username, "password": "FacultyPass123!"},
+        )
+
+        self.assertRedirects(get_response, landing_url, status_code=302, target_status_code=200)
+        self.assertEqual(post_response.status_code, 302)
+        self.assertEqual(post_response.url, landing_url)
+        self.assertNotIn("_auth_user_id", self.client.session)
+        landing_response = self.client.get(landing_url)
+        self.assertNotContains(landing_response, "Go to Admin Login")
+
     def test_invalid_public_faculty_login_stays_on_landing_page(self):
         response = self.client.post(
             reverse("faculty_portal:public_index"),

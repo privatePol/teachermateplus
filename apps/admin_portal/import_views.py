@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import csv
+
 from django.contrib import messages
 from django import forms
 from django.conf import settings
 from django.core.mail import send_mail
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
-from django.http import Http404, HttpResponseForbidden
+from django.http import Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.core.decorators import portal_required
 from apps.core.services.audit import AuditService
 from apps.core.services.email_assets import format_email_subject
 from apps.core.services.permissions import PermissionService
+from apps.core.services.csv_safety import csv_safe
+from apps.accounts.faculty_provisioning import FacultyInvitationService
+from apps.accounts.models import FacultyInvitation
 from apps.imports.forms import ImportUploadForm
 from apps.imports.models import ImportBatch, ImportBatchRow
 from apps.imports.services import BulkImportService, ImportTemplateService
@@ -136,6 +141,14 @@ def _require_import_read(request):
         raise PermissionError("You do not have permission to view import batches.")
 
 
+def _can_view_faculty_import(request):
+    return _require_permission(request, "faculty_users.view_import")
+
+
+def _faculty_import_detail_allowed(request, import_type: str):
+    return import_type != ImportBatch.ImportType.FACULTY_USERS or _can_view_faculty_import(request)
+
+
 def _resolve_import_type(import_slug: str) -> str:
     import_type = BulkImportService.slug_to_import_type(import_slug)
     if not import_type:
@@ -151,6 +164,8 @@ def import_batch_list_view(request):
         return HttpResponseForbidden("You do not have permission to view import batches.")
 
     queryset = AdminScopeService.scoped_import_batches(request)
+    if not _can_view_faculty_import(request):
+        queryset = queryset.exclude(import_type=ImportBatch.ImportType.FACULTY_USERS)
     import_type = request.GET.get("import_type", "").strip()
     status = request.GET.get("status", "").strip()
     q = request.GET.get("q", "").strip()
@@ -168,7 +183,10 @@ def import_batch_list_view(request):
     import_cards = []
     for code in BulkImportService.list_import_types():
         permission_code = BulkImportService.required_permission(code)
-        if _require_permission(request, permission_code):
+        can_view_type = (
+            code != ImportBatch.ImportType.FACULTY_USERS or _can_view_faculty_import(request)
+        )
+        if can_view_type and _require_permission(request, permission_code):
             import_cards.append(
                 {
                     "import_type": code,
@@ -218,6 +236,8 @@ def import_upload_view(request, import_slug: str):
     required_permission = BulkImportService.required_permission(import_type)
     if not _require_permission(request, required_permission):
         return HttpResponseForbidden("You do not have permission to import this module.")
+    if not _faculty_import_detail_allowed(request, import_type):
+        return HttpResponseForbidden("You do not have permission to view faculty import details.")
     try:
         _require_import_read(request)
     except PermissionError:
@@ -233,7 +253,11 @@ def import_upload_view(request, import_slug: str):
             request=request,
         )
         AuditService.log_event(
-            action="IMPORT_UPLOAD",
+            action=(
+                "FACULTY_USER_IMPORT_UPLOADED"
+                if import_type == ImportBatch.ImportType.FACULTY_USERS
+                else "IMPORT_UPLOAD"
+            ),
             portal="ADMIN",
             entity_type="ImportBatch",
             entity_id=batch.id,
@@ -275,6 +299,7 @@ def import_upload_view(request, import_slug: str):
         "template_sample": template_meta["sample_row"],
         "import_guide": template_meta.get("guide", {}),
         "import_safety": template_meta.get("safety", {}),
+        "faculty_email_system_enabled": bool(getattr(settings, "FACULTY_IMPORT_EMAIL_ENABLED", False)),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/imports/import_upload.html", context)
@@ -288,6 +313,8 @@ def import_batch_detail_view(request, batch_id: int):
         return HttpResponseForbidden("You do not have permission to view import batches.")
 
     batch = get_object_or_404(AdminScopeService.scoped_import_batches(request), id=batch_id)
+    if not _faculty_import_detail_allowed(request, batch.import_type):
+        return HttpResponseForbidden("You do not have permission to view faculty import details.")
     rows_qs = batch.rows.order_by("row_number")
     page_obj = _get_page(request, rows_qs, per_page=30)
     required_permission = BulkImportService.required_permission(batch.import_type)
@@ -296,6 +323,33 @@ def import_batch_detail_view(request, batch_id: int):
         and batch.status in {ImportBatch.Status.VALIDATED, ImportBatch.Status.CONFIRM_FAILED}
         and rows_qs.filter(row_status=ImportBatchRow.RowStatus.VALID).exists()
     )
+    faculty_user_import = batch.import_type == ImportBatch.ImportType.FACULTY_USERS
+    invitation_by_row = {}
+    if faculty_user_import:
+        invitations = FacultyInvitation.objects.filter(
+            originating_import_row_id__in=[row.id for row in page_obj.object_list]
+        ).select_related("user")
+        invitation_by_row = {invitation.originating_import_row_id: invitation for invitation in invitations}
+        for row in page_obj.object_list:
+            row.faculty_invitation = invitation_by_row.get(row.id)
+
+    preview_create_count = rows_qs.filter(result_code="PREVIEW_CREATE").count() if faculty_user_import else 0
+    preview_skip_count = (
+        rows_qs.filter(result_code="PREVIEW_SKIP_EXISTING").count() if faculty_user_import else 0
+    )
+    created_account_count = (
+        rows_qs.filter(
+            result_code__in=[
+                "CREATED_EMAIL_DISABLED",
+                "CREATED_INVITATION_NOT_REQUESTED",
+                "CREATED_INVITATION_SENT",
+                "CREATED_INVITATION_FAILED",
+            ]
+        ).count()
+        if faculty_user_import
+        else 0
+    )
+    skipped_account_count = rows_qs.filter(result_code="SKIPPED_EXISTING").count() if faculty_user_import else 0
 
     context = {
         "batch": batch,
@@ -312,6 +366,14 @@ def import_batch_detail_view(request, batch_id: int):
             ImportBatch.Status.CONFIRMED: "text-bg-success",
             ImportBatch.Status.CONFIRM_FAILED: "text-bg-warning",
         }.get(batch.status, "text-bg-secondary"),
+        "faculty_user_import": faculty_user_import,
+        "faculty_email_system_enabled": bool(getattr(settings, "FACULTY_IMPORT_EMAIL_ENABLED", False)),
+        "can_send_import_invitations": _require_permission(request, "faculty_users.send_import_invitations"),
+        "can_resend_invitation": _require_permission(request, "faculty_users.resend_invitation"),
+        "preview_create_count": preview_create_count,
+        "preview_skip_count": preview_skip_count,
+        "created_account_count": created_account_count,
+        "skipped_account_count": skipped_account_count,
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/imports/import_batch_detail.html", context)
@@ -328,6 +390,8 @@ def import_batch_confirm_view(request, batch_id: int):
         return HttpResponseForbidden("You do not have permission to view import batches.")
 
     batch = get_object_or_404(AdminScopeService.scoped_import_batches(request), id=batch_id)
+    if not _faculty_import_detail_allowed(request, batch.import_type):
+        return HttpResponseForbidden("You do not have permission to view faculty import details.")
     required_permission = BulkImportService.required_permission(batch.import_type)
     if not _require_permission(request, required_permission):
         return HttpResponseForbidden("You do not have permission to confirm this import.")
@@ -339,13 +403,23 @@ def import_batch_confirm_view(request, batch_id: int):
         "invalid_rows": batch.invalid_rows,
     }
     try:
-        updated = BulkImportService.confirm_batch(batch=batch, actor=request.user)
-    except ValidationError as exc:
+        requested_email = request.POST.get("send_invitation_emails") == "on"
+        updated = BulkImportService.confirm_batch(
+            batch=batch,
+            actor=request.user,
+            send_invitation_emails=requested_email,
+            request=request,
+        )
+    except (ValidationError, PermissionDenied) as exc:
         messages.error(request, str(exc))
         return redirect("admin_portal:import_batch_detail", batch_id=batch.id)
 
     AuditService.log_event(
-        action="IMPORT_CONFIRM",
+        action=(
+            "FACULTY_USER_IMPORT_CONFIRMED"
+            if batch.import_type == ImportBatch.ImportType.FACULTY_USERS
+            else "IMPORT_CONFIRM"
+        ),
         portal="ADMIN",
         entity_type="ImportBatch",
         entity_id=updated.id,
@@ -369,6 +443,96 @@ def import_batch_confirm_view(request, batch_id: int):
             f"Import finished with errors. Imported: {updated.imported_rows}, remaining invalid: {updated.invalid_rows}.",
         )
     return redirect("admin_portal:import_batch_detail", batch_id=updated.id)
+
+
+@portal_required("ADMIN")
+def import_batch_error_report_view(request, batch_id: int):
+    try:
+        _require_import_read(request)
+    except PermissionError:
+        return HttpResponseForbidden("You do not have permission to view import batches.")
+    batch = get_object_or_404(AdminScopeService.scoped_import_batches(request), id=batch_id)
+    if not _faculty_import_detail_allowed(request, batch.import_type):
+        return HttpResponseForbidden("You do not have permission to view faculty import details.")
+
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="TeacherMate+_{batch.import_type}_batch_{batch.id}_errors.csv"'
+    writer = csv.writer(response)
+    headers = list(batch.expected_headers_json or [])
+    writer.writerow(["row_number", *headers, "result_code", "errors"])
+    rows = batch.rows.filter(row_status=ImportBatchRow.RowStatus.ERROR).order_by("row_number")
+    for row in rows:
+        raw = row.raw_data_json or {}
+        writer.writerow(
+            [
+                row.row_number,
+                *[csv_safe(raw.get(header, "")) for header in headers],
+                csv_safe(row.result_code or "FAILED_VALIDATION"),
+                csv_safe(" | ".join(str(error) for error in (row.errors_json or []))),
+            ]
+        )
+    AuditService.log_event(
+        action="IMPORT_ERROR_REPORT_DOWNLOADED",
+        portal="ADMIN",
+        entity_type="ImportBatch",
+        entity_id=batch.id,
+        actor=request.user,
+        tenant=batch.tenant,
+        campus=batch.campus,
+        metadata={"import_type": batch.import_type, "error_rows": rows.count()},
+        request=request,
+    )
+    return response
+
+
+@portal_required("ADMIN")
+def faculty_invitation_resend_view(request, invitation_id: int):
+    if request.method != "POST":
+        return HttpResponseForbidden("Invalid method.")
+    invitation = get_object_or_404(
+        FacultyInvitation.objects.select_related(
+            "user",
+            "user__default_tenant",
+            "user__default_campus",
+            "originating_import_row",
+        ),
+        id=invitation_id,
+    )
+    tenant_id = invitation.user.default_tenant_id
+    campus_id = invitation.user.default_campus_id
+    if not PermissionService.has_permission(
+        request.user,
+        "faculty_users.resend_invitation",
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    ):
+        return HttpResponseForbidden("You do not have permission to resend this invitation.")
+    if not request.user.is_superuser:
+        if tenant_id not in set(AdminScopeService.active_scoped_tenants(request).values_list("id", flat=True)):
+            return HttpResponseForbidden("Forbidden tenant scope.")
+        if campus_id not in set(AdminScopeService.active_scoped_campuses(request).values_list("id", flat=True)):
+            return HttpResponseForbidden("Forbidden campus scope.")
+    try:
+        result = FacultyInvitationService.send_or_resend(
+            user=invitation.user,
+            actor=request.user,
+            originating_import_row=invitation.originating_import_row,
+            request=request,
+            resend=True,
+        )
+    except (ValidationError, PermissionDenied) as exc:
+        messages.error(request, str(exc))
+    else:
+        if result.sent:
+            messages.success(request, f"Invitation sent to {invitation.user.email}.")
+        else:
+            messages.warning(request, "The account remains available for resend, but email delivery failed.")
+    if invitation.originating_import_row_id:
+        return redirect(
+            "admin_portal:import_batch_detail",
+            batch_id=invitation.originating_import_row.batch_id,
+        )
+    return redirect("admin_portal:user_list")
 
 
 @portal_required("ADMIN")

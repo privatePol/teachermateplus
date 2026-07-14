@@ -90,6 +90,84 @@ class User(AbstractBaseUser, PermissionsMixin):
         return name.strip() or self.username
 
 
+class FacultyInvitation(models.Model):
+    class Status(models.TextChoices):
+        NOT_REQUESTED = "NOT_REQUESTED", "Not Requested"
+        DISABLED_BY_SYSTEM = "DISABLED_BY_SYSTEM", "Disabled by System"
+        SENT = "SENT", "Sent"
+        FAILED = "FAILED", "Failed"
+        EXPIRED = "EXPIRED", "Expired"
+        ACCEPTED = "ACCEPTED", "Accepted"
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    user = models.OneToOneField(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="faculty_invitation",
+    )
+    originating_import_row = models.ForeignKey(
+        "imports.ImportBatchRow",
+        on_delete=models.SET_NULL,
+        related_name="faculty_invitations",
+        blank=True,
+        null=True,
+    )
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.NOT_REQUESTED)
+    version = models.PositiveIntegerField(default=0)
+    attempt_count = models.PositiveIntegerField(default=0)
+    last_attempted_at = models.DateTimeField(blank=True, null=True)
+    last_successfully_sent_at = models.DateTimeField(blank=True, null=True)
+    expires_at = models.DateTimeField(blank=True, null=True)
+    accepted_at = models.DateTimeField(blank=True, null=True)
+    superseded_at = models.DateTimeField(blank=True, null=True)
+    created_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        related_name="created_faculty_invitations",
+        blank=True,
+        null=True,
+    )
+    last_resend_by_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        related_name="resent_faculty_invitations",
+        blank=True,
+        null=True,
+    )
+    failure_reason = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "faculty_invitations"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["status", "expires_at"], name="idx_fac_inv_status_expiry"),
+            models.Index(fields=["public_id"], name="idx_fac_inv_public_id"),
+        ]
+
+    def __str__(self):
+        return f"faculty-invitation:{self.user_id}:{self.status}"
+
+    @property
+    def effective_status(self):
+        if self.status == self.Status.SENT and self.expires_at and self.expires_at <= timezone.now():
+            return self.Status.EXPIRED
+        return self.status
+
+    @property
+    def status_label(self):
+        labels = {
+            self.Status.NOT_REQUESTED: "Not sent",
+            self.Status.DISABLED_BY_SYSTEM: "Email disabled",
+            self.Status.SENT: "Sent",
+            self.Status.FAILED: "Failed",
+            self.Status.EXPIRED: "Expired",
+            self.Status.ACCEPTED: "Accepted",
+        }
+        return labels.get(self.effective_status, self.effective_status)
+
+
 class UserDeactivationSchedule(models.Model):
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"

@@ -1,0 +1,60 @@
+{% if faculty_role_assignment %}
+<div class="card border-0 shadow-sm mt-3">
+  <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <h3 class="h6 mb-0">Faculty Account Invitation</h3>
+    {% if faculty_invitation_status_label == "Accepted" %}
+    <span class="badge text-bg-success">Accepted</span>
+    {% elif faculty_invitation_status_label == "Sent" %}
+    <span class="badge text-bg-primary">Sent</span>
+    {% elif faculty_invitation_status_label == "Failed" or faculty_invitation_status_label == "Expired" %}
+    <span class="badge text-bg-danger">{{ faculty_invitation_status_label }}</span>
+    {% elif faculty_invitation_status_label == "Email disabled" %}
+    <span class="badge text-bg-warning">Email disabled</span>
+    {% else %}
+    <span class="badge text-bg-secondary">Not sent</span>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    <dl class="row small mb-3">
+      <dt class="col-sm-4">Current state</dt>
+      <dd class="col-sm-8">{{ faculty_invitation_status_label }}</dd>
+      <dt class="col-sm-4">Email environment</dt>
+      <dd class="col-sm-8">{% if faculty_invitation_email_enabled %}Enabled{% else %}Disabled{% endif %}</dd>
+      {% if faculty_invitation %}
+      <dt class="col-sm-4">Attempts</dt>
+      <dd class="col-sm-8">{{ faculty_invitation.attempt_count }}</dd>
+      <dt class="col-sm-4">Last attempted</dt>
+      <dd class="col-sm-8">{{ faculty_invitation.last_attempted_at|date:"Y-m-d H:i"|default:"-" }}</dd>
+      <dt class="col-sm-4">Last sent</dt>
+      <dd class="col-sm-8">{{ faculty_invitation.last_successfully_sent_at|date:"Y-m-d H:i"|default:"-" }}</dd>
+      <dt class="col-sm-4">Expires</dt>
+      <dd class="col-sm-8">{{ faculty_invitation.expires_at|date:"Y-m-d H:i"|default:"-" }}</dd>
+      {% endif %}
+    </dl>
+
+    {% if not faculty_invitation_email_enabled %}
+    <div class="alert alert-warning py-2">
+      Invitation emails are disabled in this environment. The account remains available for a later authorized send.
+    </div>
+    {% elif not can_resend_faculty_invitation %}
+    <div class="alert alert-warning py-2">You do not have permission to send or resend this invitation.</div>
+    {% elif faculty_invitation and faculty_invitation.status == "ACCEPTED" %}
+    <div class="alert alert-success py-2 mb-0">The invitation was accepted. No resend is available.</div>
+    {% elif target_user.is_active and target_user.has_usable_password %}
+    <div class="alert alert-info py-2 mb-0">This Faculty account is already login-ready. No invitation is needed.</div>
+    {% endif %}
+
+    {% if faculty_invitation_action_allowed %}
+    <form method="post" action="{% url 'admin_portal:faculty_user_invitation_send' target_user.id %}">
+      {% csrf_token %}
+      <button
+        class="btn btn-outline-primary"
+        type="submit"
+        {% if not faculty_invitation_email_enabled or not can_resend_faculty_invitation %}disabled{% endif %}
+      >{{ faculty_invitation_action_label }}</button>
+      <div class="form-text">A successful resend starts a fresh 24-hour validity period and invalidates the previous link.</div>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

@@ -1,0 +1,47 @@
+{% extends "shared/base_public.html" %}
+
+{% block title %}Faculty Account Password Setup | TeacherMate+{% endblock %}
+
+{% block content %}
+<div class="container py-5" style="max-width: 620px;">
+  <div class="card border-0 shadow-sm">
+    <div class="card-body p-4">
+      <h1 class="h4 mb-3">Faculty Account Password Setup</h1>
+      {% if valid_link %}
+      <p class="text-muted">Create your password to activate your TeacherMate+ Faculty account.</p>
+      <form method="post" novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="invitation_token" id="faculty-invitation-token" value="">
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+        {% for field in form %}
+        <div class="mb-3">
+          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<div class="form-text">{{ field.help_text|safe }}</div>{% endif %}
+          {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+        <button class="btn btn-success" type="submit">Set Password and Activate Account</button>
+      </form>
+      {% else %}
+      <div class="alert alert-warning mb-3">
+        This invitation is invalid, expired, superseded, or has already been used.
+      </div>
+      <a class="btn btn-outline-primary" href="{% url 'faculty_portal:public_index' %}">Go to Faculty Portal</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% if valid_link %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const tokenField = document.getElementById("faculty-invitation-token");
+    const token = window.location.hash ? window.location.hash.slice(1) : "";
+    if (tokenField) tokenField.value = token;
+    if (window.location.hash && window.history && window.history.replaceState) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}

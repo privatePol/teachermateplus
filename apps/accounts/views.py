@@ -7,6 +7,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import ValidationError
 from django.db.models import Q
+from django.db import transaction
 from django.conf import settings
 from django.http import HttpResponse
 from django.shortcuts import redirect, render
@@ -17,6 +18,7 @@ from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.generic import RedirectView
 from django.views.generic import FormView, TemplateView
 
@@ -26,7 +28,6 @@ from apps.accounts.forms import (
     AdminSelfChangePasswordForm,
     AdminLoginForm,
     FacultyForgotPasswordForm,
-    FacultyLoginForm,
     LoginOtpVerificationForm,
     FacultyPasswordResetSetForm,
     FacultySelfChangePasswordForm,
@@ -35,6 +36,7 @@ from apps.accounts.forms import (
     UserSignatureUploadForm,
 )
 from apps.accounts.services import AdminPasswordResetOtpService, LoginLockoutService, LoginOtpService, UserSignatureService
+from apps.accounts.faculty_provisioning import FacultyInvitationService
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
 from apps.core.services.email_assets import format_email_subject
@@ -178,7 +180,7 @@ def _otp_verify_url_name(portal_code: str) -> str:
 
 
 def _login_url_name(portal_code: str) -> str:
-    return "accounts:admin_login" if (portal_code or "").upper() == "ADMIN" else "accounts:faculty_login"
+    return "accounts:admin_login" if (portal_code or "").upper() == "ADMIN" else "faculty_portal:public_index"
 
 
 def _store_pending_otp_login(request, *, user, portal_code: str) -> None:
@@ -300,15 +302,6 @@ class AdminLoginView(_BasePortalLoginView):
     portal_code = "ADMIN"
     portal_permission = "admin_portal.access"
     dashboard_url_name = "admin_portal:dashboard"
-
-
-@method_decorator(ensure_csrf_cookie, name="dispatch")
-class FacultyLoginView(_BasePortalLoginView):
-    template_name = "faculty_portal/login.html"
-    form_class = FacultyLoginForm
-    portal_code = "FACULTY"
-    portal_permission = "faculty_portal.access"
-    dashboard_url_name = "faculty_portal:dashboard"
 
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")
@@ -654,6 +647,45 @@ def faculty_password_reset_confirm_view(request, uidb64: str, token: str):
 @ensure_csrf_cookie
 def faculty_password_reset_complete_view(request):
     return render(request, "faculty_portal/password_reset_complete.html")
+
+
+@ensure_csrf_cookie
+@sensitive_post_parameters("invitation_token", "new_password1", "new_password2")
+def faculty_invitation_accept_view(request, public_id):
+    invitation = FacultyInvitationService.get_open_invitation(public_id=public_id)
+    if not invitation:
+        return render(
+            request,
+            "accounts/faculty_invitation_accept.html",
+            {"valid_link": False},
+        )
+
+    form = FacultyPasswordResetSetForm(invitation.user, request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        token = request.POST.get("invitation_token", "")
+        with transaction.atomic():
+            locked_invitation = FacultyInvitationService.resolve_valid(
+                public_id=public_id,
+                token=token,
+                for_update=True,
+            )
+            if not locked_invitation:
+                messages.error(request, "This invitation is invalid, expired, or has already been used.")
+                return redirect("faculty_portal:public_index")
+            locked_form = FacultyPasswordResetSetForm(locked_invitation.user, request.POST)
+            if not locked_form.is_valid():
+                form = locked_form
+            else:
+                locked_form.save()
+                FacultyInvitationService.mark_accepted(invitation=locked_invitation, request=request)
+                messages.success(request, "Password setup complete. You can now sign in to the Faculty Portal.")
+                return redirect("faculty_portal:public_index")
+
+    return render(
+        request,
+        "accounts/faculty_invitation_accept.html",
+        {"valid_link": True, "form": form, "invitation": invitation},
+    )
 
 
 @portal_required("FACULTY")

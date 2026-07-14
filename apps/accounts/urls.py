@@ -6,7 +6,6 @@ from .views import (
     AdminLoginView,
     AdminLoginOtpView,
     AdminPasswordResetOtpView,
-    FacultyLoginView,
     FacultyLoginOtpView,
     FacultyForgotPasswordView,
     PublicIndexView,
@@ -27,6 +26,7 @@ from .views import (
     faculty_signature_view,
     faculty_password_reset_complete_view,
     faculty_password_reset_confirm_view,
+    faculty_invitation_accept_view,
 )
 
 app_name = "accounts"
@@ -53,7 +53,11 @@ urlpatterns = [
     path("admin-portal/my-signature/", admin_signature_view, name="admin_signature"),
     path("admin-portal/my-signature/preview/", admin_signature_preview_view, name="admin_signature_preview"),
     path("admin-portal/privacy-consent/", admin_privacy_consent_view, name="admin_privacy_consent"),
-    path("faculty/login/", FacultyLoginView.as_view(), name="faculty_login"),
+    path(
+        "faculty/login/",
+        RedirectView.as_view(pattern_name="faculty_portal:public_index", permanent=False),
+        name="faculty_login",
+    ),
     path("faculty/login/otp/", FacultyLoginOtpView.as_view(), name="faculty_login_otp"),
     path("faculty/logout/", faculty_logout_view, name="faculty_logout"),
     path("faculty/my-signature/", faculty_signature_view, name="faculty_signature"),
@@ -67,5 +71,10 @@ urlpatterns = [
         name="faculty_password_reset_confirm",
     ),
     path("faculty/reset/done/", faculty_password_reset_complete_view, name="faculty_password_reset_complete"),
+    path(
+        "faculty/invitation/<uuid:public_id>/",
+        faculty_invitation_accept_view,
+        name="faculty_invitation_accept",
+    ),
     path("faculty/change-password/", faculty_change_password_view, name="faculty_change_password"),
 ]

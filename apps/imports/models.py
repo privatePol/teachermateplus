@@ -11,6 +11,7 @@ class ImportBatch(TimeStampedModel):
         STUDENTS = "students", "Students"
         COURSE_OFFERINGS = "course_offerings", "Course Offerings"
         FACULTY_ASSIGNMENTS = "faculty_assignments", "Faculty Assignments"
+        FACULTY_USERS = "faculty_users", "Faculty Users"
         ENROLLMENT = "enrollment", "Enrollment"
 
     class Status(models.TextChoices):
@@ -58,6 +59,8 @@ class ImportBatch(TimeStampedModel):
     error_summary_json = models.JSONField(blank=True, null=True)
     confirmed_at = models.DateTimeField(blank=True, null=True)
     metadata_json = models.JSONField(blank=True, null=True)
+    email_system_enabled_snapshot = models.BooleanField(default=False)
+    send_invitation_emails_requested = models.BooleanField(default=False)
 
     class Meta:
         db_table = "import_batches"
@@ -68,6 +71,17 @@ class ImportBatch(TimeStampedModel):
 
 
 class ImportBatchRow(TimeStampedModel):
+    RESULT_LABELS = {
+        "PREVIEW_CREATE": "New Faculty account — will be created",
+        "PREVIEW_SKIP_EXISTING": "Existing matching Faculty account — will be skipped",
+        "FAILED_VALIDATION": "Validation error",
+        "FAILED_PROVISIONING": "Provisioning failed",
+        "CREATED_EMAIL_DISABLED": "Email disabled by system",
+        "CREATED_INVITATION_NOT_REQUESTED": "Invitation not requested",
+        "CREATED_INVITATION_SENT": "Invitation sent",
+        "CREATED_INVITATION_FAILED": "Invitation failed",
+        "SKIPPED_EXISTING": "Skipped existing account",
+    }
     class RowStatus(models.TextChoices):
         VALID = "VALID", "Valid"
         ERROR = "ERROR", "Error"
@@ -85,6 +99,8 @@ class ImportBatchRow(TimeStampedModel):
     errors_json = models.JSONField(blank=True, null=True)
     imported_entity_type = models.CharField(max_length=120, blank=True, null=True)
     imported_entity_id = models.CharField(max_length=64, blank=True, null=True)
+    result_code = models.CharField(max_length=64, blank=True, null=True)
+    result_metadata_json = models.JSONField(blank=True, null=True)
 
     class Meta:
         db_table = "import_batch_rows"
@@ -95,3 +111,7 @@ class ImportBatchRow(TimeStampedModel):
 
     def __str__(self):
         return f"{self.batch_id}:{self.row_number}:{self.row_status}"
+
+    @property
+    def result_label(self):
+        return self.RESULT_LABELS.get(self.result_code, self.result_code or "Pending preview")

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Faculty Account Invitation</title>
+</head>
+<body style="margin:0;padding:0;background:#f2f6ef;font-family:Arial,Helvetica,sans-serif;color:#1f2d24;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f2f6ef;padding:28px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:760px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 12px 36px rgba(32,66,44,0.16);">
+          <tr>
+            <td style="padding:20px 28px;background:linear-gradient(90deg,#1f6a3d 0%,#2f8a4f 45%,#bfa629 100%);">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="vertical-align:middle;">
+                    <div style="font-size:20px;font-weight:800;color:#ffffff;">NCBA | TeacherMate+</div>
+                  </td>
+                  <td align="right" style="vertical-align:middle;color:#f5f6e9;font-size:12px;letter-spacing:0.1em;font-weight:700;">
+                    ACCOUNT ONBOARDING
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px 30px 8px 30px;">
+              <h1 style="margin:0 0 10px 0;font-size:26px;line-height:1.2;color:#13472a;">Welcome to TeacherMate+</h1>
+              <p style="margin:0;font-size:16px;line-height:1.6;color:#33443b;">
+                Hello {{ user.full_name|default:user.username }},
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 30px 10px 30px;">
+              <p style="margin:0;font-size:15px;line-height:1.7;color:#33443b;">
+                Your Faculty account has been created. Use the secure invitation below to create your password and activate your account.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 30px 8px 30px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0 8px;">
+                <tr>
+                  <td style="width:180px;color:#6a756f;font-size:13px;">Username</td>
+                  <td style="font-size:15px;font-weight:700;color:#1c3a2a;">{{ user.username }}</td>
+                </tr>
+                <tr>
+                  <td style="width:180px;color:#6a756f;font-size:13px;">Invitation validity</td>
+                  <td style="font-size:15px;font-weight:700;color:#1c3a2a;">{{ expiry_hours }} hours</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:14px 30px 8px 30px;">
+              <a href="{{ setup_url }}"
+                 style="display:inline-block;padding:14px 24px;border-radius:10px;background:#1f7a43;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;">
+                Set Password and Activate Account
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 30px 12px 30px;">
+              <p style="margin:0;font-size:13px;line-height:1.7;color:#6a756f;">
+                This secure invitation is single-use. It expires in {{ expiry_hours }} hours and a newer invitation will invalidate this link.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 30px 26px 30px;">
+              <p style="margin:0;font-size:13px;line-height:1.7;color:#6a756f;">
+                If you were not expecting this invitation, contact your TeacherMate+ administrator.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 30px;background:#f8fbf5;border-top:1px solid #e1e9de;">
+              <p style="margin:0;font-size:12px;line-height:1.6;color:#62706a;">TeacherMatePlus Platform Security</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

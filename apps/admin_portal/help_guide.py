@@ -587,13 +587,19 @@ ADMIN_HELP_SECTIONS = [
                 "code": "users",
                 "title": "Users and Login Security",
                 "audience": "Authorized account administrators",
-                "permissions": ["users.read", "users.update"],
+                "permissions": [
+                    "users.read",
+                    "users.update",
+                    "faculty_users.view_import",
+                    "faculty_users.import",
+                ],
                 "purpose": "Maintains user identity, campus defaults, account state, passwords, and login lockouts.",
                 "menu_path": "Admin Portal -> Security -> Users or Admin Portal -> Security -> Login Lockouts",
                 "steps": [
                     "Open Security -> Users and search by username, name, or email.",
                     "Open the existing account before deciding to create a new one.",
                     "Verify identity, email, default tenant, default campus, active status, and assigned roles.",
+                    "For many new Faculty accounts, choose Import Faculty CSV, download the official template, upload it, and review every row before confirming.",
                     "For a temporary login block, open Security -> Login Lockouts and verify the user before unlocking.",
                 ],
                 "check_first": [
@@ -609,6 +615,22 @@ ADMIN_HELP_SECTIONS = [
                         "avoid": "Do not grant portal access by guessing from account flags.",
                         "result": "The account is saved; role assignment controls what the user can open.",
                         "editable": "Yes, by authorized account administrators.",
+                    },
+                    {
+                        "name": "Import Faculty CSV",
+                        "does": "Creates inactive Faculty login accounts and assigns the exact scoped Faculty role from the official CSV template.",
+                        "when": "Use it for approved bulk Faculty account onboarding after checking existing usernames and email addresses.",
+                        "avoid": "Do not add role, password, active, staff, permission, or email-control columns. Do not enable invitation email outside an approved production rollout.",
+                        "result": "Use the flow-diagram icon beside the upload-page title to view the onboarding steps. Valid rows are created or safely skipped. Faculty can sign in only after a valid invitation is accepted.",
+                        "editable": "Conflicts are not changed by the importer; reconcile them manually through the approved account workflow.",
+                    },
+                    {
+                        "name": "Send / Resend Faculty Invitation",
+                        "does": "Shows the Faculty invitation state and sends a new secure password-setup link without creating another account.",
+                        "when": "Open the Faculty user from Security -> Users when an invitation was disabled, not requested, failed, expired, or needs replacement.",
+                        "avoid": "Do not resend within five minutes or after the account has accepted the invitation and become login-ready.",
+                        "result": "A successful send uses the Account Onboarding email design, starts a fresh 24-hour period, and invalidates the previous link. After password setup, the Faculty user returns to /faculty/ to sign in.",
+                        "editable": "The action stays available on the user record for authorized administrators within scope.",
                     },
                     {
                         "name": "Unlock",

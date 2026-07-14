@@ -41,6 +41,9 @@
     {% if "users.create" in effective_permissions %}
     <a class="btn btn-sm btn-primary" href="{% url 'admin_portal:user_create' %}">Add User</a>
     {% endif %}
+    {% if "faculty_users.import" in effective_permissions and "faculty_users.view_import" in effective_permissions %}
+    <a class="btn btn-sm btn-success" href="{% url 'admin_portal:import_upload' 'faculty-users' %}">Import Faculty CSV</a>
+    {% endif %}
   </div>
 </div>
 

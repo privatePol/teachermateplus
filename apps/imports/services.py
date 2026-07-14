@@ -6,7 +6,8 @@ import re
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
+from django.conf import settings
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
 from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
@@ -17,6 +18,13 @@ from django.utils import timezone
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.core.services.audit import AuditService
 from apps.core.services.settings import SystemSettingService
+from apps.accounts.faculty_provisioning import (
+    FacultyAccountProvisioningService,
+    FacultyInvitationService,
+    ScopedUserRoleAssignmentService,
+)
+from apps.accounts.models import FacultyInvitation
+from apps.core.services.permissions import PermissionService
 from apps.enrollment.models import Enrollment
 from apps.enrollment.services import EnrollmentService
 from apps.imports.models import ImportBatch, ImportBatchRow
@@ -68,6 +76,16 @@ class ImportTemplateService:
         ImportBatch.ImportType.FACULTY_ASSIGNMENTS: {
             "duplicate_rule": "An existing assignment for the same offering and faculty user is rejected.",
             "change_warning": "This importer creates faculty assignments only. It does not replace an existing assignment.",
+        },
+        ImportBatch.ImportType.FACULTY_USERS: {
+            "duplicate_rule": (
+                "Duplicate email addresses or usernames in the CSV are rejected on every conflicting row. "
+                "Complete matching Faculty accounts are skipped without changes."
+            ),
+            "change_warning": (
+                "This importer creates inactive Faculty login accounts only. It never updates existing users, "
+                "accepts role selection, or sends plaintext passwords."
+            ),
         },
         ImportBatch.ImportType.ENROLLMENT: {
             "duplicate_rule": "An existing enrollment for the same student and course offering is rejected.",
@@ -211,6 +229,28 @@ class ImportTemplateService:
                 "TRUE",
             ],
         },
+        ImportBatch.ImportType.FACULTY_USERS: {
+            "headers": [
+                "tenant_code",
+                "campus_code",
+                "department_code",
+                "first_name",
+                "middle_name",
+                "last_name",
+                "email",
+                "username",
+            ],
+            "sample_row": [
+                "DEMO",
+                "MAIN",
+                "COLLEGE",
+                "JUAN",
+                "SANTOS",
+                "DELA CRUZ",
+                "juan.delacruz@ncba.edu.ph",
+                "juan.delacruz",
+            ],
+        },
         ImportBatch.ImportType.ENROLLMENT: {
             "headers": [
                 "tenant_code",
@@ -288,6 +328,18 @@ class ImportTemplateService:
             "code_rules": [
                 "faculty_username: accepts username or email, exact match recommended",
                 "is_primary: TRUE/FALSE",
+            ],
+        },
+        ImportBatch.ImportType.FACULTY_USERS: {
+            "summary": "Creates inactive Faculty login accounts and assigns the exact scoped FACULTY role.",
+            "relationships": [
+                "tenant_code -> campus_code -> department_code defines both the user default scope and Faculty role scope",
+                "username is optional and is derived from the email local part when blank",
+            ],
+            "code_rules": [
+                "tenant_code, campus_code, department_code, first_name, last_name, and email are required",
+                "email must use an allowed domain for the selected tenant",
+                "role, password, permissions, staff, active, and email-control columns are never accepted",
             ],
         },
         ImportBatch.ImportType.ENROLLMENT: {
@@ -392,6 +444,7 @@ class BulkImportService:
         ImportBatch.ImportType.STUDENTS: "students.import",
         ImportBatch.ImportType.COURSE_OFFERINGS: "course_offerings.import",
         ImportBatch.ImportType.FACULTY_ASSIGNMENTS: "faculty_assignments.import",
+        ImportBatch.ImportType.FACULTY_USERS: "faculty_users.import",
         ImportBatch.ImportType.ENROLLMENT: "enrollment.import",
     }
 
@@ -409,6 +462,7 @@ class BulkImportService:
             ImportBatch.ImportType.STUDENTS,
             ImportBatch.ImportType.COURSE_OFFERINGS,
             ImportBatch.ImportType.FACULTY_ASSIGNMENTS,
+            ImportBatch.ImportType.FACULTY_USERS,
             ImportBatch.ImportType.ENROLLMENT,
         ]
 
@@ -445,6 +499,7 @@ class BulkImportService:
             "students": ImportBatch.ImportType.STUDENTS,
             "course-offerings": ImportBatch.ImportType.COURSE_OFFERINGS,
             "faculty-assignments": ImportBatch.ImportType.FACULTY_ASSIGNMENTS,
+            "faculty-users": ImportBatch.ImportType.FACULTY_USERS,
             "enrollment": ImportBatch.ImportType.ENROLLMENT,
         }
         return mapping.get(import_slug)
@@ -457,6 +512,7 @@ class BulkImportService:
             ImportBatch.ImportType.STUDENTS: "students",
             ImportBatch.ImportType.COURSE_OFFERINGS: "course-offerings",
             ImportBatch.ImportType.FACULTY_ASSIGNMENTS: "faculty-assignments",
+            ImportBatch.ImportType.FACULTY_USERS: "faculty-users",
             ImportBatch.ImportType.ENROLLMENT: "enrollment",
         }
         return mapping.get(import_type, import_type)
@@ -484,9 +540,11 @@ class BulkImportService:
         scope = getattr(request, "scope", {}) if request else {}
         tenant_ids = set(scope.get("tenant_ids", []))
         campus_ids = set(scope.get("campus_ids", []))
+        department_ids = set(scope.get("department_ids", []))
         return {
             "tenant_ids": None if getattr(user, "is_superuser", False) else tenant_ids,
             "campus_ids": None if getattr(user, "is_superuser", False) else campus_ids,
+            "department_ids": None if getattr(user, "is_superuser", False) else department_ids,
             "tenant_cache": {},
             "campus_cache": {},
             "department_cache": {},
@@ -1433,6 +1491,115 @@ class BulkImportService:
         return normalized, errors, unique_key
 
     @classmethod
+    def _validate_faculty_user_row(cls, row: dict, runtime: dict):
+        errors = []
+        if "active_faculty_role_error" not in runtime:
+            try:
+                FacultyAccountProvisioningService.resolve_active_faculty_role()
+            except ValidationError as exc:
+                runtime["active_faculty_role_error"] = "; ".join(exc.messages)
+            else:
+                runtime["active_faculty_role_error"] = ""
+        if runtime["active_faculty_role_error"]:
+            errors.append(runtime["active_faculty_role_error"])
+        tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
+        campus = department = None
+        if tenant:
+            campus = cls._resolve_campus(row["campus_code"], tenant, runtime, errors, required=True)
+        if tenant and campus:
+            department = cls._resolve_department(
+                row["department_code"],
+                tenant,
+                campus,
+                runtime,
+                errors,
+                required=True,
+            )
+        if department and runtime.get("department_ids") is not None and department.id not in runtime["department_ids"]:
+            errors.append(f"department_code '{department.code}' is outside your scope.")
+            department = None
+
+        first_name = cls._normalize_value(row["first_name"])
+        middle_name = cls._normalize_value(row["middle_name"])
+        last_name = cls._normalize_value(row["last_name"])
+        if not first_name:
+            errors.append("first_name is required.")
+        if not last_name:
+            errors.append("last_name is required.")
+
+        email = cls._normalize_value(row["email"]).lower()
+        if not email:
+            errors.append("email is required.")
+        elif tenant:
+            try:
+                email = FacultyAccountProvisioningService.validate_email_for_tenant(email, tenant.id)
+            except ValidationError as exc:
+                errors.extend(exc.messages)
+        else:
+            try:
+                validate_email(email)
+            except ValidationError:
+                errors.append("email is invalid.")
+
+        supplied_username = cls._normalize_value(row["username"])
+        derived_username = email.split("@", 1)[0] if email and "@" in email else ""
+        username = FacultyAccountProvisioningService.normalize_username(supplied_username or derived_username)
+        if not username:
+            errors.append("username could not be derived from email.")
+        elif len(username) > 150:
+            errors.append("username must be 150 characters or fewer.")
+
+        if email and email in runtime.get("duplicate_faculty_emails", set()):
+            errors.append("Duplicate email in this upload file; all conflicting rows are invalid.")
+        if username and username in runtime.get("duplicate_faculty_usernames", set()):
+            errors.append("Duplicate username in this upload file; all conflicting rows are invalid.")
+
+        email_user = User.objects.filter(email__iexact=email).order_by("id").first() if email else None
+        username_user = User.objects.filter(username__iexact=username).order_by("id").first() if username else None
+        existing_user = None
+        skip_existing = False
+        if email_user or username_user:
+            if email_user and username_user and email_user.id == username_user.id and tenant and campus and department:
+                has_exact_faculty_scope = UserRole.objects.filter(
+                    user=email_user,
+                    role__code="FACULTY",
+                    role__is_active=True,
+                    is_active=True,
+                    tenant=tenant,
+                    campus=campus,
+                    department=department,
+                ).exists()
+                if has_exact_faculty_scope:
+                    existing_user = email_user
+                    skip_existing = True
+                else:
+                    errors.append(
+                        "Existing user matches email and username but does not have the exact requested active FACULTY role scope; manual review is required."
+                    )
+            elif email_user and username_user and email_user.id != username_user.id:
+                errors.append("Email and username belong to different existing users.")
+            elif email_user:
+                errors.append("Email is already assigned to an existing user with a different username; manual review is required.")
+            else:
+                errors.append("Username is already assigned to an existing user with a different email.")
+
+        normalized = {
+            "tenant_id": tenant.id if tenant else None,
+            "campus_id": campus.id if campus else None,
+            "department_id": department.id if department else None,
+            "first_name": first_name,
+            "middle_name": middle_name or None,
+            "last_name": last_name,
+            "email": email,
+            "username": username,
+            "username_derived": not bool(supplied_username),
+            "skip_existing": skip_existing,
+            "existing_user_id": existing_user.id if existing_user else None,
+        }
+        unique_key = f"{email}:{username}" if email and username else None
+        return normalized, errors, unique_key
+
+    @classmethod
     def _validate_enrollment_row(cls, row: dict, runtime: dict):
         errors = []
         tenant = cls._resolve_tenant(row["tenant_code"], runtime, errors)
@@ -1553,6 +1720,8 @@ class BulkImportService:
             return cls._validate_course_offering_row(row, runtime)
         if import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS:
             return cls._validate_faculty_assignment_row(row, runtime)
+        if import_type == ImportBatch.ImportType.FACULTY_USERS:
+            return cls._validate_faculty_user_row(row, runtime)
         if import_type == ImportBatch.ImportType.ENROLLMENT:
             return cls._validate_enrollment_row(row, runtime)
         raise ValidationError("Unsupported import type.")
@@ -1583,12 +1752,14 @@ class BulkImportService:
         scope = getattr(request, "scope", {}) if request else {}
         content = uploaded_file.read()
         original_filename = uploaded_file.name
-        source_file = ContentFile(content, name=original_filename)
+        retain_source_file = import_type != ImportBatch.ImportType.FACULTY_USERS
+        source_file = ContentFile(content, name=original_filename) if retain_source_file else None
         upload_metadata = {
             "scope": scope,
             "original_filename": original_filename,
             "content_type": (getattr(uploaded_file, "content_type", "") or "").strip(),
             "file_size_bytes": len(content or b""),
+            "raw_file_retention": "STORED" if retain_source_file else "NOT_STORED_AFTER_PARSE",
         }
 
         batch = ImportBatch.objects.create(
@@ -1605,7 +1776,7 @@ class BulkImportService:
         )
         batch.metadata_json = {
             **upload_metadata,
-            "stored_filename": batch.source_file.name,
+            "stored_filename": batch.source_file.name if batch.source_file else "",
         }
         batch.save(update_fields=["metadata_json", "updated_at"])
 
@@ -1645,6 +1816,27 @@ class BulkImportService:
             return batch
 
         runtime = cls._build_runtime(user=user, request=request)
+        if import_type == ImportBatch.ImportType.FACULTY_USERS:
+            email_counts = {}
+            username_counts = {}
+            for values in csv_rows[1:]:
+                if cls._is_blank_row(values) or len(values) != len(expected_headers):
+                    continue
+                raw = {header: cls._normalize_value(values[index]) for index, header in enumerate(expected_headers)}
+                email_key = raw["email"].lower()
+                username_key = FacultyAccountProvisioningService.normalize_username(
+                    raw["username"] or (email_key.split("@", 1)[0] if "@" in email_key else "")
+                )
+                if email_key:
+                    email_counts[email_key] = email_counts.get(email_key, 0) + 1
+                if username_key:
+                    username_counts[username_key] = username_counts.get(username_key, 0) + 1
+            runtime["duplicate_faculty_emails"] = {
+                value for value, count in email_counts.items() if count > 1
+            }
+            runtime["duplicate_faculty_usernames"] = {
+                value for value, count in username_counts.items() if count > 1
+            }
         row_objects = []
         seen_keys = set()
         dedup_skipped_count = 0
@@ -1692,6 +1884,20 @@ class BulkImportService:
                     raw_data_json=row_data,
                     normalized_data_json=normalized or None,
                     errors_json=errors or None,
+                    result_code=(
+                        "FAILED_VALIDATION"
+                        if errors
+                        else (
+                            "PREVIEW_SKIP_EXISTING"
+                            if import_type == ImportBatch.ImportType.FACULTY_USERS
+                            and normalized.get("skip_existing")
+                            else (
+                                "PREVIEW_CREATE"
+                                if import_type == ImportBatch.ImportType.FACULTY_USERS
+                                else None
+                            )
+                        )
+                    ),
                 )
             )
 
@@ -2006,6 +2212,94 @@ class BulkImportService:
         return "FacultyAssignment", row
 
     @classmethod
+    def _resolve_faculty_user_confirmation_context(cls, *, normalized: dict, actor):
+        tenant = Tenant.objects.filter(id=normalized.get("tenant_id"), is_active=True).first()
+        campus = Campus.objects.filter(id=normalized.get("campus_id"), is_active=True).first()
+        department = Department.objects.filter(id=normalized.get("department_id"), is_active=True).first()
+        if not tenant or not campus or not department:
+            raise ValidationError("Tenant, campus, or department is no longer active.")
+        ScopedUserRoleAssignmentService._validate_scope(
+            actor=actor,
+            tenant=tenant,
+            campus=campus,
+            department=department,
+        )
+        FacultyAccountProvisioningService.resolve_active_faculty_role()
+        email = FacultyAccountProvisioningService.validate_email_for_tenant(
+            normalized.get("email"),
+            tenant.id,
+        )
+        username = FacultyAccountProvisioningService.normalize_username(normalized.get("username"))
+        email_user = User.objects.filter(email__iexact=email).order_by("id").first()
+        username_user = User.objects.filter(username__iexact=username).order_by("id").first()
+        return tenant, campus, department, email, username, email_user, username_user
+
+    @classmethod
+    def _create_or_skip_faculty_user(
+        cls,
+        *,
+        normalized: dict,
+        actor,
+        batch: ImportBatch,
+        batch_row: ImportBatchRow,
+    ):
+        tenant, campus, department, email, username, email_user, username_user = (
+            cls._resolve_faculty_user_confirmation_context(normalized=normalized, actor=actor)
+        )
+        if normalized.get("skip_existing"):
+            expected_user_id = normalized.get("existing_user_id")
+            if (
+                not email_user
+                or not username_user
+                or email_user.id != username_user.id
+                or email_user.id != expected_user_id
+                or not UserRole.objects.filter(
+                    user=email_user,
+                    role__code="FACULTY",
+                    role__is_active=True,
+                    is_active=True,
+                    tenant=tenant,
+                    campus=campus,
+                    department=department,
+                ).exists()
+            ):
+                raise ValidationError("Existing Faculty account no longer matches the validated identity and scope.")
+            AuditService.log_event(
+                action="FACULTY_IMPORT_ROW_SKIPPED",
+                portal="ADMIN",
+                entity_type="User",
+                entity_id=email_user.id,
+                actor=actor,
+                tenant=tenant,
+                campus=campus,
+                metadata={
+                    "department_id": department.id,
+                    "import_batch_id": batch.id,
+                    "import_row_number": batch_row.row_number,
+                    "result_code": "SKIPPED_EXISTING",
+                },
+                request=None,
+            )
+            return "User", email_user, False, None
+
+        if email_user or username_user:
+            raise ValidationError("Email or username became unavailable after preview; manual review is required.")
+        result = FacultyAccountProvisioningService.provision(
+            actor=actor,
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            first_name=normalized.get("first_name"),
+            middle_name=normalized.get("middle_name"),
+            last_name=normalized.get("last_name"),
+            email=email,
+            username=username,
+            import_batch_id=batch.id,
+            import_row_number=batch_row.row_number,
+        )
+        return "User", result.user, True, result.role_assignment
+
+    @classmethod
     def _resolve_or_create_enrollment_student(cls, normalized: dict, *, actor):
         student_id = normalized.get("student_id")
         student_mode = normalized.get("student_mode") or cls.ENROLLMENT_STUDENT_MODE_STRICT
@@ -2179,9 +2473,43 @@ class BulkImportService:
         raise ValidationError("Unsupported import type.")
 
     @classmethod
-    def confirm_batch(cls, *, batch: ImportBatch, actor):
+    def confirm_batch(
+        cls,
+        *,
+        batch: ImportBatch,
+        actor,
+        send_invitation_emails: bool = False,
+        request=None,
+    ):
         if batch.status == ImportBatch.Status.CONFIRMED:
             raise ValidationError("This batch is already confirmed.")
+        faculty_user_import = batch.import_type == ImportBatch.ImportType.FACULTY_USERS
+        email_system_enabled = bool(getattr(settings, "FACULTY_IMPORT_EMAIL_ENABLED", False))
+        email_requested = bool(send_invitation_emails and email_system_enabled)
+        if faculty_user_import and not PermissionService.has_permission(
+            actor,
+            "faculty_users.import",
+            tenant_id=batch.tenant_id,
+            campus_id=batch.campus_id,
+        ):
+            raise PermissionDenied("You do not have permission to confirm this Faculty user import.")
+        if faculty_user_import and email_requested and not PermissionService.has_permission(
+            actor,
+            "faculty_users.send_import_invitations",
+            tenant_id=batch.tenant_id,
+            campus_id=batch.campus_id,
+        ):
+            raise ValidationError("You do not have permission to send faculty import invitations.")
+        if faculty_user_import:
+            batch.email_system_enabled_snapshot = email_system_enabled
+            batch.send_invitation_emails_requested = email_requested
+            batch.save(
+                update_fields=[
+                    "email_system_enabled_snapshot",
+                    "send_invitation_emails_requested",
+                    "updated_at",
+                ]
+            )
         candidate_rows = list(batch.rows.filter(row_status=ImportBatchRow.RowStatus.VALID).order_by("row_number"))
         if not candidate_rows:
             raise ValidationError("No valid rows available for import.")
@@ -2190,23 +2518,52 @@ class BulkImportService:
         failed_count = 0
         for row in candidate_rows:
             normalized = row.normalized_data_json or {}
+            faculty_created = False
+            role_assignment = None
             try:
                 with transaction.atomic():
-                    entity_type, entity_obj = cls._create_from_row(batch.import_type, normalized, actor=actor)
-                    cls._audit_import_row_write(
-                        batch=batch,
-                        batch_row=row,
-                        actor=actor,
-                        entity_type=entity_type,
-                        entity_obj=entity_obj,
-                        normalized=normalized,
-                    )
-            except (ValidationError, IntegrityError, ValueError) as exc:
+                    if faculty_user_import:
+                        entity_type, entity_obj, faculty_created, role_assignment = cls._create_or_skip_faculty_user(
+                            normalized=normalized,
+                            actor=actor,
+                            batch=batch,
+                            batch_row=row,
+                        )
+                    else:
+                        entity_type, entity_obj = cls._create_from_row(batch.import_type, normalized, actor=actor)
+                    if not faculty_user_import:
+                        cls._audit_import_row_write(
+                            batch=batch,
+                            batch_row=row,
+                            actor=actor,
+                            entity_type=entity_type,
+                            entity_obj=entity_obj,
+                            normalized=normalized,
+                        )
+            except (ValidationError, PermissionDenied, IntegrityError, ValueError) as exc:
                 row_errors = list(row.errors_json or [])
                 row_errors.append(f"Import failed: {exc}")
                 row.row_status = ImportBatchRow.RowStatus.ERROR
                 row.errors_json = row_errors
-                row.save(update_fields=["row_status", "errors_json", "updated_at"])
+                row.result_code = "FAILED_PROVISIONING" if faculty_user_import else row.result_code
+                row.save(update_fields=["row_status", "errors_json", "result_code", "updated_at"])
+                if faculty_user_import:
+                    AuditService.log_event(
+                        action="FACULTY_IMPORT_ROW_FAILED",
+                        portal="ADMIN",
+                        entity_type="ImportBatchRow",
+                        entity_id=row.id,
+                        actor=actor,
+                        tenant=batch.tenant,
+                        campus=batch.campus,
+                        metadata={
+                            "import_batch_id": batch.id,
+                            "import_row_number": row.row_number,
+                            "result_code": "FAILED_PROVISIONING",
+                            "error_type": type(exc).__name__,
+                        },
+                        request=request,
+                    )
                 failed_count += 1
                 continue
 
@@ -2214,12 +2571,81 @@ class BulkImportService:
             row.imported_entity_type = entity_type
             row.imported_entity_id = str(getattr(entity_obj, "id", ""))
             row.errors_json = None
+            if faculty_user_import:
+                if not faculty_created:
+                    row.result_code = "SKIPPED_EXISTING"
+                    row.result_metadata_json = {"user_id": entity_obj.id}
+                elif not email_system_enabled:
+                    invitation = FacultyInvitationService.record_without_delivery(
+                        user=entity_obj,
+                        actor=actor,
+                        originating_import_row=row,
+                        status=FacultyInvitation.Status.DISABLED_BY_SYSTEM,
+                    )
+                    row.result_code = "CREATED_EMAIL_DISABLED"
+                    row.result_metadata_json = {
+                        "user_id": entity_obj.id,
+                        "role_assignment_id": role_assignment.id if role_assignment else None,
+                        "invitation_id": invitation.id,
+                        "invitation_status": invitation.status,
+                    }
+                elif not email_requested:
+                    invitation = FacultyInvitationService.record_without_delivery(
+                        user=entity_obj,
+                        actor=actor,
+                        originating_import_row=row,
+                        status=FacultyInvitation.Status.NOT_REQUESTED,
+                    )
+                    row.result_code = "CREATED_INVITATION_NOT_REQUESTED"
+                    row.result_metadata_json = {
+                        "user_id": entity_obj.id,
+                        "role_assignment_id": role_assignment.id if role_assignment else None,
+                        "invitation_id": invitation.id,
+                        "invitation_status": invitation.status,
+                    }
+                else:
+                    try:
+                        delivery = FacultyInvitationService.send_or_resend(
+                            user=entity_obj,
+                            actor=actor,
+                            originating_import_row=row,
+                            request=request,
+                            resend=False,
+                        )
+                    except (ValidationError, PermissionDenied) as exc:
+                        invitation = FacultyInvitationService.record_without_delivery(
+                            user=entity_obj,
+                            actor=actor,
+                            originating_import_row=row,
+                            status=FacultyInvitation.Status.FAILED,
+                        )
+                        invitation.failure_reason = type(exc).__name__
+                        invitation.save(update_fields=["failure_reason", "updated_at"])
+                        row.result_code = "CREATED_INVITATION_FAILED"
+                        row.result_metadata_json = {
+                            "user_id": entity_obj.id,
+                            "role_assignment_id": role_assignment.id if role_assignment else None,
+                            "invitation_id": invitation.id,
+                            "invitation_status": invitation.status,
+                        }
+                    else:
+                        row.result_code = (
+                            "CREATED_INVITATION_SENT" if delivery.sent else "CREATED_INVITATION_FAILED"
+                        )
+                        row.result_metadata_json = {
+                            "user_id": entity_obj.id,
+                            "role_assignment_id": role_assignment.id if role_assignment else None,
+                            "invitation_id": delivery.invitation.id,
+                            "invitation_status": delivery.invitation.status,
+                        }
             row.save(
                 update_fields=[
                     "row_status",
                     "imported_entity_type",
                     "imported_entity_id",
                     "errors_json",
+                    "result_code",
+                    "result_metadata_json",
                     "updated_at",
                 ]
             )

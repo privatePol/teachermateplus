@@ -1,0 +1,15 @@
+NCBA | TeacherMate+ - ACCOUNT ONBOARDING
+
+Welcome to TeacherMate+
+
+Hello {{ user.full_name|default:user.username }},
+
+Your TeacherMate+ Faculty account has been created and is ready for password setup.
+
+Username: {{ user.username }}
+
+Open this secure link within {{ expiry_hours }} hours to create your password and activate your account:
+{{ setup_url }}
+
+This link is single-use. A newer invitation will invalidate this link.
+If you were not expecting this invitation, contact your TeacherMate+ administrator.

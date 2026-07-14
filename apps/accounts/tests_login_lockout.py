@@ -135,12 +135,11 @@ class LoginLockoutTests(TestCase):
         self._configure_lockout(max_attempts=3, duration_minutes=20)
 
         response = self.client.post(
-            reverse("accounts:faculty_login"),
+            reverse("faculty_portal:public_index"),
             {"username": self.user.username, "password": "wrong-pass"},
         )
 
-        self.assertContains(response, 'class="login-attempt-message mt-4"', status_code=200)
-        self.assertContains(response, "color: #b02a37;")
+        self.assertContains(response, 'class="fp-login-attempt-message"', status_code=200)
         self.assertContains(response, "Failed login attempt 1 of 3.")
         self.assertContains(response, "2 attempts remaining.")
         self.assertContains(response, "temporarily locked for 20 minute(s).")
@@ -167,7 +166,7 @@ class LoginLockoutTests(TestCase):
     def test_single_device_session_enforcement_signs_out_previous_browser_by_default(self):
         first_browser = Client()
         second_browser = Client()
-        login_url = reverse("accounts:faculty_login")
+        login_url = reverse("faculty_portal:public_index")
 
         first_response = first_browser.post(login_url, {"username": self.user.username, "password": self.password})
         self.assertEqual(first_response.status_code, 302)
@@ -189,7 +188,7 @@ class LoginLockoutTests(TestCase):
         )
         first_browser = Client()
         second_browser = Client()
-        login_url = reverse("accounts:faculty_login")
+        login_url = reverse("faculty_portal:public_index")
 
         first_response = first_browser.post(login_url, {"username": self.user.username, "password": self.password})
         self.assertEqual(first_response.status_code, 302)
@@ -215,7 +214,7 @@ class LoginLockoutTests(TestCase):
         )
         first_browser = Client()
         second_browser = Client()
-        login_url = reverse("accounts:faculty_login")
+        login_url = reverse("faculty_portal:public_index")
 
         first_response = first_browser.post(login_url, {"username": self.user.username, "password": self.password})
         self.assertEqual(first_response.status_code, 302)
@@ -229,7 +228,7 @@ class LoginLockoutTests(TestCase):
     def test_lockout_is_portal_specific_and_expires_cleanly(self):
         self._configure_lockout(max_attempts=1)
         admin_login_url = reverse("accounts:admin_login")
-        faculty_login_url = reverse("accounts:faculty_login")
+        faculty_login_url = reverse("faculty_portal:public_index")
 
         self.client.post(admin_login_url, {"username": self.user.username, "password": "wrong-pass"})
         admin_state = PortalLoginLockoutState.objects.get(

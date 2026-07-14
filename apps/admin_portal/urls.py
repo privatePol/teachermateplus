@@ -3,8 +3,10 @@ from django.urls import path
 from .api_views import sis_periodic_grades_api_view
 from .import_views import (
     email_diagnostics_view,
+    faculty_invitation_resend_view,
     import_batch_confirm_view,
     import_batch_detail_view,
+    import_batch_error_report_view,
     import_batch_list_view,
     import_template_download_view,
     import_upload_view,
@@ -57,6 +59,7 @@ from .views import (
     faculty_feedback_dashboard_view,
     faculty_final_clearance_view,
     faculty_final_clearance_verify_view,
+    faculty_user_invitation_send_view,
     faculty_deactivation_schedule_view,
     faculty_assignment_create_view,
     faculty_assignment_assign_view,
@@ -257,6 +260,11 @@ urlpatterns = [
     ),
     path("admin-portal/security/users/create/", user_create_view, name="user_create"),
     path("admin-portal/security/users/<int:user_id>/edit/", user_update_view, name="user_update"),
+    path(
+        "admin-portal/security/users/<int:user_id>/faculty-invitation/send/",
+        faculty_user_invitation_send_view,
+        name="faculty_user_invitation_send",
+    ),
     path(
         "admin-portal/security/users/<int:user_id>/change-password/",
         user_change_password_view,
@@ -706,6 +714,11 @@ urlpatterns = [
     path("admin-portal/tools/email-diagnostics/", email_diagnostics_view, name="email_diagnostics"),
     path("admin-portal/imports/batches/<int:batch_id>/", import_batch_detail_view, name="import_batch_detail"),
     path(
+        "admin-portal/imports/batches/<int:batch_id>/errors.csv",
+        import_batch_error_report_view,
+        name="import_batch_error_report",
+    ),
+    path(
         "admin-portal/imports/batches/<int:batch_id>/confirm/",
         import_batch_confirm_view,
         name="import_batch_confirm",
@@ -719,5 +732,10 @@ urlpatterns = [
         "admin-portal/imports/<slug:import_slug>/upload/",
         import_upload_view,
         name="import_upload",
+    ),
+    path(
+        "admin-portal/security/faculty-invitations/<int:invitation_id>/resend/",
+        faculty_invitation_resend_view,
+        name="faculty_invitation_resend",
     ),
 ]

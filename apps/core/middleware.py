@@ -86,10 +86,10 @@ class PortalAccessMiddleware:
         "/admin-portal/reset/confirm/",
         "/admin-portal/reset/done/",
     }
-    FACULTY_LOGIN_PATH = "/faculty/login/"
     FACULTY_PUBLIC_PATHS = {
         "/faculty/",
         "/faculty/index/",
+        "/faculty/login/",
         "/faculty/login/otp/",
         "/faculty/forgot-password/",
         "/faculty/forgot-password/sent/",
@@ -97,6 +97,7 @@ class PortalAccessMiddleware:
     }
     FACULTY_PUBLIC_PREFIXES = (
         "/faculty/reset/",
+        "/faculty/invitation/",
     )
 
     def __init__(self, get_response):
@@ -119,7 +120,6 @@ class PortalAccessMiddleware:
         is_faculty_public_prefix = any(path.startswith(prefix) for prefix in self.FACULTY_PUBLIC_PREFIXES)
         if (
             path.startswith(self.FACULTY_PREFIX)
-            and path != self.FACULTY_LOGIN_PATH
             and path not in self.FACULTY_PUBLIC_PATHS
             and not is_faculty_public_prefix
         ):
@@ -165,7 +165,7 @@ class PostLoginSecurityMiddleware:
         "/faculty/change-password/",
         "/faculty/privacy-consent/",
     }
-    FACULTY_ALLOWED_PREFIXES = ("/faculty/reset/",)
+    FACULTY_ALLOWED_PREFIXES = ("/faculty/reset/", "/faculty/invitation/")
 
     def __init__(self, get_response):
         self.get_response = get_response
