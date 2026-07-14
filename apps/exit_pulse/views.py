@@ -9,6 +9,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_GET, require_POST
 from reportlab.graphics import renderSVG
 from reportlab.graphics.barcode.qr import QrCodeWidget
@@ -39,6 +40,11 @@ def _scope_ids(request):
 
 def _feature_enabled(tenant_id):
     return FeatureSettingsService.is_exit_pulse_enabled(tenant_id=tenant_id, default=True)
+
+
+def _public_url(request, session):
+    entry_url = request.build_absolute_uri(reverse("exit_pulse:public_survey"))
+    return f"{entry_url}#{session.public_token}"
 
 
 def _require_faculty_feature(request):
@@ -83,9 +89,15 @@ def landing_view(request):
         queryset = queryset.filter(tenant_id=tenant_id)
     if campus_id:
         queryset = queryset.filter(campus_id=campus_id)
+    eligible_assignment_ids = ExitPulseSessionService.valid_assignments_for_user(
+        user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    ).order_by().values("id")
+    queryset = queryset.filter(faculty_assignment_id__in=eligible_assignment_ids)
     current_sessions = []
     for session in queryset.order_by("-created_at")[:10]:
-        ExitPulseSessionService.refresh_effective_status(session)
+        ExitPulseSessionService.refresh_effective_status(session, check_assignment=False)
         if session.status in {ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE}:
             current_sessions.append(session)
     assignment_count = ExitPulseSessionService.valid_assignments_for_user(
@@ -142,9 +154,7 @@ def live_view(request, public_id):
     session = _owned_session(request, public_id)
     if session.status not in {ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE}:
         return redirect("exit_pulse:results", public_id=session.public_id)
-    public_url = request.build_absolute_uri(
-        reverse("exit_pulse:public_survey", kwargs={"public_token": session.public_token})
-    )
+    public_url = _public_url(request, session)
     remaining_seconds = max(0, int((session.expires_at - timezone.now()).total_seconds())) if session.expires_at else 0
     return render(
         request,
@@ -185,9 +195,7 @@ def status_view(request, public_id):
 def qr_view(request, public_id):
     _require_faculty_feature(request)
     session = _owned_session(request, public_id)
-    public_url = request.build_absolute_uri(
-        reverse("exit_pulse:public_survey", kwargs={"public_token": session.public_token})
-    )
+    public_url = _public_url(request, session)
     qr = QrCodeWidget(public_url)
     bounds = qr.getBounds()
     width = bounds[2] - bounds[0]
@@ -245,7 +253,7 @@ def results_view(request, public_id):
     session = _owned_session(request, public_id)
     if session.status in {ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE}:
         return redirect("exit_pulse:live", public_id=session.public_id)
-    ExitPulseResponseService.anonymize_expired_identifiers()
+    ExitPulseResponseService.anonymize_expired_identifiers(session_id=session.id)
     analytics = ExitPulseAnalyticsService.build(session)
     return render(
         request,
@@ -268,7 +276,7 @@ def _public_state(session):
     return "live", ""
 
 
-def _render_public(request, *, session, form=None, state=None, state_message="", status=200):
+def _render_public(request, *, session=None, form=None, state=None, state_message="", status=200):
     remaining_seconds = 0
     if session and session.expires_at:
         remaining_seconds = max(0, int((session.expires_at - timezone.now()).total_seconds()))
@@ -281,6 +289,7 @@ def _render_public(request, *, session, form=None, state=None, state_message="",
             "pulse_state": state,
             "state_message": state_message,
             "remaining_seconds": remaining_seconds,
+            "public_token": session.public_token if session else "",
             "reaction_options": (
                 ("CONFIDENT", "❤️", "I understand it well and feel confident"),
                 ("MOSTLY_UNDERSTOOD", "😊", "I understand most of it"),
@@ -292,12 +301,17 @@ def _render_public(request, *, session, form=None, state=None, state_message="",
     )
     response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response["Pragma"] = "no-cache"
+    response["Referrer-Policy"] = "no-referrer"
     return response
 
 
 @never_cache
 @require_GET
-def public_survey_view(request, public_token):
+def public_survey_view(request):
+    return _render_public(request, state="entry")
+
+
+def _open_public_session(request, public_token):
     session = ExitPulseResponseService.resolve_public_session(public_token)
     state, state_message = _public_state(session)
     if session and not _feature_enabled(session.tenant_id):
@@ -312,7 +326,7 @@ def public_survey_view(request, public_token):
         )
     raw_value, signed_value, _ = ExitPulseAnonymousIdentityService.resolve_or_create(request)
     anonymous_hash = ExitPulseAnonymousIdentityService.hash_for_session(session=session, raw_value=raw_value)
-    if request.GET.get("submitted") == "1" or ExitPulseResponseService.already_submitted(
+    if ExitPulseResponseService.already_submitted(
         session=session,
         anonymous_hash=anonymous_hash,
     ):
@@ -334,9 +348,18 @@ def public_survey_view(request, public_token):
 
 
 @never_cache
+@sensitive_post_parameters("public_token")
 @require_POST
-def public_submit_view(request, public_token):
-    session = ExitPulseResponseService.resolve_public_session(public_token)
+def public_open_view(request):
+    return _open_public_session(request, request.POST.get("public_token", ""))
+
+
+@never_cache
+@sensitive_post_parameters("public_token", "response_code", "feedback_review", "feedback_learned")
+@require_POST
+def public_submit_view(request):
+    public_token = request.POST.get("public_token", "")
+    session = ExitPulseResponseService.resolve_public_session(public_token, refresh=False)
     state, state_message = _public_state(session)
     if session and not _feature_enabled(session.tenant_id):
         state, state_message = "closed", "Exit Pulse is currently unavailable."
@@ -387,14 +410,25 @@ def public_submit_view(request, public_token):
             status=429,
         )
     except ValidationError as exc:
-        response = _render_public(
-            request,
-            session=session,
-            form=form,
-            state="live",
-            state_message="; ".join(exc.messages),
-            status=409,
-        )
+        session.refresh_from_db(fields=["status", "closed_at", "cancelled_at", "updated_at"])
+        effective_state, effective_message = _public_state(session)
+        if effective_state == "live":
+            response = _render_public(
+                request,
+                session=session,
+                form=form,
+                state="live",
+                state_message="; ".join(exc.messages),
+                status=409,
+            )
+        else:
+            response = _render_public(
+                request,
+                session=session,
+                state=effective_state,
+                state_message=effective_message,
+                status=409,
+            )
     except Exception:
         logger.exception(
             "Exit Pulse anonymous submission failed for session %s",
@@ -409,6 +443,16 @@ def public_submit_view(request, public_token):
             status=503,
         )
     else:
-        response = redirect(f"{reverse('exit_pulse:public_survey', kwargs={'public_token': session.public_token})}?submitted=1")
+        response = redirect("exit_pulse:public_thanks")
     ExitPulseAnonymousIdentityService.set_cookie(response, signed_value)
     return response
+
+
+@never_cache
+@require_GET
+def public_thanks_view(request):
+    return _render_public(
+        request,
+        state="submitted",
+        state_message="Thank you. Your response has been recorded.",
+    )

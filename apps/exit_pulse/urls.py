@@ -15,6 +15,8 @@ urlpatterns = [
     path("faculty/exit-pulse/<uuid:public_id>/close/", views.close_view, name="close"),
     path("faculty/exit-pulse/<uuid:public_id>/cancel/", views.cancel_view, name="cancel"),
     path("faculty/exit-pulse/<uuid:public_id>/results/", views.results_view, name="results"),
-    path("pulse/<str:public_token>/", views.public_survey_view, name="public_survey"),
-    path("pulse/<str:public_token>/submit/", views.public_submit_view, name="public_submit"),
+    path("pulse/", views.public_survey_view, name="public_survey"),
+    path("pulse/open/", views.public_open_view, name="public_open"),
+    path("pulse/submit/", views.public_submit_view, name="public_submit"),
+    path("pulse/thanks/", views.public_thanks_view, name="public_thanks"),
 ]

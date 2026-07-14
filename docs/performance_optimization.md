@@ -67,6 +67,8 @@ DJANGO_CACHE_LOCATION=TeacherMate+-local
 
 Development defaults to local memory cache. Production may use Redis by setting a Redis cache backend after IT installs and configures the required package/service.
 
+`LocMemCache` is process-local. In the current multi-worker Gunicorn deployment, SIS API and Exit Pulse cache counters therefore provide best-effort per-worker throttling, not one cross-worker limit. Exit Pulse correctness does not depend on that cache: server-side lifecycle validation and the database uniqueness constraint remain authoritative. No shared cache service is currently configured by this repository; production should use an institution-approved shared Django cache backend only when cross-worker throttling is required.
+
 Grade data is not cached in this pass because grade cache invalidation must be scoped by tenant, campus, faculty, offering, period, student, role, and release policy.
 
 ### Dev Diagnostics

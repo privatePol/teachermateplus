@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from io import StringIO
+from unittest.mock import patch
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -177,12 +180,25 @@ class ExitPulseTestBase(TestCase):
 
     def submit_as_anonymous(self, session, *, response_code="CONFIDENT", data=None, client=None, ip="10.0.0.5"):
         public_client = client or Client()
-        survey_url = reverse("exit_pulse:public_survey", kwargs={"public_token": session.public_token})
-        submit_url = reverse("exit_pulse:public_submit", kwargs={"public_token": session.public_token})
-        public_client.get(survey_url, REMOTE_ADDR=ip)
-        payload = {"response_code": response_code}
+        public_client.get(reverse("exit_pulse:public_survey"), REMOTE_ADDR=ip)
+        public_client.post(
+            reverse("exit_pulse:public_open"),
+            {"public_token": session.public_token},
+            REMOTE_ADDR=ip,
+        )
+        payload = {"public_token": session.public_token, "response_code": response_code}
         payload.update(data or {})
-        response = public_client.post(submit_url, payload, REMOTE_ADDR=ip)
+        response = public_client.post(reverse("exit_pulse:public_submit"), payload, REMOTE_ADDR=ip)
+        return public_client, response
+
+    def open_public_survey(self, session, *, client=None, ip="10.0.0.5"):
+        public_client = client or Client()
+        public_client.get(reverse("exit_pulse:public_survey"), REMOTE_ADDR=ip)
+        response = public_client.post(
+            reverse("exit_pulse:public_open"),
+            {"public_token": session.public_token},
+            REMOTE_ADDR=ip,
+        )
         return public_client, response
 
 
@@ -270,9 +286,7 @@ class ExitPulseAuthorizationAndCreationTests(ExitPulseTestBase):
             value_type="BOOL",
         )
         self.assertEqual(self.client.get(reverse("exit_pulse:landing")).status_code, 403)
-        public_response = Client().get(
-            reverse("exit_pulse:public_survey", kwargs={"public_token": session.public_token})
-        )
+        _, public_response = self.open_public_survey(session)
         self.assertEqual(public_response.status_code, 200)
         self.assertContains(public_response, "Exit Pulse is currently unavailable.")
 
@@ -355,6 +369,22 @@ class ExitPulseLifecycleTests(ExitPulseTestBase):
         with self.assertRaises(PermissionDenied):
             ExitPulseSessionService.close(session=self.make_live(), user=self.other_faculty)
 
+    def test_assignment_deactivation_auto_cancels_live_session_and_blocks_extension(self):
+        session = self.make_live()
+        self.assignment.is_active = False
+        self.assignment.save(update_fields=["is_active", "updated_at"])
+
+        updated = ExitPulseSessionService.extend(session=session, user=self.faculty)
+        self.assertEqual(updated.status, ExitPulseSession.Status.CANCELLED)
+        session.refresh_from_db()
+        self.assertEqual(session.status, ExitPulseSession.Status.CANCELLED)
+        self.assertIsNotNone(session.cancelled_at)
+        self.assertTrue(AuditLog.objects.filter(action="EXIT_PULSE_AUTO_CANCELLED").exists())
+
+        _, public_response = self.open_public_survey(session)
+        self.assertContains(public_response, "This Exit Pulse was cancelled.", status_code=200)
+        self.assertFalse(ExitPulseResponse.objects.exists())
+
 
 class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
     def test_no_login_required_and_valid_reaction_is_accepted(self):
@@ -398,12 +428,33 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
                     anonymous_token_hash="d" * 64,
                 )
 
-    def test_malformed_token_and_get_to_submit_are_handled_safely(self):
-        malformed = self.client.get(reverse("exit_pulse:public_survey", kwargs={"public_token": "bad"}))
-        self.assertEqual(malformed.status_code, 404)
+    def test_service_converts_insert_race_to_safe_duplicate_error(self):
         session = self.make_live()
-        get_submit = self.client.get(reverse("exit_pulse:public_submit", kwargs={"public_token": session.public_token}))
+        with patch(
+            "apps.exit_pulse.services.ExitPulseResponse.objects.create",
+            side_effect=IntegrityError("simulated duplicate race"),
+        ):
+            with self.assertRaises(ExitPulseDuplicateResponse):
+                ExitPulseResponseService.submit(
+                    session=session,
+                    response_code="CONFIDENT",
+                    anonymous_hash="r" * 64,
+                )
+
+    def test_malformed_token_and_get_to_submit_are_handled_safely(self):
+        malformed = self.client.post(reverse("exit_pulse:public_open"), {"public_token": "bad"})
+        self.assertEqual(malformed.status_code, 404)
+        get_submit = self.client.get(reverse("exit_pulse:public_submit"))
         self.assertEqual(get_submit.status_code, 405)
+
+    def test_public_token_uses_fragment_and_is_not_sent_in_request_path(self):
+        session = self.make_live()
+        live = self.client.get(reverse("exit_pulse:live", kwargs={"public_id": session.public_id}))
+        expected_url = f"http://testserver{reverse('exit_pulse:public_survey')}#{session.public_token}"
+        self.assertContains(live, expected_url)
+        self.assertNotContains(live, f"/pulse/{session.public_token}/")
+        entry = Client().get(reverse("exit_pulse:public_survey"))
+        self.assertNotIn(session.public_token, entry.request["PATH_INFO"])
 
     def test_closed_and_cancelled_sessions_reject_submissions(self):
         for status in (ExitPulseSession.Status.CLOSED, ExitPulseSession.Status.CANCELLED):
@@ -416,14 +467,29 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
     def test_public_post_uses_normal_csrf_protection(self):
         session = self.make_live()
         csrf_client = Client(enforce_csrf_checks=True)
-        submit_url = reverse("exit_pulse:public_submit", kwargs={"public_token": session.public_token})
-        self.assertEqual(csrf_client.post(submit_url, {"response_code": "CONFIDENT"}).status_code, 403)
-        survey_url = reverse("exit_pulse:public_survey", kwargs={"public_token": session.public_token})
-        csrf_client.get(survey_url)
+        submit_url = reverse("exit_pulse:public_submit")
+        self.assertEqual(
+            csrf_client.post(
+                submit_url,
+                {"public_token": session.public_token, "response_code": "CONFIDENT"},
+            ).status_code,
+            403,
+        )
+        csrf_client.get(reverse("exit_pulse:public_survey"))
         token = csrf_client.cookies["csrftoken"].value
+        opened = csrf_client.post(
+            reverse("exit_pulse:public_open"),
+            {"public_token": session.public_token, "csrfmiddlewaretoken": token},
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(opened.status_code, 200)
         accepted = csrf_client.post(
             submit_url,
-            {"response_code": "CONFIDENT", "csrfmiddlewaretoken": token},
+            {
+                "public_token": session.public_token,
+                "response_code": "CONFIDENT",
+                "csrfmiddlewaretoken": token,
+            },
             HTTP_X_CSRFTOKEN=token,
         )
         self.assertEqual(accepted.status_code, 302)
@@ -436,24 +502,65 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
             anonymous_token_hash="z" * 64,
             technical_identifier_expires_at=timezone.now() - timedelta(seconds=1),
         )
-        ExitPulseResponseService.anonymize_expired_identifiers()
+        ExitPulseResponseService.anonymize_expired_identifiers(session_id=session.id)
         response.refresh_from_db()
         self.assertIsNone(response.anonymous_token_hash)
         self.assertIsNone(response.technical_identifier_expires_at)
+
+    def test_cleanup_command_is_idempotent_supports_dry_run_and_preserves_response_data(self):
+        session = self.make_live(allow_written_feedback=True, feedback_review_enabled=True)
+        response = ExitPulseResponse.objects.create(
+            session=session,
+            response_code="NEEDS_CLARIFICATION",
+            feedback_review="Review joins",
+            anonymous_token_hash="c" * 64,
+            technical_identifier_expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        output = StringIO()
+        call_command(
+            "anonymize_exit_pulse_identifiers",
+            "--tenant-id",
+            str(self.tenant.id),
+            "--dry-run",
+            stdout=output,
+        )
+        self.assertIn("Would anonymize Exit Pulse technical identifiers: 1", output.getvalue())
+        response.refresh_from_db()
+        self.assertEqual(response.anonymous_token_hash, "c" * 64)
+
+        output = StringIO()
+        call_command(
+            "anonymize_exit_pulse_identifiers",
+            "--tenant-id",
+            str(self.tenant.id),
+            stdout=output,
+        )
+        self.assertIn("Anonymized Exit Pulse technical identifiers: 1", output.getvalue())
+        response.refresh_from_db()
+        self.assertIsNone(response.anonymous_token_hash)
+        self.assertIsNone(response.technical_identifier_expires_at)
+        self.assertEqual(response.response_code, "NEEDS_CLARIFICATION")
+        self.assertEqual(response.feedback_review, "Review joins")
+
+        output = StringIO()
+        call_command("anonymize_exit_pulse_identifiers", stdout=output)
+        self.assertIn("Anonymized Exit Pulse technical identifiers: 0", output.getvalue())
 
 
 class ExitPulseFeedbackAndResultsTests(ExitPulseTestBase):
     def test_written_feedback_defaults_off_and_fields_are_hidden(self):
         session = self.make_live()
-        response = Client().get(reverse("exit_pulse:public_survey", kwargs={"public_token": session.public_token}))
+        _, response = self.open_public_survey(session)
         self.assertNotContains(response, "Which part of today")
         self.assertNotContains(response, "feedback_review")
 
     def test_enabled_prompt_appears_and_answer_is_optional(self):
         session = self.make_live(allow_written_feedback=True, feedback_review_enabled=True)
         public_client = Client()
-        survey = public_client.get(reverse("exit_pulse:public_survey", kwargs={"public_token": session.public_token}))
+        _, survey = self.open_public_survey(session, client=public_client)
         self.assertContains(survey, session.feedback_review_prompt_snapshot)
+        self.assertContains(survey, 'class="form-control"', html=False)
+        self.assertContains(survey, 'aria-describedby="feedback-review-help feedback-review-error"', html=False)
         _, submitted = self.submit_as_anonymous(session, client=public_client)
         self.assertEqual(submitted.status_code, 302)
         self.assertEqual(ExitPulseResponse.objects.get().feedback_review, "")
@@ -515,7 +622,7 @@ class ExitPulseFeedbackAndResultsTests(ExitPulseTestBase):
             question_code=ExitPulseSession.QuestionCode.CUSTOM,
             custom_question="Which lesson concept needs <img src=x onerror=alert(1)> clarification?",
         )
-        response = Client().get(reverse("exit_pulse:public_survey", kwargs={"public_token": session.public_token}))
+        _, response = self.open_public_survey(session)
         self.assertContains(response, "&lt;script&gt;alert(&#x27;topic&#x27;)&lt;/script&gt;", html=False)
         self.assertNotContains(response, "<script>alert('topic')</script>", html=False)
         self.assertNotContains(response, "<img src=x", html=False)
@@ -535,20 +642,69 @@ class ExitPulseFeedbackAndResultsTests(ExitPulseTestBase):
         self.assertEqual(status.json()["response_count"], 1)
         self.assertNotIn("private anonymous text", status.content.decode())
 
+    def test_results_cleanup_is_limited_to_the_opened_session(self):
+        first_session = self.make_live()
+        second_session = self.make_live()
+        first_response = ExitPulseResponse.objects.create(
+            session=first_session,
+            response_code="CONFIDENT",
+            anonymous_token_hash="1" * 64,
+            technical_identifier_expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        second_response = ExitPulseResponse.objects.create(
+            session=second_session,
+            response_code="CONFIDENT",
+            anonymous_token_hash="2" * 64,
+            technical_identifier_expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        for session in (first_session, second_session):
+            ExitPulseSession.objects.filter(pk=session.pk).update(
+                status=ExitPulseSession.Status.CLOSED,
+                closed_at=timezone.now(),
+            )
+
+        self.client.get(reverse("exit_pulse:results", kwargs={"public_id": first_session.public_id}))
+        first_response.refresh_from_db()
+        second_response.refresh_from_db()
+        self.assertIsNone(first_response.anonymous_token_hash)
+        self.assertEqual(second_response.anonymous_token_hash, "2" * 64)
+
 
 @override_settings(EXIT_PULSE_BROWSER_RATE_LIMIT_PER_MINUTE=1)
 class ExitPulseRateLimitTests(ExitPulseTestBase):
     def test_basic_browser_rate_limit_uses_existing_cache_pattern(self):
         session = self.make_live()
         public_client = Client()
-        survey_url = reverse("exit_pulse:public_survey", kwargs={"public_token": session.public_token})
-        submit_url = reverse("exit_pulse:public_submit", kwargs={"public_token": session.public_token})
-        public_client.get(survey_url)
-        invalid = public_client.post(submit_url, {"response_code": "ANGRY"})
+        public_client.get(reverse("exit_pulse:public_survey"))
+        public_client.post(reverse("exit_pulse:public_open"), {"public_token": session.public_token})
+        submit_url = reverse("exit_pulse:public_submit")
+        invalid = public_client.post(
+            submit_url,
+            {"public_token": session.public_token, "response_code": "ANGRY"},
+        )
         self.assertEqual(invalid.status_code, 400)
-        first_valid = public_client.post(submit_url, {"response_code": "CONFIDENT"})
+        first_valid = public_client.post(
+            submit_url,
+            {"public_token": session.public_token, "response_code": "CONFIDENT"},
+        )
         self.assertEqual(first_valid.status_code, 302)
         # Clearing the stored response isolates the public rate limiter from duplicate handling.
         ExitPulseResponse.objects.all().delete()
-        limited = public_client.post(submit_url, {"response_code": "CONFIDENT"})
+        limited = public_client.post(
+            submit_url,
+            {"public_token": session.public_token, "response_code": "CONFIDENT"},
+        )
         self.assertEqual(limited.status_code, 429)
+
+    def test_cache_failure_fails_closed_without_storing_response(self):
+        session = self.make_live()
+        public_client = Client()
+        self.open_public_survey(session, client=public_client)
+        with patch("apps.exit_pulse.services.cache.add", side_effect=RuntimeError("cache unavailable")):
+            response = public_client.post(
+                reverse("exit_pulse:public_submit"),
+                {"public_token": session.public_token, "response_code": "CONFIDENT"},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertContains(response, "A temporary server error occurred.", status_code=503)
+        self.assertFalse(ExitPulseResponse.objects.exists())

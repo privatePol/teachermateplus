@@ -107,10 +107,9 @@ class ExitPulseSessionService:
     LIVE_DURATION = timedelta(minutes=5)
 
     @staticmethod
-    def valid_assignments_for_user(*, user, tenant_id=None, campus_id=None):
-        queryset = (
+    def _eligible_assignments():
+        return (
             FacultyAssignment.objects.filter(
-                faculty_user=user,
                 is_active=True,
                 response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
                 accepted_at__isnull=False,
@@ -129,9 +128,14 @@ class ExitPulseSessionService:
                 offering__section__program__is_active=True,
                 offering__section__program__department__is_active=True,
             )
-            .filter(
-                models_q_course_department_active()
-            )
+            .filter(models_q_course_department_active())
+        )
+
+    @classmethod
+    def valid_assignments_for_user(cls, *, user, tenant_id=None, campus_id=None):
+        queryset = (
+            cls._eligible_assignments()
+            .filter(faculty_user=user)
             .select_related(
                 "offering",
                 "offering__tenant",
@@ -148,6 +152,23 @@ class ExitPulseSessionService:
         if campus_id:
             queryset = queryset.filter(offering__campus_id=campus_id)
         return queryset
+
+    @classmethod
+    def session_assignment_is_valid(cls, session, *, lock=False):
+        queryset = cls._eligible_assignments().filter(
+            pk=session.faculty_assignment_id,
+            faculty_user_id=session.faculty_user_id,
+            offering_id=session.course_offering_id,
+            offering__tenant_id=session.tenant_id,
+            offering__campus_id=session.campus_id,
+            offering__academic_year_id=session.academic_year_id,
+            offering__term_id=session.term_id,
+            offering__course_id=session.course_id,
+            offering__section_id=session.section_id,
+        )
+        if lock:
+            queryset = queryset.select_for_update()
+        return queryset.exists()
 
     @classmethod
     def validate_assignment_ownership(cls, *, user, assignment, tenant_id=None, campus_id=None):
@@ -246,6 +267,8 @@ class ExitPulseSessionService:
         cls._assert_owner(row, user)
         if row.status != ExitPulseSession.Status.DRAFT:
             raise ValidationError("Only a draft Exit Pulse can be started.")
+        if not cls.session_assignment_is_valid(row, lock=True):
+            raise PermissionDenied("This faculty assignment is no longer available for Exit Pulse.")
         now = now or timezone.now()
         row.status = ExitPulseSession.Status.LIVE
         row.started_at = now
@@ -260,7 +283,14 @@ class ExitPulseSessionService:
             raise PermissionDenied("You cannot access another faculty member's Exit Pulse session.")
 
     @classmethod
-    def refresh_effective_status(cls, session, *, now=None):
+    def refresh_effective_status(
+        cls,
+        session,
+        *,
+        now=None,
+        lock_assignment=False,
+        check_assignment=True,
+    ):
         now = now or timezone.now()
         if (
             session.status == ExitPulseSession.Status.LIVE
@@ -279,6 +309,40 @@ class ExitPulseSessionService:
                 session.updated_at = now
             else:
                 session.refresh_from_db()
+            return session
+        assignment_became_invalid = (
+            check_assignment
+            and session.status in {ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE}
+            and not cls.session_assignment_is_valid(session, lock=lock_assignment)
+        )
+        if assignment_became_invalid:
+            updated = ExitPulseSession.objects.filter(
+                pk=session.pk,
+                status__in=[ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE],
+            ).update(
+                status=ExitPulseSession.Status.CANCELLED,
+                cancelled_at=now,
+                updated_at=now,
+            )
+            if updated:
+                session.status = ExitPulseSession.Status.CANCELLED
+                session.cancelled_at = now
+                session.updated_at = now
+                AuditService.log_event(
+                    action="EXIT_PULSE_AUTO_CANCELLED",
+                    portal="SYSTEM",
+                    entity_type="ExitPulseSession",
+                    entity_id=session.public_id,
+                    tenant=session.tenant_id,
+                    campus=session.campus_id,
+                    metadata={
+                        "reason": "ASSIGNMENT_NO_LONGER_ELIGIBLE",
+                        "faculty_assignment_id": session.faculty_assignment_id,
+                        "course_offering_id": session.course_offering_id,
+                    },
+                )
+            else:
+                session.refresh_from_db()
         return session
 
     @classmethod
@@ -287,7 +351,13 @@ class ExitPulseSessionService:
         row = ExitPulseSession.objects.select_for_update().get(pk=session.pk)
         cls._assert_owner(row, user)
         now = now or timezone.now()
-        cls.refresh_effective_status(row, now=now)
+        previous_status = row.status
+        cls.refresh_effective_status(row, now=now, lock_assignment=True)
+        if (
+            previous_status in {ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE}
+            and row.status == ExitPulseSession.Status.CANCELLED
+        ):
+            return row
         if row.status != ExitPulseSession.Status.LIVE:
             raise ValidationError("Only a live Exit Pulse can be extended.")
         if row.extension_count >= 1:
@@ -305,7 +375,13 @@ class ExitPulseSessionService:
         row = ExitPulseSession.objects.select_for_update().get(pk=session.pk)
         cls._assert_owner(row, user)
         now = now or timezone.now()
-        cls.refresh_effective_status(row, now=now)
+        previous_status = row.status
+        cls.refresh_effective_status(row, now=now, lock_assignment=True)
+        if (
+            previous_status in {ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE}
+            and row.status == ExitPulseSession.Status.CANCELLED
+        ):
+            return row
         if row.status != ExitPulseSession.Status.LIVE:
             raise ValidationError("Only a live Exit Pulse can be closed.")
         row.status = ExitPulseSession.Status.CLOSED
@@ -320,7 +396,13 @@ class ExitPulseSessionService:
         row = ExitPulseSession.objects.select_for_update().get(pk=session.pk)
         cls._assert_owner(row, user)
         now = now or timezone.now()
-        cls.refresh_effective_status(row, now=now)
+        previous_status = row.status
+        cls.refresh_effective_status(row, now=now, lock_assignment=True)
+        if (
+            previous_status in {ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE}
+            and row.status == ExitPulseSession.Status.CANCELLED
+        ):
+            return row
         if row.status not in {ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE}:
             raise ValidationError("This Exit Pulse can no longer be cancelled.")
         row.status = ExitPulseSession.Status.CANCELLED
@@ -427,7 +509,7 @@ class ExitPulseResponseService:
     TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,64}$")
 
     @classmethod
-    def resolve_public_session(cls, public_token):
+    def resolve_public_session(cls, public_token, *, refresh=True):
         if not cls.TOKEN_PATTERN.fullmatch(public_token or ""):
             return None
         session = (
@@ -442,7 +524,7 @@ class ExitPulseResponseService:
             .filter(public_token=public_token)
             .first()
         )
-        if session:
+        if session and refresh:
             ExitPulseSessionService.refresh_effective_status(session)
         return session
 
@@ -466,47 +548,68 @@ class ExitPulseResponseService:
         now=None,
     ):
         now = now or timezone.now()
+        inactive_error = None
+        created_response = None
         with transaction.atomic():
             locked = ExitPulseSession.objects.select_for_update().get(pk=session.pk)
-            ExitPulseSessionService.refresh_effective_status(locked, now=now)
+            ExitPulseSessionService.refresh_effective_status(
+                locked,
+                now=now,
+                lock_assignment=True,
+            )
             if locked.status != ExitPulseSession.Status.LIVE:
-                raise ValidationError("This Exit Pulse is no longer accepting responses.")
-            if response_code not in ExitPulseResponse.ResponseCode.values:
-                raise ValidationError("Select a valid learning-status response.")
-            review = (feedback_review or "").strip()
-            learned = (feedback_learned or "").strip()
-            if len(review) > 200 or len(learned) > 200:
-                raise ValidationError("Written responses must be 200 characters or fewer.")
-            if not locked.allow_written_feedback:
-                review = ""
-                learned = ""
+                inactive_error = ValidationError("This Exit Pulse is no longer accepting responses.")
             else:
-                if not locked.feedback_review_enabled:
+                if response_code not in ExitPulseResponse.ResponseCode.values:
+                    raise ValidationError("Select a valid learning-status response.")
+                review = (feedback_review or "").strip()
+                learned = (feedback_learned or "").strip()
+                if len(review) > 200 or len(learned) > 200:
+                    raise ValidationError("Written responses must be 200 characters or fewer.")
+                if not locked.allow_written_feedback:
                     review = ""
-                if not locked.feedback_learned_enabled:
                     learned = ""
-            if cls.already_submitted(session=locked, anonymous_hash=anonymous_hash):
-                raise ExitPulseDuplicateResponse("This browser has already submitted a response.")
-            try:
-                with transaction.atomic():
-                    return ExitPulseResponse.objects.create(
-                        session=locked,
-                        response_code=response_code,
-                        feedback_review=review,
-                        feedback_learned=learned,
-                        anonymous_token_hash=anonymous_hash,
-                        technical_identifier_expires_at=now + timedelta(hours=24),
-                    )
-            except IntegrityError as exc:
-                raise ExitPulseDuplicateResponse("This browser has already submitted a response.") from exc
+                else:
+                    if not locked.feedback_review_enabled:
+                        review = ""
+                    if not locked.feedback_learned_enabled:
+                        learned = ""
+                if cls.already_submitted(session=locked, anonymous_hash=anonymous_hash):
+                    raise ExitPulseDuplicateResponse("This browser has already submitted a response.")
+                try:
+                    with transaction.atomic():
+                        created_response = ExitPulseResponse.objects.create(
+                            session=locked,
+                            response_code=response_code,
+                            feedback_review=review,
+                            feedback_learned=learned,
+                            anonymous_token_hash=anonymous_hash,
+                            technical_identifier_expires_at=now + timedelta(hours=24),
+                        )
+                except IntegrityError as exc:
+                    raise ExitPulseDuplicateResponse("This browser has already submitted a response.") from exc
+        if inactive_error:
+            raise inactive_error
+        return created_response
 
     @staticmethod
-    def anonymize_expired_identifiers(*, now=None):
+    def anonymize_expired_identifiers(*, now=None, tenant_id=None, session_id=None, dry_run=False):
         now = now or timezone.now()
-        return ExitPulseResponse.objects.filter(
+        queryset = ExitPulseResponse.objects.filter(
             technical_identifier_expires_at__lte=now,
             anonymous_token_hash__isnull=False,
-        ).update(anonymous_token_hash=None, technical_identifier_expires_at=None, updated_at=now)
+        )
+        if tenant_id is not None:
+            queryset = queryset.filter(session__tenant_id=tenant_id)
+        if session_id is not None:
+            queryset = queryset.filter(session_id=session_id)
+        if dry_run:
+            return queryset.count()
+        return queryset.update(
+            anonymous_token_hash=None,
+            technical_identifier_expires_at=None,
+            updated_at=now,
+        )
 
 
 @dataclass(frozen=True)

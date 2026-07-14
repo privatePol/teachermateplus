@@ -14,20 +14,33 @@
 <main class="container pulse-shell py-4 py-md-5">
   <header class="text-center mb-3"><div class="brand fs-4">NCBA | TeacherMate+</div><div class="text-muted">Exit Pulse · Learning Check</div></header>
   <section class="card shadow-sm" aria-labelledby="pulse-title"><div class="card-body p-4 p-md-5">
-    {% if pulse_state == 'live' %}
-      <div class="d-flex justify-content-between align-items-center gap-3 mb-3"><span class="badge text-bg-success">Live</span><div class="timer fw-bold" aria-live="polite">Time left: <span id="student-countdown" data-seconds="{{ remaining_seconds }}">--:--</span></div></div>
+    {% if pulse_state == 'entry' %}
+      <div class="text-center py-4">
+        <h1 class="h3" id="pulse-title">Opening Exit Pulse</h1>
+        <p class="text-muted">Checking the secure Learning Check link.</p>
+        <form method="post" action="{% url 'exit_pulse:public_open' %}" id="exit-pulse-open-form">
+          {% csrf_token %}
+          <input type="hidden" name="public_token" id="exit-pulse-fragment-token">
+          <noscript><div class="alert alert-warning">JavaScript is required to open this secure Exit Pulse link.</div></noscript>
+        </form>
+        <div class="alert alert-danger d-none" id="exit-pulse-link-error" role="alert">This Exit Pulse link is invalid.</div>
+      </div>
+    {% elif pulse_state == 'live' %}
+      <div class="d-flex justify-content-between align-items-center gap-3 mb-3"><span class="badge text-bg-success">Live</span><div class="timer fw-bold" role="timer">Time left: <span id="student-countdown" data-seconds="{{ remaining_seconds }}" aria-hidden="true">--:--</span><span class="visually-hidden" id="student-countdown-announcement" aria-live="polite" aria-atomic="true"></span></div></div>
       <p class="small text-muted mb-1">Today's topic</p><h1 class="h3 mb-3" id="pulse-title">{{ session.topic }}</h1>
       <p class="lead fw-semibold">{{ session.question_text_snapshot }}</p>
       {% if state_message %}<div class="alert alert-warning" role="alert">{{ state_message }}</div>{% endif %}
-      <form method="post" action="{% url 'exit_pulse:public_submit' session.public_token %}" novalidate>
+      <div class="alert alert-warning" id="pulse-client-expired" role="status" hidden>This Exit Pulse has expired. Responses are no longer accepted.</div>
+      <form method="post" action="{% url 'exit_pulse:public_submit' %}" novalidate id="exit-pulse-response-form">
         {% csrf_token %}
-        {% if form.response_code.errors %}<div class="alert alert-danger">Select one learning-status response.</div>{% endif %}
-        <fieldset class="border-0 p-0 m-0"><legend class="visually-hidden">Choose your learning status</legend><div class="d-grid gap-2 mb-4">
+        <input type="hidden" name="public_token" value="{{ public_token }}">
+        {% if form.response_code.errors %}<div class="alert alert-danger" id="response-code-error" role="alert">Select one learning-status response.</div>{% endif %}
+        <fieldset class="border-0 p-0 m-0" aria-required="true" {% if form.response_code.errors %}aria-describedby="response-code-error"{% endif %}><legend class="visually-hidden">Choose your learning status</legend><div class="d-grid gap-2 mb-4">
           {% for code, emoji, label in reaction_options %}<div class="position-relative"><input class="reaction-input" type="radio" name="response_code" value="{{ code }}" id="reaction-{{ code }}" {% if form.response_code.value == code %}checked{% endif %}><label class="reaction-label" for="reaction-{{ code }}"><span class="emoji" aria-hidden="true">{{ emoji }}</span><span>{{ label }}</span></label></div>{% endfor %}
         </div></fieldset>
         {% if session.allow_written_feedback %}
-          {% if form.feedback_review %}<div class="mb-3"><label class="form-label fw-semibold" for="{{ form.feedback_review.id_for_label }}">{{ form.feedback_review.label }}</label>{{ form.feedback_review }}{% for error in form.feedback_review.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}<div class="form-text">Optional · maximum 200 characters</div></div>{% endif %}
-          {% if form.feedback_learned %}<div class="mb-3"><label class="form-label fw-semibold" for="{{ form.feedback_learned.id_for_label }}">{{ form.feedback_learned.label }}</label>{{ form.feedback_learned }}{% for error in form.feedback_learned.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}<div class="form-text">Optional · maximum 200 characters</div></div>{% endif %}
+          {% if form.feedback_review %}<div class="mb-3"><label class="form-label fw-semibold" for="{{ form.feedback_review.id_for_label }}">{{ form.feedback_review.label }}</label>{{ form.feedback_review }}<div id="feedback-review-error" {% if form.feedback_review.errors %}class="text-danger small" role="alert"{% endif %}>{% for error in form.feedback_review.errors %}{{ error }}{% endfor %}</div><div class="form-text" id="feedback-review-help">Optional · maximum 200 characters</div></div>{% endif %}
+          {% if form.feedback_learned %}<div class="mb-3"><label class="form-label fw-semibold" for="{{ form.feedback_learned.id_for_label }}">{{ form.feedback_learned.label }}</label>{{ form.feedback_learned }}<div id="feedback-learned-error" {% if form.feedback_learned.errors %}class="text-danger small" role="alert"{% endif %}>{% for error in form.feedback_learned.errors %}{{ error }}{% endfor %}</div><div class="form-text" id="feedback-learned-help">Optional · maximum 200 characters</div></div>{% endif %}
         {% endif %}
         <button class="btn btn-success w-100 fw-semibold" type="submit">Submit Learning Check</button>
       </form>
@@ -40,6 +53,7 @@
   </div></section>
   <footer class="text-center small text-muted mt-3">Anonymous Learning Check · No name, student number, email, or attendance is collected.</footer>
 </main>
-{% if pulse_state == 'live' %}<script>(function(){const node=document.getElementById('student-countdown');let seconds=Number(node.dataset.seconds||0);let refreshing=false;function draw(){const safe=Math.max(0,seconds);node.textContent=String(Math.floor(safe/60)).padStart(2,'0')+':'+String(safe%60).padStart(2,'0');if(safe===0&&!refreshing){refreshing=true;window.setTimeout(function(){window.location.reload();},500);}}draw();window.setInterval(function(){if(seconds>0){seconds-=1;draw();}},1000);})();</script>{% endif %}
+{% if pulse_state == 'entry' %}<script>(function(){const token=window.location.hash.slice(1);window.history.replaceState(null,"",window.location.pathname);if(/^[A-Za-z0-9_-]{32,64}$/.test(token)){document.getElementById("exit-pulse-fragment-token").value=token;document.getElementById("exit-pulse-open-form").submit();}else{document.getElementById("exit-pulse-link-error").classList.remove("d-none");}})();</script>{% endif %}
+{% if pulse_state == 'live' %}<script>(function(){const node=document.getElementById('student-countdown');const announcement=document.getElementById('student-countdown-announcement');const form=document.getElementById('exit-pulse-response-form');let seconds=Number(node.dataset.seconds||0);let stopped=false;function draw(){const safe=Math.max(0,seconds);node.textContent=String(Math.floor(safe/60)).padStart(2,'0')+':'+String(safe%60).padStart(2,'0');if(safe===0&&!stopped){stopped=true;announcement.textContent='This Exit Pulse has expired.';document.getElementById('pulse-client-expired').hidden=false;form.querySelectorAll('button,input,textarea').forEach(function(control){control.disabled=true;});}else if(safe>0&&safe%60===0){const minutes=safe/60;announcement.textContent=minutes+' minute'+(minutes===1?'':'s')+' remaining.';}else if(safe===30||safe===10){announcement.textContent=safe+' seconds remaining.';}}draw();window.setInterval(function(){if(seconds>0){seconds-=1;draw();}},1000);})();</script>{% endif %}
 </body>
 </html>

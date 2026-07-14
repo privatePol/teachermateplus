@@ -742,6 +742,7 @@ Current scheduled jobs:
 - `auto_lock_period_deadlines`
 - `auto_lapse_correction_windows`
 - `queue_period_reminders`
+- `anonymize_exit_pulse_identifiers` (hourly at minute 5; clears only expired anonymous browser-token hashes while preserving reaction and optional written-response data; use `--dry-run` to preview and `--tenant-id ID` for a tenant-scoped run)
 - `issue_submission_non_compliance_notices` (daily at 7:15 AM server time; scheduler cadence checks overdue gradebooks daily. Configuration Management controls first notice after deadline, notice interval, and maximum notices. Defaults send Notice 1/2/3 on Day 1/2/3 and then stop automatic notices for that unsubmitted period.)
 
 The repository cron file is not installed automatically by `git pull`. After deployment, reinstall it and verify:

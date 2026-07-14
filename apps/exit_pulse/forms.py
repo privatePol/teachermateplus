@@ -117,12 +117,26 @@ class ExitPulseResponseForm(forms.Form):
     feedback_review = forms.CharField(
         required=False,
         max_length=200,
-        widget=forms.Textarea(attrs={"rows": 3, "maxlength": 200}),
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 3,
+                "maxlength": 200,
+                "aria-describedby": "feedback-review-help feedback-review-error",
+            }
+        ),
     )
     feedback_learned = forms.CharField(
         required=False,
         max_length=200,
-        widget=forms.Textarea(attrs={"rows": 3, "maxlength": 200}),
+        widget=forms.Textarea(
+            attrs={
+                "class": "form-control",
+                "rows": 3,
+                "maxlength": 200,
+                "aria-describedby": "feedback-learned-help feedback-learned-error",
+            }
+        ),
     )
 
     def __init__(self, *args, session, **kwargs):
