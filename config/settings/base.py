@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "apps.attendance.apps.AttendanceConfig",
     "apps.notifications.apps.NotificationsConfig",
     "apps.predictions.apps.PredictionsConfig",
+    "apps.exit_pulse.apps.ExitPulseConfig",
     "apps.student_portal.apps.StudentPortalConfig",
     "apps.admin_portal.apps.AdminPortalConfig",
     "apps.faculty_portal.apps.FacultyPortalConfig",
@@ -175,6 +176,8 @@ FACULTY_INVITATION_EXPIRY_HOURS = max(1, int(os.getenv("FACULTY_INVITATION_EXPIR
 SIS_API_TOKEN = os.getenv("SIS_API_TOKEN", "")
 SIS_API_LEGACY_TOKEN_ENABLED = env_bool("SIS_API_LEGACY_TOKEN_ENABLED", True)
 SIS_API_RATE_LIMIT_PER_MINUTE = int(os.getenv("SIS_API_RATE_LIMIT_PER_MINUTE", "60"))
+EXIT_PULSE_BROWSER_RATE_LIMIT_PER_MINUTE = int(os.getenv("EXIT_PULSE_BROWSER_RATE_LIMIT_PER_MINUTE", "6"))
+EXIT_PULSE_IP_RATE_LIMIT_PER_MINUTE = int(os.getenv("EXIT_PULSE_IP_RATE_LIMIT_PER_MINUTE", "120"))
 PRIVACY_CONSENT_VERSION = os.getenv("PRIVACY_CONSENT_VERSION", "2026-03")
 ENFORCE_SINGLE_DEVICE_SESSION = env_bool("ENFORCE_SINGLE_DEVICE_SESSION", True)
 MAINTENANCE_MODE = env_bool("MAINTENANCE_MODE", False)

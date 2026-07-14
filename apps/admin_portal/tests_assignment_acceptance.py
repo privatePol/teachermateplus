@@ -839,6 +839,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_assignment_response_window_days": 3,
                 "faculty_assignment_first_reminder_days": 1,
                 "faculty_assignment_repeat_reminder_days": 1,
+                "exit_pulse_enabled": "on",
                 "submission_non_compliance_notice_interval_days": 1,
                 "grade_deadline_enforcement_policy": "AUTO_CLOSE_REQUIRES_REOPEN",
                 "grade_prediction_default_assumption": "IGNORE_MISSING",
@@ -859,6 +860,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             SystemSettingService.get("FACULTY_DRP_ALLOWED_THROUGH_PERIOD", tenant_id=self.tenant.id),
             "PREFINAL",
         )
+        self.assertTrue(FeatureSettingsService.is_exit_pulse_enabled(tenant_id=self.tenant.id))
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.response_status, FacultyAssignment.ResponseStatus.PENDING)
         self.assertIsNotNone(self.assignment.response_due_at)
@@ -939,6 +941,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertContains(response, "Campus / Branch Recipient Emails")
         self.assertContains(response, "Official Grade Release to Faculty")
         self.assertContains(response, "Role-Based Help Guide")
+        self.assertContains(response, "Enable Exit Pulse")
 
     def test_assignment_dashboard_view_loads(self):
         self.client.force_login(self.admin_user)

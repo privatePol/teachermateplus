@@ -3378,6 +3378,14 @@ class ConfigurableFeatureSettingForm(forms.Form):
             "Faculty Portal score encoding page. Turning this off restores the standard score-entry behavior."
         ),
     )
+    exit_pulse_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Exit Pulse",
+        help_text=(
+            "Lets assigned faculty run five-minute anonymous classroom Learning Checks. "
+            "Exit Pulse does not affect attendance, grades, or faculty evaluation."
+        ),
+    )
     submission_non_compliance_notice_enabled = forms.BooleanField(
         required=False,
         label="Enable non-compliance notices for overdue grade submissions",
@@ -3829,6 +3837,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
             cleaned["faculty_quick_tour_enabled"] = False
         if not cleaned.get("faculty_quick_score_encoding_enabled"):
             cleaned["faculty_quick_score_encoding_enabled"] = False
+        if not cleaned.get("exit_pulse_enabled"):
+            cleaned["exit_pulse_enabled"] = False
         if not cleaned.get("submission_non_compliance_notice_enabled"):
             cleaned["submission_non_compliance_notice_enabled"] = False
         cleaned["submission_non_compliance_notice_interval_days"] = 1

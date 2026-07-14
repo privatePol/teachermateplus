@@ -65,6 +65,7 @@ def portal_menu(request):
     faculty_quick_tour_enabled = False
     faculty_grade_prediction_enabled = False
     faculty_at_risk_monitor_enabled = False
+    exit_pulse_enabled = False
     faculty_portal_identity_warning = None
     if portal == "FACULTY":
         faculty_tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
@@ -79,6 +80,13 @@ def portal_menu(request):
         faculty_at_risk_monitor_enabled = (
             faculty_grade_prediction_enabled
             and FeatureSettingsService.is_grade_prediction_at_risk_enabled(
+                tenant_id=faculty_tenant_id,
+                default=True,
+            )
+        )
+        exit_pulse_enabled = (
+            "exit_pulse.use" in permissions
+            and FeatureSettingsService.is_exit_pulse_enabled(
                 tenant_id=faculty_tenant_id,
                 default=True,
             )
@@ -139,6 +147,7 @@ def portal_menu(request):
         "faculty_quick_tour_enabled": faculty_quick_tour_enabled,
         "faculty_grade_prediction_enabled": faculty_grade_prediction_enabled,
         "faculty_at_risk_monitor_enabled": faculty_at_risk_monitor_enabled,
+        "exit_pulse_enabled": exit_pulse_enabled,
         "faculty_portal_identity_warning": faculty_portal_identity_warning,
         "admin_active_academic_year": admin_active_academic_year,
         "admin_active_term": admin_active_term,

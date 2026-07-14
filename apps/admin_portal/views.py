@@ -4198,6 +4198,10 @@ def configurable_features_settings_view(request):
             default=False,
         )
     )
+    current_exit_pulse_enabled = FeatureSettingsService.is_exit_pulse_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
     current_submission_non_compliance_notice_enabled = (
         FeatureSettingsService.is_submission_non_compliance_notice_enabled(
             tenant_id=tenant_id,
@@ -4417,6 +4421,7 @@ def configurable_features_settings_view(request):
             "faculty_memo_center_enabled": current_faculty_memo_center_enabled,
             "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
             "faculty_quick_score_encoding_enabled": current_faculty_quick_score_encoding_enabled,
+            "exit_pulse_enabled": current_exit_pulse_enabled,
             "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
             "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
             "submission_non_compliance_first_notice_after_days": current_submission_non_compliance_first_notice_after_days,
@@ -4686,6 +4691,13 @@ def configurable_features_settings_view(request):
         SystemSettingService.set(
             FeatureSettingsService.FACULTY_QUICK_SCORE_ENCODING_KEY,
             bool(form.cleaned_data["faculty_quick_score_encoding_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.EXIT_PULSE_ENABLED_KEY,
+            bool(form.cleaned_data["exit_pulse_enabled"]),
             tenant_id=tenant_id,
             value_type="BOOL",
             is_active=True,
@@ -5007,6 +5019,7 @@ def configurable_features_settings_view(request):
                 "faculty_memo_center_enabled": current_faculty_memo_center_enabled,
                 "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
                 "faculty_quick_score_encoding_enabled": current_faculty_quick_score_encoding_enabled,
+                "exit_pulse_enabled": current_exit_pulse_enabled,
                 "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
                 "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
                 "submission_non_compliance_first_notice_after_days": current_submission_non_compliance_first_notice_after_days,
@@ -5093,6 +5106,7 @@ def configurable_features_settings_view(request):
                 "faculty_quick_score_encoding_enabled": bool(
                     form.cleaned_data["faculty_quick_score_encoding_enabled"]
                 ),
+                "exit_pulse_enabled": bool(form.cleaned_data["exit_pulse_enabled"]),
                 "submission_non_compliance_notice_enabled": bool(
                     form.cleaned_data["submission_non_compliance_notice_enabled"]
                 ),
@@ -5192,6 +5206,7 @@ def configurable_features_settings_view(request):
                     FeatureSettingsService.FACULTY_MEMO_CENTER_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_QUICK_TOUR_ENABLED_KEY,
                     FeatureSettingsService.FACULTY_QUICK_SCORE_ENCODING_KEY,
+                    FeatureSettingsService.EXIT_PULSE_ENABLED_KEY,
                     FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_ENABLED_KEY,
                     FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
                     FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY,

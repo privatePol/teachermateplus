@@ -1,0 +1,55 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Exit Pulse | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<div class="container-fluid py-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+      <p class="text-success fw-semibold text-uppercase small mb-1">Classroom Tools</p>
+      <h1 class="h3 mb-1">Exit Pulse</h1>
+      <p class="text-muted mb-0">Run a five-minute anonymous Learning Check for one accepted class assignment.</p>
+    </div>
+    {% if assignment_count %}
+      <a class="btn btn-success" href="{% url 'exit_pulse:create' %}">Create Exit Pulse</a>
+    {% endif %}
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-4"><div class="card h-100 border-success-subtle"><div class="card-body"><h2 class="h6">1. Ask</h2><p class="mb-0 text-muted">Choose a learning question and lesson topic.</p></div></div></div>
+    <div class="col-md-4"><div class="card h-100 border-warning-subtle"><div class="card-body"><h2 class="h6">2. Share</h2><p class="mb-0 text-muted">Display the secure QR code or public link for five minutes.</p></div></div></div>
+    <div class="col-md-4"><div class="card h-100 border-info-subtle"><div class="card-body"><h2 class="h6">3. Review</h2><p class="mb-0 text-muted">See anonymous class-level results after the session ends.</p></div></div></div>
+  </div>
+
+  {% if not assignment_count %}
+    <div class="alert alert-warning">No active accepted faculty assignment is available in the current tenant and campus scope.</div>
+  {% endif %}
+
+  {% if current_sessions %}
+    <section aria-labelledby="current-pulses-heading">
+      <h2 class="h5 mb-3" id="current-pulses-heading">Current Exit Pulse</h2>
+      <div class="row g-3">
+        {% for session in current_sessions %}
+          <div class="col-lg-6">
+            <div class="card h-100 shadow-sm">
+              <div class="card-body">
+                <div class="d-flex justify-content-between gap-2">
+                  <h3 class="h6 mb-1">{{ session.topic }}</h3>
+                  <span class="badge text-bg-success">{{ session.get_status_display }}</span>
+                </div>
+                <p class="small text-muted mb-2">{{ session.course.code }} · {{ session.section.code }} · {{ session.term.code }}</p>
+                <p class="mb-3">{{ session.question_text_snapshot }}</p>
+                <a class="btn btn-sm btn-outline-success" href="{% url 'exit_pulse:live' session.public_id %}">Open Live Session</a>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% else %}
+    <div class="card border-0 bg-light"><div class="card-body text-center py-5"><h2 class="h5">No live Exit Pulse</h2><p class="text-muted mb-0">Create one when you are ready to check class understanding.</p></div></div>
+  {% endif %}
+
+  <div class="alert alert-light border mt-4 mb-0">
+    <strong>Privacy note:</strong> Exit Pulse is anonymous and is not used for faculty evaluation, attendance, or grading.
+  </div>
+</div>
+{% endblock %}

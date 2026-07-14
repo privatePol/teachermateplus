@@ -557,6 +557,17 @@
           <span class="sidebar-label">Archived Classes</span>
           <span class="sidebar-sub">Archive</span>
         </a>
+        {% if exit_pulse_enabled %}
+          <div class="faculty-nav-group-title sidebar-label">Classroom Tools</div>
+          <a
+            href="{% url 'exit_pulse:landing' %}"
+            class="sidebar-link {% if request.resolver_match.namespace == 'exit_pulse' %}active{% endif %}"
+            title="Exit Pulse"
+          >
+            <span class="sidebar-icon">&#128246;</span>
+            <span class="sidebar-label">Exit Pulse</span>
+          </a>
+        {% endif %}
         <div class="faculty-nav-group-title sidebar-label">Reminders and Notes</div>
         <a
           href="{% url 'faculty_portal:reminder_center' %}"

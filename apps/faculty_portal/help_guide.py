@@ -34,6 +34,23 @@ FACULTY_HELP_SECTIONS = [
                 "next_step": "Open Grading, choose a period, and review the required activity categories.",
             },
             {
+                "code": "exit-pulse",
+                "title": "Exit Pulse Learning Check",
+                "purpose": "Runs a short anonymous check of student understanding for one of your accepted classes. It is not a faculty evaluation, attendance check, or graded activity.",
+                "how_to_open": ["From the left navigation bar, open Classroom Tools.", "Click Exit Pulse, then click Create Exit Pulse."],
+                "check_first": [
+                    "Choose the correct accepted class and enter the lesson topic.",
+                    "Choose one of the three learning questions, or write a custom question about understanding, confidence, clarification, examples, or practice.",
+                    "Enable optional written feedback only when you want one or both short prompts.",
+                ],
+                "actions": [
+                    {"name": "Start Exit Pulse", "does": "Creates a secure public link and QR code and opens the Learning Check for five minutes.", "when": "Use it near the end of a lesson after previewing the student question.", "avoid": "Do not ask students to rate you or treat the heart as a like button; it means strong understanding and confidence.", "result": "Students can anonymously choose one of four learning-status responses without logging in.", "editable": "You may extend once by five minutes, close early, or cancel."},
+                    {"name": "View Results", "does": "Shows counts, percentages, response rate, understanding rate, support-needed rate, and enabled anonymous comments.", "when": "Use it after the session closes or expires.", "avoid": "Do not use anonymous responses as proof of attendance or as grades.", "result": "A basic session summary helps identify material that may need clarification or more practice.", "editable": "Results are read-only and available only to the assigned faculty owner."},
+                ],
+                "avoid": "Anonymous browser controls reduce casual duplicate submissions but cannot verify identity or prevent every duplicate after cookies are cleared or another browser is used.",
+                "next_step": "Use the neutral summary to decide whether to review the topic, give more examples, or provide more practice.",
+            },
+            {
                 "code": "dashboard",
                 "title": "Dashboard and Grade Encoding Status",
                 "purpose": "Shows your accepted classes, current-period encoding status, and gradebook blockers without displaying student names.",

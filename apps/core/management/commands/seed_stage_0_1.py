@@ -23,6 +23,7 @@ class Command(BaseCommand):
     permissions = [
         ("admin_portal.access", "admin_portal", "access"),
         ("faculty_portal.access", "faculty_portal", "access"),
+        ("exit_pulse.use", "exit_pulse", "use"),
         ("dashboard.read", "dashboard", "read"),
         ("grading_analytics.read", "grading_analytics", "read"),
         ("grade_distribution_monitor.read", "grade_distribution_monitor", "read"),
@@ -891,7 +892,7 @@ class Command(BaseCommand):
         MenuItem.objects.filter(portal="ADMIN", code__in=retired_grading_menu_codes).update(is_active=False)
 
         faculty_role = role_map["FACULTY"]
-        for faculty_perm in ["faculty_portal.access", "dashboard.read", "corrections.create"]:
+        for faculty_perm in ["faculty_portal.access", "dashboard.read", "corrections.create", "exit_pulse.use"]:
             RolePermission.objects.get_or_create(role=faculty_role, permission=perm_map[faculty_perm])
 
         college_dean_role = role_map["COLLEGE_DEAN"]

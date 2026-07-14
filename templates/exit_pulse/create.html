@@ -1,0 +1,95 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Create Exit Pulse | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<div class="container-fluid py-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+    <div><p class="text-success fw-semibold text-uppercase small mb-1">Exit Pulse</p><h1 class="h3 mb-0">Create Exit Pulse</h1></div>
+    <a class="btn btn-outline-secondary btn-sm" href="{% url 'exit_pulse:landing' %}">Back</a>
+  </div>
+  <div class="row g-4">
+    <div class="col-xl-7">
+      <form method="post" class="card shadow-sm" novalidate id="exit-pulse-create-form">
+        {% csrf_token %}
+        <div class="card-body p-4">
+          {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="{{ form.faculty_assignment.id_for_label }}">{{ form.faculty_assignment.label }}</label>
+            {{ form.faculty_assignment }}
+            {% for error in form.faculty_assignment.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="{{ form.topic.id_for_label }}">{{ form.topic.label }}</label>
+            {{ form.topic }}<div class="form-text">Maximum 200 characters.</div>
+            {% for error in form.topic.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="{{ form.question_code.id_for_label }}">{{ form.question_code.label }}</label>
+            {{ form.question_code }}
+            {% for error in form.question_code.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="mb-3" id="custom-question-wrap">
+            <label class="form-label fw-semibold" for="{{ form.custom_question.id_for_label }}">{{ form.custom_question.label }}</label>
+            {{ form.custom_question }}
+            <div class="form-text">{{ form.custom_question.help_text }}</div>
+            {% for error in form.custom_question.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="border rounded p-3 mb-3 bg-light">
+            <div class="form-check mb-2">{{ form.allow_written_feedback }} <label class="form-check-label fw-semibold" for="{{ form.allow_written_feedback.id_for_label }}">{{ form.allow_written_feedback.label }}</label></div>
+            {% for error in form.allow_written_feedback.errors %}<div class="text-danger small mb-2">{{ error }}</div>{% endfor %}
+            <div id="written-prompts-wrap" class="ps-2">
+              <p class="small text-muted mb-2">Select one or both optional prompts:</p>
+              <div class="form-check mb-2">{{ form.feedback_review_enabled }} <label class="form-check-label" for="{{ form.feedback_review_enabled.id_for_label }}">{{ form.feedback_review_enabled.label }}</label></div>
+              <div class="form-check">{{ form.feedback_learned_enabled }} <label class="form-check-label" for="{{ form.feedback_learned_enabled.id_for_label }}">{{ form.feedback_learned_enabled.label }}</label></div>
+            </div>
+          </div>
+          <div class="alert alert-warning small">Custom questions must measure learning, understanding, confidence, clarification, examples, or practice. Faculty-rating questions are blocked.</div>
+          <div class="d-flex justify-content-end"><button class="btn btn-success px-4" type="submit">Start Exit Pulse</button></div>
+        </div>
+      </form>
+    </div>
+    <div class="col-xl-5">
+      <aside class="card border-success-subtle sticky-xl-top" style="top:1rem" aria-labelledby="pulse-preview-title">
+        <div class="card-header bg-success text-white"><h2 class="h6 mb-0" id="pulse-preview-title">Student Survey Preview</h2></div>
+        <div class="card-body">
+          <p class="small text-muted mb-1">Lesson topic</p><h3 class="h5" id="preview-topic">Your lesson topic</h3>
+          <p class="fw-semibold" id="preview-question">Choose a Learning Check question.</p>
+          <div class="d-grid gap-2" aria-hidden="true">
+            <div class="btn btn-outline-success text-start">❤️ I understand it well and feel confident</div>
+            <div class="btn btn-outline-success text-start">😊 I understand most of it</div>
+            <div class="btn btn-outline-warning text-start">🤔 I need a little clarification</div>
+            <div class="btn btn-outline-warning text-start">🧩 I need more examples or practice</div>
+          </div>
+          <div class="small text-muted mt-3">This Learning Check is not a faculty evaluation.</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+{{ block.super }}
+<script>
+(function () {
+  const topic = document.getElementById("id_topic");
+  const question = document.getElementById("id_question_code");
+  const custom = document.getElementById("id_custom_question");
+  const customWrap = document.getElementById("custom-question-wrap");
+  const writtenToggle = document.getElementById("id_allow_written_feedback");
+  const writtenWrap = document.getElementById("written-prompts-wrap");
+  const questionText = {
+    UNDERSTANDING: "How well do you understand today's topic?",
+    APPLICATION_CONFIDENCE: "How confident are you that you can apply today's lesson?",
+    NEEDS_EXPLANATION: "Does today's topic need further explanation or examples?"
+  };
+  function refresh() {
+    document.getElementById("preview-topic").textContent = topic.value.trim() || "Your lesson topic";
+    const customMode = question.value === "CUSTOM";
+    customWrap.hidden = !customMode;
+    document.getElementById("preview-question").textContent = customMode ? (custom.value.trim() || "Your custom learning question") : (questionText[question.value] || "Choose a Learning Check question.");
+    writtenWrap.hidden = !writtenToggle.checked;
+  }
+  [topic, question, custom, writtenToggle].forEach(function (node) { node.addEventListener("input", refresh); node.addEventListener("change", refresh); });
+  refresh();
+})();
+</script>
+{% endblock %}

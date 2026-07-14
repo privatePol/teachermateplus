@@ -1,0 +1,31 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Exit Pulse Results | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<div class="container-fluid py-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div><p class="text-success fw-semibold text-uppercase small mb-1">Exit Pulse · Session Results</p><h1 class="h3 mb-1">{{ session.topic }}</h1><p class="text-muted mb-0">{{ session.course.title }} ({{ session.course.code }}) · {{ session.section.code }} · {{ session.academic_year.code }} / {{ session.term.code }}</p></div>
+    <div class="d-flex gap-2"><span class="badge text-bg-secondary fs-6">{{ session.get_status_display }}</span><a class="btn btn-sm btn-outline-success" href="{% url 'exit_pulse:landing' %}">Exit Pulse Home</a></div>
+  </div>
+  <div class="card shadow-sm mb-4"><div class="card-body"><p class="small text-muted mb-1">Question used</p><h2 class="h5 mb-2">{{ session.question_text_snapshot }}</h2><div class="small text-muted">Started {{ session.started_at|date:"M d, Y g:i A" }} · Duration {{ analytics.duration_minutes }} minutes</div></div></div>
+  <div class="row g-3 mb-4">
+    <div class="col-sm-6 col-xl-3"><div class="card h-100 border-success-subtle"><div class="card-body"><div class="small text-muted">Total Responses</div><div class="display-6 fw-bold">{{ analytics.total_responses }}</div></div></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="small text-muted">Enrolled Students</div><div class="display-6 fw-bold">{{ analytics.enrolled_students }}</div><div class="small">Response rate: {{ analytics.response_rate }}%</div></div></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="card h-100 border-info-subtle"><div class="card-body"><div class="small text-muted">Understanding Rate</div><div class="display-6 fw-bold">{{ analytics.understanding_rate }}%</div><div class="small">Confident + mostly understood</div></div></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="card h-100 border-warning-subtle"><div class="card-body"><div class="small text-muted">Support-Needed Rate</div><div class="display-6 fw-bold">{{ analytics.support_needed_rate }}%</div><div class="small">Clarification + more practice</div></div></div></div>
+  </div>
+  <div class="card shadow-sm mb-4"><div class="card-header bg-light"><h2 class="h5 mb-0">Learning Check Summary</h2></div><div class="card-body">
+    {% for row in analytics.reaction_rows %}
+      <div class="mb-3"><div class="d-flex justify-content-between gap-2 mb-1"><span>{{ row.label }}</span><strong>{{ row.count }} · {{ row.percentage }}%</strong></div><div class="progress" role="progressbar" aria-label="{{ row.label }}" aria-valuenow="{{ row.percentage }}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar {% if row.code == 'NEEDS_CLARIFICATION' or row.code == 'NEEDS_PRACTICE' %}bg-warning text-dark{% else %}bg-success{% endif %}" style="width:{{ row.percentage }}%"></div></div></div>
+    {% endfor %}
+    {% if analytics.support_needed_rate > 0 %}<div class="alert alert-warning mb-0">Some students may benefit from additional clarification or examples.</div>{% endif %}
+  </div></div>
+  {% if session.allow_written_feedback and session.status != 'CANCELLED' %}
+    <div class="card shadow-sm"><div class="card-header bg-light"><h2 class="h5 mb-0">Anonymous Written Responses</h2></div><div class="card-body">
+      {% if session.feedback_review_enabled %}<h3 class="h6">{{ session.feedback_review_prompt_snapshot }}</h3><ul class="list-group mb-4">{% for answer in analytics.written_review %}<li class="list-group-item">{{ answer }}</li>{% empty %}<li class="list-group-item text-muted">No written responses.</li>{% endfor %}</ul>{% endif %}
+      {% if session.feedback_learned_enabled %}<h3 class="h6">{{ session.feedback_learned_prompt_snapshot }}</h3><ul class="list-group">{% for answer in analytics.written_learned %}<li class="list-group-item">{{ answer }}</li>{% empty %}<li class="list-group-item text-muted">No written responses.</li>{% endfor %}</ul>{% endif %}
+      <p class="small text-muted mt-3 mb-0">Responses are anonymous and are shown only after the session ends.</p>
+    </div></div>
+  {% endif %}
+  <div class="alert alert-light border mt-4 mb-0">Exit Pulse is a Learning Check. These results are not a faculty score, attendance record, or gradebook item.</div>
+</div>
+{% endblock %}
