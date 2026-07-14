@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import hmac
@@ -14,7 +14,7 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core import signing
 from django.db import IntegrityError, transaction
-from django.db.models import Count
+from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering, FacultyAssignment
@@ -105,6 +105,14 @@ class ExitPulseQuestionValidationService:
 
 class ExitPulseSessionService:
     LIVE_DURATION = timedelta(minutes=5)
+
+    @staticmethod
+    def eligible_enrollment_count(*, course_offering_id):
+        return Enrollment.objects.filter(
+            course_offering_id=course_offering_id,
+            is_active=True,
+            enrollment_status=Enrollment.Status.ACTIVE,
+        ).count()
 
     @staticmethod
     def _eligible_assignments():
@@ -269,11 +277,25 @@ class ExitPulseSessionService:
             raise ValidationError("Only a draft Exit Pulse can be started.")
         if not cls.session_assignment_is_valid(row, lock=True):
             raise PermissionDenied("This faculty assignment is no longer available for Exit Pulse.")
+        if row.enrollment_count_snapshot is not None:
+            raise ValidationError("This draft already has an enrollment snapshot and cannot be started.")
         now = now or timezone.now()
+        enrollment_count_snapshot = cls.eligible_enrollment_count(
+            course_offering_id=row.course_offering_id,
+        )
         row.status = ExitPulseSession.Status.LIVE
         row.started_at = now
         row.expires_at = now + cls.LIVE_DURATION
-        row.save(update_fields=["status", "started_at", "expires_at", "updated_at"])
+        row.enrollment_count_snapshot = enrollment_count_snapshot
+        row.save(
+            update_fields=[
+                "status",
+                "started_at",
+                "expires_at",
+                "enrollment_count_snapshot",
+                "updated_at",
+            ]
+        )
         cls._audit_action("EXIT_PULSE_STARTED", row, user, request)
         return row
 
@@ -616,8 +638,12 @@ class ExitPulseResponseService:
 class ExitPulseAnalytics:
     total_responses: int
     enrolled_students: int
+    enrollment_denominator_is_historical: bool
+    enrollment_denominator_source: str
     response_rate: Decimal
     reaction_rows: tuple
+    understanding_response_count: int
+    support_needed_response_count: int
     understanding_rate: Decimal
     support_needed_rate: Decimal
     duration_minutes: Decimal
@@ -625,13 +651,132 @@ class ExitPulseAnalytics:
     written_learned: tuple
 
 
+@dataclass(frozen=True)
+class ExitPulseAssignmentAnalytics:
+    terminal_session_count: int
+    distinct_topic_count: int
+    latest_terminal_session_at: datetime | None
+    total_responses: int
+    historical_denominator_session_count: int
+    missing_denominator_session_count: int
+    enrollment_denominator_total: int
+    response_total_with_historical_denominator: int
+    weighted_response_rate: Decimal
+    understanding_response_count: int
+    support_needed_response_count: int
+    weighted_understanding_rate: Decimal
+    weighted_support_needed_rate: Decimal
+
+
 class ExitPulseAnalyticsService:
+    TERMINAL_STATUSES = (
+        ExitPulseSession.Status.CLOSED,
+        ExitPulseSession.Status.EXPIRED,
+    )
+    DENOMINATOR_SOURCE_SNAPSHOT = "STORED_SNAPSHOT"
+    DENOMINATOR_SOURCE_LEGACY_ESTIMATE = "CURRENT_ENROLLMENT_ESTIMATE"
+
     @staticmethod
     def _percent(count, total):
         if not total:
             return Decimal("0.0")
         return (Decimal(count) * Decimal("100") / Decimal(total)).quantize(
             Decimal("0.1"), rounding=ROUND_HALF_UP
+        )
+
+    @classmethod
+    def terminal_sessions(cls, queryset):
+        return queryset.filter(status__in=cls.TERMINAL_STATUSES)
+
+    @classmethod
+    def enrollment_denominator(cls, session):
+        if session.enrollment_count_snapshot is not None:
+            return (
+                session.enrollment_count_snapshot,
+                True,
+                cls.DENOMINATOR_SOURCE_SNAPSHOT,
+            )
+        return (
+            ExitPulseSessionService.eligible_enrollment_count(
+                course_offering_id=session.course_offering_id,
+            ),
+            False,
+            cls.DENOMINATOR_SOURCE_LEGACY_ESTIMATE,
+        )
+
+    @classmethod
+    def build_assignment(cls, sessions):
+        terminal = cls.terminal_sessions(sessions)
+        session_summary = terminal.aggregate(
+            terminal_session_count=Count("id", distinct=True),
+            distinct_topic_count=Count(
+                "topic",
+                filter=~Q(topic=""),
+                distinct=True,
+            ),
+            latest_terminal_session_at=Max("started_at"),
+            historical_denominator_session_count=Count(
+                "id",
+                filter=Q(enrollment_count_snapshot__isnull=False),
+                distinct=True,
+            ),
+            missing_denominator_session_count=Count(
+                "id",
+                filter=Q(enrollment_count_snapshot__isnull=True),
+                distinct=True,
+            ),
+            enrollment_denominator_total=Sum("enrollment_count_snapshot"),
+        )
+        response_summary = ExitPulseResponse.objects.filter(session__in=terminal).aggregate(
+            total_responses=Count("id"),
+            response_total_with_historical_denominator=Count(
+                "id",
+                filter=Q(session__enrollment_count_snapshot__isnull=False),
+            ),
+            understanding_response_count=Count(
+                "id",
+                filter=Q(
+                    response_code__in=[
+                        ExitPulseResponse.ResponseCode.CONFIDENT,
+                        ExitPulseResponse.ResponseCode.MOSTLY_UNDERSTOOD,
+                    ]
+                ),
+            ),
+            support_needed_response_count=Count(
+                "id",
+                filter=Q(
+                    response_code__in=[
+                        ExitPulseResponse.ResponseCode.NEEDS_CLARIFICATION,
+                        ExitPulseResponse.ResponseCode.NEEDS_PRACTICE,
+                    ]
+                ),
+            ),
+        )
+        total_responses = response_summary["total_responses"] or 0
+        denominator_total = session_summary["enrollment_denominator_total"] or 0
+        response_total_with_denominator = (
+            response_summary["response_total_with_historical_denominator"] or 0
+        )
+        understanding = response_summary["understanding_response_count"] or 0
+        support = response_summary["support_needed_response_count"] or 0
+        return ExitPulseAssignmentAnalytics(
+            terminal_session_count=session_summary["terminal_session_count"] or 0,
+            distinct_topic_count=session_summary["distinct_topic_count"] or 0,
+            latest_terminal_session_at=session_summary["latest_terminal_session_at"],
+            total_responses=total_responses,
+            historical_denominator_session_count=(
+                session_summary["historical_denominator_session_count"] or 0
+            ),
+            missing_denominator_session_count=(
+                session_summary["missing_denominator_session_count"] or 0
+            ),
+            enrollment_denominator_total=denominator_total,
+            response_total_with_historical_denominator=response_total_with_denominator,
+            weighted_response_rate=cls._percent(response_total_with_denominator, denominator_total),
+            understanding_response_count=understanding,
+            support_needed_response_count=support,
+            weighted_understanding_rate=cls._percent(understanding, total_responses),
+            weighted_support_needed_rate=cls._percent(support, total_responses),
         )
 
     @classmethod
@@ -651,11 +796,7 @@ class ExitPulseAnalyticsService:
             }
             for code, count in counts.items()
         )
-        enrolled = Enrollment.objects.filter(
-            course_offering=session.course_offering,
-            is_active=True,
-            enrollment_status=Enrollment.Status.ACTIVE,
-        ).count()
+        enrolled, denominator_is_historical, denominator_source = cls.enrollment_denominator(session)
         understanding = counts[ExitPulseResponse.ResponseCode.CONFIDENT] + counts[
             ExitPulseResponse.ResponseCode.MOSTLY_UNDERSTOOD
         ]
@@ -683,8 +824,12 @@ class ExitPulseAnalyticsService:
         return ExitPulseAnalytics(
             total_responses=total,
             enrolled_students=enrolled,
+            enrollment_denominator_is_historical=denominator_is_historical,
+            enrollment_denominator_source=denominator_source,
             response_rate=cls._percent(total, enrolled),
             reaction_rows=reaction_rows,
+            understanding_response_count=understanding,
+            support_needed_response_count=support,
             understanding_rate=cls._percent(understanding, total),
             support_needed_rate=cls._percent(support, total),
             duration_minutes=(Decimal(str(duration_seconds)) / Decimal("60")).quantize(

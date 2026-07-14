@@ -91,6 +91,12 @@ class ExitPulseSession(TimeStampedModel):
     cancelled_at = models.DateTimeField(blank=True, null=True)
     extended_at = models.DateTimeField(blank=True, null=True)
     extension_count = models.PositiveSmallIntegerField(default=0)
+    enrollment_count_snapshot = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+        editable=False,
+        help_text="Eligible enrollment count captured when the session first starts; null for legacy sessions.",
+    )
     created_by = models.ForeignKey(
         "accounts.User",
         on_delete=models.PROTECT,

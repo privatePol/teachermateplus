@@ -331,9 +331,46 @@ class ExitPulseLifecycleTests(ExitPulseTestBase):
     def test_draft_starts_with_five_minute_expiration(self):
         draft = self.make_draft()
         self.assertEqual(draft.status, ExitPulseSession.Status.DRAFT)
+        self.assertIsNone(draft.enrollment_count_snapshot)
         started = ExitPulseSessionService.start(session=draft, user=self.faculty)
         self.assertEqual(started.status, ExitPulseSession.Status.LIVE)
         self.assertAlmostEqual((started.expires_at - started.started_at).total_seconds(), 300, delta=1)
+
+    def test_start_captures_only_active_eligible_enrollments(self):
+        self.create_enrollments(3)
+        enrollments = list(Enrollment.objects.order_by("id"))
+        enrollments[0].enrollment_status = Enrollment.Status.DRP
+        enrollments[0].save(update_fields=["enrollment_status", "updated_at"])
+        enrollments[1].is_active = False
+        enrollments[1].save(update_fields=["is_active", "updated_at"])
+
+        draft = self.make_draft()
+        self.assertIsNone(draft.enrollment_count_snapshot)
+        started = ExitPulseSessionService.start(session=draft, user=self.faculty)
+
+        self.assertEqual(started.enrollment_count_snapshot, 1)
+
+    def test_zero_enrollment_snapshot_is_stored_as_zero(self):
+        started = self.make_live()
+        self.assertEqual(started.enrollment_count_snapshot, 0)
+        self.assertIsNotNone(started.enrollment_count_snapshot)
+
+    def test_started_snapshot_is_not_recalculated_after_enrollment_changes(self):
+        self.create_enrollments(2)
+        started = self.make_live()
+        Enrollment.objects.update(
+            is_active=False,
+            enrollment_status=Enrollment.Status.W,
+        )
+
+        with self.assertRaises(ValidationError):
+            ExitPulseSessionService.start(session=started, user=self.faculty)
+
+        started.refresh_from_db()
+        self.assertEqual(started.enrollment_count_snapshot, 2)
+        analytics = ExitPulseAnalyticsService.build(started)
+        self.assertEqual(analytics.enrolled_students, 2)
+        self.assertTrue(analytics.enrollment_denominator_is_historical)
 
     def test_close_and_cancel_stop_session(self):
         closed = ExitPulseSessionService.close(session=self.make_live(), user=self.faculty)
@@ -668,6 +705,169 @@ class ExitPulseFeedbackAndResultsTests(ExitPulseTestBase):
         second_response.refresh_from_db()
         self.assertIsNone(first_response.anonymous_token_hash)
         self.assertEqual(second_response.anonymous_token_hash, "2" * 64)
+
+
+class ExitPulseCheckpointOneAnalyticsTests(ExitPulseTestBase):
+    def _terminal_session(
+        self,
+        *,
+        topic,
+        snapshot,
+        status=ExitPulseSession.Status.CLOSED,
+        started_at=None,
+    ):
+        session = self.make_live(topic=topic)
+        session.status = status
+        session.enrollment_count_snapshot = snapshot
+        session.started_at = started_at or session.started_at
+        session.closed_at = session.started_at + timedelta(minutes=5)
+        session.save(
+            update_fields=[
+                "status",
+                "enrollment_count_snapshot",
+                "started_at",
+                "closed_at",
+                "updated_at",
+            ]
+        )
+        return session
+
+    @staticmethod
+    def _add_responses(session, codes, prefix):
+        for index, code in enumerate(codes):
+            ExitPulseResponse.objects.create(
+                session=session,
+                response_code=code,
+                anonymous_token_hash=f"{prefix}{index:063d}"[:64],
+            )
+
+    def test_legacy_null_denominator_is_distinct_and_uses_estimated_display_fallback(self):
+        self.create_enrollments(2)
+        legacy = self._terminal_session(topic="Legacy topic", snapshot=None)
+        zero = self._terminal_session(topic="Zero topic", snapshot=0)
+
+        legacy_analytics = ExitPulseAnalyticsService.build(legacy)
+        zero_analytics = ExitPulseAnalyticsService.build(zero)
+
+        self.assertEqual(legacy_analytics.enrolled_students, 2)
+        self.assertFalse(legacy_analytics.enrollment_denominator_is_historical)
+        self.assertEqual(
+            legacy_analytics.enrollment_denominator_source,
+            ExitPulseAnalyticsService.DENOMINATOR_SOURCE_LEGACY_ESTIMATE,
+        )
+        self.assertEqual(zero_analytics.enrolled_students, 0)
+        self.assertTrue(zero_analytics.enrollment_denominator_is_historical)
+        self.assertEqual(
+            zero_analytics.enrollment_denominator_source,
+            ExitPulseAnalyticsService.DENOMINATOR_SOURCE_SNAPSHOT,
+        )
+
+    def test_terminal_filter_excludes_draft_live_and_cancelled_sessions(self):
+        closed = self._terminal_session(topic="Closed", snapshot=4)
+        expired = self._terminal_session(
+            topic="Expired",
+            snapshot=4,
+            status=ExitPulseSession.Status.EXPIRED,
+        )
+        draft = self.make_draft(topic="Draft")
+        live = self.make_live(topic="Live")
+        cancelled = ExitPulseSessionService.cancel(
+            session=self.make_live(topic="Cancelled"),
+            user=self.faculty,
+        )
+        for index, session in enumerate((closed, expired, draft, live, cancelled)):
+            self._add_responses(session, [ExitPulseResponse.ResponseCode.CONFIDENT], str(index))
+
+        analytics = ExitPulseAnalyticsService.build_assignment(ExitPulseSession.objects.all())
+
+        self.assertEqual(analytics.terminal_session_count, 2)
+        self.assertEqual(analytics.total_responses, 2)
+        self.assertEqual(analytics.distinct_topic_count, 2)
+
+    def test_weighted_assignment_calculations_exclude_legacy_response_rate_denominator(self):
+        first_at = timezone.now() - timedelta(days=2)
+        latest_at = timezone.now() - timedelta(days=1)
+        first = self._terminal_session(
+            topic="Normalization",
+            snapshot=2,
+            started_at=first_at,
+        )
+        second = self._terminal_session(
+            topic="SQL joins",
+            snapshot=8,
+            status=ExitPulseSession.Status.EXPIRED,
+            started_at=latest_at,
+        )
+        legacy = self._terminal_session(topic="Legacy topic", snapshot=None)
+        self._add_responses(first, [ExitPulseResponse.ResponseCode.CONFIDENT], "a")
+        self._add_responses(
+            second,
+            [
+                ExitPulseResponse.ResponseCode.CONFIDENT,
+                ExitPulseResponse.ResponseCode.MOSTLY_UNDERSTOOD,
+                ExitPulseResponse.ResponseCode.NEEDS_CLARIFICATION,
+                ExitPulseResponse.ResponseCode.NEEDS_PRACTICE,
+                ExitPulseResponse.ResponseCode.NEEDS_PRACTICE,
+                ExitPulseResponse.ResponseCode.CONFIDENT,
+            ],
+            "b",
+        )
+        self._add_responses(
+            legacy,
+            [
+                ExitPulseResponse.ResponseCode.CONFIDENT,
+                ExitPulseResponse.ResponseCode.NEEDS_CLARIFICATION,
+            ],
+            "c",
+        )
+
+        with self.assertNumQueries(2):
+            analytics = ExitPulseAnalyticsService.build_assignment(
+                ExitPulseSession.objects.filter(faculty_assignment=self.assignment)
+            )
+
+        self.assertEqual(analytics.terminal_session_count, 3)
+        self.assertEqual(analytics.distinct_topic_count, 3)
+        self.assertEqual(analytics.latest_terminal_session_at, legacy.started_at)
+        self.assertEqual(analytics.total_responses, 9)
+        self.assertEqual(analytics.historical_denominator_session_count, 2)
+        self.assertEqual(analytics.missing_denominator_session_count, 1)
+        self.assertEqual(analytics.enrollment_denominator_total, 10)
+        self.assertEqual(analytics.response_total_with_historical_denominator, 7)
+        self.assertEqual(analytics.weighted_response_rate, Decimal("70.0"))
+        self.assertEqual(analytics.understanding_response_count, 5)
+        self.assertEqual(analytics.support_needed_response_count, 4)
+        self.assertEqual(analytics.weighted_understanding_rate, Decimal("55.6"))
+        self.assertEqual(analytics.weighted_support_needed_rate, Decimal("44.4"))
+
+    def test_zero_response_and_zero_denominator_are_zero_safe(self):
+        self._terminal_session(topic="Empty", snapshot=0)
+        analytics = ExitPulseAnalyticsService.build_assignment(ExitPulseSession.objects.all())
+
+        self.assertEqual(analytics.terminal_session_count, 1)
+        self.assertEqual(analytics.enrollment_denominator_total, 0)
+        self.assertEqual(analytics.weighted_response_rate, Decimal("0.0"))
+        self.assertEqual(analytics.weighted_understanding_rate, Decimal("0.0"))
+        self.assertEqual(analytics.weighted_support_needed_rate, Decimal("0.0"))
+
+    def test_later_enrollment_changes_do_not_change_historical_assignment_rate(self):
+        self.create_enrollments(3)
+        session = self.make_live(topic="Immutable denominator")
+        self._add_responses(
+            session,
+            [ExitPulseResponse.ResponseCode.CONFIDENT],
+            "d",
+        )
+        ExitPulseSessionService.close(session=session, user=self.faculty)
+        Enrollment.objects.update(
+            is_active=False,
+            enrollment_status=Enrollment.Status.DRP,
+        )
+
+        analytics = ExitPulseAnalyticsService.build_assignment(ExitPulseSession.objects.all())
+
+        self.assertEqual(analytics.enrollment_denominator_total, 3)
+        self.assertEqual(analytics.weighted_response_rate, Decimal("33.3"))
 
 
 @override_settings(EXIT_PULSE_BROWSER_RATE_LIMIT_PER_MINUTE=1)
