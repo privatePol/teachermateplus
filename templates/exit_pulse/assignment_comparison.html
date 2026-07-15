@@ -1,0 +1,92 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Assignment Comparison | Exit Pulse | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<div class="container-fluid py-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div>
+      <p class="text-success fw-semibold text-uppercase small mb-1">Exit Pulse · Instructional Reflection</p>
+      <h1 class="h3 mb-1">Assignment Comparison</h1>
+      <p class="text-muted mb-0">Compare aggregate learning-response patterns across only your own authorized assignments.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'exit_pulse:landing' %}">Back to Exit Pulse</a>
+  </div>
+
+  {% if has_filter_options %}
+    <section class="card border-0 shadow-sm mb-4" aria-labelledby="comparison-filter-heading">
+      <div class="card-body">
+        <h2 class="h5 mb-3" id="comparison-filter-heading">Comparison scope</h2>
+        {% if filter_form.errors %}<div class="alert alert-danger" role="alert">Choose filter values available in your authorized Exit Pulse assignments.</div>{% endif %}
+        <form method="get" class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label" for="{{ filter_form.academic_year.id_for_label }}">{{ filter_form.academic_year.label }}</label>
+            {{ filter_form.academic_year }}
+            {% if filter_form.academic_year.errors %}<div class="invalid-feedback d-block" id="id_academic_year_errors">{{ filter_form.academic_year.errors|join:" " }}</div>{% endif %}
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="{{ filter_form.term.id_for_label }}">{{ filter_form.term.label }}</label>
+            {{ filter_form.term }}
+            {% if filter_form.term.errors %}<div class="invalid-feedback d-block" id="id_term_errors">{{ filter_form.term.errors|join:" " }}</div>{% endif %}
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="{{ filter_form.question_type.id_for_label }}">{{ filter_form.question_type.label }}</label>
+            {{ filter_form.question_type }}
+            {% if filter_form.question_type.errors %}<div class="invalid-feedback d-block" id="id_question_type_errors">{{ filter_form.question_type.errors|join:" " }}</div>{% endif %}
+          </div>
+          <div class="col-12 d-flex flex-wrap gap-2">
+            <button class="btn btn-success" type="submit">Apply filters</button>
+            <a class="btn btn-outline-secondary" href="{% url 'exit_pulse:assignment_comparison' %}">Reset filters</a>
+          </div>
+        </form>
+      </div>
+    </section>
+  {% endif %}
+
+  <section aria-labelledby="comparison-summary-heading" class="mb-4">
+    <h2 class="h5 mb-3" id="comparison-summary-heading">Filtered comparison summary</h2>
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-5 g-3">
+      <div class="col"><div class="card h-100 border-success-subtle"><div class="card-body"><div class="small text-uppercase text-muted fw-semibold">Assignments compared</div><div class="h2 mb-0">{{ page_obj.paginator.count }}</div></div></div></div>
+      <div class="col"><div class="card h-100 border-secondary-subtle"><div class="card-body"><div class="small text-uppercase text-muted fw-semibold">Terminal sessions</div><div class="h2 mb-0">{{ comparison_analytics.terminal_session_count }}</div><div class="small text-muted">Closed and expired only</div></div></div></div>
+      <div class="col"><div class="card h-100 border-info-subtle"><div class="card-body"><div class="small text-uppercase text-muted fw-semibold">Weighted response rate</div><div class="h2 mb-0">{% if comparison_analytics.historical_denominator_session_count %}{{ comparison_analytics.weighted_response_rate }}%{% elif comparison_analytics.terminal_session_count %}Unavailable{% else %}No data{% endif %}</div></div></div></div>
+      <div class="col"><div class="card h-100 border-success-subtle"><div class="card-body"><div class="small text-uppercase text-muted fw-semibold">Understanding</div><div class="h2 mb-0">{% if comparison_analytics.total_responses %}{{ comparison_analytics.weighted_understanding_rate }}%{% else %}No responses{% endif %}</div></div></div></div>
+      <div class="col"><div class="card h-100 border-warning-subtle"><div class="card-body"><div class="small text-uppercase text-muted fw-semibold">Support needed</div><div class="h2 mb-0">{% if comparison_analytics.total_responses %}{{ comparison_analytics.weighted_support_needed_rate }}%{% else %}No responses{% endif %}</div></div></div></div>
+    </div>
+  </section>
+
+  {% if comparison_analytics.missing_denominator_session_count %}<div class="alert alert-info" role="status">Weighted response-rate calculations exclude {{ comparison_analytics.missing_denominator_session_count }} matching legacy session{{ comparison_analytics.missing_denominator_session_count|pluralize }} without a stored historical enrollment count.</div>{% endif %}
+  {% if comparison_analytics.response_rate_above_100 %}<div class="alert alert-light border" role="note">Anonymous browser-based participation may produce more responses than stored class enrollment. The calculated response rate is shown without being capped.</div>{% endif %}
+
+  <section class="card border-0 shadow-sm" aria-labelledby="comparison-table-heading">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between gap-2"><h2 class="h5 mb-0" id="comparison-table-heading">Authorized assignment comparison</h2><span class="small text-muted">{{ page_obj.paginator.count }} assignment{{ page_obj.paginator.count|pluralize }}</span></div>
+    {% if page_obj.object_list %}
+      <div class="table-responsive" tabindex="0" aria-label="Scrollable Exit Pulse assignment comparison table">
+        <table class="table table-sm align-middle mb-0">
+          <caption class="visually-hidden">Aggregate Exit Pulse comparison for only the authenticated faculty member's authorized assignments.</caption>
+          <thead><tr><th scope="col">Assignment</th><th scope="col">Academic scope</th><th scope="col">State</th><th scope="col">Terminal sessions</th><th scope="col">Topics</th><th scope="col">Weighted response rate</th><th scope="col">Understanding</th><th scope="col">Support needed</th><th scope="col">Latest survey</th><th scope="col">Action</th></tr></thead>
+          <tbody>
+          {% for row in page_obj.object_list %}
+            <tr>
+              <td><span class="fw-semibold">{{ row.assignment.offering.course.code }} · {{ row.assignment.offering.section.code }}</span><br><small class="text-muted">{{ row.assignment.offering.course.title }}</small></td>
+              <td>{{ row.assignment.offering.academic_year.code }} / {{ row.assignment.offering.term.code }}<br><small class="text-muted">{{ row.assignment.offering.campus.name }}</small></td>
+              <td>{% if row.is_current %}<span class="badge text-bg-success">Current</span>{% else %}<span class="badge text-bg-secondary">Historical</span>{% endif %}{% if not row.analytics.terminal_session_count %}<br><span class="badge text-bg-light border mt-1">No completed Exit Pulse data</span>{% elif not row.response_rate_available %}<br><span class="badge text-bg-light border mt-1">No historical denominator</span>{% endif %}</td>
+              <td>{{ row.analytics.terminal_session_count }}</td>
+              <td>{{ row.analytics.distinct_topic_count }}</td>
+              <td>{% if not row.analytics.terminal_session_count %}<span class="text-muted">No data</span>{% elif row.response_rate_available %}<span class="d-block">{{ row.analytics.weighted_response_rate }}%</span>{% if row.analytics.response_rate_above_100 %}<small class="text-muted">Uncapped anonymous participation</small>{% endif %}{% else %}<span class="text-muted">Not historically comparable</span>{% endif %}</td>
+              <td>{% if row.analytics.total_responses %}<span class="d-block">{{ row.analytics.weighted_understanding_rate }}%</span><div class="progress" role="progressbar" aria-label="Understanding rate for {{ row.assignment.offering.course.code }} {{ row.assignment.offering.section.code }}" aria-valuenow="{{ row.analytics.weighted_understanding_rate }}" aria-valuemin="0" aria-valuemax="100" style="height:.35rem;min-width:5rem"><div class="progress-bar bg-success" style="width:{{ row.analytics.understanding_progress_width }}%"></div></div>{% else %}<span class="text-muted">No responses</span>{% endif %}</td>
+              <td>{% if row.analytics.total_responses %}<span class="d-block">{{ row.analytics.weighted_support_needed_rate }}%</span><div class="progress" role="progressbar" aria-label="Support-needed rate for {{ row.assignment.offering.course.code }} {{ row.assignment.offering.section.code }}" aria-valuenow="{{ row.analytics.weighted_support_needed_rate }}" aria-valuemin="0" aria-valuemax="100" style="height:.35rem;min-width:5rem"><div class="progress-bar bg-warning" style="width:{{ row.analytics.support_needed_progress_width }}%"></div></div>{% else %}<span class="text-muted">No responses</span>{% endif %}</td>
+              <td>{% if row.latest_session_public_id %}<span class="fw-semibold">{{ row.latest_topic }}</span><br><small class="text-muted">{{ row.latest_question_label }} · {{ row.latest_session_at|date:"M j, Y" }} · {{ row.latest_status_label }}</small><br><a href="{% url 'exit_pulse:results' row.latest_session_public_id %}">View latest results for {{ row.latest_topic }}</a>{% else %}<span class="text-muted">No completed survey</span>{% endif %}</td>
+              <td>{% if row.history_reference %}<a class="btn btn-sm btn-outline-success text-nowrap" href="{% url 'exit_pulse:history' row.history_reference %}">View class history for {{ row.assignment.offering.course.code }} {{ row.assignment.offering.section.code }}</a>{% else %}<span class="text-muted">No history yet</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="card-body text-center py-5" role="status"><p class="text-muted mb-0">{% if has_active_filters %}No authorized assignments match the selected comparison filters.{% else %}No assignments are available for Exit Pulse comparison yet.{% endif %}</p></div>
+    {% endif %}
+  </section>
+
+  {% if page_obj.paginator.num_pages > 1 %}<nav class="mt-3" aria-label="Assignment Comparison pagination"><ul class="pagination justify-content-center flex-wrap"><li class="page-item{% if not page_obj.has_previous %} disabled{% endif %}">{% if page_obj.has_previous %}<a class="page-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>{% else %}<span class="page-link">Previous</span>{% endif %}</li><li class="page-item active" aria-current="page"><span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li><li class="page-item{% if not page_obj.has_next %} disabled{% endif %}">{% if page_obj.has_next %}<a class="page-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>{% else %}<span class="page-link">Next</span>{% endif %}</li></ul></nav>{% endif %}
+
+  <div class="alert alert-light border mt-4 mb-0"><strong>Instructional-use note:</strong> Assignment Comparison includes only your own authorized assignments. It supports instructional reflection and must not be used for faculty evaluation, ranking, attendance, or grading. Written responses are never shown here.</div>
+</div>
+{% endblock %}

@@ -58,6 +58,7 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "It is not a faculty evaluation, attendance check, or graded activity.")
         self.assertContains(response, "Review Dashboard")
         self.assertContains(response, "Open Class History")
+        self.assertContains(response, "Compare Assignments")
         self.assertContains(response, "excluded from the weighted response-rate denominator")
         self.assertContains(response, "a historical assignment cannot start a new session")
         self.assertContains(response, "Back to Faculty Portal")

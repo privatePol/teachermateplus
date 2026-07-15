@@ -8,9 +8,10 @@
       <h1 class="h3 mb-1">Exit Pulse</h1>
       <p class="text-muted mb-0">Review anonymous learning-response patterns and run a new Learning Check for an eligible class.</p>
     </div>
-    {% if assignment_count %}
-      <a class="btn btn-success" href="{% url 'exit_pulse:create' %}">Create Exit Pulse</a>
-    {% endif %}
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-success" href="{% url 'exit_pulse:assignment_comparison' %}">Assignment Comparison</a>
+      {% if assignment_count %}<a class="btn btn-success" href="{% url 'exit_pulse:create' %}">Create Exit Pulse</a>{% endif %}
+    </div>
   </div>
 
   {% if has_filter_options %}
@@ -52,7 +53,7 @@
       </div>
       <div class="col-sm-6 col-xl-3">
         <div class="card h-100 border-info-subtle shadow-sm"><div class="card-body">
-          <div class="small text-uppercase text-muted fw-semibold">Average response rate</div>
+          <div class="small text-uppercase text-muted fw-semibold">Weighted response rate</div>
           <div class="display-6 fw-bold text-primary">{% if dashboard_analytics.historical_denominator_session_count %}{{ dashboard_analytics.weighted_response_rate }}%{% elif dashboard_analytics.terminal_session_count %}Unavailable{% else %}No data{% endif %}</div>
           <div class="small text-muted">Uses stored historical enrollment counts</div>
         </div></div>

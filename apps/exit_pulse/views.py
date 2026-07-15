@@ -5,6 +5,7 @@ import logging
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
+from django.db.models import F
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -16,10 +17,12 @@ from reportlab.graphics import renderSVG
 from reportlab.graphics.barcode.qr import QrCodeWidget
 from reportlab.graphics.shapes import Drawing
 
+from apps.academics.models import FacultyAssignment
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.features import FeatureSettingsService
 from apps.exit_pulse.forms import (
     ExitPulseCreateForm,
+    ExitPulseComparisonFilterForm,
     ExitPulseDashboardFilterForm,
     ExitPulseHistoryFilterForm,
     ExitPulseResponseForm,
@@ -55,7 +58,9 @@ def _public_url(request, session):
 
 
 def _require_faculty_feature(request):
-    tenant_id, _ = _scope_ids(request)
+    tenant_id, campus_id = _scope_ids(request)
+    if tenant_id is None or campus_id is None:
+        raise PermissionDenied("An active tenant and campus scope is required for Exit Pulse.")
     if not _feature_enabled(tenant_id):
         raise PermissionDenied("Exit Pulse is disabled for this tenant.")
 
@@ -72,17 +77,19 @@ def _owned_session(request, public_id):
         "term",
         "course",
         "section",
-    ).filter(public_id=public_id, faculty_user=request.user)
-    if tenant_id:
-        queryset = queryset.filter(tenant_id=tenant_id)
-    if campus_id:
-        queryset = queryset.filter(campus_id=campus_id)
+    ).filter(
+        public_id=public_id,
+        faculty_user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    )
     session = queryset.first()
     if not session:
         raise Http404("Exit Pulse session not found.")
     return ExitPulseSessionService.refresh_effective_status(session)
 
 
+@require_GET
 @portal_required("FACULTY")
 @permission_required("exit_pulse.use")
 def landing_view(request):
@@ -166,6 +173,7 @@ def landing_view(request):
     )
 
 
+@require_GET
 @portal_required("FACULTY")
 @permission_required("exit_pulse.use")
 def history_view(request, session_public_id):
@@ -243,6 +251,113 @@ def history_view(request, session_public_id):
             "page_obj": page_obj,
             "page_query": page_query.urlencode(),
             "has_active_filters": has_active_filters,
+        },
+    )
+
+
+@require_GET
+@portal_required("FACULTY")
+@permission_required("exit_pulse.use")
+def assignment_comparison_view(request):
+    _require_faculty_feature(request)
+    tenant_id, campus_id = _scope_ids(request)
+    owned_sessions = ExitPulseHistoryService.owned_sessions(
+        user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    )
+    ExitPulseHistoryService.expire_elapsed_sessions(owned_sessions)
+    current_assignments = ExitPulseSessionService.valid_assignments_for_user(
+        user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    )
+    all_current_assignment_ids = list(
+        current_assignments.order_by().values_list("id", flat=True)
+    )
+    all_terminal_sessions = ExitPulseAnalyticsService.terminal_sessions(owned_sessions)
+    scope_assignments = ExitPulseHistoryService.comparison_assignments(
+        user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+        current_assignment_ids=all_current_assignment_ids,
+        sessions=all_terminal_sessions,
+    )
+    scope_rows = list(
+        scope_assignments.order_by("offering__academic_year__code", "offering__term__code")
+        .values(
+            academic_year_id=F("offering__academic_year_id"),
+            academic_year__code=F("offering__academic_year__code"),
+            term_id=F("offering__term_id"),
+            term__code=F("offering__term__code"),
+            term__name=F("offering__term__name"),
+        )
+        .distinct()
+    )
+    filter_form = ExitPulseComparisonFilterForm(request.GET, scope_rows=scope_rows)
+    if filter_form.is_valid():
+        terminal_sessions = ExitPulseHistoryService.apply_comparison_filters(
+            all_terminal_sessions,
+            filter_form.cleaned_data,
+        )
+        filtered_current_assignments = ExitPulseHistoryService.apply_assignment_academic_filters(
+            current_assignments,
+            filter_form.cleaned_data,
+        )
+        current_assignment_ids = list(
+            filtered_current_assignments.order_by().values_list("id", flat=True)
+        )
+        assignments = ExitPulseHistoryService.comparison_assignments(
+            user=request.user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+            current_assignment_ids=current_assignment_ids,
+            sessions=terminal_sessions,
+        )
+    else:
+        terminal_sessions = owned_sessions.none()
+        current_assignment_ids = []
+        assignments = FacultyAssignment.objects.none()
+
+    comparison_analytics = ExitPulseAnalyticsService.build_assignment(terminal_sessions)
+    comparison_queryset = ExitPulseAnalyticsService.annotate_assignment_comparison(
+        assignments,
+        terminal_sessions=terminal_sessions,
+        owned_sessions=owned_sessions,
+        current_assignment_ids=current_assignment_ids,
+        user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+        question_code=(
+            filter_form.cleaned_data.get("question_type", "")
+            if filter_form.is_valid()
+            else ""
+        ),
+    ).order_by(
+        "-comparison_is_current",
+        "-offering__academic_year__start_date",
+        "offering__term__code",
+        "offering__course__code",
+        "offering__section__code",
+        "id",
+    )
+    paginator = Paginator(comparison_queryset, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    page_obj.object_list = ExitPulseAnalyticsService.comparison_rows(page_obj.object_list)
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+    active_filter_keys = ("academic_year", "term", "question_type")
+    has_active_filters = any((request.GET.get(key) or "").strip() for key in active_filter_keys)
+    return render(
+        request,
+        "exit_pulse/assignment_comparison.html",
+        {
+            "filter_form": filter_form,
+            "has_filter_options": bool(scope_rows),
+            "has_active_filters": has_active_filters,
+            "comparison_analytics": comparison_analytics,
+            "page_obj": page_obj,
+            "page_query": page_query.urlencode(),
         },
     )
 

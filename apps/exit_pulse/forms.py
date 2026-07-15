@@ -8,6 +8,15 @@ from apps.exit_pulse.models import ExitPulseResponse, ExitPulseSession
 from apps.exit_pulse.services import ExitPulseQuestionValidationService, ExitPulseSessionService
 
 
+EXIT_PULSE_QUESTION_TYPE_CHOICES = [
+    ("", "All question types"),
+    (ExitPulseSession.QuestionCode.UNDERSTANDING, "Understanding"),
+    (ExitPulseSession.QuestionCode.APPLICATION_CONFIDENCE, "Application confidence"),
+    (ExitPulseSession.QuestionCode.NEEDS_EXPLANATION, "Needs explanation"),
+    (ExitPulseSession.QuestionCode.CUSTOM, "Custom"),
+]
+
+
 class ExitPulseDashboardFilterForm(forms.Form):
     academic_year = forms.ChoiceField(required=False, label="Academic year")
     term = forms.ChoiceField(required=False, label="Term")
@@ -30,14 +39,15 @@ class ExitPulseDashboardFilterForm(forms.Form):
                 field.widget.attrs["aria-describedby"] = f"id_{name}_errors"
 
 
+class ExitPulseComparisonFilterForm(ExitPulseDashboardFilterForm):
+    question_type = forms.ChoiceField(
+        required=False,
+        label="Question type",
+        choices=EXIT_PULSE_QUESTION_TYPE_CHOICES,
+    )
+
+
 class ExitPulseHistoryFilterForm(forms.Form):
-    QUESTION_CHOICES = [
-        ("", "All question types"),
-        (ExitPulseSession.QuestionCode.UNDERSTANDING, "Understanding"),
-        (ExitPulseSession.QuestionCode.APPLICATION_CONFIDENCE, "Application confidence"),
-        (ExitPulseSession.QuestionCode.NEEDS_EXPLANATION, "Needs explanation"),
-        (ExitPulseSession.QuestionCode.CUSTOM, "Custom"),
-    ]
     STATUS_CHOICES = [
         ("", "All completed statuses"),
         (ExitPulseSession.Status.CLOSED, "Closed"),
@@ -57,7 +67,7 @@ class ExitPulseHistoryFilterForm(forms.Form):
     question_type = forms.ChoiceField(
         required=False,
         label="Question type",
-        choices=QUESTION_CHOICES,
+        choices=EXIT_PULSE_QUESTION_TYPE_CHOICES,
     )
     topic = forms.CharField(
         required=False,

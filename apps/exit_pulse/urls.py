@@ -9,6 +9,11 @@ urlpatterns = [
     path("faculty/exit-pulse/", views.landing_view, name="landing"),
     path("faculty/exit-pulse/create/", views.create_view, name="create"),
     path(
+        "faculty/exit-pulse/assignment-comparison/",
+        views.assignment_comparison_view,
+        name="assignment_comparison",
+    ),
+    path(
         "faculty/exit-pulse/history/<uuid:session_public_id>/",
         views.history_view,
         name="history",

@@ -8,7 +8,10 @@
       <h1 class="h3 mb-1">{{ reference_session.course.code }} · {{ reference_session.section.code }}</h1>
       <p class="text-muted mb-0">{{ reference_session.course.title }}</p>
     </div>
-    <a class="btn btn-outline-secondary" href="{% url 'exit_pulse:landing' %}">Back to Exit Pulse</a>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-success" href="{% url 'exit_pulse:assignment_comparison' %}">Assignment Comparison</a>
+      <a class="btn btn-outline-secondary" href="{% url 'exit_pulse:landing' %}">Back to Exit Pulse</a>
+    </div>
   </div>
 
   {% if not is_current_assignment %}

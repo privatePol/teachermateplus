@@ -15,7 +15,22 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core import signing
 from django.db import IntegrityError, transaction
-from django.db.models import Count, F, Max, Min, OuterRef, Q, Subquery, Sum
+from django.db.models import (
+    BooleanField,
+    Case,
+    Count,
+    F,
+    IntegerField,
+    Max,
+    Min,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+    When,
+)
+from django.db.models.functions import Coalesce, NullIf, Trim
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering, FacultyAssignment
@@ -708,6 +723,21 @@ class ExitPulseHistoryAssignmentRow:
     is_current: bool
 
 
+@dataclass(frozen=True)
+class ExitPulseAssignmentComparisonRow:
+    assignment: FacultyAssignment
+    is_current: bool
+    analytics: ExitPulseAssignmentAnalytics
+    response_rate_available: bool
+    latest_session_public_id: UUID | None
+    latest_topic: str
+    latest_question_label: str
+    latest_session_at: datetime | None
+    latest_status: str
+    latest_status_label: str
+    history_reference: UUID | None
+
+
 class ExitPulseAnalyticsService:
     TERMINAL_STATUSES = (
         ExitPulseSession.Status.CLOSED,
@@ -830,11 +860,14 @@ class ExitPulseAnalyticsService:
     @classmethod
     def build_assignment(cls, sessions):
         terminal = cls.terminal_sessions(sessions)
-        session_summary = terminal.aggregate(
+        terminal_with_normalized_topic = terminal.annotate(
+            analytics_normalized_topic=Trim("topic"),
+        )
+        session_summary = terminal_with_normalized_topic.aggregate(
             terminal_session_count=Count("id", distinct=True),
             distinct_topic_count=Count(
-                "topic",
-                filter=~Q(topic=""),
+                "analytics_normalized_topic",
+                filter=~Q(analytics_normalized_topic=""),
                 distinct=True,
             ),
             latest_terminal_session_at=Max("started_at"),
@@ -909,6 +942,211 @@ class ExitPulseAnalyticsService:
         )
 
     @classmethod
+    def annotate_assignment_comparison(
+        cls,
+        assignments,
+        *,
+        terminal_sessions,
+        owned_sessions,
+        current_assignment_ids,
+        user,
+        tenant_id,
+        campus_id,
+        question_code="",
+    ):
+        assignment_sessions = terminal_sessions.filter(
+            faculty_assignment_id=OuterRef("pk"),
+        )
+        session_metrics = (
+            assignment_sessions.values("faculty_assignment_id")
+            .annotate(
+                terminal_session_count=Count("id"),
+                distinct_topic_count=Count(
+                    NullIf(Trim("topic"), Value("")),
+                    distinct=True,
+                ),
+                historical_denominator_session_count=Count(
+                    "id",
+                    filter=Q(enrollment_count_snapshot__isnull=False),
+                ),
+                missing_denominator_session_count=Count(
+                    "id",
+                    filter=Q(enrollment_count_snapshot__isnull=True),
+                ),
+                enrollment_denominator_total=Sum("enrollment_count_snapshot"),
+            )
+        )
+        response_filters = {
+            "session__faculty_assignment_id": OuterRef("pk"),
+            "session__faculty_user": user,
+            "session__tenant_id": tenant_id,
+            "session__campus_id": campus_id,
+            "session__status__in": cls.TERMINAL_STATUSES,
+        }
+        if question_code:
+            response_filters["session__question_code"] = question_code
+        response_metrics = (
+            ExitPulseResponse.objects.filter(**response_filters)
+            .values("session__faculty_assignment_id")
+            .annotate(
+                total_responses=Count("id"),
+                response_total_with_historical_denominator=Count(
+                    "id",
+                    filter=Q(session__enrollment_count_snapshot__isnull=False),
+                ),
+                understanding_response_count=Count(
+                    "id",
+                    filter=Q(
+                        response_code__in=[
+                            ExitPulseResponse.ResponseCode.CONFIDENT,
+                            ExitPulseResponse.ResponseCode.MOSTLY_UNDERSTOOD,
+                        ]
+                    ),
+                ),
+                support_needed_response_count=Count(
+                    "id",
+                    filter=Q(
+                        response_code__in=[
+                            ExitPulseResponse.ResponseCode.NEEDS_CLARIFICATION,
+                            ExitPulseResponse.ResponseCode.NEEDS_PRACTICE,
+                        ]
+                    ),
+                ),
+            )
+        )
+        latest_terminal = assignment_sessions.order_by("-started_at", "-id")
+        latest_owned = owned_sessions.filter(
+            faculty_assignment_id=OuterRef("pk"),
+        ).order_by("-started_at", "-created_at", "-id")
+        return assignments.annotate(
+            comparison_is_current=Case(
+                When(pk__in=current_assignment_ids, then=Value(True)),
+                default=Value(False),
+                output_field=BooleanField(),
+            ),
+            comparison_terminal_session_count=Coalesce(
+                Subquery(session_metrics.values("terminal_session_count")[:1]),
+                0,
+                output_field=IntegerField(),
+            ),
+            comparison_distinct_topic_count=Coalesce(
+                Subquery(session_metrics.values("distinct_topic_count")[:1]),
+                0,
+                output_field=IntegerField(),
+            ),
+            comparison_historical_denominator_session_count=Coalesce(
+                Subquery(session_metrics.values("historical_denominator_session_count")[:1]),
+                0,
+                output_field=IntegerField(),
+            ),
+            comparison_missing_denominator_session_count=Coalesce(
+                Subquery(session_metrics.values("missing_denominator_session_count")[:1]),
+                0,
+                output_field=IntegerField(),
+            ),
+            comparison_enrollment_denominator_total=Coalesce(
+                Subquery(session_metrics.values("enrollment_denominator_total")[:1]),
+                0,
+                output_field=IntegerField(),
+            ),
+            comparison_total_responses=Coalesce(
+                Subquery(response_metrics.values("total_responses")[:1]),
+                0,
+                output_field=IntegerField(),
+            ),
+            comparison_response_total_with_historical_denominator=Coalesce(
+                Subquery(
+                    response_metrics.values("response_total_with_historical_denominator")[:1]
+                ),
+                0,
+                output_field=IntegerField(),
+            ),
+            comparison_understanding_response_count=Coalesce(
+                Subquery(response_metrics.values("understanding_response_count")[:1]),
+                0,
+                output_field=IntegerField(),
+            ),
+            comparison_support_needed_response_count=Coalesce(
+                Subquery(response_metrics.values("support_needed_response_count")[:1]),
+                0,
+                output_field=IntegerField(),
+            ),
+            comparison_latest_session_public_id=Subquery(
+                latest_terminal.values("public_id")[:1]
+            ),
+            comparison_latest_topic=Subquery(latest_terminal.values("topic")[:1]),
+            comparison_latest_question_code=Subquery(
+                latest_terminal.values("question_code")[:1]
+            ),
+            comparison_latest_session_at=Subquery(
+                latest_terminal.values("started_at")[:1]
+            ),
+            comparison_latest_status=Subquery(latest_terminal.values("status")[:1]),
+            comparison_history_reference=Subquery(latest_owned.values("public_id")[:1]),
+        )
+
+    @classmethod
+    def comparison_rows(cls, assignments):
+        rows = []
+        status_labels = dict(ExitPulseSession.Status.choices)
+        for assignment in assignments:
+            total_responses = assignment.comparison_total_responses or 0
+            denominator_total = assignment.comparison_enrollment_denominator_total or 0
+            response_total = (
+                assignment.comparison_response_total_with_historical_denominator or 0
+            )
+            understanding = assignment.comparison_understanding_response_count or 0
+            support = assignment.comparison_support_needed_response_count or 0
+            weighted_response_rate = cls._percent(response_total, denominator_total)
+            understanding_rate = cls._percent(understanding, total_responses)
+            support_rate = cls._percent(support, total_responses)
+            analytics = ExitPulseAssignmentAnalytics(
+                terminal_session_count=assignment.comparison_terminal_session_count or 0,
+                distinct_topic_count=assignment.comparison_distinct_topic_count or 0,
+                latest_terminal_session_at=assignment.comparison_latest_session_at,
+                total_responses=total_responses,
+                historical_denominator_session_count=(
+                    assignment.comparison_historical_denominator_session_count or 0
+                ),
+                missing_denominator_session_count=(
+                    assignment.comparison_missing_denominator_session_count or 0
+                ),
+                enrollment_denominator_total=denominator_total,
+                response_total_with_historical_denominator=response_total,
+                weighted_response_rate=weighted_response_rate,
+                understanding_response_count=understanding,
+                support_needed_response_count=support,
+                weighted_understanding_rate=understanding_rate,
+                weighted_support_needed_rate=support_rate,
+                response_rate_above_100=weighted_response_rate > Decimal("100.0"),
+                understanding_progress_width=cls._progress_width(understanding_rate),
+                support_needed_progress_width=cls._progress_width(support_rate),
+            )
+            latest_question_code = assignment.comparison_latest_question_code or ""
+            latest_status = assignment.comparison_latest_status or ""
+            rows.append(
+                ExitPulseAssignmentComparisonRow(
+                    assignment=assignment,
+                    is_current=bool(assignment.comparison_is_current),
+                    analytics=analytics,
+                    response_rate_available=(
+                        analytics.historical_denominator_session_count > 0
+                    ),
+                    latest_session_public_id=assignment.comparison_latest_session_public_id,
+                    latest_topic=assignment.comparison_latest_topic or "",
+                    latest_question_label=cls.QUESTION_TYPE_LABELS.get(
+                        latest_question_code,
+                        "",
+                    ),
+                    latest_session_at=assignment.comparison_latest_session_at,
+                    latest_status=latest_status,
+                    latest_status_label=status_labels.get(latest_status, ""),
+                    history_reference=assignment.comparison_history_reference,
+                )
+            )
+        return tuple(rows)
+
+    @classmethod
     def build(cls, session):
         counts = OrderedDict((code, 0) for code in ExitPulseResponse.ResponseCode.values)
         for row in session.responses.values("response_code").annotate(total=Count("id")):
@@ -973,11 +1211,9 @@ class ExitPulseHistoryService:
     @staticmethod
     def owned_sessions(*, user, tenant_id=None, campus_id=None):
         queryset = ExitPulseSession.objects.filter(faculty_user=user)
-        if tenant_id:
-            queryset = queryset.filter(tenant_id=tenant_id)
-        if campus_id:
-            queryset = queryset.filter(campus_id=campus_id)
-        return queryset
+        if tenant_id is None or campus_id is None:
+            return queryset.none()
+        return queryset.filter(tenant_id=tenant_id, campus_id=campus_id)
 
     @staticmethod
     def expire_elapsed_sessions(queryset, *, now=None):
@@ -1000,6 +1236,55 @@ class ExitPulseHistoryService:
         if term_id:
             queryset = queryset.filter(term_id=term_id)
         return queryset
+
+    @staticmethod
+    def apply_comparison_filters(queryset, cleaned_data):
+        queryset = ExitPulseHistoryService.apply_dashboard_filters(queryset, cleaned_data)
+        question_type = cleaned_data.get("question_type")
+        if question_type:
+            queryset = queryset.filter(question_code=question_type)
+        return queryset
+
+    @staticmethod
+    def apply_assignment_academic_filters(queryset, cleaned_data):
+        academic_year_id = cleaned_data.get("academic_year")
+        term_id = cleaned_data.get("term")
+        if academic_year_id:
+            queryset = queryset.filter(offering__academic_year_id=academic_year_id)
+        if term_id:
+            queryset = queryset.filter(offering__term_id=term_id)
+        return queryset
+
+    @staticmethod
+    def comparison_assignments(
+        *,
+        user,
+        tenant_id,
+        campus_id,
+        current_assignment_ids,
+        sessions,
+    ):
+        if tenant_id is None or campus_id is None:
+            return FacultyAssignment.objects.none()
+        return (
+            FacultyAssignment.objects.filter(
+                faculty_user=user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+            )
+            .filter(
+                Q(pk__in=current_assignment_ids)
+                | Q(pk__in=sessions.values("faculty_assignment_id"))
+            )
+            .select_related(
+                "offering",
+                "offering__academic_year",
+                "offering__term",
+                "offering__course",
+                "offering__section",
+                "offering__campus",
+            )
+        )
 
     @staticmethod
     def apply_history_filters(queryset, cleaned_data):

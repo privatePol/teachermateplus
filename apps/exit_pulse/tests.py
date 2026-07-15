@@ -13,6 +13,7 @@ from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import strip_tags
 
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
@@ -467,6 +468,16 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
                     anonymous_token_hash="d" * 64,
                 )
 
+    def test_database_constraint_rejects_unexpected_response_code(self):
+        session = self.make_live()
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ExitPulseResponse.objects.create(
+                    session=session,
+                    response_code="UNEXPECTED",
+                    anonymous_token_hash="u" * 64,
+                )
+
     def test_service_converts_insert_race_to_safe_duplicate_error(self):
         session = self.make_live()
         with patch(
@@ -655,6 +666,25 @@ class ExitPulseFeedbackAndResultsTests(ExitPulseTestBase):
         self.assertEqual(empty_analytics.total_responses, 0)
         self.assertEqual(empty_analytics.understanding_rate, Decimal("0.0"))
 
+    def test_legacy_results_identify_current_enrollment_as_an_estimate(self):
+        self.create_enrollments(2)
+        session = ExitPulseSessionService.close(
+            session=self.make_live(topic="Legacy result"),
+            user=self.faculty,
+        )
+        ExitPulseSession.objects.filter(pk=session.pk).update(
+            enrollment_count_snapshot=None,
+        )
+
+        response = self.client.get(
+            reverse("exit_pulse:results", kwargs={"public_id": session.public_id})
+        )
+
+        self.assertContains(response, "Current eligible enrollment estimate")
+        self.assertContains(response, "Estimated response rate")
+        self.assertContains(response, "Historical enrollment was not captured")
+        self.assertContains(response, "current active class list")
+
     def test_topic_and_custom_question_xss_are_escaped(self):
         session = self.make_live(
             topic="<script>alert('topic')</script>",
@@ -785,6 +815,20 @@ class ExitPulseCheckpointOneAnalyticsTests(ExitPulseTestBase):
         self.assertEqual(analytics.terminal_session_count, 2)
         self.assertEqual(analytics.total_responses, 2)
         self.assertEqual(analytics.distinct_topic_count, 2)
+
+    def test_distinct_topic_count_trims_values_and_excludes_whitespace_only_topics(self):
+        first = self._terminal_session(topic="Normalization", snapshot=3)
+        duplicate = self._terminal_session(topic="Temporary duplicate", snapshot=3)
+        blank = self._terminal_session(topic="Temporary blank", snapshot=3)
+        ExitPulseSession.objects.filter(pk=duplicate.pk).update(topic="  Normalization  ")
+        ExitPulseSession.objects.filter(pk=blank.pk).update(topic="   ")
+
+        analytics = ExitPulseAnalyticsService.build_assignment(
+            ExitPulseSession.objects.filter(pk__in=[first.pk, duplicate.pk, blank.pk])
+        )
+
+        self.assertEqual(analytics.terminal_session_count, 3)
+        self.assertEqual(analytics.distinct_topic_count, 1)
 
     def test_weighted_assignment_calculations_exclude_legacy_response_rate_denominator(self):
         first_at = timezone.now() - timedelta(days=2)
@@ -1019,6 +1063,14 @@ class ExitPulseDashboardAndHistoryTests(ExitPulseTestBase):
         denied = self.client.get(reverse("exit_pulse:landing"))
         self.assertEqual(denied.status_code, 403)
 
+    def test_dashboard_fails_closed_without_tenant_and_campus_scope(self):
+        self._terminal_session(topic="Must remain scoped")
+
+        with patch("apps.exit_pulse.views._scope_ids", return_value=(None, None)):
+            response = self.client.get(reverse("exit_pulse:landing"))
+
+        self.assertEqual(response.status_code, 403)
+
     def test_original_faculty_retains_history_after_deactivation_but_cannot_create_from_it(self):
         session = self._terminal_session(topic="Historical normalization")
         self.assignment.is_active = False
@@ -1201,6 +1253,86 @@ class ExitPulseDashboardAndHistoryTests(ExitPulseTestBase):
         self.assertContains(first_page, f'href="{history_url}">Reset filters</a>', html=False)
         invalid_page = self.client.get(history_url, {"topic": "Pagination", "page": "not-a-page"})
         self.assertEqual(invalid_page.context["page_obj"].number, 1)
+        for page_value in ("0", "-2", "999999"):
+            edge_page = self.client.get(
+                history_url,
+                {"topic": "Pagination", "page": page_value},
+            )
+            self.assertEqual(edge_page.status_code, 200)
+            self.assertGreaterEqual(edge_page.context["page_obj"].number, 1)
+            self.assertLessEqual(
+                edge_page.context["page_obj"].number,
+                edge_page.context["page_obj"].paginator.num_pages,
+            )
+
+    def test_history_order_is_stable_when_session_timestamps_match(self):
+        same_start = timezone.now() - timedelta(days=1)
+        sessions = [
+            self._terminal_session(
+                topic=f"Stable ordering {index}",
+                started_at=same_start,
+            )
+            for index in range(22)
+        ]
+        history_url = reverse(
+            "exit_pulse:history",
+            kwargs={"session_public_id": sessions[0].public_id},
+        )
+
+        first_page = self.client.get(history_url, {"page": "1"})
+        second_page = self.client.get(history_url, {"page": "2"})
+        first_ids = [row.session.id for row in first_page.context["page_obj"].object_list]
+        second_ids = [row.session.id for row in second_page.context["page_obj"].object_list]
+
+        self.assertEqual(first_ids, sorted(first_ids, reverse=True))
+        self.assertEqual(second_ids, sorted(second_ids, reverse=True))
+        self.assertEqual(set(first_ids).intersection(second_ids), set())
+        self.assertEqual(set(first_ids + second_ids), {session.id for session in sessions})
+
+    def test_dashboard_and_history_reject_non_get_requests(self):
+        session = self._terminal_session(topic="Read only routes")
+        history_url = reverse(
+            "exit_pulse:history",
+            kwargs={"session_public_id": session.public_id},
+        )
+
+        self.assertEqual(self.client.post(reverse("exit_pulse:landing")).status_code, 405)
+        self.assertEqual(self.client.post(history_url).status_code, 405)
+
+    def test_dashboard_expiry_update_is_limited_to_owned_scope(self):
+        owned = self.make_live(topic="Owned elapsed")
+        other_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=self.other_faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.other_faculty,
+        )
+        other = ExitPulseSessionService.create_draft(
+            user=self.other_faculty,
+            assignment=other_assignment,
+            topic="Other elapsed",
+            question_code=ExitPulseSession.QuestionCode.UNDERSTANDING,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        other = ExitPulseSessionService.start(session=other, user=self.other_faculty)
+        elapsed_at = timezone.now() - timedelta(seconds=1)
+        ExitPulseSession.objects.filter(pk__in=[owned.pk, other.pk]).update(
+            expires_at=elapsed_at,
+        )
+
+        response = self.client.get(reverse("exit_pulse:landing"))
+        owned.refresh_from_db()
+        other.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(owned.status, ExitPulseSession.Status.EXPIRED)
+        self.assertEqual(owned.closed_at, elapsed_at)
+        self.assertEqual(other.status, ExitPulseSession.Status.LIVE)
+        self.assertIsNone(other.closed_at)
 
     def test_history_metric_queries_do_not_grow_per_row(self):
         sessions = [self._terminal_session(topic=f"Query topic {index}") for index in range(5)]
@@ -1294,6 +1426,518 @@ class ExitPulseDashboardAndHistoryTests(ExitPulseTestBase):
             value_type="BOOL",
         )
         self.assertEqual(self.client.get(history_url).status_code, 403)
+
+
+class ExitPulseAssignmentComparisonTests(ExitPulseTestBase):
+    def _create_assignment(
+        self,
+        index,
+        *,
+        user=None,
+        academic_year=None,
+        term=None,
+        course=None,
+        section=None,
+    ):
+        user = user or self.faculty
+        academic_year = academic_year or self.academic_year
+        term = term or self.term
+        course = course or Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code=f"IT{index:03d}",
+            title=f"Comparison Course {index}",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=academic_year,
+            term=term,
+            course=course,
+            section=section or self.section,
+            status=CourseOffering.Status.OPEN,
+        )
+        return FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=offering,
+            faculty_user=user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=user,
+        )
+
+    def _terminal_session(
+        self,
+        *,
+        assignment=None,
+        user=None,
+        topic="Comparison topic",
+        snapshot=4,
+        status=ExitPulseSession.Status.CLOSED,
+        question_code=ExitPulseSession.QuestionCode.UNDERSTANDING,
+        custom_question="",
+        started_at=None,
+        allow_written_feedback=False,
+    ):
+        assignment = assignment or self.assignment
+        user = user or self.faculty
+        session = ExitPulseSessionService.create_draft(
+            user=user,
+            assignment=assignment,
+            topic=topic,
+            question_code=question_code,
+            custom_question=custom_question,
+            allow_written_feedback=allow_written_feedback,
+            feedback_review_enabled=allow_written_feedback,
+            tenant_id=assignment.offering.tenant_id,
+            campus_id=assignment.offering.campus_id,
+        )
+        session = ExitPulseSessionService.start(session=session, user=user)
+        session.status = status
+        session.enrollment_count_snapshot = snapshot
+        session.started_at = started_at or session.started_at
+        session.closed_at = session.started_at + timedelta(minutes=5)
+        session.save(
+            update_fields=[
+                "status",
+                "enrollment_count_snapshot",
+                "started_at",
+                "closed_at",
+                "updated_at",
+            ]
+        )
+        return session
+
+    @staticmethod
+    def _add_responses(session, codes, prefix="r", *, feedback=""):
+        for index, code in enumerate(codes):
+            ExitPulseResponse.objects.create(
+                session=session,
+                response_code=code,
+                feedback_review=feedback,
+                anonymous_token_hash=f"{prefix}{index:063d}"[:64],
+            )
+
+    def test_current_assignment_without_sessions_has_neutral_no_data_row(self):
+        response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["page_obj"].paginator.count, 1)
+        row = response.context["page_obj"].object_list[0]
+        self.assertEqual(row.assignment, self.assignment)
+        self.assertTrue(row.is_current)
+        self.assertEqual(row.analytics.terminal_session_count, 0)
+        self.assertContains(response, "No completed Exit Pulse data")
+        self.assertContains(response, "No completed survey")
+
+    def test_dashboard_and_history_link_to_assignment_comparison(self):
+        comparison_url = reverse("exit_pulse:assignment_comparison")
+        session = self._terminal_session(topic="Comparison navigation")
+
+        dashboard = self.client.get(reverse("exit_pulse:landing"))
+        history = self.client.get(
+            reverse("exit_pulse:history", kwargs={"session_public_id": session.public_id})
+        )
+
+        self.assertContains(dashboard, f'href="{comparison_url}"')
+        self.assertContains(history, f'href="{comparison_url}"')
+
+    def test_weighted_rows_and_summary_use_terminal_snapshot_and_response_totals(self):
+        same_start = timezone.now() - timedelta(days=1)
+        stored = self._terminal_session(
+            topic="  Normalization  ",
+            snapshot=2,
+            started_at=same_start,
+        )
+        legacy = self._terminal_session(
+            topic="Normalization",
+            snapshot=None,
+            started_at=same_start,
+        )
+        zero = self._terminal_session(
+            topic="Temporary",
+            snapshot=0,
+            status=ExitPulseSession.Status.EXPIRED,
+            started_at=same_start,
+        )
+        ExitPulseSession.objects.filter(pk=zero.pk).update(topic="   ")
+        self._add_responses(
+            stored,
+            [
+                ExitPulseResponse.ResponseCode.CONFIDENT,
+                ExitPulseResponse.ResponseCode.MOSTLY_UNDERSTOOD,
+                ExitPulseResponse.ResponseCode.NEEDS_PRACTICE,
+            ],
+            "s",
+        )
+        self._add_responses(
+            legacy,
+            [ExitPulseResponse.ResponseCode.NEEDS_CLARIFICATION],
+            "l",
+        )
+        self._add_responses(
+            zero,
+            [ExitPulseResponse.ResponseCode.CONFIDENT],
+            "z",
+        )
+
+        response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+        row = response.context["page_obj"].object_list[0]
+        summary = response.context["comparison_analytics"]
+
+        self.assertEqual(row.analytics.terminal_session_count, 3)
+        self.assertEqual(row.analytics.distinct_topic_count, 1)
+        self.assertEqual(row.analytics.historical_denominator_session_count, 2)
+        self.assertEqual(row.analytics.missing_denominator_session_count, 1)
+        self.assertEqual(row.analytics.enrollment_denominator_total, 2)
+        self.assertEqual(row.analytics.response_total_with_historical_denominator, 4)
+        self.assertEqual(row.analytics.weighted_response_rate, Decimal("200.0"))
+        self.assertEqual(row.analytics.weighted_understanding_rate, Decimal("60.0"))
+        self.assertEqual(row.analytics.weighted_support_needed_rate, Decimal("40.0"))
+        self.assertEqual(row.latest_session_public_id, zero.public_id)
+        self.assertEqual(summary.weighted_response_rate, row.analytics.weighted_response_rate)
+        self.assertEqual(summary.weighted_understanding_rate, row.analytics.weighted_understanding_rate)
+        self.assertContains(response, "shown without being capped")
+        self.assertContains(response, "without a stored historical enrollment count")
+
+    def test_terminal_metrics_ignore_cancelled_draft_and_live_sessions(self):
+        draft = self.make_draft(topic="Draft comparison topic")
+        live = self.make_live(topic="Live comparison topic")
+        cancelled = ExitPulseSessionService.cancel(
+            session=self.make_live(topic="Cancelled comparison topic"),
+            user=self.faculty,
+        )
+        for index, session in enumerate((draft, live, cancelled)):
+            self._add_responses(
+                session,
+                [ExitPulseResponse.ResponseCode.CONFIDENT],
+                f"x{index}",
+            )
+
+        response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+        row = response.context["page_obj"].object_list[0]
+
+        self.assertEqual(row.analytics.terminal_session_count, 0)
+        self.assertEqual(row.analytics.total_responses, 0)
+        self.assertEqual(row.analytics.distinct_topic_count, 0)
+        self.assertIsNone(row.latest_session_public_id)
+        self.assertNotContains(response, "Draft comparison topic")
+        self.assertNotContains(response, "Live comparison topic")
+        self.assertNotContains(response, "Cancelled comparison topic")
+
+    def test_route_requires_get_authentication_permission_feature_and_complete_scope(self):
+        url = reverse("exit_pulse:assignment_comparison")
+
+        self.assertEqual(self.client.post(url).status_code, 405)
+        self.client.logout()
+        self.assertEqual(self.client.get(url).status_code, 302)
+
+        self.client.force_login(self.faculty)
+        RolePermission.objects.filter(permission__code="exit_pulse.use").delete()
+        self.assertEqual(self.client.get(url).status_code, 403)
+        permission = Permission.objects.get(code="exit_pulse.use")
+        RolePermission.objects.create(role=self.faculty_role, permission=permission)
+
+        with patch("apps.exit_pulse.views._scope_ids", return_value=(None, self.campus.id)):
+            self.assertEqual(self.client.get(url).status_code, 403)
+        with patch("apps.exit_pulse.views._scope_ids", return_value=(self.tenant.id, None)):
+            self.assertEqual(self.client.get(url).status_code, 403)
+
+        SystemSettingService.set(
+            FeatureSettingsService.EXIT_PULSE_ENABLED_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_owner_history_survives_replacement_without_granting_replacement_access(self):
+        original = self._terminal_session(topic="Original faculty private comparison")
+        self.assignment.is_active = False
+        self.assignment.save(update_fields=["is_active", "updated_at"])
+        replacement = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=self.other_faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.other_faculty,
+        )
+
+        original_response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+        original_rows = original_response.context["page_obj"].object_list
+        self.assertEqual([row.assignment.id for row in original_rows], [self.assignment.id])
+        self.assertFalse(original_rows[0].is_current)
+        self.assertContains(original_response, "Original faculty private comparison")
+
+        self.client.force_login(self.other_faculty)
+        replacement_response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+        replacement_rows = replacement_response.context["page_obj"].object_list
+        self.assertEqual([row.assignment.id for row in replacement_rows], [replacement.id])
+        self.assertNotContains(replacement_response, original.topic)
+
+        self.other_faculty.is_superuser = True
+        self.other_faculty.save(update_fields=["is_superuser", "updated_at"])
+        superuser_response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+        self.assertEqual(
+            [row.assignment.id for row in superuser_response.context["page_obj"].object_list],
+            [replacement.id],
+        )
+
+    def test_exact_tenant_and_campus_scope_excludes_inconsistent_records(self):
+        hidden_tenant = self._terminal_session(topic="Cross-tenant comparison secret")
+        hidden_campus_assignment = self._create_assignment(250)
+        hidden_campus = self._terminal_session(
+            assignment=hidden_campus_assignment,
+            topic="Cross-campus comparison secret",
+        )
+        other_tenant = Tenant.objects.create(code="CMP2", name="Comparison Tenant 2")
+        other_tenant_campus = Campus.objects.create(
+            tenant=other_tenant,
+            code="CMP2",
+            name="Comparison Campus 2",
+        )
+        other_campus = Campus.objects.create(
+            tenant=self.tenant,
+            code="CMP3",
+            name="Other Campus in Tenant",
+        )
+        ExitPulseSession.objects.filter(pk=hidden_tenant.pk).update(
+            tenant=other_tenant,
+            campus=other_tenant_campus,
+        )
+        FacultyAssignment.objects.filter(pk=self.assignment.pk).update(
+            tenant=other_tenant,
+            campus=other_tenant_campus,
+        )
+        ExitPulseSession.objects.filter(pk=hidden_campus.pk).update(campus=other_campus)
+        FacultyAssignment.objects.filter(pk=hidden_campus_assignment.pk).update(
+            campus=other_campus,
+        )
+
+        response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+
+        self.assertEqual(response.context["page_obj"].paginator.count, 0)
+        self.assertNotContains(response, hidden_tenant.topic)
+        self.assertNotContains(response, hidden_campus.topic)
+        self.assertContains(response, "No assignments are available")
+
+    def test_similar_labels_remain_distinct_and_current_and_historical_rows_are_clear(self):
+        historical_session = self._terminal_session(topic="Earlier academic scope")
+        self.assignment.is_active = False
+        self.assignment.save(update_fields=["is_active", "updated_at"])
+        later_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2027-2028",
+            name="AY 2027-2028",
+            start_date=date(2027, 6, 1),
+            end_date=date(2028, 5, 31),
+        )
+        later_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=later_year,
+            code="1ST",
+            name="First Semester",
+        )
+        current = self._create_assignment(
+            202,
+            academic_year=later_year,
+            term=later_term,
+            course=self.course,
+            section=self.section,
+        )
+
+        response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+        rows = response.context["page_obj"].object_list
+
+        self.assertEqual({row.assignment.id for row in rows}, {self.assignment.id, current.id})
+        states = {row.assignment.id: row.is_current for row in rows}
+        self.assertEqual(states, {self.assignment.id: False, current.id: True})
+        self.assertContains(response, historical_session.topic)
+        self.assertContains(response, "Historical")
+        self.assertContains(response, "Current")
+
+    def test_legacy_unavailable_and_stored_zero_are_distinct(self):
+        legacy = self._terminal_session(topic="Legacy-only comparison", snapshot=None)
+        zero_assignment = self._create_assignment(203)
+        zero = self._terminal_session(
+            assignment=zero_assignment,
+            topic="Stored-zero comparison",
+            snapshot=0,
+        )
+        self._add_responses(legacy, [ExitPulseResponse.ResponseCode.CONFIDENT], "legacy")
+        self._add_responses(zero, [ExitPulseResponse.ResponseCode.NEEDS_PRACTICE], "zero")
+
+        response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+        rows = {row.assignment.id: row for row in response.context["page_obj"].object_list}
+
+        self.assertFalse(rows[self.assignment.id].response_rate_available)
+        self.assertTrue(rows[zero_assignment.id].response_rate_available)
+        self.assertEqual(rows[zero_assignment.id].analytics.enrollment_denominator_total, 0)
+        self.assertEqual(rows[zero_assignment.id].analytics.weighted_response_rate, Decimal("0.0"))
+        self.assertContains(response, "Not historically comparable")
+        self.assertContains(response, "0.0%")
+
+    def test_filters_apply_to_rows_and_summary_and_reject_forged_values(self):
+        first = self._terminal_session(topic="First filter topic", snapshot=2)
+        self._add_responses(first, [ExitPulseResponse.ResponseCode.CONFIDENT], "filter1")
+        later_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2028-2029",
+            name="AY 2028-2029",
+            start_date=date(2028, 6, 1),
+            end_date=date(2029, 5, 31),
+        )
+        later_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=later_year,
+            code="2ND",
+            name="Second Semester",
+        )
+        later_assignment = self._create_assignment(
+            204,
+            academic_year=later_year,
+            term=later_term,
+        )
+        later = self._terminal_session(
+            assignment=later_assignment,
+            topic="Custom filter topic",
+            snapshot=4,
+            question_code=ExitPulseSession.QuestionCode.CUSTOM,
+            custom_question="Which concept should we revisit?",
+        )
+        self._add_responses(later, [ExitPulseResponse.ResponseCode.NEEDS_CLARIFICATION], "filter2")
+
+        url = reverse("exit_pulse:assignment_comparison")
+        filtered = self.client.get(
+            url,
+            {
+                "academic_year": later_year.id,
+                "term": later_term.id,
+                "question_type": ExitPulseSession.QuestionCode.CUSTOM,
+            },
+        )
+        rows = filtered.context["page_obj"].object_list
+        summary = filtered.context["comparison_analytics"]
+        self.assertEqual([row.assignment.id for row in rows], [later_assignment.id])
+        self.assertEqual(summary.terminal_session_count, 1)
+        self.assertEqual(summary.total_responses, 1)
+        self.assertNotContains(filtered, first.topic)
+
+        invalid = self.client.get(url, {"question_type": "FORGED"})
+        self.assertFalse(invalid.context["filter_form"].is_valid())
+        self.assertEqual(invalid.context["page_obj"].paginator.count, 0)
+        self.assertEqual(invalid.context["comparison_analytics"].terminal_session_count, 0)
+        self.assertContains(invalid, "Choose filter values available")
+
+    def test_latest_terminal_is_deterministic_escaped_and_never_exposes_feedback_or_tokens(self):
+        same_start = timezone.now() - timedelta(hours=1)
+        older = self._terminal_session(topic="Older safe topic", started_at=same_start)
+        latest = self._terminal_session(
+            topic="<script>alert('topic')</script>",
+            question_code=ExitPulseSession.QuestionCode.CUSTOM,
+            custom_question="What concept needs more explanation?",
+            started_at=same_start,
+            allow_written_feedback=True,
+        )
+        ExitPulseSession.objects.filter(pk=latest.pk).update(
+            question_text_snapshot="<img src=x onerror=alert('question')>",
+        )
+        self._add_responses(
+            latest,
+            [ExitPulseResponse.ResponseCode.CONFIDENT],
+            "private",
+            feedback="PRIVATE WRITTEN FEEDBACK",
+        )
+        live = self.make_live(topic="Newer live topic")
+
+        response = self.client.get(reverse("exit_pulse:assignment_comparison"))
+        row = response.context["page_obj"].object_list[0]
+        content = response.content.decode()
+        visible_text = strip_tags(content)
+
+        self.assertGreater(latest.id, older.id)
+        self.assertEqual(row.latest_session_public_id, latest.public_id)
+        self.assertNotEqual(row.latest_session_public_id, live.public_id)
+        self.assertNotIn("<script>alert('topic')</script>", content)
+        self.assertIn("&lt;script&gt;", content)
+        self.assertNotIn("<img src=x onerror=alert('question')>", content)
+        self.assertNotIn("PRIVATE WRITTEN FEEDBACK", content)
+        self.assertNotIn(latest.public_token, content)
+        self.assertNotIn(str(latest.public_id), visible_text)
+
+    def test_pagination_is_stable_complete_and_preserves_filters(self):
+        assignment_ids = {self.assignment.id}
+        for index in range(205, 225):
+            assignment_ids.add(self._create_assignment(index).id)
+        url = reverse("exit_pulse:assignment_comparison")
+
+        first = self.client.get(
+            url,
+            {"question_type": ExitPulseSession.QuestionCode.UNDERSTANDING},
+        )
+        second = self.client.get(
+            url,
+            {"question_type": ExitPulseSession.QuestionCode.UNDERSTANDING, "page": 2},
+        )
+        first_ids = {row.assignment.id for row in first.context["page_obj"].object_list}
+        second_ids = {row.assignment.id for row in second.context["page_obj"].object_list}
+
+        self.assertEqual(first.context["page_obj"].paginator.count, 21)
+        self.assertEqual(len(first_ids), 20)
+        self.assertEqual(len(second_ids), 1)
+        self.assertFalse(first_ids & second_ids)
+        self.assertEqual(first_ids | second_ids, assignment_ids)
+        self.assertContains(first, "question_type=UNDERSTANDING&amp;page=2", html=False)
+        self.assertEqual(self.client.get(url, {"page": "invalid"}).context["page_obj"].number, 1)
+        self.assertEqual(self.client.get(url, {"page": 0}).context["page_obj"].number, 2)
+        self.assertEqual(self.client.get(url, {"page": -1}).context["page_obj"].number, 2)
+        self.assertEqual(self.client.get(url, {"page": 999}).context["page_obj"].number, 2)
+
+    def test_comparison_row_aggregation_uses_one_bounded_query(self):
+        for index in range(225, 230):
+            assignment = self._create_assignment(index)
+            session = self._terminal_session(assignment=assignment, snapshot=3)
+            self._add_responses(session, [ExitPulseResponse.ResponseCode.CONFIDENT], f"q{index}")
+        owned = ExitPulseHistoryService.owned_sessions(
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        terminal = ExitPulseAnalyticsService.terminal_sessions(owned)
+        current_ids = list(
+            ExitPulseSessionService.valid_assignments_for_user(
+                user=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+            ).values_list("id", flat=True)
+        )
+        assignments = ExitPulseHistoryService.comparison_assignments(
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            current_assignment_ids=current_ids,
+            sessions=terminal,
+        )
+        comparison = ExitPulseAnalyticsService.annotate_assignment_comparison(
+            assignments,
+            terminal_sessions=terminal,
+            owned_sessions=owned,
+            current_assignment_ids=current_ids,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+
+        with self.assertNumQueries(1):
+            rows = ExitPulseAnalyticsService.comparison_rows(comparison)
+
+        self.assertEqual(len(rows), 6)
 
 
 @override_settings(EXIT_PULSE_BROWSER_RATE_LIMIT_PER_MINUTE=1)
