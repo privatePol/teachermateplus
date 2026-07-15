@@ -151,6 +151,12 @@ class ExitPulseSession(TimeStampedModel):
 
 
 class ExitPulseResponse(TimeStampedModel):
+    IDENTITY_FIELDS = (
+        "student_enrollment_id",
+        "privacy_notice_version",
+        "privacy_notice_acknowledged_at",
+    )
+
     class ResponseCode(models.TextChoices):
         CONFIDENT = "CONFIDENT", "I understand it well and feel confident"
         MOSTLY_UNDERSTOOD = "MOSTLY_UNDERSTOOD", "I understand most of it"
@@ -161,6 +167,26 @@ class ExitPulseResponse(TimeStampedModel):
         "exit_pulse.ExitPulseSession",
         on_delete=models.CASCADE,
         related_name="responses",
+    )
+    student_enrollment = models.ForeignKey(
+        "enrollment.Enrollment",
+        on_delete=models.PROTECT,
+        related_name="exit_pulse_responses",
+        blank=True,
+        null=True,
+        editable=False,
+        help_text="Validated class enrollment; null only for responses created before identity validation.",
+    )
+    privacy_notice_version = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        editable=False,
+    )
+    privacy_notice_acknowledged_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        editable=False,
     )
     response_code = models.CharField(max_length=32, choices=ResponseCode.choices)
     feedback_review = models.CharField(max_length=200, blank=True)
@@ -178,8 +204,25 @@ class ExitPulseResponse(TimeStampedModel):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["session", "anonymous_token_hash"],
-                name="uq_pulse_response_browser",
+                fields=["session", "student_enrollment"],
+                name="uq_pulse_response_enrollment",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        student_enrollment__isnull=True,
+                        privacy_notice_version="",
+                        privacy_notice_acknowledged_at__isnull=True,
+                    )
+                    | (
+                        models.Q(
+                            student_enrollment__isnull=False,
+                            privacy_notice_acknowledged_at__isnull=False,
+                        )
+                        & ~models.Q(privacy_notice_version="")
+                    )
+                ),
+                name="ck_pulse_response_identity_notice",
             ),
             models.CheckConstraint(
                 condition=models.Q(
@@ -196,3 +239,13 @@ class ExitPulseResponse(TimeStampedModel):
 
     def __str__(self):
         return f"{self.session_id}:{self.response_code}:{self.submitted_at:%Y-%m-%d %H:%M}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            original = type(self).objects.filter(pk=self.pk).values(*self.IDENTITY_FIELDS).first()
+            if original and any(
+                original[field_name] != getattr(self, field_name)
+                for field_name in self.IDENTITY_FIELDS
+            ):
+                raise ValidationError("Exit Pulse response identity and privacy evidence are immutable.")
+        return super().save(*args, **kwargs)

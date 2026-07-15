@@ -87,7 +87,7 @@
     </div>
   {% endif %}
   {% if filtered_analytics.response_rate_above_100 %}
-    <div class="alert alert-light border" role="note">Anonymous browser-based participation may produce more responses than the stored class enrollment. The calculated response rate is shown without being capped.</div>
+    <div class="alert alert-light border" role="note">Eligible enrollment may change after the immutable class count is captured. The calculated response rate is shown without being capped.</div>
   {% endif %}
 
   <section class="card border-0 shadow-sm" aria-labelledby="history-table-heading">
@@ -144,7 +144,7 @@
   {% endif %}
 
   <div class="alert alert-light border mt-4 mb-0">
-    Written responses are never displayed in Class History. Open an owner-authorized session result to review enabled anonymous feedback.
+    Written responses are never displayed in Class History. Open an owner-authorized session result to review enabled confidential feedback without student identity.
   </div>
 </div>
 {% endblock %}

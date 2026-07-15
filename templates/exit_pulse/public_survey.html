@@ -25,6 +25,26 @@
         </form>
         <div class="alert alert-danger d-none" id="exit-pulse-link-error" role="alert">This Exit Pulse link is invalid.</div>
       </div>
+    {% elif pulse_state == 'verify' %}
+      <span class="badge text-bg-success mb-3">Confidential · Enrollment verification required</span>
+      <h1 class="h3 mb-3" id="pulse-title">Verify your enrollment</h1>
+      <p>Enter your student number to confirm that you are enrolled in this class. Your identity will remain hidden from the faculty's Exit Pulse results.</p>
+      {% if state_message %}<div class="alert alert-warning" role="alert">{{ state_message }}</div>{% endif %}
+      <form method="post" action="{% url 'exit_pulse:public_verify' %}" novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="public_token" value="{{ public_token }}">
+        <div class="mb-3">
+          <label class="form-label fw-semibold" for="{{ form.student_number.id_for_label }}">{{ form.student_number.label }}</label>
+          {{ form.student_number }}
+          <div class="form-text" id="student-number-help">Use the student number registered for your current class enrollment.</div>
+          <div id="student-number-error" {% if form.student_number.errors %}class="text-danger small mt-1" role="alert"{% endif %}>{% for error in form.student_number.errors %}{{ error }}{% endfor %}</div>
+        </div>
+        <div class="alert alert-info small" id="privacy-notice" role="note">
+          <strong>Privacy notice:</strong> {{ privacy_notice }}
+        </div>
+        <p class="small text-muted">Submitting your student number confirms that you have read and understood this notice. If you do not want your response linked confidentially to your enrollment record, do not continue.</p>
+        <button class="btn btn-success w-100 fw-semibold" type="submit">Verify and continue</button>
+      </form>
     {% elif pulse_state == 'live' %}
       <div class="d-flex justify-content-between align-items-center gap-3 mb-3"><span class="badge text-bg-success">Live</span><div class="timer fw-bold" role="timer">Time left: <span id="student-countdown" data-seconds="{{ remaining_seconds }}" aria-hidden="true">--:--</span><span class="visually-hidden" id="student-countdown-announcement" aria-live="polite" aria-atomic="true"></span></div></div>
       <p class="small text-muted mb-1">Today's topic</p><h1 class="h3 mb-3" id="pulse-title">{{ session.topic }}</h1>
@@ -33,7 +53,6 @@
       <div class="alert alert-warning" id="pulse-client-expired" role="status" hidden>This Exit Pulse has expired. Responses are no longer accepted.</div>
       <form method="post" action="{% url 'exit_pulse:public_submit' %}" novalidate id="exit-pulse-response-form">
         {% csrf_token %}
-        <input type="hidden" name="public_token" value="{{ public_token }}">
         {% if form.response_code.errors %}<div class="alert alert-danger" id="response-code-error" role="alert">Select one learning-status response.</div>{% endif %}
         <fieldset class="border-0 p-0 m-0" aria-required="true" {% if form.response_code.errors %}aria-describedby="response-code-error"{% endif %}><legend class="visually-hidden">Choose your learning status</legend><div class="d-grid gap-2 mb-4">
           {% for code, emoji, label in reaction_options %}<div class="position-relative"><input class="reaction-input" type="radio" name="response_code" value="{{ code }}" id="reaction-{{ code }}" {% if form.response_code.value == code %}checked{% endif %}><label class="reaction-label" for="reaction-{{ code }}"><span class="emoji" aria-hidden="true">{{ emoji }}</span><span>{{ label }}</span></label></div>{% endfor %}
@@ -51,7 +70,7 @@
       <div class="text-center py-4"><h1 class="h3" id="pulse-title">Exit Pulse unavailable</h1><p class="lead mb-0">{{ state_message }}</p></div>
     {% endif %}
   </div></section>
-  <footer class="text-center small text-muted mt-3">Anonymous Learning Check · No name, student number, email, or attendance is collected.</footer>
+  <footer class="text-center small text-muted mt-3">Confidential, identity-validated classroom feedback · Identity is hidden from routine faculty results.</footer>
 </main>
 {% if pulse_state == 'entry' %}<script>(function(){const token=window.location.hash.slice(1);window.history.replaceState(null,"",window.location.pathname);if(/^[A-Za-z0-9_-]{32,64}$/.test(token)){document.getElementById("exit-pulse-fragment-token").value=token;document.getElementById("exit-pulse-open-form").submit();}else{document.getElementById("exit-pulse-link-error").classList.remove("d-none");}})();</script>{% endif %}
 {% if pulse_state == 'live' %}<script>(function(){const node=document.getElementById('student-countdown');const announcement=document.getElementById('student-countdown-announcement');const form=document.getElementById('exit-pulse-response-form');let seconds=Number(node.dataset.seconds||0);let stopped=false;function draw(){const safe=Math.max(0,seconds);node.textContent=String(Math.floor(safe/60)).padStart(2,'0')+':'+String(safe%60).padStart(2,'0');if(safe===0&&!stopped){stopped=true;announcement.textContent='This Exit Pulse has expired.';document.getElementById('pulse-client-expired').hidden=false;form.querySelectorAll('button,input,textarea').forEach(function(control){control.disabled=true;});}else if(safe>0&&safe%60===0){const minutes=safe/60;announcement.textContent=minutes+' minute'+(minutes===1?'':'s')+' remaining.';}else if(safe===30||safe===10){announcement.textContent=safe+' seconds remaining.';}}draw();window.setInterval(function(){if(seconds>0){seconds-=1;draw();}},1000);})();</script>{% endif %}

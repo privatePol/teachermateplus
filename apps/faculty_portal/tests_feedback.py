@@ -241,8 +241,26 @@ class FacultyFeedbackSubmissionTests(TestCase):
         public_response = self.client.get(reverse("faculty_portal:public_index"))
         admin_response = self.client.get(reverse("admin_portal:root_slash"))
 
-        self.assertContains(faculty_response, 'id="faculty-feedback-open"', html=False)
-        self.assertContains(faculty_response, "Faculty Quick Guide")
+        self.assertContains(faculty_response, 'class="faculty-utility-stack"', count=1, html=False)
+        self.assertContains(faculty_response, 'id="faculty-feedback-open"', count=1, html=False)
+        self.assertContains(faculty_response, 'id="faculty-quick-guide-link"', count=1, html=False)
+        self.assertContains(faculty_response, 'data-tour-id="user-guide"', count=1, html=False)
+        self.assertContains(faculty_response, 'data-tour-id="privacy-notice"', count=1, html=False)
+        self.assertContains(faculty_response, 'class="faculty-feedback-fab"', count=1, html=False)
+        self.assertContains(faculty_response, 'class="help-fab"', count=1, html=False)
+        self.assertContains(faculty_response, "<span>Quick Guide</span>", count=1, html=True)
+        self.assertContains(faculty_response, 'class="privacy-chip"', count=1, html=False)
+        self.assertContains(faculty_response, reverse("faculty_portal:feedback_submit"), count=1)
+        self.assertContains(faculty_response, f'href="{reverse("faculty_portal:guide")}"', html=False)
+        content = faculty_response.content
+        self.assertLess(
+            content.index(b'id="faculty-feedback-open"'),
+            content.index(b'id="faculty-quick-guide-link"'),
+        )
+        self.assertLess(
+            content.index(b'id="faculty-quick-guide-link"'),
+            content.index(b'data-tour-id="privacy-notice"'),
+        )
         self.assertContains(faculty_response, 'data-route-name="faculty_portal:my_courses"', html=False)
         self.assertNotContains(public_response, "faculty-feedback-open")
         self.assertNotIn(b"faculty-feedback-open", admin_response.content)

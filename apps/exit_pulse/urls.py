@@ -27,6 +27,8 @@ urlpatterns = [
     path("faculty/exit-pulse/<uuid:public_id>/results/", views.results_view, name="results"),
     path("pulse/", views.public_survey_view, name="public_survey"),
     path("pulse/open/", views.public_open_view, name="public_open"),
+    path("pulse/verify/", views.public_verify_view, name="public_verify"),
+    path("pulse/respond/", views.public_response_view, name="public_response"),
     path("pulse/submit/", views.public_submit_view, name="public_submit"),
     path("pulse/thanks/", views.public_thanks_view, name="public_thanks"),
 ]

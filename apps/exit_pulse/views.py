@@ -26,12 +26,14 @@ from apps.exit_pulse.forms import (
     ExitPulseDashboardFilterForm,
     ExitPulseHistoryFilterForm,
     ExitPulseResponseForm,
+    ExitPulseStudentVerificationForm,
 )
 from apps.exit_pulse.models import ExitPulseSession
 from apps.exit_pulse.services import (
     ExitPulseAnalyticsService,
-    ExitPulseAnonymousIdentityService,
+    ExitPulseBrowserIdentityService,
     ExitPulseDuplicateResponse,
+    ExitPulseEnrollmentVerificationService,
     ExitPulseHistoryService,
     ExitPulseRateLimited,
     ExitPulseRateLimitService,
@@ -526,7 +528,16 @@ def _public_state(session):
     return "live", ""
 
 
-def _render_public(request, *, session=None, form=None, state=None, state_message="", status=200):
+def _render_public(
+    request,
+    *,
+    session=None,
+    form=None,
+    state=None,
+    state_message="",
+    public_token="",
+    status=200,
+):
     remaining_seconds = 0
     if session and session.expires_at:
         remaining_seconds = max(0, int((session.expires_at - timezone.now()).total_seconds()))
@@ -539,7 +550,11 @@ def _render_public(request, *, session=None, form=None, state=None, state_messag
             "pulse_state": state,
             "state_message": state_message,
             "remaining_seconds": remaining_seconds,
-            "public_token": session.public_token if session else "",
+            "public_token": public_token,
+            "privacy_notice": ExitPulseEnrollmentVerificationService.PRIVACY_NOTICE,
+            "privacy_notice_version": (
+                ExitPulseEnrollmentVerificationService.PRIVACY_NOTICE_VERSION
+            ),
             "reaction_options": (
                 ("CONFIDENT", "❤️", "I understand it well and feel confident"),
                 ("MOSTLY_UNDERSTOOD", "😊", "I understand most of it"),
@@ -551,7 +566,9 @@ def _render_public(request, *, session=None, form=None, state=None, state_messag
     )
     response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response["Pragma"] = "no-cache"
-    response["Referrer-Policy"] = "no-referrer"
+    # Same-origin form posts need a non-opaque Origin for Django's CSRF check.
+    # The bearer token remains safe in the URL fragment and is never sent as a referrer.
+    response["Referrer-Policy"] = "same-origin"
     return response
 
 
@@ -574,26 +591,16 @@ def _open_public_session(request, public_token):
             state_message=state_message,
             status=404 if state == "invalid" else 200,
         )
-    raw_value, signed_value, _ = ExitPulseAnonymousIdentityService.resolve_or_create(request)
-    anonymous_hash = ExitPulseAnonymousIdentityService.hash_for_session(session=session, raw_value=raw_value)
-    if ExitPulseResponseService.already_submitted(
+    _, signed_value, _ = ExitPulseBrowserIdentityService.resolve_or_create(request)
+    ExitPulseEnrollmentVerificationService.clear_state(request)
+    response = _render_public(
+        request,
         session=session,
-        anonymous_hash=anonymous_hash,
-    ):
-        response = _render_public(
-            request,
-            session=session,
-            state="submitted",
-            state_message="Thank you. Your response has been recorded.",
-        )
-    else:
-        response = _render_public(
-            request,
-            session=session,
-            form=ExitPulseResponseForm(session=session),
-            state="live",
-        )
-    ExitPulseAnonymousIdentityService.set_cookie(response, signed_value)
+        form=ExitPulseStudentVerificationForm(),
+        state="verify",
+        public_token=public_token,
+    )
+    ExitPulseBrowserIdentityService.set_cookie(response, signed_value)
     return response
 
 
@@ -605,9 +612,9 @@ def public_open_view(request):
 
 
 @never_cache
-@sensitive_post_parameters("public_token", "response_code", "feedback_review", "feedback_learned")
+@sensitive_post_parameters("public_token", "student_number")
 @require_POST
-def public_submit_view(request):
+def public_verify_view(request):
     public_token = request.POST.get("public_token", "")
     session = ExitPulseResponseService.resolve_public_session(public_token, refresh=False)
     state, state_message = _public_state(session)
@@ -621,33 +628,183 @@ def public_submit_view(request):
             state_message=state_message,
             status=404 if state == "invalid" else 409,
         )
-    raw_value, signed_value, _ = ExitPulseAnonymousIdentityService.resolve_or_create(request)
-    anonymous_hash = ExitPulseAnonymousIdentityService.hash_for_session(session=session, raw_value=raw_value)
+    raw_value, signed_value, _ = ExitPulseBrowserIdentityService.resolve_or_create(request)
+    browser_hash = ExitPulseBrowserIdentityService.hash_for_session(
+        session=session,
+        raw_value=raw_value,
+    )
+    form = ExitPulseStudentVerificationForm(request.POST)
+    try:
+        ExitPulseRateLimitService.check_verification(
+            request=request,
+            session=session,
+            browser_hash=browser_hash,
+        )
+        if not form.is_valid():
+            raise ValidationError(ExitPulseEnrollmentVerificationService.VERIFICATION_ERROR)
+        enrollment = ExitPulseEnrollmentVerificationService.eligible_enrollment(
+            session=session,
+            student_number=form.cleaned_data["student_number"],
+        )
+        if not enrollment:
+            raise ValidationError(ExitPulseEnrollmentVerificationService.VERIFICATION_ERROR)
+        if ExitPulseResponseService.already_submitted(
+            session=session,
+            enrollment=enrollment,
+        ):
+            response = _render_public(
+                request,
+                session=session,
+                state="submitted",
+                state_message="A response has already been submitted for this student number.",
+                status=409,
+            )
+        else:
+            ExitPulseEnrollmentVerificationService.store_state(
+                request=request,
+                session=session,
+                enrollment=enrollment,
+                browser_hash=browser_hash,
+            )
+            response = redirect("exit_pulse:public_response")
+    except ExitPulseRateLimited as exc:
+        safe_form = ExitPulseStudentVerificationForm({})
+        response = _render_public(
+            request,
+            session=session,
+            form=safe_form,
+            state="verify",
+            state_message="; ".join(exc.messages),
+            public_token=public_token,
+            status=429,
+        )
+    except ValidationError as exc:
+        safe_form = ExitPulseStudentVerificationForm({})
+        safe_form.add_error("student_number", "; ".join(exc.messages))
+        response = _render_public(
+            request,
+            session=session,
+            form=safe_form,
+            state="verify",
+            public_token=public_token,
+            status=400,
+        )
+    except Exception:
+        logger.exception(
+            "Exit Pulse enrollment verification failed for session %s",
+            session.public_id,
+        )
+        response = _render_public(
+            request,
+            session=session,
+            form=ExitPulseStudentVerificationForm({}),
+            state="verify",
+            state_message="A temporary server error occurred. Please try again.",
+            public_token=public_token,
+            status=503,
+        )
+    ExitPulseBrowserIdentityService.set_cookie(response, signed_value)
+    return response
+
+
+@never_cache
+@require_GET
+def public_response_view(request):
+    raw_value, signed_value, _ = ExitPulseBrowserIdentityService.resolve_or_create(request)
+    verified = ExitPulseEnrollmentVerificationService.resolve_state(
+        request=request,
+        raw_browser_value=raw_value,
+    )
+    if not verified:
+        response = _render_public(
+            request,
+            state="invalid",
+            state_message="Student-number verification is required. Scan the Exit Pulse QR code again.",
+            status=403,
+        )
+    elif not _feature_enabled(verified.session.tenant_id):
+        ExitPulseEnrollmentVerificationService.clear_state(request)
+        response = _render_public(
+            request,
+            session=verified.session,
+            state="closed",
+            state_message="Exit Pulse is currently unavailable.",
+            status=403,
+        )
+    else:
+        response = _render_public(
+            request,
+            session=verified.session,
+            form=ExitPulseResponseForm(session=verified.session),
+            state="live",
+        )
+    ExitPulseBrowserIdentityService.set_cookie(response, signed_value)
+    return response
+
+
+@never_cache
+@sensitive_post_parameters("response_code", "feedback_review", "feedback_learned")
+@require_POST
+def public_submit_view(request):
+    raw_value, signed_value, _ = ExitPulseBrowserIdentityService.resolve_or_create(request)
+    verified = ExitPulseEnrollmentVerificationService.resolve_state(
+        request=request,
+        raw_browser_value=raw_value,
+    )
+    if not verified:
+        response = _render_public(
+            request,
+            state="invalid",
+            state_message="Student-number verification is required. Scan the Exit Pulse QR code again.",
+            status=403,
+        )
+        ExitPulseBrowserIdentityService.set_cookie(response, signed_value)
+        return response
+    session = verified.session
+    if not _feature_enabled(session.tenant_id):
+        ExitPulseEnrollmentVerificationService.clear_state(request)
+        response = _render_public(
+            request,
+            session=session,
+            state="closed",
+            state_message="Exit Pulse is currently unavailable.",
+            status=403,
+        )
+        ExitPulseBrowserIdentityService.set_cookie(response, signed_value)
+        return response
+    browser_hash = ExitPulseBrowserIdentityService.hash_for_session(
+        session=session,
+        raw_value=raw_value,
+    )
     form = ExitPulseResponseForm(request.POST, session=session)
     if not form.is_valid():
         response = _render_public(request, session=session, form=form, state="live", status=400)
-        ExitPulseAnonymousIdentityService.set_cookie(response, signed_value)
+        ExitPulseBrowserIdentityService.set_cookie(response, signed_value)
         return response
     try:
         ExitPulseRateLimitService.check(
             request=request,
             session=session,
-            anonymous_hash=anonymous_hash,
+            browser_hash=browser_hash,
         )
         ExitPulseResponseService.submit(
             session=session,
+            enrollment=verified.enrollment,
+            privacy_notice_version=verified.privacy_notice_version,
+            privacy_notice_acknowledged_at=verified.privacy_notice_acknowledged_at,
             response_code=form.cleaned_data["response_code"],
-            anonymous_hash=anonymous_hash,
+            browser_hash=browser_hash,
             feedback_review=form.cleaned_data.get("feedback_review", ""),
             feedback_learned=form.cleaned_data.get("feedback_learned", ""),
             request=request,
         )
     except ExitPulseDuplicateResponse:
+        ExitPulseEnrollmentVerificationService.clear_state(request)
         response = _render_public(
             request,
             session=session,
             state="submitted",
-            state_message="This browser has already submitted a response.",
+            state_message="A response has already been submitted for this student number.",
             status=409,
         )
     except ExitPulseRateLimited as exc:
@@ -681,7 +838,7 @@ def public_submit_view(request):
             )
     except Exception:
         logger.exception(
-            "Exit Pulse anonymous submission failed for session %s",
+            "Exit Pulse confidential submission failed for session %s",
             session.public_id,
         )
         response = _render_public(
@@ -693,8 +850,9 @@ def public_submit_view(request):
             status=503,
         )
     else:
+        ExitPulseEnrollmentVerificationService.clear_state(request)
         response = redirect("exit_pulse:public_thanks")
-    ExitPulseAnonymousIdentityService.set_cookie(response, signed_value)
+    ExitPulseBrowserIdentityService.set_cookie(response, signed_value)
     return response
 
 

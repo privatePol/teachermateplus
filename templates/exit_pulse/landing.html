@@ -6,9 +6,10 @@
     <div>
       <p class="text-success fw-semibold text-uppercase small mb-1">Classroom Tools</p>
       <h1 class="h3 mb-1">Exit Pulse</h1>
-      <p class="text-muted mb-0">Review anonymous learning-response patterns and run a new Learning Check for an eligible class.</p>
+      <p class="text-muted mb-0">Review confidential, identity-validated learning-response patterns and run a new Learning Check for an eligible class.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-secondary" href="{% url 'faculty_portal:guide' %}#guide-exit-pulse">Exit Pulse Guide</a>
       <a class="btn btn-outline-success" href="{% url 'exit_pulse:assignment_comparison' %}">Assignment Comparison</a>
       {% if assignment_count %}<a class="btn btn-success" href="{% url 'exit_pulse:create' %}">Create Exit Pulse</a>{% endif %}
     </div>
@@ -86,7 +87,7 @@
   {% endif %}
   {% if dashboard_analytics.response_rate_above_100 %}
     <div class="alert alert-light border" role="note">
-      Anonymous browser-based participation may produce more responses than the stored class enrollment. The calculated response rate is shown without being capped.
+      Eligible enrollment may change after the immutable class count is captured. The calculated response rate is shown without being capped.
     </div>
   {% endif %}
 
@@ -178,7 +179,7 @@
   </section>
 
   <div class="alert alert-light border mt-4 mb-0">
-    <strong>Privacy note:</strong> Exit Pulse is anonymous and is not used for faculty evaluation, attendance, or grading. Written feedback remains available only on the owner-authorized session results page.
+    <strong>Privacy note:</strong> Exit Pulse is confidential and identity-validated. Student identity is hidden from routine faculty results, and Exit Pulse is not used for faculty evaluation, attendance, or grading. Written feedback remains available only on the owner-authorized session results page without responder identity.
   </div>
 </div>
 {% endblock %}

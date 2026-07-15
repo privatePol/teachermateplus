@@ -5,7 +5,7 @@ from apps.exit_pulse.services import ExitPulseResponseService
 
 
 class Command(BaseCommand):
-    help = "Anonymize expired Exit Pulse browser-token hashes while preserving anonymous response data."
+    help = "Clear expired Exit Pulse browser-token hashes while preserving confidential response data."
 
     def add_arguments(self, parser):
         parser.add_argument("--tenant-id", type=int, default=None)

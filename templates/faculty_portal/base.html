@@ -185,38 +185,17 @@
     color: #ffffff;
     border-color: rgba(255, 255, 255, 0.8);
   }
-  .help-fab {
+  .faculty-utility-stack {
     position: fixed;
-    right: 18px;
-    bottom: 18px;
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    border: 1px solid #78927f;
-    color: #214a31;
-    background: #f8fbf8;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    text-decoration: none;
-    box-shadow: 0 6px 16px rgba(24, 59, 37, 0.16);
+    left: 14px;
+    bottom: 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
     z-index: 1060;
-    overflow: hidden;
-  }
-  .help-fab:hover {
-    background: #e6f0e8;
-    color: #103d25;
-  }
-  .help-fab img {
-    width: 28px;
-    height: 28px;
-    object-fit: contain;
-    display: block;
   }
   .faculty-feedback-fab {
-    position: fixed;
-    right: 18px;
-    bottom: 76px;
     border: 1px solid #2e6a45;
     border-radius: 999px;
     background: #1f6b40;
@@ -229,12 +208,55 @@
     font-weight: 700;
     line-height: 1;
     box-shadow: 0 8px 18px rgba(24, 59, 37, 0.18);
-    z-index: 1060;
   }
   .faculty-feedback-fab:hover,
   .faculty-feedback-fab:focus {
     background: #185532;
     color: #ffffff;
+  }
+  .help-fab {
+    height: 42px;
+    border-radius: 999px;
+    border: 1px solid #78927f;
+    color: #214a31;
+    background: #f8fbf8;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.75rem 0.3rem 0.45rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-decoration: none;
+    box-shadow: 0 6px 16px rgba(24, 59, 37, 0.16);
+    overflow: hidden;
+  }
+  .help-fab:hover {
+    background: #e6f0e8;
+    color: #103d25;
+  }
+  .help-fab img {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+    display: block;
+  }
+  .privacy-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: rgba(244, 249, 245, 0.92);
+    border: 1px solid #ccdbcf;
+    color: #31513f;
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem 0.35rem 0.6rem;
+    font-size: 0.78rem;
+    box-shadow: 0 4px 12px rgba(26, 66, 42, 0.12);
+    text-decoration: none;
+  }
+  .privacy-chip svg {
+    width: 14px;
+    height: 14px;
   }
   .faculty-feedback-backdrop {
     position: fixed;
@@ -273,26 +295,6 @@
   }
   .faculty-feedback-error {
     min-height: 1.25rem;
-  }
-  .privacy-chip {
-    position: fixed;
-    left: 14px;
-    bottom: 14px;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    background: rgba(244, 249, 245, 0.92);
-    border: 1px solid #ccdbcf;
-    color: #31513f;
-    border-radius: 999px;
-    padding: 0.35rem 0.75rem 0.35rem 0.6rem;
-    font-size: 0.78rem;
-    box-shadow: 0 4px 12px rgba(26, 66, 42, 0.12);
-    z-index: 1040;
-  }
-  .privacy-chip svg {
-    width: 14px;
-    height: 14px;
   }
   .faculty-tour-backdrop {
     position: fixed;
@@ -418,17 +420,15 @@
     .faculty-main {
       padding: 1rem;
     }
-    .privacy-chip {
-      left: 10px;
-      bottom: 66px;
-      font-size: 0.72rem;
-    }
-    .faculty-feedback-fab {
-      right: 12px;
-      bottom: 78px;
-    }
     .faculty-feedback-backdrop {
       padding: 0.75rem;
+    }
+    .faculty-utility-stack {
+      left: 10px;
+      bottom: 66px;
+    }
+    .privacy-chip {
+      font-size: 0.72rem;
     }
   }
   @media (max-width: 575.98px) {
@@ -452,6 +452,11 @@
       flex: 1 1 9.5rem;
       justify-content: center;
       text-align: center;
+    }
+  }
+  @media print {
+    .faculty-utility-stack {
+      display: none !important;
     }
   }
 </style>
@@ -608,7 +613,8 @@
     </main>
   </div>
 
-  {% if not privacy_consent_pending and not password_change_required %}
+  <div class="faculty-utility-stack" role="group" aria-label="Faculty support and privacy links">
+    {% if not privacy_consent_pending and not password_change_required %}
     <button
       class="faculty-feedback-fab"
       type="button"
@@ -619,13 +625,33 @@
     ><span aria-hidden="true">&#128522;</span><span>Feedback</span></button>
     <a
       class="help-fab"
+      id="faculty-quick-guide-link"
       href="{% url 'faculty_portal:guide' %}"
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Faculty Quick Guide"
       title="Faculty Quick Guide"
       data-tour-id="user-guide"
-    ><img src="{% get_media_prefix %}logos/teacher_star.png" alt="" aria-hidden="true"></a>
+    ><img src="{% get_media_prefix %}logos/teacher_star.png" alt="" aria-hidden="true"><span>Quick Guide</span></a>
+    {% endif %}
+    <a
+      class="privacy-chip"
+      aria-label="Open NCBA Data Privacy Notice"
+      href="https://ncba.edu.ph/ncba-privacy-notice/"
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open NCBA Data Privacy Notice"
+      data-tour-id="privacy-notice"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M12 3l7 3v6c0 5-3.5 8.7-7 10-3.5-1.3-7-5-7-10V6l7-3z"></path>
+        <path d="M9.5 12.5l1.8 1.8 3.5-3.5"></path>
+      </svg>
+      <span>Data Privacy Notice</span>
+    </a>
+  </div>
+
+  {% if not privacy_consent_pending and not password_change_required %}
     <div class="faculty-feedback-backdrop" id="faculty-feedback-backdrop" aria-hidden="true">
       <section
         class="faculty-feedback-dialog"
@@ -688,21 +714,6 @@
       </section>
     </div>
   {% endif %}
-  <a
-    class="privacy-chip"
-    aria-label="Open NCBA Data Privacy Notice"
-    href="https://ncba.edu.ph/ncba-privacy-notice/"
-    target="_blank"
-    rel="noopener noreferrer"
-    title="Open NCBA Data Privacy Notice"
-    data-tour-id="privacy-notice"
-  >
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M12 3l7 3v6c0 5-3.5 8.7-7 10-3.5-1.3-7-5-7-10V6l7-3z"></path>
-      <path d="M9.5 12.5l1.8 1.8 3.5-3.5"></path>
-    </svg>
-    <span>Data Privacy Notice</span>
-  </a>
   {% if faculty_quick_tour_enabled and not request.user.faculty_quick_tour_disabled and not privacy_consent_pending and not password_change_required %}
   <div class="faculty-tour-backdrop" id="faculty-tour-backdrop" aria-hidden="true"></div>
   <div class="faculty-tour-card" id="faculty-tour-card" role="dialog" aria-live="polite" aria-label="Faculty Portal quick tour">

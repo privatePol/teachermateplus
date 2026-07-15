@@ -475,7 +475,7 @@ def models_q_course_department_active():
     return Q(offering__course__department__isnull=True) | Q(offering__course__department__is_active=True)
 
 
-class ExitPulseAnonymousIdentityService:
+class ExitPulseBrowserIdentityService:
     COOKIE_NAME = "exit_pulse_client"
     COOKIE_SALT = "teachermateplus.exit-pulse.browser.v1"
     MAX_AGE_SECONDS = 24 * 60 * 60
@@ -515,6 +515,154 @@ class ExitPulseAnonymousIdentityService:
         )
 
 
+@dataclass(frozen=True)
+class ExitPulseVerifiedEnrollment:
+    session: ExitPulseSession
+    enrollment: Enrollment
+    privacy_notice_version: str
+    privacy_notice_acknowledged_at: datetime
+
+
+class ExitPulseEnrollmentVerificationService:
+    STATE_KEY = "exit_pulse_verified_enrollment"
+    STATE_MAX_AGE_SECONDS = 10 * 60
+    PRIVACY_NOTICE_VERSION = "2026-07-identity-v1"
+    PRIVACY_NOTICE = (
+        "By entering your student number, you understand that it will be used to verify "
+        "your enrollment and securely link your response to your student record. Your "
+        "identity will remain confidential and will not appear in the faculty's Exit Pulse results."
+    )
+    VERIFICATION_ERROR = (
+        "We could not verify this student number for this class. Check the number and try "
+        "again, or contact your instructor if you believe this is an error."
+    )
+
+    @classmethod
+    def eligible_enrollment(cls, *, session, student_number):
+        normalized = (student_number or "").strip()
+        if not normalized:
+            return None
+        return (
+            Enrollment.objects.select_related("student")
+            .filter(
+                course_offering_id=session.course_offering_id,
+                tenant_id=session.tenant_id,
+                campus_id=session.campus_id,
+                academic_year_id=session.academic_year_id,
+                term_id=session.term_id,
+                is_active=True,
+                enrollment_status=Enrollment.Status.ACTIVE,
+                student__tenant_id=session.tenant_id,
+                student__campus_id=session.campus_id,
+                student__student_no__iexact=normalized,
+            )
+            .first()
+        )
+
+    @classmethod
+    def store_state(cls, *, request, session, enrollment, browser_hash, now=None):
+        now = now or timezone.now()
+        request.session[cls.STATE_KEY] = {
+            "session_public_id": str(session.public_id),
+            "enrollment_id": enrollment.id,
+            "browser_hash": browser_hash,
+            "privacy_notice_version": cls.PRIVACY_NOTICE_VERSION,
+            "privacy_notice_acknowledged_at": now.isoformat(),
+        }
+        request.session.modified = True
+
+    @classmethod
+    def clear_state(cls, request):
+        if cls.STATE_KEY in request.session:
+            del request.session[cls.STATE_KEY]
+            request.session.modified = True
+
+    @classmethod
+    def resolve_state(cls, *, request, raw_browser_value, now=None):
+        now = now or timezone.now()
+        payload = request.session.get(cls.STATE_KEY)
+        if not isinstance(payload, dict):
+            return None
+        try:
+            acknowledged_at = datetime.fromisoformat(
+                str(payload.get("privacy_notice_acknowledged_at", ""))
+            )
+            if timezone.is_naive(acknowledged_at):
+                raise ValueError
+            age_seconds = (now - acknowledged_at).total_seconds()
+            session_public_id = UUID(str(payload.get("session_public_id", "")))
+            enrollment_id = int(payload.get("enrollment_id"))
+        except (TypeError, ValueError):
+            cls.clear_state(request)
+            return None
+        if not 0 <= age_seconds <= cls.STATE_MAX_AGE_SECONDS:
+            cls.clear_state(request)
+            return None
+        if payload.get("privacy_notice_version") != cls.PRIVACY_NOTICE_VERSION:
+            cls.clear_state(request)
+            return None
+        session = (
+            ExitPulseSession.objects.select_related(
+                "tenant",
+                "campus",
+                "faculty_assignment",
+                "course_offering",
+                "course",
+                "section",
+            )
+            .filter(public_id=session_public_id)
+            .first()
+        )
+        if not session:
+            cls.clear_state(request)
+            return None
+        expected_browser_hash = ExitPulseBrowserIdentityService.hash_for_session(
+            session=session,
+            raw_value=raw_browser_value,
+        )
+        if not hmac.compare_digest(
+            str(payload.get("browser_hash", "")),
+            expected_browser_hash,
+        ):
+            cls.clear_state(request)
+            return None
+        ExitPulseSessionService.refresh_effective_status(session)
+        if session.status != ExitPulseSession.Status.LIVE:
+            cls.clear_state(request)
+            return None
+        enrollment = cls.eligible_enrollment_by_id(
+            session=session,
+            enrollment_id=enrollment_id,
+        )
+        if not enrollment:
+            cls.clear_state(request)
+            return None
+        return ExitPulseVerifiedEnrollment(
+            session=session,
+            enrollment=enrollment,
+            privacy_notice_version=cls.PRIVACY_NOTICE_VERSION,
+            privacy_notice_acknowledged_at=acknowledged_at,
+        )
+
+    @staticmethod
+    def eligible_enrollment_by_id(*, session, enrollment_id, lock=False):
+        queryset = Enrollment.objects.filter(
+            pk=enrollment_id,
+            course_offering_id=session.course_offering_id,
+            tenant_id=session.tenant_id,
+            campus_id=session.campus_id,
+            academic_year_id=session.academic_year_id,
+            term_id=session.term_id,
+            is_active=True,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            student__tenant_id=session.tenant_id,
+            student__campus_id=session.campus_id,
+        )
+        if lock:
+            queryset = queryset.select_for_update()
+        return queryset.first()
+
+
 class ExitPulseRateLimitService:
     WINDOW_SECONDS = 60
 
@@ -529,11 +677,11 @@ class ExitPulseRateLimitService:
             return 1
 
     @classmethod
-    def check(cls, *, request, session, anonymous_hash):
+    def check(cls, *, request, session, browser_hash):
         bucket = timezone.now().strftime("%Y%m%d%H%M")
         browser_limit = int(getattr(settings, "EXIT_PULSE_BROWSER_RATE_LIMIT_PER_MINUTE", 6) or 6)
         ip_limit = int(getattr(settings, "EXIT_PULSE_IP_RATE_LIMIT_PER_MINUTE", 120) or 120)
-        browser_key = f"exit-pulse-rate:browser:{session.public_id}:{anonymous_hash[:16]}:{bucket}"
+        browser_key = f"exit-pulse-rate:browser:{session.public_id}:{browser_hash[:16]}:{bucket}"
         if cls._increment(browser_key, timeout=65) > browser_limit:
             raise ExitPulseRateLimited("Too many submission attempts. Please wait a moment and try again.")
         ip_address = resolve_client_ip(request) or "unknown"
@@ -541,6 +689,26 @@ class ExitPulseRateLimitService:
         ip_key = f"exit-pulse-rate:ip:{session.public_id}:{ip_hash}:{bucket}"
         if cls._increment(ip_key, timeout=65) > ip_limit:
             raise ExitPulseRateLimited("The survey is receiving too many requests. Please try again shortly.")
+
+    @classmethod
+    def check_verification(cls, *, request, session, browser_hash):
+        bucket = timezone.now().strftime("%Y%m%d%H%M")
+        browser_limit = int(
+            getattr(settings, "EXIT_PULSE_VERIFICATION_BROWSER_RATE_LIMIT_PER_MINUTE", 6) or 6
+        )
+        ip_limit = int(
+            getattr(settings, "EXIT_PULSE_VERIFICATION_IP_RATE_LIMIT_PER_MINUTE", 60) or 60
+        )
+        browser_key = (
+            f"exit-pulse-verify:browser:{session.public_id}:{browser_hash[:16]}:{bucket}"
+        )
+        if cls._increment(browser_key, timeout=65) > browser_limit:
+            raise ExitPulseRateLimited("Too many verification attempts. Please wait and try again.")
+        ip_address = resolve_client_ip(request) or "unknown"
+        ip_hash = hashlib.sha256(ip_address.encode("utf-8")).hexdigest()[:20]
+        ip_key = f"exit-pulse-verify:ip:{session.public_id}:{ip_hash}:{bucket}"
+        if cls._increment(ip_key, timeout=65) > ip_limit:
+            raise ExitPulseRateLimited("Too many verification attempts. Please wait and try again.")
 
 
 class ExitPulseResponseService:
@@ -567,10 +735,10 @@ class ExitPulseResponseService:
         return session
 
     @classmethod
-    def already_submitted(cls, *, session, anonymous_hash):
+    def already_submitted(cls, *, session, enrollment):
         return ExitPulseResponse.objects.filter(
             session=session,
-            anonymous_token_hash=anonymous_hash,
+            student_enrollment=enrollment,
         ).exists()
 
     @classmethod
@@ -579,7 +747,10 @@ class ExitPulseResponseService:
         *,
         session,
         response_code,
-        anonymous_hash,
+        browser_hash,
+        enrollment=None,
+        privacy_notice_version="",
+        privacy_notice_acknowledged_at=None,
         feedback_review="",
         feedback_learned="",
         request=None,
@@ -598,6 +769,24 @@ class ExitPulseResponseService:
             if locked.status != ExitPulseSession.Status.LIVE:
                 inactive_error = ValidationError("This Exit Pulse is no longer accepting responses.")
             else:
+                locked_enrollment = ExitPulseEnrollmentVerificationService.eligible_enrollment_by_id(
+                    session=locked,
+                    enrollment_id=getattr(enrollment, "id", None),
+                    lock=True,
+                )
+                if not locked_enrollment:
+                    raise ValidationError(ExitPulseEnrollmentVerificationService.VERIFICATION_ERROR)
+                if privacy_notice_version != ExitPulseEnrollmentVerificationService.PRIVACY_NOTICE_VERSION:
+                    raise ValidationError("Student-number verification has expired. Verify again.")
+                if not privacy_notice_acknowledged_at:
+                    raise ValidationError("Student-number verification has expired. Verify again.")
+                if timezone.is_naive(privacy_notice_acknowledged_at):
+                    raise ValidationError("Student-number verification has expired. Verify again.")
+                verification_age_seconds = (now - privacy_notice_acknowledged_at).total_seconds()
+                if not 0 <= verification_age_seconds <= (
+                    ExitPulseEnrollmentVerificationService.STATE_MAX_AGE_SECONDS
+                ):
+                    raise ValidationError("Student-number verification has expired. Verify again.")
                 if response_code not in ExitPulseResponse.ResponseCode.values:
                     raise ValidationError("Select a valid learning-status response.")
                 review = (feedback_review or "").strip()
@@ -612,20 +801,27 @@ class ExitPulseResponseService:
                         review = ""
                     if not locked.feedback_learned_enabled:
                         learned = ""
-                if cls.already_submitted(session=locked, anonymous_hash=anonymous_hash):
-                    raise ExitPulseDuplicateResponse("This browser has already submitted a response.")
+                if cls.already_submitted(session=locked, enrollment=locked_enrollment):
+                    raise ExitPulseDuplicateResponse(
+                        "A response has already been submitted for this student number."
+                    )
                 try:
                     with transaction.atomic():
                         created_response = ExitPulseResponse.objects.create(
                             session=locked,
+                            student_enrollment=locked_enrollment,
+                            privacy_notice_version=privacy_notice_version,
+                            privacy_notice_acknowledged_at=privacy_notice_acknowledged_at,
                             response_code=response_code,
                             feedback_review=review,
                             feedback_learned=learned,
-                            anonymous_token_hash=anonymous_hash,
+                            anonymous_token_hash=browser_hash,
                             technical_identifier_expires_at=now + timedelta(hours=24),
                         )
                 except IntegrityError as exc:
-                    raise ExitPulseDuplicateResponse("This browser has already submitted a response.") from exc
+                    raise ExitPulseDuplicateResponse(
+                        "A response has already been submitted for this student number."
+                    ) from exc
         if inactive_error:
             raise inactive_error
         return created_response

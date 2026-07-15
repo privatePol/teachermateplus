@@ -25,8 +25,8 @@ from apps.exit_pulse.forms import ExitPulseCreateForm
 from apps.exit_pulse.models import ExitPulseResponse, ExitPulseSession
 from apps.exit_pulse.services import (
     ExitPulseAnalyticsService,
-    ExitPulseAnonymousIdentityService,
     ExitPulseDuplicateResponse,
+    ExitPulseEnrollmentVerificationService,
     ExitPulseHistoryService,
     ExitPulseQuestionValidationService,
     ExitPulseResponseService,
@@ -181,20 +181,67 @@ class ExitPulseTestBase(TestCase):
                 course_offering=self.offering,
             )
 
-    def submit_as_anonymous(self, session, *, response_code="CONFIDENT", data=None, client=None, ip="10.0.0.5"):
-        public_client = client or Client()
-        public_client.get(reverse("exit_pulse:public_survey"), REMOTE_ADDR=ip)
-        public_client.post(
-            reverse("exit_pulse:public_open"),
-            {"public_token": session.public_token},
-            REMOTE_ADDR=ip,
+    def eligible_enrollment_for_session(self, session, *, suffix="PRIMARY"):
+        enrollment = Enrollment.objects.filter(
+            course_offering=session.course_offering,
+            is_active=True,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            student__student_no=f"VERIFY-{session.id}-{suffix}",
+        ).first()
+        if enrollment:
+            return enrollment
+        student = Student.objects.create(
+            tenant=session.tenant,
+            campus=session.campus,
+            department=self.department,
+            program=self.program,
+            student_no=f"VERIFY-{session.id}-{suffix}",
+            last_name=f"IdentitySecret{suffix}",
+            first_name="IdentitySecretFirst",
         )
-        payload = {"public_token": session.public_token, "response_code": response_code}
+        return Enrollment.objects.create(
+            tenant=session.tenant,
+            campus=session.campus,
+            academic_year=session.academic_year,
+            term=session.term,
+            student=student,
+            course_offering=session.course_offering,
+        )
+
+    def submit_as_anonymous(
+        self,
+        session,
+        *,
+        response_code="CONFIDENT",
+        data=None,
+        client=None,
+        ip="10.0.0.5",
+        enrollment=None,
+    ):
+        public_client = client or Client()
+        enrollment = enrollment or self.eligible_enrollment_for_session(session)
+        _, survey = self.open_public_survey(
+            session,
+            client=public_client,
+            ip=ip,
+            enrollment=enrollment,
+        )
+        if survey.status_code != 200 or survey.context.get("pulse_state") != "live":
+            return public_client, survey
+        payload = {"response_code": response_code}
         payload.update(data or {})
         response = public_client.post(reverse("exit_pulse:public_submit"), payload, REMOTE_ADDR=ip)
         return public_client, response
 
-    def open_public_survey(self, session, *, client=None, ip="10.0.0.5"):
+    def open_public_survey(
+        self,
+        session,
+        *,
+        client=None,
+        ip="10.0.0.5",
+        enrollment=None,
+        verify=True,
+    ):
         public_client = client or Client()
         public_client.get(reverse("exit_pulse:public_survey"), REMOTE_ADDR=ip)
         response = public_client.post(
@@ -202,6 +249,20 @@ class ExitPulseTestBase(TestCase):
             {"public_token": session.public_token},
             REMOTE_ADDR=ip,
         )
+        if verify and response.status_code == 200 and response.context.get("pulse_state") == "verify":
+            enrollment = enrollment or self.eligible_enrollment_for_session(session)
+            verified = public_client.post(
+                reverse("exit_pulse:public_verify"),
+                {
+                    "public_token": session.public_token,
+                    "student_number": enrollment.student.student_no,
+                },
+                REMOTE_ADDR=ip,
+            )
+            if verified.status_code == 302:
+                response = public_client.get(verified.url, REMOTE_ADDR=ip)
+            else:
+                response = verified
         return public_client, response
 
 
@@ -402,7 +463,7 @@ class ExitPulseLifecycleTests(ExitPulseTestBase):
             ExitPulseResponseService.submit(
                 session=session,
                 response_code="CONFIDENT",
-                anonymous_hash="a" * 64,
+                browser_hash="a" * 64,
             )
 
     def test_owner_only_lifecycle_action(self):
@@ -447,25 +508,58 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
         self.assertEqual(overlength.status_code, 400)
         self.assertFalse(ExitPulseResponse.objects.exists())
 
-    def test_same_browser_is_rejected_but_same_ip_different_browser_is_allowed(self):
+    def test_same_enrollment_is_rejected_across_browsers_and_another_student_is_allowed(self):
         session = self.make_live()
+        first_enrollment = self.eligible_enrollment_for_session(session)
         client_one, first = self.submit_as_anonymous(session, ip="10.1.1.1")
         self.assertEqual(first.status_code, 302)
-        _, duplicate = self.submit_as_anonymous(session, client=client_one, ip="10.1.1.1")
+        _, duplicate = self.submit_as_anonymous(
+            session,
+            client=Client(),
+            ip="10.1.1.1",
+            enrollment=first_enrollment,
+        )
         self.assertEqual(duplicate.status_code, 409)
-        _, second_browser = self.submit_as_anonymous(session, client=Client(), ip="10.1.1.1")
-        self.assertEqual(second_browser.status_code, 302)
+        second_enrollment = self.eligible_enrollment_for_session(session, suffix="SECOND")
+        _, second_student = self.submit_as_anonymous(
+            session,
+            client=client_one,
+            ip="10.1.1.1",
+            enrollment=second_enrollment,
+        )
+        self.assertEqual(second_student.status_code, 302)
         self.assertEqual(session.responses.count(), 2)
+        another_session = self.make_live(topic="Another confidential check")
+        _, another_response = self.submit_as_anonymous(
+            another_session,
+            client=Client(),
+            enrollment=first_enrollment,
+        )
+        self.assertEqual(another_response.status_code, 302)
 
-    def test_database_constraint_safely_rejects_duplicate_hash(self):
+    def test_database_constraint_safely_rejects_duplicate_enrollment(self):
         session = self.make_live()
-        ExitPulseResponse.objects.create(session=session, response_code="CONFIDENT", anonymous_token_hash="d" * 64)
+        enrollment = self.eligible_enrollment_for_session(session)
+        notice_at = timezone.now()
+        ExitPulseResponse.objects.create(
+            session=session,
+            student_enrollment=enrollment,
+            privacy_notice_version=ExitPulseEnrollmentVerificationService.PRIVACY_NOTICE_VERSION,
+            privacy_notice_acknowledged_at=notice_at,
+            response_code="CONFIDENT",
+            anonymous_token_hash="d" * 64,
+        )
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 ExitPulseResponse.objects.create(
                     session=session,
+                    student_enrollment=enrollment,
+                    privacy_notice_version=(
+                        ExitPulseEnrollmentVerificationService.PRIVACY_NOTICE_VERSION
+                    ),
+                    privacy_notice_acknowledged_at=notice_at,
                     response_code="NEEDS_PRACTICE",
-                    anonymous_token_hash="d" * 64,
+                    anonymous_token_hash="e" * 64,
                 )
 
     def test_database_constraint_rejects_unexpected_response_code(self):
@@ -480,6 +574,7 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
 
     def test_service_converts_insert_race_to_safe_duplicate_error(self):
         session = self.make_live()
+        enrollment = self.eligible_enrollment_for_session(session)
         with patch(
             "apps.exit_pulse.services.ExitPulseResponse.objects.create",
             side_effect=IntegrityError("simulated duplicate race"),
@@ -488,7 +583,12 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
                 ExitPulseResponseService.submit(
                     session=session,
                     response_code="CONFIDENT",
-                    anonymous_hash="r" * 64,
+                    browser_hash="r" * 64,
+                    enrollment=enrollment,
+                    privacy_notice_version=(
+                        ExitPulseEnrollmentVerificationService.PRIVACY_NOTICE_VERSION
+                    ),
+                    privacy_notice_acknowledged_at=timezone.now(),
                 )
 
     def test_malformed_token_and_get_to_submit_are_handled_safely(self):
@@ -496,6 +596,8 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
         self.assertEqual(malformed.status_code, 404)
         get_submit = self.client.get(reverse("exit_pulse:public_submit"))
         self.assertEqual(get_submit.status_code, 405)
+        self.assertEqual(self.client.get(reverse("exit_pulse:public_verify")).status_code, 405)
+        self.assertEqual(self.client.post(reverse("exit_pulse:public_response")).status_code, 405)
 
     def test_public_token_uses_fragment_and_is_not_sent_in_request_path(self):
         session = self.make_live()
@@ -512,7 +614,8 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
             ExitPulseSession.objects.filter(pk=session.pk).update(status=status, closed_at=timezone.now())
             session.refresh_from_db()
             _, response = self.submit_as_anonymous(session, client=Client())
-            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(ExitPulseResponse.objects.filter(session=session).exists())
 
     def test_public_post_uses_normal_csrf_protection(self):
         session = self.make_live()
@@ -525,18 +628,36 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
             ).status_code,
             403,
         )
-        csrf_client.get(reverse("exit_pulse:public_survey"))
+        entry = csrf_client.get(reverse("exit_pulse:public_survey"))
+        self.assertEqual(entry["Referrer-Policy"], "same-origin")
         token = csrf_client.cookies["csrftoken"].value
+        null_origin = csrf_client.post(
+            reverse("exit_pulse:public_open"),
+            {"public_token": session.public_token, "csrfmiddlewaretoken": token},
+            HTTP_ORIGIN="null",
+        )
+        self.assertEqual(null_origin.status_code, 403)
         opened = csrf_client.post(
             reverse("exit_pulse:public_open"),
             {"public_token": session.public_token, "csrfmiddlewaretoken": token},
             HTTP_X_CSRFTOKEN=token,
         )
         self.assertEqual(opened.status_code, 200)
+        enrollment = self.eligible_enrollment_for_session(session)
+        verified = csrf_client.post(
+            reverse("exit_pulse:public_verify"),
+            {
+                "public_token": session.public_token,
+                "student_number": enrollment.student.student_no,
+                "csrfmiddlewaretoken": token,
+            },
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(verified.status_code, 302)
+        csrf_client.get(verified.url)
         accepted = csrf_client.post(
             submit_url,
             {
-                "public_token": session.public_token,
                 "response_code": "CONFIDENT",
                 "csrfmiddlewaretoken": token,
             },
@@ -595,6 +716,408 @@ class ExitPulseAnonymousResponseTests(ExitPulseTestBase):
         output = StringIO()
         call_command("anonymize_exit_pulse_identifiers", stdout=output)
         self.assertIn("Anonymized Exit Pulse technical identifiers: 0", output.getvalue())
+
+
+class ExitPulseIdentityValidationTests(ExitPulseTestBase):
+    def _verify(self, session, enrollment, *, client=None, student_number=None):
+        public_client = client or Client()
+        self.open_public_survey(session, client=public_client, verify=False)
+        return public_client, public_client.post(
+            reverse("exit_pulse:public_verify"),
+            {
+                "public_token": session.public_token,
+                "student_number": (
+                    student_number
+                    if student_number is not None
+                    else enrollment.student.student_no
+                ),
+                "student_enrollment": enrollment.id,
+            },
+        )
+
+    def _other_scope_enrollment(self, code, *, tenant=None, campus=None):
+        tenant = tenant or self.tenant
+        campus = campus or Campus.objects.create(
+            tenant=tenant,
+            code=f"{code}C",
+            name=f"{code} Campus",
+        )
+        department = Department.objects.create(
+            tenant=tenant,
+            campus=campus,
+            code=f"{code}D",
+            name=f"{code} Department",
+        )
+        program = Program.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            code=f"{code}P",
+            name=f"{code} Program",
+        )
+        academic_year = AcademicYear.objects.create(
+            tenant=tenant,
+            code=f"{code}-AY",
+            name=f"{code} Academic Year",
+            start_date=date(2030, 1, 1),
+            end_date=date(2030, 12, 31),
+        )
+        term = Term.objects.create(
+            tenant=tenant,
+            academic_year=academic_year,
+            code=f"{code}T",
+            name=f"{code} Term",
+        )
+        course = Course.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            code=f"{code}101",
+            title=f"{code} Course",
+        )
+        section = Section.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            code=f"{code}S",
+            name=f"{code} Section",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            academic_year=academic_year,
+            term=term,
+            course=course,
+            section=section,
+            status=CourseOffering.Status.OPEN,
+        )
+        student = Student.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            student_no=f"{code}-STUDENT",
+            last_name=f"{code}Last",
+            first_name=f"{code}First",
+        )
+        return Enrollment.objects.create(
+            tenant=tenant,
+            campus=campus,
+            academic_year=academic_year,
+            term=term,
+            student=student,
+            course_offering=offering,
+        )
+
+    def test_notice_is_visible_and_entering_student_number_is_the_consent_action(self):
+        session = self.make_live()
+        _, response = self.open_public_survey(session, verify=False)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["pulse_state"], "verify")
+        self.assertContains(
+            response,
+            "By entering your student number, you understand that it will be used to verify",
+        )
+        self.assertContains(response, "Submitting your student number confirms")
+        self.assertContains(response, 'name="student_number"', html=False)
+        self.assertNotContains(response, 'type="checkbox"', html=False)
+        investigation_permission = Permission.objects.get(
+            code="exit_pulse.response_identity_investigate"
+        )
+        self.assertFalse(
+            RolePermission.objects.filter(permission=investigation_permission).exists()
+        )
+
+    def test_valid_enrollment_whitespace_and_case_store_server_controlled_identity_and_notice(self):
+        session = self.make_live()
+        enrollment = self.eligible_enrollment_for_session(session)
+        public_client, verified = self._verify(
+            session,
+            enrollment,
+            student_number=f"  {enrollment.student.student_no.lower()}  ",
+        )
+        self.assertRedirects(verified, reverse("exit_pulse:public_response"))
+        response_form = public_client.get(verified.url)
+        self.assertContains(response_form, session.question_text_snapshot)
+        self.assertNotContains(response_form, enrollment.student.student_no)
+
+        other_enrollment = self.eligible_enrollment_for_session(session, suffix="FORGED")
+        submitted = public_client.post(
+            reverse("exit_pulse:public_submit"),
+            {
+                "response_code": ExitPulseResponse.ResponseCode.CONFIDENT,
+                "student_enrollment": other_enrollment.id,
+                "student_number": other_enrollment.student.student_no,
+            },
+        )
+        self.assertEqual(submitted.status_code, 302)
+        stored = ExitPulseResponse.objects.get()
+        self.assertEqual(stored.student_enrollment, enrollment)
+        self.assertEqual(
+            stored.privacy_notice_version,
+            ExitPulseEnrollmentVerificationService.PRIVACY_NOTICE_VERSION,
+        )
+        self.assertIsNotNone(stored.privacy_notice_acknowledged_at)
+        stored.student_enrollment = other_enrollment
+        with self.assertRaises(ValidationError):
+            stored.save()
+
+    def test_unknown_other_class_cross_campus_and_cross_tenant_numbers_fail_generically(self):
+        session = self.make_live()
+        other_class = self._other_scope_enrollment("OTHERCLASS", campus=self.campus)
+        cross_campus = self._other_scope_enrollment("OTHERCAMPUS")
+        other_tenant = Tenant.objects.create(code="IDTENANT", name="Identity Other Tenant")
+        cross_tenant = self._other_scope_enrollment("OTHERTENANT", tenant=other_tenant)
+        expected = ExitPulseEnrollmentVerificationService.VERIFICATION_ERROR
+
+        for student_number in (
+            "DOES-NOT-EXIST",
+            other_class.student.student_no,
+            cross_campus.student.student_no,
+            cross_tenant.student.student_no,
+        ):
+            _, response = self._verify(
+                session,
+                self.eligible_enrollment_for_session(session),
+                student_number=student_number,
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertContains(response, expected, status_code=400)
+            self.assertNotContains(response, student_number, status_code=400)
+            self.assertNotContains(
+                response,
+                other_class.student.first_name,
+                status_code=400,
+            )
+
+    def test_inactive_and_withdrawn_enrollments_are_denied(self):
+        session = self.make_live()
+        for index, updates in enumerate(
+            (
+                {"is_active": False},
+                {"enrollment_status": Enrollment.Status.W},
+            )
+        ):
+            enrollment = self.eligible_enrollment_for_session(session, suffix=f"INACTIVE{index}")
+            Enrollment.objects.filter(pk=enrollment.pk).update(**updates)
+            _, response = self._verify(session, enrollment)
+            self.assertEqual(response.status_code, 400)
+            self.assertContains(
+                response,
+                ExitPulseEnrollmentVerificationService.VERIFICATION_ERROR,
+                status_code=400,
+            )
+
+    def test_direct_forged_expired_and_cross_session_verification_state_are_denied(self):
+        session = self.make_live()
+        enrollment = self.eligible_enrollment_for_session(session)
+        direct = Client().post(
+            reverse("exit_pulse:public_submit"),
+            {"response_code": ExitPulseResponse.ResponseCode.CONFIDENT},
+        )
+        self.assertEqual(direct.status_code, 403)
+
+        public_client, verified = self._verify(session, enrollment)
+        self.assertEqual(verified.status_code, 302)
+        state = public_client.session
+        payload = dict(state[ExitPulseEnrollmentVerificationService.STATE_KEY])
+        payload["browser_hash"] = "forged"
+        state[ExitPulseEnrollmentVerificationService.STATE_KEY] = payload
+        state.save()
+        self.assertEqual(
+            public_client.get(reverse("exit_pulse:public_response")).status_code,
+            403,
+        )
+
+        public_client, verified = self._verify(session, enrollment, client=Client())
+        state = public_client.session
+        payload = dict(state[ExitPulseEnrollmentVerificationService.STATE_KEY])
+        payload["privacy_notice_acknowledged_at"] = (
+            timezone.now() - timedelta(minutes=11)
+        ).isoformat()
+        state[ExitPulseEnrollmentVerificationService.STATE_KEY] = payload
+        state.save()
+        self.assertEqual(
+            public_client.get(reverse("exit_pulse:public_response")).status_code,
+            403,
+        )
+
+        other_session = self.make_live(topic="Different verification session")
+        public_client, verified = self._verify(session, enrollment, client=Client())
+        state = public_client.session
+        payload = dict(state[ExitPulseEnrollmentVerificationService.STATE_KEY])
+        payload["session_public_id"] = str(other_session.public_id)
+        state[ExitPulseEnrollmentVerificationService.STATE_KEY] = payload
+        state.save()
+        self.assertEqual(
+            public_client.get(reverse("exit_pulse:public_response")).status_code,
+            403,
+        )
+
+    def test_submission_service_rejects_stale_privacy_notice_evidence(self):
+        session = self.make_live()
+        enrollment = self.eligible_enrollment_for_session(session)
+
+        with self.assertRaises(ValidationError):
+            ExitPulseResponseService.submit(
+                session=session,
+                enrollment=enrollment,
+                privacy_notice_version=(
+                    ExitPulseEnrollmentVerificationService.PRIVACY_NOTICE_VERSION
+                ),
+                privacy_notice_acknowledged_at=timezone.now() - timedelta(minutes=11),
+                response_code=ExitPulseResponse.ResponseCode.CONFIDENT,
+                browser_hash="s" * 64,
+            )
+
+        self.assertFalse(ExitPulseResponse.objects.exists())
+
+    def test_feature_disabled_after_verification_blocks_response_page_and_submission(self):
+        session = self.make_live()
+        enrollment = self.eligible_enrollment_for_session(session)
+        page_client, page_verified = self._verify(session, enrollment)
+        submit_client, submit_verified = self._verify(session, enrollment, client=Client())
+        self.assertEqual(page_verified.status_code, 302)
+        self.assertEqual(submit_verified.status_code, 302)
+        SystemSettingService.set(
+            FeatureSettingsService.EXIT_PULSE_ENABLED_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+
+        response_page = page_client.get(reverse("exit_pulse:public_response"))
+        submission = submit_client.post(
+            reverse("exit_pulse:public_submit"),
+            {"response_code": ExitPulseResponse.ResponseCode.CONFIDENT},
+        )
+
+        self.assertEqual(response_page.status_code, 403)
+        self.assertContains(
+            response_page,
+            "Exit Pulse is currently unavailable.",
+            status_code=403,
+        )
+        self.assertEqual(submission.status_code, 403)
+        self.assertFalse(ExitPulseResponse.objects.exists())
+
+    def test_identity_remains_linked_after_enrollment_and_assignment_changes(self):
+        session = self.make_live()
+        enrollment = self.eligible_enrollment_for_session(session)
+        self.submit_as_anonymous(session, enrollment=enrollment)
+        Enrollment.objects.filter(pk=enrollment.pk).update(
+            is_active=False,
+            enrollment_status=Enrollment.Status.W,
+        )
+        FacultyAssignment.objects.filter(pk=self.assignment.pk).update(is_active=False)
+
+        response = ExitPulseResponse.objects.get()
+        self.assertEqual(response.student_enrollment_id, enrollment.id)
+        self.assertEqual(response.student_enrollment.student_id, enrollment.student_id)
+
+    def test_legacy_response_remains_valid_without_identity_or_notice_evidence(self):
+        session = self.make_live()
+        response = ExitPulseResponse.objects.create(
+            session=session,
+            response_code=ExitPulseResponse.ResponseCode.CONFIDENT,
+        )
+
+        self.assertIsNone(response.student_enrollment_id)
+        self.assertEqual(response.privacy_notice_version, "")
+        self.assertIsNone(response.privacy_notice_acknowledged_at)
+
+    def test_student_identity_is_absent_from_all_routine_faculty_pages(self):
+        session = self.make_live(
+            allow_written_feedback=True,
+            feedback_review_enabled=True,
+        )
+        enrollment = self.eligible_enrollment_for_session(session)
+        confidential_feedback = "Please revisit normalization examples."
+        self.submit_as_anonymous(
+            session,
+            enrollment=enrollment,
+            data={"feedback_review": confidential_feedback},
+        )
+        live = self.client.get(
+            reverse("exit_pulse:live", kwargs={"public_id": session.public_id})
+        )
+        ExitPulseSessionService.close(session=session, user=self.faculty)
+        pages = (
+            live,
+            self.client.get(
+                reverse("exit_pulse:results", kwargs={"public_id": session.public_id})
+            ),
+            self.client.get(reverse("exit_pulse:landing")),
+            self.client.get(
+                reverse(
+                    "exit_pulse:history",
+                    kwargs={"session_public_id": session.public_id},
+                )
+            ),
+            self.client.get(reverse("exit_pulse:assignment_comparison")),
+        )
+        for page in pages:
+            content = page.content.decode()
+            self.assertNotIn(enrollment.student.student_no, content)
+            self.assertNotIn(enrollment.student.first_name, content)
+            self.assertNotIn(enrollment.student.last_name, content)
+            self.assertNotIn("student_enrollment", content)
+        self.assertContains(pages[1], confidential_feedback)
+
+
+@override_settings(EXIT_PULSE_VERIFICATION_BROWSER_RATE_LIMIT_PER_MINUTE=1)
+class ExitPulseIdentityVerificationRateLimitTests(ExitPulseTestBase):
+    def test_repeated_failed_verification_is_rate_limited_without_enumeration(self):
+        session = self.make_live()
+        public_client = Client()
+        self.open_public_survey(session, client=public_client, verify=False)
+        verify_url = reverse("exit_pulse:public_verify")
+        first = public_client.post(
+            verify_url,
+            {"public_token": session.public_token, "student_number": "UNKNOWN-ONE"},
+        )
+        second = public_client.post(
+            verify_url,
+            {"public_token": session.public_token, "student_number": "UNKNOWN-TWO"},
+        )
+
+        self.assertEqual(first.status_code, 400)
+        self.assertContains(
+            first,
+            ExitPulseEnrollmentVerificationService.VERIFICATION_ERROR,
+            status_code=400,
+        )
+        self.assertEqual(second.status_code, 429)
+        self.assertNotContains(second, "UNKNOWN-TWO", status_code=429)
+        self.assertFalse(ExitPulseResponse.objects.exists())
+
+    def test_verification_cache_failure_fails_closed_without_echoing_student_number(self):
+        session = self.make_live()
+        enrollment = self.eligible_enrollment_for_session(session)
+        public_client = Client()
+        self.open_public_survey(session, client=public_client, verify=False)
+
+        with patch("apps.exit_pulse.services.cache.add", side_effect=RuntimeError("cache unavailable")):
+            response = public_client.post(
+                reverse("exit_pulse:public_verify"),
+                {
+                    "public_token": session.public_token,
+                    "student_number": enrollment.student.student_no,
+                },
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertContains(response, "A temporary server error occurred.", status_code=503)
+        self.assertNotContains(
+            response,
+            enrollment.student.student_no,
+            status_code=503,
+        )
+        self.assertFalse(ExitPulseResponse.objects.exists())
 
 
 class ExitPulseFeedbackAndResultsTests(ExitPulseTestBase):
@@ -1522,6 +2045,33 @@ class ExitPulseAssignmentComparisonTests(ExitPulseTestBase):
                 anonymous_token_hash=f"{prefix}{index:063d}"[:64],
             )
 
+    def test_shared_faculty_utility_stack_renders_once_on_exit_pulse_pages(self):
+        session = self._terminal_session(topic="Utility footer coverage")
+        urls = (
+            reverse("exit_pulse:landing"),
+            reverse("exit_pulse:results", kwargs={"public_id": session.public_id}),
+            reverse("exit_pulse:history", kwargs={"session_public_id": session.public_id}),
+            reverse("exit_pulse:assignment_comparison"),
+        )
+
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'class="faculty-utility-stack"', count=1, html=False)
+                self.assertContains(response, 'id="faculty-feedback-open"', count=1, html=False)
+                self.assertContains(response, 'id="faculty-quick-guide-link"', count=1, html=False)
+                self.assertContains(response, 'data-tour-id="privacy-notice"', count=1, html=False)
+                content = response.content
+                self.assertLess(
+                    content.index(b'id="faculty-feedback-open"'),
+                    content.index(b'id="faculty-quick-guide-link"'),
+                )
+                self.assertLess(
+                    content.index(b'id="faculty-quick-guide-link"'),
+                    content.index(b'data-tour-id="privacy-notice"'),
+                )
+
     def test_current_assignment_without_sessions_has_neutral_no_data_row(self):
         response = self.client.get(reverse("exit_pulse:assignment_comparison"))
 
@@ -1945,24 +2495,33 @@ class ExitPulseRateLimitTests(ExitPulseTestBase):
     def test_basic_browser_rate_limit_uses_existing_cache_pattern(self):
         session = self.make_live()
         public_client = Client()
-        public_client.get(reverse("exit_pulse:public_survey"))
-        public_client.post(reverse("exit_pulse:public_open"), {"public_token": session.public_token})
+        enrollment = self.eligible_enrollment_for_session(session)
+        self.open_public_survey(
+            session,
+            client=public_client,
+            enrollment=enrollment,
+        )
         submit_url = reverse("exit_pulse:public_submit")
         invalid = public_client.post(
             submit_url,
-            {"public_token": session.public_token, "response_code": "ANGRY"},
+            {"response_code": "ANGRY"},
         )
         self.assertEqual(invalid.status_code, 400)
         first_valid = public_client.post(
             submit_url,
-            {"public_token": session.public_token, "response_code": "CONFIDENT"},
+            {"response_code": "CONFIDENT"},
         )
         self.assertEqual(first_valid.status_code, 302)
         # Clearing the stored response isolates the public rate limiter from duplicate handling.
         ExitPulseResponse.objects.all().delete()
+        self.open_public_survey(
+            session,
+            client=public_client,
+            enrollment=enrollment,
+        )
         limited = public_client.post(
             submit_url,
-            {"public_token": session.public_token, "response_code": "CONFIDENT"},
+            {"response_code": "CONFIDENT"},
         )
         self.assertEqual(limited.status_code, 429)
 
@@ -1973,7 +2532,7 @@ class ExitPulseRateLimitTests(ExitPulseTestBase):
         with patch("apps.exit_pulse.services.cache.add", side_effect=RuntimeError("cache unavailable")):
             response = public_client.post(
                 reverse("exit_pulse:public_submit"),
-                {"public_token": session.public_token, "response_code": "CONFIDENT"},
+                {"response_code": "CONFIDENT"},
             )
         self.assertEqual(response.status_code, 503)
         self.assertContains(response, "A temporary server error occurred.", status_code=503)

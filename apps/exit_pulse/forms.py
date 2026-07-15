@@ -254,3 +254,23 @@ class ExitPulseResponseForm(forms.Form):
             cleaned["feedback_review"] = ""
             cleaned["feedback_learned"] = ""
         return cleaned
+
+
+class ExitPulseStudentVerificationForm(forms.Form):
+    student_number = forms.CharField(
+        max_length=64,
+        label="Student number",
+        widget=forms.TextInput(
+            attrs={
+                "class": "form-control",
+                "autocomplete": "off",
+                "autocapitalize": "characters",
+                "spellcheck": "false",
+                "inputmode": "text",
+                "aria-describedby": "student-number-help privacy-notice student-number-error",
+            }
+        ),
+    )
+
+    def clean_student_number(self):
+        return (self.cleaned_data.get("student_number") or "").strip()
