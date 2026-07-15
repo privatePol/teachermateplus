@@ -1,0 +1,147 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Class History | Exit Pulse | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<div class="container-fluid py-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div>
+      <p class="text-success fw-semibold text-uppercase small mb-1">Exit Pulse · Class History</p>
+      <h1 class="h3 mb-1">{{ reference_session.course.code }} · {{ reference_session.section.code }}</h1>
+      <p class="text-muted mb-0">{{ reference_session.course.title }}</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'exit_pulse:landing' %}">Back to Exit Pulse</a>
+  </div>
+
+  {% if not is_current_assignment %}
+    <div class="alert alert-secondary" role="status">
+      <strong>Historical assignment.</strong> Existing Exit Pulse records remain available, but new sessions cannot be created from this assignment.
+    </div>
+  {% endif %}
+
+  <section class="card border-0 shadow-sm mb-4" aria-labelledby="assignment-context-heading">
+    <div class="card-header bg-white"><h2 class="h5 mb-0" id="assignment-context-heading">Assignment context</h2></div>
+    <div class="card-body">
+      <dl class="row mb-0">
+        <dt class="col-sm-3 col-lg-2">Course</dt><dd class="col-sm-9 col-lg-4">{{ reference_session.course.code }} · {{ reference_session.course.title }}</dd>
+        <dt class="col-sm-3 col-lg-2">Section</dt><dd class="col-sm-9 col-lg-4">{{ reference_session.section.code }}</dd>
+        <dt class="col-sm-3 col-lg-2">Campus</dt><dd class="col-sm-9 col-lg-4">{{ reference_session.campus.name }}</dd>
+        <dt class="col-sm-3 col-lg-2">Academic scope</dt><dd class="col-sm-9 col-lg-4">{{ reference_session.academic_year.code }} / {{ reference_session.term.code }}</dd>
+        <dt class="col-sm-3 col-lg-2">Faculty</dt><dd class="col-sm-9 col-lg-4">{{ reference_session.faculty_user.get_full_name|default:reference_session.faculty_user.username }}</dd>
+        <dt class="col-sm-3 col-lg-2">Assignment state</dt><dd class="col-sm-9 col-lg-4">{% if is_current_assignment %}<span class="badge text-bg-success">Current</span>{% else %}<span class="badge text-bg-secondary">Historical</span>{% endif %}</dd>
+        <dt class="col-sm-3 col-lg-2">Completed sessions</dt><dd class="col-sm-9 col-lg-4">{{ assignment_context.total_completed_sessions }}</dd>
+        <dt class="col-sm-3 col-lg-2">Date range</dt><dd class="col-sm-9 col-lg-4">{% if assignment_context.first_session_at %}{{ assignment_context.first_session_at|date:"M j, Y" }} to {{ assignment_context.latest_session_at|date:"M j, Y" }}{% else %}No completed sessions{% endif %}</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="card border-0 shadow-sm mb-4" aria-labelledby="history-filter-heading">
+    <div class="card-header bg-white"><h2 class="h5 mb-0" id="history-filter-heading">Filter completed sessions</h2></div>
+    <div class="card-body">
+      {% if filter_form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ filter_form.non_field_errors }}</div>{% endif %}
+      <form method="get" class="row g-3 align-items-end" novalidate>
+        <div class="col-sm-6 col-xl-2">
+          <label class="form-label" for="{{ filter_form.date_from.id_for_label }}">{{ filter_form.date_from.label }}</label>
+          {{ filter_form.date_from }}
+          {% if filter_form.date_from.errors %}<div class="invalid-feedback d-block" id="id_date_from_errors">{{ filter_form.date_from.errors|join:" " }}</div>{% endif %}
+        </div>
+        <div class="col-sm-6 col-xl-2">
+          <label class="form-label" for="{{ filter_form.date_to.id_for_label }}">{{ filter_form.date_to.label }}</label>
+          {{ filter_form.date_to }}
+          {% if filter_form.date_to.errors %}<div class="invalid-feedback d-block" id="id_date_to_errors">{{ filter_form.date_to.errors|join:" " }}</div>{% endif %}
+        </div>
+        <div class="col-sm-6 col-xl-2">
+          <label class="form-label" for="{{ filter_form.question_type.id_for_label }}">{{ filter_form.question_type.label }}</label>
+          {{ filter_form.question_type }}
+          {% if filter_form.question_type.errors %}<div class="invalid-feedback d-block" id="id_question_type_errors">{{ filter_form.question_type.errors|join:" " }}</div>{% endif %}
+        </div>
+        <div class="col-sm-6 col-xl-2">
+          <label class="form-label" for="{{ filter_form.topic.id_for_label }}">{{ filter_form.topic.label }}</label>
+          {{ filter_form.topic }}
+          {% if filter_form.topic.errors %}<div class="invalid-feedback d-block" id="id_topic_errors">{{ filter_form.topic.errors|join:" " }}</div>{% endif %}
+        </div>
+        <div class="col-sm-6 col-xl-2">
+          <label class="form-label" for="{{ filter_form.status.id_for_label }}">{{ filter_form.status.label }}</label>
+          {{ filter_form.status }}
+          {% if filter_form.status.errors %}<div class="invalid-feedback d-block" id="id_status_errors">{{ filter_form.status.errors|join:" " }}</div>{% endif %}
+        </div>
+        <div class="col-sm-6 col-xl-2 d-flex gap-2">
+          <button class="btn btn-success" type="submit">Apply</button>
+          <a class="btn btn-outline-secondary" href="{% url 'exit_pulse:history' reference_session.public_id %}">Reset filters</a>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <div class="row g-3 mb-4">
+    <div class="col-sm-6 col-xl-3"><div class="card h-100 border-success-subtle"><div class="card-body"><div class="small text-uppercase text-muted fw-semibold">Matching sessions</div><div class="h2 mb-0">{{ page_obj.paginator.count }}</div></div></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="card h-100 border-info-subtle"><div class="card-body"><div class="small text-uppercase text-muted fw-semibold">Weighted response rate</div><div class="h2 mb-0">{% if filtered_analytics.historical_denominator_session_count %}{{ filtered_analytics.weighted_response_rate }}%{% elif filtered_analytics.terminal_session_count %}Unavailable{% else %}No data{% endif %}</div></div></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="card h-100 border-success-subtle"><div class="card-body"><div class="small text-uppercase text-muted fw-semibold">Understanding</div><div class="h2 mb-0">{{ filtered_analytics.weighted_understanding_rate }}%</div></div></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="card h-100 border-warning-subtle"><div class="card-body"><div class="small text-uppercase text-muted fw-semibold">Support needed</div><div class="h2 mb-0">{{ filtered_analytics.weighted_support_needed_rate }}%</div></div></div></div>
+  </div>
+
+  {% if filtered_analytics.missing_denominator_session_count %}
+    <div class="alert alert-info" role="status">
+      Response-rate calculations exclude {{ filtered_analytics.missing_denominator_session_count }} matching older session{{ filtered_analytics.missing_denominator_session_count|pluralize }} without a stored historical enrollment count.
+    </div>
+  {% endif %}
+  {% if filtered_analytics.response_rate_above_100 %}
+    <div class="alert alert-light border" role="note">Anonymous browser-based participation may produce more responses than the stored class enrollment. The calculated response rate is shown without being capped.</div>
+  {% endif %}
+
+  <section class="card border-0 shadow-sm" aria-labelledby="history-table-heading">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between gap-2"><h2 class="h5 mb-0" id="history-table-heading">Completed Exit Pulse sessions</h2><span class="text-muted small">{{ page_obj.paginator.count }} matching</span></div>
+    {% if page_obj.object_list %}
+      <div class="table-responsive" tabindex="0" aria-label="Scrollable completed Exit Pulse session table">
+        <table class="table table-sm align-middle mb-0">
+          <caption class="visually-hidden">Completed Exit Pulse sessions for {{ reference_session.course.code }} {{ reference_session.section.code }}.</caption>
+          <thead><tr><th scope="col">Date</th><th scope="col">Topic</th><th scope="col">Question</th><th scope="col">Responses</th><th scope="col">Enrollment denominator</th><th scope="col">Response rate</th><th scope="col">Understanding</th><th scope="col">Support needed</th><th scope="col">Written feedback</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead>
+          <tbody>
+          {% for row in page_obj.object_list %}
+            <tr>
+              <td class="text-nowrap">{{ row.session.started_at|date:"M j, Y" }}<br><small class="text-muted">{{ row.session.started_at|date:"g:i A" }}</small></td>
+              <td>{{ row.session.topic }}</td>
+              <td><span class="fw-semibold">{{ row.question_label }}</span><br><small class="text-muted">{{ row.session.question_text_snapshot }}</small></td>
+              <td>{{ row.total_responses }}</td>
+              <td>{% if row.enrollment_denominator_is_historical %}{{ row.enrollment_denominator }}{% else %}<span class="text-muted" title="This session was created before historical enrollment snapshots were introduced.">Unavailable</span>{% endif %}</td>
+              <td>{% if row.response_rate_available %}{{ row.response_rate }}%{% else %}<span class="text-muted">Not historically comparable</span>{% endif %}</td>
+              <td>
+                <span class="d-block">{{ row.understanding_rate }}%</span>
+                <div class="progress" role="progressbar" aria-label="Understanding rate for {{ row.session.topic }}" aria-valuenow="{{ row.understanding_rate }}" aria-valuemin="0" aria-valuemax="100" style="height: .35rem; min-width: 5rem;"><div class="progress-bar bg-success" style="width: {{ row.understanding_progress_width }}%"></div></div>
+              </td>
+              <td>
+                <span class="d-block">{{ row.support_needed_rate }}%</span>
+                <div class="progress" role="progressbar" aria-label="Support-needed rate for {{ row.session.topic }}" aria-valuenow="{{ row.support_needed_rate }}" aria-valuemin="0" aria-valuemax="100" style="height: .35rem; min-width: 5rem;"><div class="progress-bar bg-warning" style="width: {{ row.support_needed_progress_width }}%"></div></div>
+              </td>
+              <td>{% if row.written_feedback_enabled %}<span class="badge text-bg-info">Enabled</span>{% else %}<span class="text-muted">Not enabled</span>{% endif %}</td>
+              <td><span class="badge text-bg-secondary">{{ row.session.get_status_display }}</span></td>
+              <td><a class="btn btn-sm btn-outline-success text-nowrap" href="{% url 'exit_pulse:results' row.session.public_id %}">View results for {{ row.session.topic }}</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="card-body text-center py-5" role="status">
+        {% if has_active_filters %}
+          <p class="text-muted mb-0">No completed Exit Pulse sessions match the selected filters.</p>
+        {% else %}
+          <p class="text-muted mb-0">No completed Exit Pulse sessions are available for this assignment.</p>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="mt-3" aria-label="Class History pagination">
+      <ul class="pagination justify-content-center flex-wrap">
+        <li class="page-item{% if not page_obj.has_previous %} disabled{% endif %}">{% if page_obj.has_previous %}<a class="page-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>{% else %}<span class="page-link">Previous</span>{% endif %}</li>
+        <li class="page-item active" aria-current="page"><span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+        <li class="page-item{% if not page_obj.has_next %} disabled{% endif %}">{% if page_obj.has_next %}<a class="page-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>{% else %}<span class="page-link">Next</span>{% endif %}</li>
+      </ul>
+    </nav>
+  {% endif %}
+
+  <div class="alert alert-light border mt-4 mb-0">
+    Written responses are never displayed in Class History. Open an owner-authorized session result to review enabled anonymous feedback.
+  </div>
+</div>
+{% endblock %}

@@ -2,19 +2,20 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import hmac
 import re
 import secrets
+from uuid import UUID
 
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core import signing
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Count, F, Max, Min, OuterRef, Q, Subquery, Sum
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering, FacultyAssignment
@@ -666,6 +667,45 @@ class ExitPulseAssignmentAnalytics:
     support_needed_response_count: int
     weighted_understanding_rate: Decimal
     weighted_support_needed_rate: Decimal
+    response_rate_above_100: bool
+    understanding_progress_width: Decimal
+    support_needed_progress_width: Decimal
+
+
+@dataclass(frozen=True)
+class ExitPulseSessionAnalyticsRow:
+    session: ExitPulseSession
+    total_responses: int
+    enrollment_denominator: int | None
+    enrollment_denominator_is_historical: bool
+    enrollment_denominator_source: str
+    response_rate_available: bool
+    response_rate: Decimal | None
+    response_rate_above_100: bool
+    understanding_response_count: int
+    support_needed_response_count: int
+    understanding_rate: Decimal
+    support_needed_rate: Decimal
+    understanding_progress_width: Decimal
+    support_needed_progress_width: Decimal
+    question_label: str
+    written_feedback_enabled: bool
+
+
+@dataclass(frozen=True)
+class ExitPulseHistoryAssignmentRow:
+    assignment_id: int
+    history_reference: UUID
+    course_code: str
+    course_title: str
+    section_code: str
+    campus_name: str
+    academic_year_code: str
+    term_code: str
+    session_count: int
+    completed_session_count: int
+    latest_session_at: datetime | None
+    is_current: bool
 
 
 class ExitPulseAnalyticsService:
@@ -675,6 +715,13 @@ class ExitPulseAnalyticsService:
     )
     DENOMINATOR_SOURCE_SNAPSHOT = "STORED_SNAPSHOT"
     DENOMINATOR_SOURCE_LEGACY_ESTIMATE = "CURRENT_ENROLLMENT_ESTIMATE"
+    DENOMINATOR_SOURCE_UNAVAILABLE = "HISTORICAL_UNAVAILABLE"
+    QUESTION_TYPE_LABELS = {
+        ExitPulseSession.QuestionCode.UNDERSTANDING: "Understanding",
+        ExitPulseSession.QuestionCode.APPLICATION_CONFIDENCE: "Application confidence",
+        ExitPulseSession.QuestionCode.NEEDS_EXPLANATION: "Needs explanation",
+        ExitPulseSession.QuestionCode.CUSTOM: "Custom",
+    }
 
     @staticmethod
     def _percent(count, total):
@@ -684,9 +731,85 @@ class ExitPulseAnalyticsService:
             Decimal("0.1"), rounding=ROUND_HALF_UP
         )
 
+    @staticmethod
+    def _progress_width(rate):
+        return min(Decimal("100.0"), max(Decimal("0.0"), rate or Decimal("0.0")))
+
     @classmethod
     def terminal_sessions(cls, queryset):
         return queryset.filter(status__in=cls.TERMINAL_STATUSES)
+
+    @classmethod
+    def annotate_session_metrics(cls, queryset):
+        return queryset.annotate(
+            analytics_response_total=Count("responses"),
+            analytics_understanding_count=Count(
+                "responses",
+                filter=Q(
+                    responses__response_code__in=[
+                        ExitPulseResponse.ResponseCode.CONFIDENT,
+                        ExitPulseResponse.ResponseCode.MOSTLY_UNDERSTOOD,
+                    ]
+                ),
+            ),
+            analytics_support_count=Count(
+                "responses",
+                filter=Q(
+                    responses__response_code__in=[
+                        ExitPulseResponse.ResponseCode.NEEDS_CLARIFICATION,
+                        ExitPulseResponse.ResponseCode.NEEDS_PRACTICE,
+                    ]
+                ),
+            ),
+        )
+
+    @classmethod
+    def session_rows(cls, sessions):
+        rows = []
+        for session in sessions:
+            total = session.analytics_response_total or 0
+            understanding = session.analytics_understanding_count or 0
+            support = session.analytics_support_count or 0
+            has_historical_denominator = session.enrollment_count_snapshot is not None
+            response_rate = (
+                cls._percent(total, session.enrollment_count_snapshot)
+                if has_historical_denominator
+                else None
+            )
+            understanding_rate = cls._percent(understanding, total)
+            support_rate = cls._percent(support, total)
+            rows.append(
+                ExitPulseSessionAnalyticsRow(
+                    session=session,
+                    total_responses=total,
+                    enrollment_denominator=(
+                        session.enrollment_count_snapshot if has_historical_denominator else None
+                    ),
+                    enrollment_denominator_is_historical=has_historical_denominator,
+                    enrollment_denominator_source=(
+                        cls.DENOMINATOR_SOURCE_SNAPSHOT
+                        if has_historical_denominator
+                        else cls.DENOMINATOR_SOURCE_UNAVAILABLE
+                    ),
+                    response_rate_available=has_historical_denominator,
+                    response_rate=response_rate,
+                    response_rate_above_100=(
+                        response_rate is not None and response_rate > Decimal("100.0")
+                    ),
+                    understanding_response_count=understanding,
+                    support_needed_response_count=support,
+                    understanding_rate=understanding_rate,
+                    support_needed_rate=support_rate,
+                    understanding_progress_width=cls._progress_width(understanding_rate),
+                    support_needed_progress_width=cls._progress_width(support_rate),
+                    question_label=cls.QUESTION_TYPE_LABELS.get(
+                        session.question_code,
+                        session.get_question_code_display(),
+                    ),
+                    written_feedback_enabled=session.allow_written_feedback,
+                )
+            )
+        return tuple(rows)
 
     @classmethod
     def enrollment_denominator(cls, session):
@@ -759,6 +882,9 @@ class ExitPulseAnalyticsService:
         )
         understanding = response_summary["understanding_response_count"] or 0
         support = response_summary["support_needed_response_count"] or 0
+        weighted_response_rate = cls._percent(response_total_with_denominator, denominator_total)
+        weighted_understanding_rate = cls._percent(understanding, total_responses)
+        weighted_support_needed_rate = cls._percent(support, total_responses)
         return ExitPulseAssignmentAnalytics(
             terminal_session_count=session_summary["terminal_session_count"] or 0,
             distinct_topic_count=session_summary["distinct_topic_count"] or 0,
@@ -772,11 +898,14 @@ class ExitPulseAnalyticsService:
             ),
             enrollment_denominator_total=denominator_total,
             response_total_with_historical_denominator=response_total_with_denominator,
-            weighted_response_rate=cls._percent(response_total_with_denominator, denominator_total),
+            weighted_response_rate=weighted_response_rate,
             understanding_response_count=understanding,
             support_needed_response_count=support,
-            weighted_understanding_rate=cls._percent(understanding, total_responses),
-            weighted_support_needed_rate=cls._percent(support, total_responses),
+            weighted_understanding_rate=weighted_understanding_rate,
+            weighted_support_needed_rate=weighted_support_needed_rate,
+            response_rate_above_100=weighted_response_rate > Decimal("100.0"),
+            understanding_progress_width=cls._progress_width(weighted_understanding_rate),
+            support_needed_progress_width=cls._progress_width(weighted_support_needed_rate),
         )
 
     @classmethod
@@ -837,4 +966,115 @@ class ExitPulseAnalyticsService:
             ),
             written_review=written_review,
             written_learned=written_learned,
+        )
+
+
+class ExitPulseHistoryService:
+    @staticmethod
+    def owned_sessions(*, user, tenant_id=None, campus_id=None):
+        queryset = ExitPulseSession.objects.filter(faculty_user=user)
+        if tenant_id:
+            queryset = queryset.filter(tenant_id=tenant_id)
+        if campus_id:
+            queryset = queryset.filter(campus_id=campus_id)
+        return queryset
+
+    @staticmethod
+    def expire_elapsed_sessions(queryset, *, now=None):
+        now = now or timezone.now()
+        return queryset.filter(
+            status=ExitPulseSession.Status.LIVE,
+            expires_at__lte=now,
+        ).update(
+            status=ExitPulseSession.Status.EXPIRED,
+            closed_at=F("expires_at"),
+            updated_at=now,
+        )
+
+    @staticmethod
+    def apply_dashboard_filters(queryset, cleaned_data):
+        academic_year_id = cleaned_data.get("academic_year")
+        term_id = cleaned_data.get("term")
+        if academic_year_id:
+            queryset = queryset.filter(academic_year_id=academic_year_id)
+        if term_id:
+            queryset = queryset.filter(term_id=term_id)
+        return queryset
+
+    @staticmethod
+    def apply_history_filters(queryset, cleaned_data):
+        date_from = cleaned_data.get("date_from")
+        date_to = cleaned_data.get("date_to")
+        question_type = cleaned_data.get("question_type")
+        topic = cleaned_data.get("topic")
+        status = cleaned_data.get("status")
+        current_timezone = timezone.get_current_timezone()
+        if date_from:
+            start_at = timezone.make_aware(datetime.combine(date_from, time.min), current_timezone)
+            queryset = queryset.filter(started_at__gte=start_at)
+        if date_to:
+            end_at = timezone.make_aware(
+                datetime.combine(date_to + timedelta(days=1), time.min),
+                current_timezone,
+            )
+            queryset = queryset.filter(started_at__lt=end_at)
+        if question_type:
+            queryset = queryset.filter(question_code=question_type)
+        if topic:
+            queryset = queryset.filter(topic__icontains=topic)
+        if status:
+            queryset = queryset.filter(status=status)
+        return queryset
+
+    @classmethod
+    def assignment_rows(cls, sessions, *, current_assignment_ids):
+        latest_session = sessions.filter(
+            faculty_assignment_id=OuterRef("faculty_assignment_id")
+        ).order_by("-started_at", "-created_at", "-id")
+        grouped = (
+            sessions.values(
+                "faculty_assignment_id",
+                "course__code",
+                "course__title",
+                "section__code",
+                "campus__name",
+                "academic_year__code",
+                "term__code",
+            )
+            .annotate(
+                session_count=Count("id"),
+                completed_session_count=Count(
+                    "id",
+                    filter=Q(status__in=ExitPulseAnalyticsService.TERMINAL_STATUSES),
+                ),
+                latest_session_at=Max("started_at"),
+                history_reference=Subquery(latest_session.values("public_id")[:1]),
+            )
+            .order_by("-latest_session_at", "-faculty_assignment_id")
+        )
+        current_assignment_ids = set(current_assignment_ids)
+        return tuple(
+            ExitPulseHistoryAssignmentRow(
+                assignment_id=row["faculty_assignment_id"],
+                history_reference=row["history_reference"],
+                course_code=row["course__code"],
+                course_title=row["course__title"],
+                section_code=row["section__code"],
+                campus_name=row["campus__name"],
+                academic_year_code=row["academic_year__code"],
+                term_code=row["term__code"],
+                session_count=row["session_count"],
+                completed_session_count=row["completed_session_count"],
+                latest_session_at=row["latest_session_at"],
+                is_current=row["faculty_assignment_id"] in current_assignment_ids,
+            )
+            for row in grouped
+        )
+
+    @staticmethod
+    def history_context(terminal_sessions):
+        return terminal_sessions.aggregate(
+            total_completed_sessions=Count("id"),
+            first_session_at=Min("started_at"),
+            latest_session_at=Max("started_at"),
         )

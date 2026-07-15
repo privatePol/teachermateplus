@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from io import StringIO
 from unittest.mock import patch
+import uuid
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -25,6 +26,7 @@ from apps.exit_pulse.services import (
     ExitPulseAnalyticsService,
     ExitPulseAnonymousIdentityService,
     ExitPulseDuplicateResponse,
+    ExitPulseHistoryService,
     ExitPulseQuestionValidationService,
     ExitPulseResponseService,
     ExitPulseSessionService,
@@ -868,6 +870,430 @@ class ExitPulseCheckpointOneAnalyticsTests(ExitPulseTestBase):
 
         self.assertEqual(analytics.enrollment_denominator_total, 3)
         self.assertEqual(analytics.weighted_response_rate, Decimal("33.3"))
+
+
+class ExitPulseDashboardAndHistoryTests(ExitPulseTestBase):
+    def _terminal_session(
+        self,
+        *,
+        topic,
+        snapshot=4,
+        status=ExitPulseSession.Status.CLOSED,
+        question_code=ExitPulseSession.QuestionCode.UNDERSTANDING,
+        started_at=None,
+        allow_written_feedback=False,
+    ):
+        session = self.make_live(
+            topic=topic,
+            question_code=question_code,
+            custom_question=(
+                "Which lesson concept needs more clarification?"
+                if question_code == ExitPulseSession.QuestionCode.CUSTOM
+                else ""
+            ),
+            allow_written_feedback=allow_written_feedback,
+            feedback_review_enabled=allow_written_feedback,
+        )
+        session.status = status
+        session.enrollment_count_snapshot = snapshot
+        session.started_at = started_at or session.started_at
+        session.closed_at = session.started_at + timedelta(minutes=5)
+        session.save(
+            update_fields=[
+                "status",
+                "enrollment_count_snapshot",
+                "started_at",
+                "closed_at",
+                "updated_at",
+            ]
+        )
+        return session
+
+    @staticmethod
+    def _add_responses(session, codes, prefix, *, feedback=""):
+        for index, code in enumerate(codes):
+            ExitPulseResponse.objects.create(
+                session=session,
+                response_code=code,
+                feedback_review=feedback,
+                anonymous_token_hash=f"{prefix}{index:063d}"[:64],
+            )
+
+    def test_dashboard_uses_terminal_weighted_metrics_and_neutral_legacy_notices(self):
+        stored = self._terminal_session(topic="Stored denominator", snapshot=2)
+        legacy = self._terminal_session(
+            topic="Legacy denominator",
+            snapshot=None,
+            allow_written_feedback=True,
+        )
+        self._add_responses(
+            stored,
+            [
+                ExitPulseResponse.ResponseCode.CONFIDENT,
+                ExitPulseResponse.ResponseCode.MOSTLY_UNDERSTOOD,
+                ExitPulseResponse.ResponseCode.NEEDS_PRACTICE,
+            ],
+            "a",
+        )
+        self._add_responses(
+            legacy,
+            [ExitPulseResponse.ResponseCode.NEEDS_CLARIFICATION],
+            "b",
+            feedback="private dashboard feedback",
+        )
+        cancelled = ExitPulseSessionService.cancel(
+            session=self.make_live(topic="Cancelled topic"),
+            user=self.faculty,
+        )
+        self._add_responses(
+            cancelled,
+            [ExitPulseResponse.ResponseCode.CONFIDENT],
+            "c",
+        )
+        self.make_draft(topic="Draft topic")
+        self.make_live(topic="Live topic")
+
+        response = self.client.get(reverse("exit_pulse:landing"))
+        analytics = response.context["dashboard_analytics"]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(analytics.terminal_session_count, 2)
+        self.assertEqual(analytics.weighted_response_rate, Decimal("150.0"))
+        self.assertEqual(analytics.missing_denominator_session_count, 1)
+        self.assertEqual(analytics.weighted_understanding_rate, Decimal("50.0"))
+        self.assertEqual(analytics.weighted_support_needed_rate, Decimal("50.0"))
+        self.assertContains(response, "do not have a stored historical enrollment count")
+        self.assertContains(response, "shown without being capped")
+        self.assertNotContains(response, "private dashboard feedback")
+        self.assertNotContains(response, "faculty ranking")
+
+    def test_dashboard_recent_sessions_are_owned_limited_and_newest_first(self):
+        other_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=self.other_faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.other_faculty,
+        )
+        other_session = ExitPulseSessionService.create_draft(
+            user=self.other_faculty,
+            assignment=other_assignment,
+            topic="Other faculty private topic",
+            question_code=ExitPulseSession.QuestionCode.UNDERSTANDING,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        other_session = ExitPulseSessionService.start(
+            session=other_session,
+            user=self.other_faculty,
+        )
+        ExitPulseSessionService.close(session=other_session, user=self.other_faculty)
+        for index in range(12):
+            self._terminal_session(topic=f"Owned topic {index}")
+
+        response = self.client.get(reverse("exit_pulse:landing"))
+        recent = response.context["recent_sessions"]
+
+        self.assertEqual(len(recent), 10)
+        self.assertEqual(recent[0].session.topic, "Owned topic 11")
+        self.assertNotContains(response, "Other faculty private topic")
+
+    def test_dashboard_permission_and_snapshot_scope_are_enforced(self):
+        hidden = self._terminal_session(topic="Wrong scope topic")
+        other_tenant = Tenant.objects.create(code="PULSE2", name="Other Pulse College")
+        other_campus = Campus.objects.create(
+            tenant=other_tenant,
+            code="OTHER",
+            name="Other Campus",
+        )
+        ExitPulseSession.objects.filter(pk=hidden.pk).update(
+            tenant=other_tenant,
+            campus=other_campus,
+        )
+        response = self.client.get(reverse("exit_pulse:landing"))
+        self.assertNotContains(response, "Wrong scope topic")
+
+        RolePermission.objects.filter(permission__code="exit_pulse.use").delete()
+        denied = self.client.get(reverse("exit_pulse:landing"))
+        self.assertEqual(denied.status_code, 403)
+
+    def test_original_faculty_retains_history_after_deactivation_but_cannot_create_from_it(self):
+        session = self._terminal_session(topic="Historical normalization")
+        self.assignment.is_active = False
+        self.assignment.save(update_fields=["is_active", "updated_at"])
+        history_url = reverse("exit_pulse:history", kwargs={"session_public_id": session.public_id})
+
+        response = self.client.get(history_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["is_current_assignment"])
+        self.assertContains(response, "Historical assignment")
+        self.assertContains(response, "new sessions cannot be created")
+        create_response = self.client.post(
+            reverse("exit_pulse:create"),
+            {
+                "faculty_assignment": self.assignment.id,
+                "topic": "Unauthorized new pulse",
+                "question_code": ExitPulseSession.QuestionCode.UNDERSTANDING,
+            },
+        )
+        self.assertContains(create_response, "Select a valid choice")
+        self.assertFalse(ExitPulseSession.objects.filter(topic="Unauthorized new pulse").exists())
+        dashboard = self.client.get(reverse("exit_pulse:landing"))
+        self.assertContains(dashboard, "Historical normalization")
+        self.assertContains(dashboard, "Historical")
+        self.assertNotContains(dashboard, 'href="/faculty/exit-pulse/create/"', html=False)
+
+    def test_replacement_faculty_cannot_inherit_prior_faculty_history(self):
+        session = self._terminal_session(topic="Prior faculty session")
+        self.assignment.is_active = False
+        self.assignment.save(update_fields=["is_active", "updated_at"])
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=self.other_faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.other_faculty,
+        )
+        history_url = reverse("exit_pulse:history", kwargs={"session_public_id": session.public_id})
+
+        self.client.force_login(self.other_faculty)
+        self.assertEqual(self.client.get(history_url).status_code, 404)
+        self.client.force_login(self.faculty)
+        self.assertEqual(self.client.get(history_url).status_code, 200)
+
+    def test_history_forged_uuid_and_cross_scope_access_are_denied(self):
+        session = self._terminal_session(topic="Scoped history")
+        self.assertEqual(
+            self.client.get(
+                reverse("exit_pulse:history", kwargs={"session_public_id": uuid.uuid4()})
+            ).status_code,
+            404,
+        )
+        other_tenant = Tenant.objects.create(code="HIST2", name="History Tenant")
+        other_campus = Campus.objects.create(
+            tenant=other_tenant,
+            code="HIST",
+            name="History Campus",
+        )
+        self.faculty.default_tenant = other_tenant
+        self.faculty.default_campus = other_campus
+        self.faculty.save(update_fields=["default_tenant", "default_campus", "updated_at"])
+        UserRole.objects.create(
+            user=self.faculty,
+            role=self.faculty_role,
+            tenant=other_tenant,
+            campus=other_campus,
+        )
+        self.client.logout()
+        self.client.force_login(self.faculty)
+        history_url = reverse("exit_pulse:history", kwargs={"session_public_id": session.public_id})
+        self.assertEqual(self.client.get(history_url).status_code, 404)
+
+    def test_history_displays_terminal_rows_denominator_integrity_and_no_feedback_content(self):
+        older = self._terminal_session(
+            topic="<script>older topic</script>",
+            snapshot=2,
+            started_at=timezone.now() - timedelta(days=3),
+            allow_written_feedback=True,
+        )
+        zero = self._terminal_session(
+            topic="Zero denominator",
+            snapshot=0,
+            status=ExitPulseSession.Status.EXPIRED,
+            started_at=timezone.now() - timedelta(days=2),
+        )
+        legacy = self._terminal_session(
+            topic="Legacy unavailable",
+            snapshot=None,
+            started_at=timezone.now() - timedelta(days=1),
+        )
+        self._add_responses(
+            older,
+            [ExitPulseResponse.ResponseCode.CONFIDENT],
+            "d",
+            feedback="secret history response",
+        )
+        self.make_draft(topic="Excluded draft")
+        self.make_live(topic="Excluded live")
+        ExitPulseSessionService.cancel(
+            session=self.make_live(topic="Excluded cancelled"),
+            user=self.faculty,
+        )
+
+        response = self.client.get(
+            reverse("exit_pulse:history", kwargs={"session_public_id": older.public_id})
+        )
+        rows = response.context["page_obj"].object_list
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0].session, legacy)
+        self.assertEqual(rows[1].enrollment_denominator, 0)
+        self.assertTrue(rows[1].response_rate_available)
+        self.assertIsNone(rows[0].response_rate)
+        self.assertContains(response, "Unavailable")
+        self.assertContains(response, "Not historically comparable")
+        self.assertContains(response, "&lt;script&gt;older topic&lt;/script&gt;", html=False)
+        self.assertNotContains(response, "secret history response")
+        self.assertNotContains(response, "Excluded draft")
+        self.assertNotContains(response, "Excluded live")
+        self.assertNotContains(response, "Excluded cancelled")
+        self.assertContains(response, 'role="progressbar"', html=False)
+        self.assertContains(response, "View results for")
+
+    def test_history_filters_dates_question_topic_status_and_invalid_range(self):
+        first = self._terminal_session(
+            topic="Database Normalization",
+            started_at=timezone.now() - timedelta(days=5),
+        )
+        target = self._terminal_session(
+            topic="Advanced SQL Joins",
+            status=ExitPulseSession.Status.EXPIRED,
+            question_code=ExitPulseSession.QuestionCode.APPLICATION_CONFIDENCE,
+            started_at=timezone.now() - timedelta(days=2),
+        )
+        self._terminal_session(topic="Current Networks", started_at=timezone.now())
+        history_url = reverse("exit_pulse:history", kwargs={"session_public_id": first.public_id})
+        target_date = timezone.localtime(target.started_at).date().isoformat()
+
+        response = self.client.get(
+            history_url,
+            {
+                "date_from": target_date,
+                "date_to": target_date,
+                "question_type": ExitPulseSession.QuestionCode.APPLICATION_CONFIDENCE,
+                "topic": "  sql   joins ",
+                "status": ExitPulseSession.Status.EXPIRED,
+            },
+        )
+
+        self.assertEqual(response.context["page_obj"].paginator.count, 1)
+        self.assertEqual(response.context["page_obj"].object_list[0].session, target)
+        self.assertEqual(response.context["filter_form"].cleaned_data["topic"], "sql joins")
+        invalid = self.client.get(
+            history_url,
+            {"date_from": "2026-07-10", "date_to": "2026-07-01"},
+        )
+        self.assertContains(invalid, "Date to must be on or after Date from.")
+        self.assertEqual(invalid.context["page_obj"].paginator.count, 0)
+
+    def test_history_paginates_twenty_and_preserves_filters(self):
+        reference = None
+        for index in range(21):
+            reference = self._terminal_session(topic=f"Pagination topic {index}")
+        history_url = reverse(
+            "exit_pulse:history",
+            kwargs={"session_public_id": reference.public_id},
+        )
+
+        first_page = self.client.get(history_url, {"topic": "Pagination", "page": "1"})
+        second_page = self.client.get(history_url, {"topic": "Pagination", "page": "2"})
+
+        self.assertEqual(len(first_page.context["page_obj"].object_list), 20)
+        self.assertEqual(len(second_page.context["page_obj"].object_list), 1)
+        self.assertEqual(first_page.context["page_obj"].paginator.count, 21)
+        self.assertIn("topic=Pagination", first_page.context["page_query"])
+        self.assertContains(first_page, "topic=Pagination&amp;page=2", html=False)
+        self.assertContains(first_page, f'href="{history_url}">Reset filters</a>', html=False)
+        invalid_page = self.client.get(history_url, {"topic": "Pagination", "page": "not-a-page"})
+        self.assertEqual(invalid_page.context["page_obj"].number, 1)
+
+    def test_history_metric_queries_do_not_grow_per_row(self):
+        sessions = [self._terminal_session(topic=f"Query topic {index}") for index in range(5)]
+        for index, session in enumerate(sessions):
+            self._add_responses(
+                session,
+                [ExitPulseResponse.ResponseCode.CONFIDENT],
+                str(index),
+            )
+        terminal = ExitPulseAnalyticsService.terminal_sessions(ExitPulseSession.objects.all())
+
+        with self.assertNumQueries(1):
+            rows = ExitPulseAnalyticsService.session_rows(
+                ExitPulseAnalyticsService.annotate_session_metrics(terminal).order_by("id")
+            )
+            self.assertEqual(len(rows), 5)
+        with self.assertNumQueries(1):
+            assignment_rows = ExitPulseHistoryService.assignment_rows(
+                ExitPulseSession.objects.all(),
+                current_assignment_ids=[self.assignment.id],
+            )
+            self.assertEqual(len(assignment_rows), 1)
+
+    def test_dashboard_academic_filters_select_owned_historical_scope(self):
+        first = self._terminal_session(topic="First academic scope")
+        second_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2027-2028",
+            name="AY 2027-2028",
+            start_date=date(2027, 6, 1),
+            end_date=date(2028, 5, 31),
+        )
+        second_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=second_year,
+            code="2ND",
+            name="Second Semester",
+        )
+        second_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=second_year,
+            term=second_term,
+            course=self.course,
+            section=self.section,
+            status=CourseOffering.Status.OPEN,
+        )
+        second_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=second_offering,
+            faculty_user=self.faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty,
+        )
+        second = ExitPulseSessionService.create_draft(
+            user=self.faculty,
+            assignment=second_assignment,
+            topic="Second academic scope",
+            question_code=ExitPulseSession.QuestionCode.UNDERSTANDING,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        second = ExitPulseSessionService.start(session=second, user=self.faculty)
+        ExitPulseSessionService.close(session=second, user=self.faculty)
+
+        response = self.client.get(
+            reverse("exit_pulse:landing"),
+            {"academic_year": second_year.id, "term": second_term.id},
+        )
+
+        self.assertEqual(response.context["dashboard_analytics"].terminal_session_count, 1)
+        self.assertContains(response, "Second academic scope")
+        self.assertNotContains(response, first.topic)
+        invalid = self.client.get(reverse("exit_pulse:landing"), {"academic_year": "999999"})
+        self.assertContains(invalid, 'aria-describedby="id_academic_year_errors"', html=False)
+
+    def test_history_empty_state_and_feature_flag_enforcement(self):
+        live = self.make_live(topic="Only live reference")
+        history_url = reverse("exit_pulse:history", kwargs={"session_public_id": live.public_id})
+        response = self.client.get(history_url)
+        self.assertContains(response, "No completed Exit Pulse sessions are available for this assignment.")
+
+        SystemSettingService.set(
+            FeatureSettingsService.EXIT_PULSE_ENABLED_KEY,
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        self.assertEqual(self.client.get(history_url).status_code, 403)
 
 
 @override_settings(EXIT_PULSE_BROWSER_RATE_LIMIT_PER_MINUTE=1)

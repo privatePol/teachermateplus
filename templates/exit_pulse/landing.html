@@ -6,25 +6,95 @@
     <div>
       <p class="text-success fw-semibold text-uppercase small mb-1">Classroom Tools</p>
       <h1 class="h3 mb-1">Exit Pulse</h1>
-      <p class="text-muted mb-0">Run a five-minute anonymous Learning Check for one accepted class assignment.</p>
+      <p class="text-muted mb-0">Review anonymous learning-response patterns and run a new Learning Check for an eligible class.</p>
     </div>
     {% if assignment_count %}
       <a class="btn btn-success" href="{% url 'exit_pulse:create' %}">Create Exit Pulse</a>
     {% endif %}
   </div>
 
-  <div class="row g-3 mb-4">
-    <div class="col-md-4"><div class="card h-100 border-success-subtle"><div class="card-body"><h2 class="h6">1. Ask</h2><p class="mb-0 text-muted">Choose a learning question and lesson topic.</p></div></div></div>
-    <div class="col-md-4"><div class="card h-100 border-warning-subtle"><div class="card-body"><h2 class="h6">2. Share</h2><p class="mb-0 text-muted">Display the secure QR code or public link for five minutes.</p></div></div></div>
-    <div class="col-md-4"><div class="card h-100 border-info-subtle"><div class="card-body"><h2 class="h6">3. Review</h2><p class="mb-0 text-muted">See anonymous class-level results after the session ends.</p></div></div></div>
-  </div>
+  {% if has_filter_options %}
+    <section class="card border-0 shadow-sm mb-4" aria-labelledby="dashboard-filter-heading">
+      <div class="card-body">
+        <h2 class="h6 mb-3" id="dashboard-filter-heading">Dashboard scope</h2>
+        {% if filter_form.errors %}
+          <div class="alert alert-danger" role="alert">Choose an academic year and term available in your Exit Pulse history.</div>
+        {% endif %}
+        <form method="get" class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label" for="{{ filter_form.academic_year.id_for_label }}">{{ filter_form.academic_year.label }}</label>
+            {{ filter_form.academic_year }}
+            {% if filter_form.academic_year.errors %}<div class="invalid-feedback d-block" id="id_academic_year_errors">{{ filter_form.academic_year.errors|join:" " }}</div>{% endif %}
+          </div>
+          <div class="col-md-5">
+            <label class="form-label" for="{{ filter_form.term.id_for_label }}">{{ filter_form.term.label }}</label>
+            {{ filter_form.term }}
+            {% if filter_form.term.errors %}<div class="invalid-feedback d-block" id="id_term_errors">{{ filter_form.term.errors|join:" " }}</div>{% endif %}
+          </div>
+          <div class="col-md-3 d-flex gap-2">
+            <button class="btn btn-success" type="submit">Apply</button>
+            <a class="btn btn-outline-secondary" href="{% url 'exit_pulse:landing' %}">Reset</a>
+          </div>
+        </form>
+      </div>
+    </section>
+  {% endif %}
+
+  <section aria-labelledby="exit-pulse-summary-heading" class="mb-4">
+    <h2 class="h5 mb-3" id="exit-pulse-summary-heading">Completed learning checks</h2>
+    <div class="row g-3">
+      <div class="col-sm-6 col-xl-3">
+        <div class="card h-100 border-success-subtle shadow-sm"><div class="card-body">
+          <div class="small text-uppercase text-muted fw-semibold">Completed sessions</div>
+          <div class="display-6 fw-bold text-success">{{ dashboard_analytics.terminal_session_count }}</div>
+          <div class="small text-muted">Closed and expired only</div>
+        </div></div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="card h-100 border-info-subtle shadow-sm"><div class="card-body">
+          <div class="small text-uppercase text-muted fw-semibold">Average response rate</div>
+          <div class="display-6 fw-bold text-primary">{% if dashboard_analytics.historical_denominator_session_count %}{{ dashboard_analytics.weighted_response_rate }}%{% elif dashboard_analytics.terminal_session_count %}Unavailable{% else %}No data{% endif %}</div>
+          <div class="small text-muted">Uses stored historical enrollment counts</div>
+        </div></div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="card h-100 border-success-subtle shadow-sm"><div class="card-body">
+          <div class="small text-uppercase text-muted fw-semibold">Overall understanding</div>
+          <div class="h2 fw-bold text-success">{{ dashboard_analytics.weighted_understanding_rate }}%</div>
+          <div class="progress" role="progressbar" aria-label="Overall understanding rate" aria-valuenow="{{ dashboard_analytics.weighted_understanding_rate }}" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar bg-success" style="width: {{ dashboard_analytics.understanding_progress_width }}%"></div>
+          </div>
+        </div></div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="card h-100 border-warning-subtle shadow-sm"><div class="card-body">
+          <div class="small text-uppercase text-muted fw-semibold">Overall support needed</div>
+          <div class="h2 fw-bold text-warning-emphasis">{{ dashboard_analytics.weighted_support_needed_rate }}%</div>
+          <div class="progress" role="progressbar" aria-label="Overall support-needed rate" aria-valuenow="{{ dashboard_analytics.weighted_support_needed_rate }}" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar bg-warning" style="width: {{ dashboard_analytics.support_needed_progress_width }}%"></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  {% if dashboard_analytics.missing_denominator_session_count %}
+    <div class="alert alert-info" role="status">
+      Response-rate calculations exclude {{ dashboard_analytics.missing_denominator_session_count }} older completed session{{ dashboard_analytics.missing_denominator_session_count|pluralize }} that do not have a stored historical enrollment count.
+    </div>
+  {% endif %}
+  {% if dashboard_analytics.response_rate_above_100 %}
+    <div class="alert alert-light border" role="note">
+      Anonymous browser-based participation may produce more responses than the stored class enrollment. The calculated response rate is shown without being capped.
+    </div>
+  {% endif %}
 
   {% if not assignment_count %}
-    <div class="alert alert-warning">No active accepted faculty assignment is available in the current tenant and campus scope.</div>
+    <div class="alert alert-warning">No active accepted faculty assignment is available in the current tenant and campus scope. Historical Exit Pulse records remain available below when present.</div>
   {% endif %}
 
   {% if current_sessions %}
-    <section aria-labelledby="current-pulses-heading">
+    <section aria-labelledby="current-pulses-heading" class="mb-4">
       <h2 class="h5 mb-3" id="current-pulses-heading">Current Exit Pulse</h2>
       <div class="row g-3">
         {% for session in current_sessions %}
@@ -33,23 +103,81 @@
               <div class="card-body">
                 <div class="d-flex justify-content-between gap-2">
                   <h3 class="h6 mb-1">{{ session.topic }}</h3>
-                  <span class="badge text-bg-success">{{ session.get_status_display }}</span>
+                  <span><span class="visually-hidden">Status: </span><span class="badge text-bg-success">{{ session.get_status_display }}</span></span>
                 </div>
                 <p class="small text-muted mb-2">{{ session.course.code }} · {{ session.section.code }} · {{ session.term.code }}</p>
                 <p class="mb-3">{{ session.question_text_snapshot }}</p>
-                <a class="btn btn-sm btn-outline-success" href="{% url 'exit_pulse:live' session.public_id %}">Open Live Session</a>
+                <a class="btn btn-sm btn-outline-success" href="{% url 'exit_pulse:live' session.public_id %}">Open live session for {{ session.topic }}</a>
               </div>
             </div>
           </div>
         {% endfor %}
       </div>
     </section>
-  {% else %}
-    <div class="card border-0 bg-light"><div class="card-body text-center py-5"><h2 class="h5">No live Exit Pulse</h2><p class="text-muted mb-0">Create one when you are ready to check class understanding.</p></div></div>
   {% endif %}
 
+  <section class="card border-0 shadow-sm mb-4" aria-labelledby="recent-pulses-heading">
+    <div class="card-header bg-white"><h2 class="h5 mb-0" id="recent-pulses-heading">Recent completed sessions</h2></div>
+    {% if recent_sessions %}
+      <div class="table-responsive" tabindex="0" aria-label="Scrollable recent completed Exit Pulse session table">
+        <table class="table table-sm align-middle mb-0">
+          <caption class="visually-hidden">Ten most recent completed Exit Pulse sessions in the selected dashboard scope.</caption>
+          <thead><tr><th scope="col">Date</th><th scope="col">Assignment</th><th scope="col">Topic</th><th scope="col">Question type</th><th scope="col">Status</th><th scope="col">Responses</th><th scope="col">Response rate</th><th scope="col">Understanding</th><th scope="col">Support needed</th><th scope="col">Action</th></tr></thead>
+          <tbody>
+          {% for row in recent_sessions %}
+            <tr>
+              <td class="text-nowrap">{{ row.session.started_at|date:"M j, Y" }}</td>
+              <td><span class="fw-semibold">{{ row.session.course.code }}</span><br><small class="text-muted">{{ row.session.section.code }}</small></td>
+              <td>{{ row.session.topic }}</td>
+              <td>{{ row.question_label }}</td>
+              <td><span class="badge text-bg-secondary">{{ row.session.get_status_display }}</span></td>
+              <td>{{ row.total_responses }}</td>
+              <td>{% if row.response_rate_available %}{{ row.response_rate }}%{% else %}<span class="text-muted">Not historically comparable</span>{% endif %}</td>
+              <td>{{ row.understanding_rate }}%</td>
+              <td>{{ row.support_needed_rate }}%</td>
+              <td><a class="btn btn-sm btn-outline-success text-nowrap" href="{% url 'exit_pulse:results' row.session.public_id %}">View results for {{ row.session.topic }}</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="card-body text-center py-4" role="status"><p class="text-muted mb-0">No completed Exit Pulse sessions are available in the selected scope.</p></div>
+    {% endif %}
+  </section>
+
+  <section class="card border-0 shadow-sm" aria-labelledby="history-assignments-heading">
+    <div class="card-header bg-white"><h2 class="h5 mb-0" id="history-assignments-heading">Assignments with Exit Pulse history</h2></div>
+    {% if history_assignments %}
+      <div class="table-responsive" tabindex="0" aria-label="Scrollable assignments with Exit Pulse history table">
+        <table class="table table-sm align-middle mb-0">
+          <caption class="visually-hidden">Assignments for which you own Exit Pulse sessions.</caption>
+          <thead><tr><th scope="col">Course and section</th><th scope="col">Campus</th><th scope="col">Academic scope</th><th scope="col">Sessions</th><th scope="col">Latest Exit Pulse</th><th scope="col">Assignment state</th><th scope="col">Action</th></tr></thead>
+          <tbody>
+          {% for row in history_assignments %}
+            <tr>
+              <td><span class="fw-semibold">{{ row.course_code }} · {{ row.section_code }}</span><br><small class="text-muted">{{ row.course_title }}</small></td>
+              <td>{{ row.campus_name }}</td>
+              <td>{{ row.academic_year_code }} / {{ row.term_code }}</td>
+              <td>{{ row.completed_session_count }} completed<br><small class="text-muted">{{ row.session_count }} total</small></td>
+              <td class="text-nowrap">{{ row.latest_session_at|date:"M j, Y" }}</td>
+              <td>{% if row.is_current %}<span class="badge text-bg-success">Current</span><span class="visually-hidden"> assignment</span>{% else %}<span class="badge text-bg-secondary">Historical</span><span class="visually-hidden"> assignment; new sessions are unavailable</span>{% endif %}</td>
+              <td><a class="btn btn-sm btn-outline-success text-nowrap" href="{% url 'exit_pulse:history' row.history_reference %}">View history for {{ row.course_code }} {{ row.section_code }}</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="card-body text-center py-5" role="status">
+        <h2 class="h6">No Exit Pulse sessions are available yet.</h2>
+        <p class="text-muted mb-0">Create an Exit Pulse when you are ready to check class understanding.</p>
+      </div>
+    {% endif %}
+  </section>
+
   <div class="alert alert-light border mt-4 mb-0">
-    <strong>Privacy note:</strong> Exit Pulse is anonymous and is not used for faculty evaluation, attendance, or grading.
+    <strong>Privacy note:</strong> Exit Pulse is anonymous and is not used for faculty evaluation, attendance, or grading. Written feedback remains available only on the owner-authorized session results page.
   </div>
 </div>
 {% endblock %}

@@ -4,6 +4,7 @@ import logging
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.paginator import Paginator
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -17,12 +18,18 @@ from reportlab.graphics.shapes import Drawing
 
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.features import FeatureSettingsService
-from apps.exit_pulse.forms import ExitPulseCreateForm, ExitPulseResponseForm
+from apps.exit_pulse.forms import (
+    ExitPulseCreateForm,
+    ExitPulseDashboardFilterForm,
+    ExitPulseHistoryFilterForm,
+    ExitPulseResponseForm,
+)
 from apps.exit_pulse.models import ExitPulseSession
 from apps.exit_pulse.services import (
     ExitPulseAnalyticsService,
     ExitPulseAnonymousIdentityService,
     ExitPulseDuplicateResponse,
+    ExitPulseHistoryService,
     ExitPulseRateLimited,
     ExitPulseRateLimitService,
     ExitPulseResponseService,
@@ -81,34 +88,162 @@ def _owned_session(request, public_id):
 def landing_view(request):
     _require_faculty_feature(request)
     tenant_id, campus_id = _scope_ids(request)
-    queryset = ExitPulseSession.objects.filter(
-        faculty_user=request.user,
-        status__in=[ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE],
-    ).select_related("course", "section", "campus", "term")
-    if tenant_id:
-        queryset = queryset.filter(tenant_id=tenant_id)
-    if campus_id:
-        queryset = queryset.filter(campus_id=campus_id)
-    eligible_assignment_ids = ExitPulseSessionService.valid_assignments_for_user(
+    owned_sessions = ExitPulseHistoryService.owned_sessions(
         user=request.user,
         tenant_id=tenant_id,
         campus_id=campus_id,
-    ).order_by().values("id")
-    queryset = queryset.filter(faculty_assignment_id__in=eligible_assignment_ids)
+    )
+    ExitPulseHistoryService.expire_elapsed_sessions(owned_sessions)
+    current_assignment_ids = list(
+        ExitPulseSessionService.valid_assignments_for_user(
+            user=request.user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+        )
+        .order_by()
+        .values_list("id", flat=True)
+    )
+    scope_rows = list(
+        owned_sessions.order_by("academic_year__code", "term__code")
+        .values(
+            "academic_year_id",
+            "academic_year__code",
+            "term_id",
+            "term__code",
+            "term__name",
+        )
+        .distinct()
+    )
+    filter_form = ExitPulseDashboardFilterForm(
+        request.GET,
+        scope_rows=scope_rows,
+    )
+    if filter_form.is_valid():
+        filtered_sessions = ExitPulseHistoryService.apply_dashboard_filters(
+            owned_sessions,
+            filter_form.cleaned_data,
+        )
+    else:
+        filtered_sessions = owned_sessions.none()
+
+    current_queryset = owned_sessions.filter(
+        status__in=[ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE],
+        faculty_assignment_id__in=current_assignment_ids,
+    ).select_related("course", "section", "campus", "term")
     current_sessions = []
-    for session in queryset.order_by("-created_at")[:10]:
+    for session in current_queryset.order_by("-created_at", "-id")[:10]:
         ExitPulseSessionService.refresh_effective_status(session, check_assignment=False)
         if session.status in {ExitPulseSession.Status.DRAFT, ExitPulseSession.Status.LIVE}:
             current_sessions.append(session)
-    assignment_count = ExitPulseSessionService.valid_assignments_for_user(
-        user=request.user,
-        tenant_id=tenant_id,
-        campus_id=campus_id,
-    ).count()
+
+    dashboard_analytics = ExitPulseAnalyticsService.build_assignment(filtered_sessions)
+    recent_queryset = ExitPulseAnalyticsService.annotate_session_metrics(
+        ExitPulseAnalyticsService.terminal_sessions(filtered_sessions).select_related(
+            "course",
+            "section",
+            "campus",
+            "academic_year",
+            "term",
+        )
+    ).order_by("-started_at", "-id")[:10]
+    recent_sessions = ExitPulseAnalyticsService.session_rows(recent_queryset)
+    history_assignments = ExitPulseHistoryService.assignment_rows(
+        filtered_sessions,
+        current_assignment_ids=current_assignment_ids,
+    )
     return render(
         request,
         "exit_pulse/landing.html",
-        {"current_sessions": current_sessions, "assignment_count": assignment_count},
+        {
+            "current_sessions": current_sessions,
+            "assignment_count": len(current_assignment_ids),
+            "dashboard_analytics": dashboard_analytics,
+            "recent_sessions": recent_sessions,
+            "history_assignments": history_assignments,
+            "filter_form": filter_form,
+            "has_filter_options": bool(scope_rows),
+        },
+    )
+
+
+@portal_required("FACULTY")
+@permission_required("exit_pulse.use")
+def history_view(request, session_public_id):
+    _require_faculty_feature(request)
+    tenant_id, campus_id = _scope_ids(request)
+    owned_sessions = ExitPulseHistoryService.owned_sessions(
+        user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    )
+    ExitPulseHistoryService.expire_elapsed_sessions(owned_sessions)
+    reference_session = (
+        owned_sessions.select_related(
+            "faculty_user",
+            "faculty_assignment",
+            "course_offering",
+            "course",
+            "section",
+            "campus",
+            "academic_year",
+            "term",
+        )
+        .filter(public_id=session_public_id)
+        .first()
+    )
+    if reference_session is None:
+        raise Http404("Exit Pulse history not found.")
+
+    assignment_sessions = owned_sessions.filter(
+        faculty_assignment_id=reference_session.faculty_assignment_id,
+    )
+    terminal_sessions = ExitPulseAnalyticsService.terminal_sessions(assignment_sessions)
+    assignment_context = ExitPulseHistoryService.history_context(terminal_sessions)
+    is_current_assignment = ExitPulseSessionService.valid_assignments_for_user(
+        user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    ).filter(pk=reference_session.faculty_assignment_id).exists()
+
+    filter_form = ExitPulseHistoryFilterForm(request.GET)
+    if filter_form.is_valid():
+        filtered_sessions = ExitPulseHistoryService.apply_history_filters(
+            terminal_sessions,
+            filter_form.cleaned_data,
+        )
+    else:
+        filtered_sessions = terminal_sessions.none()
+    filtered_analytics = ExitPulseAnalyticsService.build_assignment(filtered_sessions)
+    history_queryset = ExitPulseAnalyticsService.annotate_session_metrics(
+        filtered_sessions.select_related(
+            "course",
+            "section",
+            "campus",
+            "academic_year",
+            "term",
+        )
+    ).order_by("-started_at", "-id")
+    paginator = Paginator(history_queryset, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    page_obj.object_list = ExitPulseAnalyticsService.session_rows(page_obj.object_list)
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+    active_filter_keys = ("date_from", "date_to", "question_type", "topic", "status")
+    has_active_filters = any((request.GET.get(key) or "").strip() for key in active_filter_keys)
+
+    return render(
+        request,
+        "exit_pulse/history.html",
+        {
+            "reference_session": reference_session,
+            "assignment_context": assignment_context,
+            "is_current_assignment": is_current_assignment,
+            "filter_form": filter_form,
+            "filtered_analytics": filtered_analytics,
+            "page_obj": page_obj,
+            "page_query": page_query.urlencode(),
+            "has_active_filters": has_active_filters,
+        },
     )
 
 

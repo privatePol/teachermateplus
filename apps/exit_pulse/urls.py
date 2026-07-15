@@ -8,6 +8,11 @@ app_name = "exit_pulse"
 urlpatterns = [
     path("faculty/exit-pulse/", views.landing_view, name="landing"),
     path("faculty/exit-pulse/create/", views.create_view, name="create"),
+    path(
+        "faculty/exit-pulse/history/<uuid:session_public_id>/",
+        views.history_view,
+        name="history",
+    ),
     path("faculty/exit-pulse/<uuid:public_id>/live/", views.live_view, name="live"),
     path("faculty/exit-pulse/<uuid:public_id>/status/", views.status_view, name="status"),
     path("faculty/exit-pulse/<uuid:public_id>/qr.svg", views.qr_view, name="qr"),

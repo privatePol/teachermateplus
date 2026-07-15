@@ -8,6 +8,91 @@ from apps.exit_pulse.models import ExitPulseResponse, ExitPulseSession
 from apps.exit_pulse.services import ExitPulseQuestionValidationService, ExitPulseSessionService
 
 
+class ExitPulseDashboardFilterForm(forms.Form):
+    academic_year = forms.ChoiceField(required=False, label="Academic year")
+    term = forms.ChoiceField(required=False, label="Term")
+
+    def __init__(self, *args, scope_rows=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        year_choices = {}
+        term_choices = {}
+        for row in scope_rows:
+            year_choices[str(row["academic_year_id"])] = row["academic_year__code"]
+            term_choices[str(row["term_id"])] = (
+                f'{row["academic_year__code"]} - {row["term__name"]} ({row["term__code"]})'
+            )
+        self.fields["academic_year"].choices = [("", "All academic years"), *year_choices.items()]
+        self.fields["term"].choices = [("", "All terms"), *term_choices.items()]
+        for name, field in self.fields.items():
+            field.widget.attrs["class"] = "form-select"
+            if self.is_bound and name in self.errors:
+                field.widget.attrs["aria-invalid"] = "true"
+                field.widget.attrs["aria-describedby"] = f"id_{name}_errors"
+
+
+class ExitPulseHistoryFilterForm(forms.Form):
+    QUESTION_CHOICES = [
+        ("", "All question types"),
+        (ExitPulseSession.QuestionCode.UNDERSTANDING, "Understanding"),
+        (ExitPulseSession.QuestionCode.APPLICATION_CONFIDENCE, "Application confidence"),
+        (ExitPulseSession.QuestionCode.NEEDS_EXPLANATION, "Needs explanation"),
+        (ExitPulseSession.QuestionCode.CUSTOM, "Custom"),
+    ]
+    STATUS_CHOICES = [
+        ("", "All completed statuses"),
+        (ExitPulseSession.Status.CLOSED, "Closed"),
+        (ExitPulseSession.Status.EXPIRED, "Expired"),
+    ]
+
+    date_from = forms.DateField(
+        required=False,
+        label="Date from",
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    date_to = forms.DateField(
+        required=False,
+        label="Date to",
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    question_type = forms.ChoiceField(
+        required=False,
+        label="Question type",
+        choices=QUESTION_CHOICES,
+    )
+    topic = forms.CharField(
+        required=False,
+        max_length=200,
+        label="Topic contains",
+        widget=forms.TextInput(attrs={"autocomplete": "off", "placeholder": "Search lesson topic"}),
+    )
+    status = forms.ChoiceField(
+        required=False,
+        label="Status",
+        choices=STATUS_CHOICES,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            field.widget.attrs["class"] = (
+                "form-select" if isinstance(field.widget, forms.Select) else "form-control"
+            )
+            if self.is_bound and name in self.errors:
+                field.widget.attrs["aria-invalid"] = "true"
+                field.widget.attrs["aria-describedby"] = f"id_{name}_errors"
+
+    def clean_topic(self):
+        return " ".join((self.cleaned_data.get("topic") or "").split())
+
+    def clean(self):
+        cleaned = super().clean()
+        date_from = cleaned.get("date_from")
+        date_to = cleaned.get("date_to")
+        if date_from and date_to and date_from > date_to:
+            self.add_error("date_to", "Date to must be on or after Date from.")
+        return cleaned
+
+
 class ExitPulseCreateForm(forms.Form):
     faculty_assignment = forms.ModelChoiceField(
         queryset=FacultyAssignment.objects.none(),
