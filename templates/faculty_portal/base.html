@@ -195,6 +195,15 @@
     gap: 0.5rem;
     z-index: 1060;
   }
+  .faculty-utility-toggle {
+    display: none;
+  }
+  .faculty-utility-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
   .faculty-feedback-fab {
     border: 1px solid #2e6a45;
     border-radius: 999px;
@@ -431,6 +440,39 @@
       font-size: 0.72rem;
     }
   }
+  @media (max-width: 767.98px) {
+    .faculty-mobile-hidden {
+      display: none !important;
+    }
+    .faculty-utility-toggle {
+      border: 1px solid #78927f;
+      border-radius: 999px;
+      background: #f8fbf8;
+      color: #214a31;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.48rem 0.72rem;
+      font-size: 0.8rem;
+      font-weight: 700;
+      line-height: 1;
+      box-shadow: 0 6px 16px rgba(24, 59, 37, 0.16);
+    }
+    .faculty-utility-toggle::after {
+      content: "\25B2";
+      font-size: 0.62rem;
+      transition: transform 0.16s ease;
+    }
+    .faculty-utility-stack:not(.is-expanded) .faculty-utility-toggle::after {
+      transform: rotate(180deg);
+    }
+    .faculty-utility-actions {
+      display: none;
+    }
+    .faculty-utility-stack.is-expanded .faculty-utility-actions {
+      display: flex;
+    }
+  }
   @media (max-width: 575.98px) {
     .faculty-brand-title {
       font-size: 1.2rem;
@@ -515,8 +557,9 @@
           {% for node in group.items %}
             <a
               href="{{ node.url }}"
-              class="sidebar-link {% if request.path == node.url %}active{% endif %}"
+              class="sidebar-link {% if request.path == node.url %}active{% endif %}{% if node.item.code == 'FACULTY_ANALYTICS' %} faculty-mobile-hidden{% endif %}"
               title="{{ node.item.label }}"
+              data-menu-code="{{ node.item.code }}"
             >
               <span class="sidebar-icon">&#9679;</span>
               <span class="sidebar-label">{{ node.item.label }}</span>
@@ -535,7 +578,7 @@
         </a>
         <a
           href="{% url 'faculty_portal:parallel_section_comparison' %}"
-          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:parallel_section_comparison' %}active{% endif %}"
+          class="sidebar-link faculty-mobile-hidden {% if request.resolver_match.view_name == 'faculty_portal:parallel_section_comparison' %}active{% endif %}"
           title="Performance Trends"
           data-tour-id="performance-trends"
         >
@@ -585,7 +628,7 @@
         </a>
         <a
           href="{% url 'faculty_portal:activity_history' %}"
-          class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:activity_history' %}active{% endif %}"
+          class="sidebar-link faculty-mobile-hidden {% if request.resolver_match.view_name == 'faculty_portal:activity_history' %}active{% endif %}"
           title="My Activity History"
           data-tour-id="activity-history"
         >
@@ -614,6 +657,13 @@
   </div>
 
   <div class="faculty-utility-stack" role="group" aria-label="Faculty support and privacy links">
+    <button
+      class="faculty-utility-toggle"
+      type="button"
+      aria-expanded="false"
+      aria-controls="faculty-utility-actions"
+    ><span aria-hidden="true">&#9432;</span><span>Help &amp; Privacy</span></button>
+    <div class="faculty-utility-actions" id="faculty-utility-actions">
     {% if not privacy_consent_pending and not password_change_required %}
     <button
       class="faculty-feedback-fab"
@@ -649,6 +699,7 @@
       </svg>
       <span>Data Privacy Notice</span>
     </a>
+    </div>
   </div>
 
   {% if not privacy_consent_pending and not password_change_required %}
@@ -770,6 +821,15 @@
         }
         layout.classList.toggle("sidebar-collapsed");
         localStorage.setItem(storageKey, layout.classList.contains("sidebar-collapsed") ? "1" : "0");
+      });
+    }
+
+    const utilityStack = document.querySelector(".faculty-utility-stack");
+    const utilityToggle = document.querySelector(".faculty-utility-toggle");
+    if (utilityStack && utilityToggle) {
+      utilityToggle.addEventListener("click", function () {
+        const expanded = utilityStack.classList.toggle("is-expanded");
+        utilityToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
       });
     }
 

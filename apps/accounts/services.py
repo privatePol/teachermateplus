@@ -16,6 +16,7 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.sessions.models import Session
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
+from django.db import transaction
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
@@ -756,6 +757,12 @@ class SignatureImagePayload:
 
 class UserSignatureService:
     MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+    MAX_DRAW_DATA_URL_CHARS = 3 * 1024 * 1024
+    MAX_SOURCE_WIDTH = 4096
+    MAX_SOURCE_HEIGHT = 4096
+    MAX_SOURCE_PIXELS = 8_000_000
+    MAX_STORED_WIDTH = 1200
+    MAX_STORED_HEIGHT = 400
     ALLOWED_FORMATS = {"PNG", "JPEG", "JPG"}
 
     @classmethod
@@ -772,8 +779,13 @@ class UserSignatureService:
         return hashlib.sha256((getattr(settings, "SECRET_KEY", "") or "TeacherMate+-signature-key").encode("utf-8")).digest()
 
     @classmethod
-    def _normalize_image(cls, uploaded_file) -> SignatureImagePayload:
-        raw_bytes = uploaded_file.read()
+    def _normalize_image_bytes(
+        cls,
+        raw_bytes: bytes,
+        *,
+        allowed_formats: set[str] | None = None,
+        reject_blank: bool = False,
+    ) -> SignatureImagePayload:
         if not raw_bytes:
             raise ValidationError("Upload a signature image file first.")
         if len(raw_bytes) > cls.MAX_UPLOAD_BYTES:
@@ -781,18 +793,38 @@ class UserSignatureService:
 
         try:
             image = Image.open(BytesIO(raw_bytes))
+            if (
+                image.width > cls.MAX_SOURCE_WIDTH
+                or image.height > cls.MAX_SOURCE_HEIGHT
+                or image.width * image.height > cls.MAX_SOURCE_PIXELS
+            ):
+                raise ValidationError("Signature image dimensions are too large.")
             image.load()
+        except ValidationError:
+            raise
         except Exception as exc:
             raise ValidationError("Uploaded file is not a valid image.") from exc
 
         image_format = (image.format or "").upper()
-        if image_format not in cls.ALLOWED_FORMATS:
+        if image_format not in (allowed_formats or cls.ALLOWED_FORMATS):
             raise ValidationError("Use PNG or JPG/JPEG for the signature image.")
 
         normalized = image.convert("RGBA")
+        alpha_bbox = normalized.getchannel("A").getbbox()
+        if reject_blank and alpha_bbox is None:
+            raise ValidationError("Draw a signature before saving.")
+        if alpha_bbox:
+            normalized = normalized.crop(alpha_bbox)
+        if normalized.width > cls.MAX_STORED_WIDTH or normalized.height > cls.MAX_STORED_HEIGHT:
+            normalized.thumbnail(
+                (cls.MAX_STORED_WIDTH, cls.MAX_STORED_HEIGHT),
+                Image.Resampling.LANCZOS,
+            )
         output = BytesIO()
         normalized.save(output, format="PNG")
         png_bytes = output.getvalue()
+        if len(png_bytes) > cls.MAX_UPLOAD_BYTES:
+            raise ValidationError("Normalized signature image must be 2 MB or smaller.")
         return SignatureImagePayload(
             image_bytes=png_bytes,
             mime_type="image/png",
@@ -804,15 +836,42 @@ class UserSignatureService:
         )
 
     @classmethod
-    def store_signature(cls, *, user, uploaded_file, actor):
-        payload = cls._normalize_image(uploaded_file)
+    def _normalize_image(cls, uploaded_file) -> SignatureImagePayload:
+        return cls._normalize_image_bytes(uploaded_file.read())
+
+    @classmethod
+    def _decode_drawn_png(cls, data_url: str) -> SignatureImagePayload:
+        value = (data_url or "").strip()
+        if not value:
+            raise ValidationError("Draw a signature before saving.")
+        if len(value) > cls.MAX_DRAW_DATA_URL_CHARS:
+            raise ValidationError("Drawn signature payload is too large.")
+        prefix = "data:image/png;base64,"
+        if not value.startswith(prefix):
+            raise ValidationError("Drawn signature must be a PNG image.")
+        encoded = value[len(prefix) :]
+        try:
+            raw_bytes = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ValidationError("Drawn signature data is invalid.") from exc
+        return cls._normalize_image_bytes(
+            raw_bytes,
+            allowed_formats={"PNG"},
+            reject_blank=True,
+        )
+
+    @classmethod
+    @transaction.atomic
+    def _store_payload(cls, *, user, payload, actor, stored_filename: str):
         nonce = os.urandom(12)
         aesgcm = AESGCM(cls._encryption_key())
         encrypted_blob = aesgcm.encrypt(nonce, payload.image_bytes, None)
-        credential, _created = UserSignatureCredential.objects.get_or_create(user=user)
+        credential = UserSignatureCredential.objects.select_for_update().filter(user=user).first()
+        if credential is None:
+            credential = UserSignatureCredential(user=user)
         credential.encrypted_blob = encrypted_blob
         credential.encryption_nonce = nonce
-        credential.original_filename = str(getattr(uploaded_file, "name", "") or "signature.png")
+        credential.original_filename = stored_filename
         credential.mime_type = payload.mime_type
         credential.image_format = payload.image_format
         credential.image_width = payload.width
@@ -824,6 +883,26 @@ class UserSignatureService:
         credential.is_enabled = True
         credential.save()
         return credential
+
+    @classmethod
+    def store_signature(cls, *, user, uploaded_file, actor):
+        payload = cls._normalize_image(uploaded_file)
+        return cls._store_payload(
+            user=user,
+            payload=payload,
+            actor=actor,
+            stored_filename=str(getattr(uploaded_file, "name", "") or "signature.png"),
+        )
+
+    @classmethod
+    def store_drawn_signature(cls, *, user, data_url: str, actor):
+        payload = cls._decode_drawn_png(data_url)
+        return cls._store_payload(
+            user=user,
+            payload=payload,
+            actor=actor,
+            stored_filename=f"drawn-signature-{user.pk}-{timezone.now():%Y%m%d%H%M%S}.png",
+        )
 
     @classmethod
     def clear_signature(cls, *, user):

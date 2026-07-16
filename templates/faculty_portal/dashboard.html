@@ -859,7 +859,7 @@
       </div>
       <div class="faculty-dashboard-actions">
         <a class="primary" href="{% url 'faculty_portal:my_courses' %}">Open My Classes</a>
-        <a href="{% url 'faculty_portal:parallel_section_comparison' %}">Performance Trends</a>
+        <a class="faculty-mobile-hidden" href="{% url 'faculty_portal:parallel_section_comparison' %}">Performance Trends</a>
         <a href="{% url 'faculty_portal:reminder_center' %}">Reminders</a>
       </div>
     </div>
@@ -876,7 +876,7 @@
 {% include "faculty_portal/partials/active_period_banner.html" with rows=stats.active_grading_period_rows %}
 {% include "faculty_portal/partials/deadline_banner.html" with reminder=stats.deadline_reminder %}
 
-<section class="faculty-command-panel faculty-updates-panel mt-3 mb-4">
+<section class="faculty-command-panel faculty-updates-panel dashboard-mobile-hidden-updates faculty-mobile-hidden mt-3 mb-4">
   <div class="panel-head faculty-updates-head">
     <div>
       <h3 class="panel-title">Updates Since Your Last Visit</h3>
@@ -942,7 +942,7 @@
 </section>
 
 <div class="row g-3">
-  <div class="col-xl-8">
+  <div class="col-xl-8 dashboard-mobile-hidden-grade-status faculty-mobile-hidden">
     <section class="faculty-command-panel h-100">
       <div class="panel-head d-flex justify-content-between align-items-start gap-3 flex-wrap">
         <div>
@@ -996,7 +996,7 @@
       </div>
     </section>
   </div>
-  <div class="col-xl-4">
+  <div class="col-xl-4 dashboard-mobile-hidden-pending-issues faculty-mobile-hidden">
     <section class="faculty-command-panel h-100">
       <div class="panel-head">
         <h3 class="panel-title">Pending Grade Issues</h3>

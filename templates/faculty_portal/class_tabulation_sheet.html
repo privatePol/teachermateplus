@@ -134,7 +134,16 @@
   .signature-box {
     min-width: 260px;
     text-align: center;
-    padding-top: 2rem;
+    padding-top: 1rem;
+  }
+  .signature-image {
+    display: block;
+    width: auto;
+    max-width: 220px;
+    height: auto;
+    max-height: 72px;
+    margin: 0 auto 0.25rem;
+    object-fit: contain;
   }
   .signature-line {
     border-top: 1px solid #111827;
@@ -148,8 +157,8 @@
     color: #374151;
   }
   @page {
-    size: legal landscape;
-    margin: 10mm;
+    size: {{ complete_report.print_page_css_size }};
+    margin: {{ complete_report.print_page_css_margin }};
   }
   @media print {
     .no-print,
@@ -177,16 +186,40 @@
       min-width: 0;
     }
   }
+  @media screen and (max-width: 575.98px) {
+    .tabulation-toolbar {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .tabulation-toolbar > .d-flex {
+      display: grid !important;
+      grid-template-columns: 1fr;
+    }
+    .tabulation-toolbar .btn {
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tabulation-sheet {
+      padding: 0.65rem;
+    }
+    .tabulation-meta {
+      grid-template-columns: 1fr;
+    }
+    .tabulation-meta .full {
+      grid-column: auto;
+    }
+  }
 </style>
 
 <div class="tabulation-toolbar no-print">
   <div>
-    <h2 class="h4 mb-0">Class Tabulation Sheet</h2>
+    <h2 class="h4 mb-0">Complete Tabulation Sheet</h2>
     <div class="text-muted">{{ offering.course.title }} | {{ offering.section.code }} | {{ offering.term.name|default:offering.term.code }}</div>
   </div>
   <div class="d-flex gap-2">
-    <a class="btn btn-success btn-sm" href="{% url 'faculty_portal:offering_class_tabulation_sheet' offering.id %}?format=pdf" target="_blank" rel="noopener">Print PDF</a>
-    <button class="btn btn-outline-success btn-sm" type="button" onclick="window.print();">Print Browser Copy</button>
+    <a class="btn btn-success btn-sm" href="{% url 'faculty_portal:offering_class_tabulation_sheet' offering.id %}?format=pdf" target="_blank" rel="noopener">Print Official PDF</a>
     <a class="btn btn-outline-secondary btn-sm" href="{% url 'faculty_portal:offering_periods' offering.id %}">Back to Periods</a>
   </div>
 </div>
@@ -202,7 +235,7 @@
         {% endif %}
       </div>
     </div>
-    <div class="tabulation-title">Class Tabulation Sheet</div>
+    <div class="tabulation-title">Complete Tabulation Sheet</div>
     <div class="tabulation-meta">
       <div><b>Tenant:</b> {{ offering.tenant.name }}</div>
       <div><b>Campus:</b> {{ offering.campus.name }}</div>
@@ -272,6 +305,9 @@
 
   <footer class="tabulation-footer">
     <div class="signature-box">
+      {% if complete_report.signature_data_uri %}
+      <img class="signature-image" src="{{ complete_report.signature_data_uri }}" alt="Stored signature of {{ faculty_name }}">
+      {% endif %}
       <div class="signature-line">{{ faculty_name }}</div>
       <div class="signature-label">Prepared and Submitted By</div>
     </div>

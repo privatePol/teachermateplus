@@ -111,6 +111,7 @@ from .views import (
     menu_item_list_view,
     menu_item_update_view,
     offering_create_view,
+    offering_complete_tabulation_sheet_view,
     offering_list_view,
     offering_update_view,
     overdue_unsubmitted_report_view,
@@ -312,6 +313,11 @@ urlpatterns = [
     path("admin-portal/academics/sections/create/", section_create_view, name="section_create"),
     path("admin-portal/academics/sections/<int:section_id>/edit/", section_update_view, name="section_update"),
     path("admin-portal/academics/offerings/", offering_list_view, name="offering_list"),
+    path(
+        "admin-portal/academics/offerings/<int:offering_id>/complete-tabulation/",
+        offering_complete_tabulation_sheet_view,
+        name="offering_complete_tabulation_sheet",
+    ),
     path("admin-portal/academics/offerings/create/", offering_create_view, name="offering_create"),
     path("admin-portal/academics/offerings/<int:offering_id>/edit/", offering_update_view, name="offering_update"),
     path(

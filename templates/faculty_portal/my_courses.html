@@ -226,6 +226,17 @@
     font-weight: 700;
     padding: 0.3rem 0.65rem;
   }
+  .course-card-mobile-details {
+    border-top: 1px solid #e2ebe1;
+    margin-top: 0.55rem;
+    padding-top: 0.55rem;
+    font-size: 0.82rem;
+  }
+  .course-card-mobile-details summary {
+    color: #315a3e;
+    cursor: pointer;
+    font-weight: 700;
+  }
   .course-card-tool {
     position: absolute;
     top: 0.75rem;
@@ -310,6 +321,35 @@
   }
   .faculty-deadline-banner-neutral {
     background: linear-gradient(135deg, #ffffff 0%, #f5f8f6 100%);
+  }
+  @media (max-width: 575.98px) {
+    .courses-header,
+    .my-courses-board-head {
+      align-items: flex-start;
+    }
+    .accepted-board,
+    .pending-board {
+      padding: 0.8rem;
+      border-radius: 0.85rem;
+    }
+    .course-card-header {
+      min-height: 94px;
+      padding: 0.8rem 0.85rem 0.7rem;
+    }
+    .course-card-code { font-size: 1.3rem; }
+    .course-card-body { padding: 0.7rem 0.85rem; }
+    .course-card-footer .btn,
+    .course-card-footer .btn.disabled {
+      flex: 1 1 9rem;
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .faculty-deadline-banner {
+      padding: 0.8rem;
+    }
   }
   .faculty-deadline-banner-eyebrow {
     font-size: 0.74rem;
@@ -560,7 +600,9 @@
 </section>
 {% endif %}
 {% if deadline_banner %}
+<div class="faculty-mobile-hidden my-courses-deadline-card">
 {% include "faculty_portal/partials/deadline_banner.html" with reminder=deadline_banner %}
+</div>
 {% endif %}
 {% if final_clearance_targets %}
 <section class="final-clearance-board">
@@ -711,8 +753,8 @@
           </header>
 
           <div class="course-card-body">
-            <div class="course-card-row"><span class="label">Room/Office/Lab</span><span>{{ offering.room|default:"-" }}</span></div>
-            <div class="course-card-row"><span class="label">Schedule</span><span>{{ offering.schedule_text|default:"-" }}</span></div>
+            <div class="course-card-row d-none d-sm-flex"><span class="label">Room/Office/Lab</span><span>{{ offering.room|default:"-" }}</span></div>
+            <div class="course-card-row d-none d-sm-flex"><span class="label">Schedule</span><span>{{ offering.schedule_text|default:"-" }}</span></div>
             <div class="course-card-row"><span class="label">Class Size</span><span>{{ offering.enrollment_count }}</span></div>
             <div class="course-card-row"><span class="label">Status</span><span>{{ offering.status|default:"-" }}</span></div>
             <div class="course-card-row">
@@ -733,6 +775,11 @@
               {{ offering.template_assignment_warning }}
             </div>
             {% endif %}
+            <details class="course-card-mobile-details d-sm-none">
+              <summary>Schedule and room</summary>
+              <div class="course-card-row mt-2"><span class="label">Room/Office/Lab</span><span>{{ offering.room|default:"-" }}</span></div>
+              <div class="course-card-row"><span class="label">Schedule</span><span>{{ offering.schedule_text|default:"-" }}</span></div>
+            </details>
           </div>
 
           <footer class="course-card-footer">
@@ -774,6 +821,33 @@
     </div>
 {% endfor %}
 {% if grouped_offerings %}
+</section>
+{% endif %}
+
+{% if historical_report_assignments %}
+<section class="accepted-board mt-3">
+  <h3 class="accepted-board-title">Historical Tabulation Reports</h3>
+  <div class="accepted-board-copy">Read-only reports from accepted assignments you previously owned. These links do not restore grading, encoding, or submission access.</div>
+  <div class="row g-3">
+    {% for assignment in historical_report_assignments %}
+    <div class="col-md-6 col-xl-4">
+      <article class="course-card">
+        <header class="course-card-header theme-c">
+          <div class="course-card-code">{{ assignment.offering.course.code }}</div>
+          <div class="course-card-title">{{ assignment.offering.course.title }}</div>
+          <div class="course-card-meta">{{ assignment.offering.section.code }} | {{ assignment.offering.academic_year.code }} / {{ assignment.offering.term.code }}</div>
+        </header>
+        <div class="course-card-body">
+          <div class="course-card-row"><span class="label">Campus</span><span>{{ assignment.offering.campus.name }}</span></div>
+          <div class="course-card-row"><span class="label">Access</span><span>Historical report only</span></div>
+        </div>
+        <footer class="course-card-footer">
+          <a class="btn btn-outline-success" href="{% url 'faculty_portal:offering_class_tabulation_sheet' assignment.offering_id %}?format=pdf" target="_blank" rel="noopener">Complete Tabulation PDF</a>
+        </footer>
+      </article>
+    </div>
+    {% endfor %}
+  </div>
 </section>
 {% endif %}
 {% endblock %}

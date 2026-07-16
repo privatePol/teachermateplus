@@ -33,6 +33,7 @@ from apps.accounts.forms import (
     FacultySelfChangePasswordForm,
     PrivacyConsentForm,
     UserSignatureDeleteForm,
+    UserSignatureDrawForm,
     UserSignatureUploadForm,
 )
 from apps.accounts.services import AdminPasswordResetOtpService, LoginLockoutService, LoginOtpService, UserSignatureService
@@ -842,12 +843,14 @@ def faculty_signature_view(request):
 
     credential = getattr(request.user, "signature_credential", None)
     upload_form = UserSignatureUploadForm(request.user, request.POST or None, request.FILES or None, prefix="upload")
+    draw_form = UserSignatureDrawForm(request.user, request.POST or None, prefix="draw")
     delete_form = UserSignatureDeleteForm(request.user, request.POST or None, prefix="delete")
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
         if action == "upload":
             if upload_form.is_valid():
+                had_signature = bool(credential and credential.has_signature)
                 try:
                     credential = UserSignatureService.store_signature(
                         user=request.user,
@@ -858,7 +861,7 @@ def faculty_signature_view(request):
                     upload_form.add_error("signature_file", exc.message)
                 else:
                     AuditService.log_event(
-                        action="UPLOAD_SIGNATURE",
+                        action="REPLACE_SIGNATURE" if had_signature else "CREATE_SIGNATURE",
                         portal="FACULTY",
                         entity_type="UserSignatureCredential",
                         entity_id=credential.id,
@@ -866,6 +869,7 @@ def faculty_signature_view(request):
                         tenant=request.user.default_tenant_id,
                         campus=request.user.default_campus_id,
                         metadata={
+                            "source": "UPLOAD",
                             "filename": credential.original_filename,
                             "mime_type": credential.mime_type,
                             "file_size_bytes": credential.file_size_bytes,
@@ -876,6 +880,37 @@ def faculty_signature_view(request):
                     return redirect("accounts:faculty_signature")
             else:
                 messages.error(request, "Please correct the signature upload errors below.")
+        elif action == "draw":
+            if draw_form.is_valid():
+                had_signature = bool(credential and credential.has_signature)
+                try:
+                    credential = UserSignatureService.store_drawn_signature(
+                        user=request.user,
+                        data_url=draw_form.cleaned_data["signature_data"],
+                        actor=request.user,
+                    )
+                except ValidationError as exc:
+                    draw_form.add_error("signature_data", exc.message)
+                else:
+                    AuditService.log_event(
+                        action="REPLACE_SIGNATURE" if had_signature else "CREATE_SIGNATURE",
+                        portal="FACULTY",
+                        entity_type="UserSignatureCredential",
+                        entity_id=credential.id,
+                        actor=request.user,
+                        tenant=request.user.default_tenant_id,
+                        campus=request.user.default_campus_id,
+                        metadata={
+                            "source": "DRAW",
+                            "filename": credential.original_filename,
+                            "mime_type": credential.mime_type,
+                            "file_size_bytes": credential.file_size_bytes,
+                        },
+                        request=request,
+                    )
+                    messages.success(request, "Your drawn signature has been validated, encrypted, and saved.")
+                    return redirect("accounts:faculty_signature")
+            messages.error(request, "Please correct the drawn signature errors below.")
         elif action == "delete":
             if delete_form.is_valid():
                 credential = UserSignatureService.clear_signature(user=request.user)
@@ -898,6 +933,7 @@ def faculty_signature_view(request):
         "faculty_portal/signature_profile.html",
         {
             "upload_form": upload_form,
+            "draw_form": draw_form,
             "delete_form": delete_form,
             "credential": credential,
         },

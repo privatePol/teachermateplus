@@ -18,6 +18,8 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from apps.accounts.forms import FacultyLoginForm
+from apps.accounts.models import UserSignatureUsageLog
+from apps.accounts.services import UserSignatureService
 from apps.accounts.views import process_valid_portal_login_form
 from apps.academics.models import CourseOffering, FacultyAssignment
 from apps.academics.services import AcademicGovernanceService, FacultyAssignmentWorkflowService
@@ -77,8 +79,10 @@ from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService, GradebookReopenNotificationService
 from apps.grading.reporting import (
     ClassTabulationSheetPdfService,
+    CompleteTabulationSheetDataService,
     CorrectionOfficialReportService,
     FacultyFinalClearanceReportService,
+    TabulationSheetAuthorizationService,
 )
 from apps.grading.services import (
     FacultyGradingService,
@@ -3396,6 +3400,15 @@ def my_courses_view(request):
 
     deadline_banner, _ = _build_deadline_reminder_for_offerings(active_offerings, now=timezone.now())
     active_grading_period_rows = _build_active_grading_period_rows(active_offerings, now=timezone.now())
+    visible_assignment_ids = {assignment.id for assignment in assignment_qs}
+    historical_report_assignments = list(
+        TabulationSheetAuthorizationService.faculty_assignments_for_offering(
+            faculty_user=request.user,
+            offering_id=None,
+        )
+        .filter(is_active=False)
+        .exclude(id__in=visible_assignment_ids)
+    )
 
     context = {
         "grouped_offerings": grouped_offerings,
@@ -3408,6 +3421,7 @@ def my_courses_view(request):
         "deadline_banner": deadline_banner if not show_archived else None,
         "active_grading_period_rows": active_grading_period_rows if not show_archived else [],
         "final_clearance_targets": final_clearance_targets if not show_archived else [],
+        "historical_report_assignments": historical_report_assignments,
         "missing_template_assignment_count": (
             len(missing_template_assignment_offerings) + len(missing_template_assignment_pending)
             if not show_archived
@@ -3887,11 +3901,13 @@ def parallel_section_comparison_view(request):
 @portal_required("FACULTY")
 @permission_required("faculty_portal.access")
 def offering_class_tabulation_sheet_view(request, offering_id: int):
-    assignment = _find_faculty_assignment(request.user, offering_id)
-    if assignment and not assignment.is_accepted:
-        messages.error(request, "Please accept this faculty assignment first before opening the class.")
-        return redirect("faculty_portal:my_courses")
-    offering = _require_faculty_offering_or_404(request, offering_id)
+    assignment = get_object_or_404(
+        TabulationSheetAuthorizationService.faculty_assignments_for_offering(
+            faculty_user=request.user,
+            offering_id=offering_id,
+        )
+    )
+    offering = _attach_faculty_offering_scope_state(assignment.offering)
     try:
         template = FacultyGradingService.resolve_template_for_offering(offering)
         periods = list(FacultyGradingService.get_template_periods(template))
@@ -3899,62 +3915,17 @@ def offering_class_tabulation_sheet_view(request, offering_id: int):
         messages.error(request, str(exc))
         return redirect("faculty_portal:offering_periods", offering_id=offering.id)
 
-    if not _all_template_periods_submitted(offering, periods):
-        messages.error(request, "The class tabulation sheet is available only after all grading periods are submitted.")
-        return redirect("faculty_portal:offering_periods", offering_id=offering.id)
-
-    FacultyGradingService.recompute_final_grades_from_stored_periods(
-        user=request.user,
+    complete_report = CompleteTabulationSheetDataService.build_report(
         offering=offering,
-        template=template,
+        faculty_user=request.user,
+        generated_by=request.user,
+        portal_code="FACULTY",
     )
-    enrollments = list(
-        Enrollment.objects.filter(course_offering_id=offering.id, is_active=True)
-        .select_related("student")
-        .order_by("student__last_name", "student__first_name", "student__student_no")
-    )
-    stored_grade_map = defaultdict(dict)
-    for grade_row in StudentPeriodGrade.objects.filter(
-        offering_id=offering.id,
-        template_period_id__in=[period.id for period in periods],
-    ):
-        stored_grade_map[grade_row.template_period_id][grade_row.student_id] = grade_row
-
-    final_grade_map = {
-        row.student_id: row.final_grade
-        for row in StudentFinalGrade.objects.filter(offering_id=offering.id)
+    sheet_grid = {
+        "period_column_groups": complete_report["period_column_groups"],
+        "highest_row": complete_report["highest_row"],
+        "sheet_rows": complete_report["sheet_rows"],
     }
-    period_sections = [
-        _build_class_tabulation_period_section(
-            offering=offering,
-            period=period,
-            enrollments=enrollments,
-            stored_grade_map=stored_grade_map,
-        )
-        for period in periods
-    ]
-    sheet_grid = _build_class_tabulation_sheet_grid(
-        period_sections=period_sections,
-        final_grade_map=final_grade_map,
-        enrollments=enrollments,
-    )
-    final_grade_rows = []
-    for enrollment in enrollments:
-        final_grade_rows.append(
-            {
-                "student": enrollment.student,
-                "enrollment_status": _tabulation_status_display(enrollment.enrollment_status),
-                "period_grades": [
-                    _format_official_grade_display(
-                        stored_grade_map.get(period.id, {}).get(enrollment.student_id).period_grade
-                        if stored_grade_map.get(period.id, {}).get(enrollment.student_id)
-                        else None
-                    )
-                    for period in periods
-                ],
-                "final_grade": _format_official_grade_display(final_grade_map.get(enrollment.student_id)),
-            }
-        )
 
     print_header_name = SystemSettingService.get(
         "PRINT_HEADER_SCHOOL_NAME",
@@ -3966,25 +3937,45 @@ def offering_class_tabulation_sheet_view(request, offering_id: int):
         tenant_id=offering.tenant_id,
         default=getattr(offering.campus, "address", "") or "",
     )
-    faculty_name = request.user.full_name or request.user.username
+    faculty_name = complete_report["faculty_name"]
     context = {
         "offering": offering,
         "template": template,
         "periods": periods,
-        "period_sections": period_sections,
-        "final_grade_rows": final_grade_rows,
         "print_header_name": print_header_name,
         "print_header_address": print_header_address,
         "faculty_name": faculty_name,
         **sheet_grid,
-        "generated_at": timezone.localtime(),
+        "generated_at": complete_report["generated_at"],
+        "complete_report": complete_report,
     }
     if request.GET.get("format") == "pdf":
-        pdf_bytes = ClassTabulationSheetPdfService.build_pdf_bytes(report=context)
-        filename = f"class-tabulation-{offering.course.code}-{offering.section.code}.pdf"
+        pdf_bytes = ClassTabulationSheetPdfService.build_pdf_bytes(report=complete_report)
+        filename = f"complete-tabulation-{offering.course.code}-{offering.section.code}.pdf"
+        AuditService.log_event(
+            action="GENERATE_COMPLETE_TABULATION_SHEET",
+            portal="FACULTY",
+            entity_type="CourseOffering",
+            entity_id=offering.id,
+            actor=request.user,
+            tenant=offering.tenant,
+            campus=offering.campus,
+            metadata={"format": "PDF", "historical_assignment": not assignment.is_active},
+            request=request,
+        )
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'inline; filename="{filename}"'
         return response
+    if complete_report.get("signature_bytes") and complete_report.get("faculty_user"):
+        UserSignatureService.log_signature_usage(
+            user=complete_report["faculty_user"],
+            document_type=UserSignatureUsageLog.DocumentType.COMPLETE_TABULATION_SHEET,
+            document_reference=f"offering:{offering.id}",
+            usage_role="FACULTY_OF_RECORD",
+            actor=request.user,
+            portal_code="FACULTY",
+            metadata={"offering_id": offering.id, "format": "HTML_PRINT_PREVIEW"},
+        )
     return render(request, "faculty_portal/class_tabulation_sheet.html", context)
 
 

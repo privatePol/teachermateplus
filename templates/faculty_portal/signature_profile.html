@@ -4,7 +4,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h2 class="h5 mb-1">My Signature</h2>
-    <div class="text-muted">Upload your encrypted signature image for approved printed documents such as Final Clearance and Correction Reports.</div>
+    <div class="text-muted">Draw or upload your encrypted signature for approved TeacherMate+ institutional documents.</div>
   </div>
   <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:dashboard' %}">Back</a>
 </div>
@@ -30,6 +30,44 @@
   </div>
 
   <div class="col-lg-7">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-header bg-white"><strong>Draw Signature</strong></div>
+      <div class="card-body">
+        <form id="draw-signature-form" method="post" novalidate>
+          {% csrf_token %}
+          <input type="hidden" name="action" value="draw">
+          {{ draw_form.signature_data }}
+          <div class="signature-canvas-wrap mb-2">
+            <canvas id="signature-canvas" width="900" height="300" aria-label="Draw your signature here"></canvas>
+          </div>
+          <div class="small text-muted mb-3">Use a mouse, finger, touchscreen, or stylus. Preview your signature before saving.</div>
+          {% for error in draw_form.signature_data.errors %}<div class="alert alert-danger py-2">{{ error }}</div>{% endfor %}
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <button id="signature-undo" class="btn btn-sm btn-outline-secondary" type="button">Undo</button>
+            <button id="signature-clear" class="btn btn-sm btn-outline-secondary" type="button">Clear</button>
+            <button id="signature-preview-button" class="btn btn-sm btn-outline-success" type="button">Preview</button>
+            <button id="signature-cancel" class="btn btn-sm btn-outline-secondary" type="button">Cancel</button>
+          </div>
+          <div id="signature-preview-panel" class="border rounded-3 bg-light p-3 text-center mb-3 d-none" aria-live="polite">
+            <div class="small fw-semibold mb-2">Signature preview</div>
+            <img id="signature-preview-image" alt="Preview of the signature to be saved" style="max-width: 100%; max-height: 140px; object-fit: contain;">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="{{ draw_form.current_password.id_for_label }}">{{ draw_form.current_password.label }}</label>
+            {{ draw_form.current_password }}
+            {% if draw_form.current_password.help_text %}<div class="form-text">{{ draw_form.current_password.help_text }}</div>{% endif %}
+            {% for error in draw_form.current_password.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          <div class="form-check mb-3">
+            {{ draw_form.ownership_confirmation }}
+            <label class="form-check-label" for="{{ draw_form.ownership_confirmation.id_for_label }}">{{ draw_form.ownership_confirmation.label }}</label>
+            {% for error in draw_form.ownership_confirmation.errors %}<div class="small text-danger">{{ error }}</div>{% endfor %}
+          </div>
+          <button id="signature-save" class="btn btn-success" type="submit" disabled>Save Drawn Signature</button>
+        </form>
+      </div>
+    </div>
+
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-header bg-white"><strong>Upload or Replace Signature</strong></div>
       <div class="card-body">
@@ -71,4 +109,147 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<style>
+  .signature-canvas-wrap {
+    width: 100%;
+    min-height: 180px;
+    border: 2px dashed #9ca3af;
+    border-radius: 0.75rem;
+    background: #fff;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #signature-canvas {
+    display: block;
+    width: 100%;
+    height: clamp(180px, 30vw, 260px);
+    cursor: crosshair;
+    touch-action: none;
+  }
+  @media (max-width: 575.98px) {
+    .signature-canvas-wrap { min-height: 160px; }
+    #signature-canvas { height: 180px; }
+  }
+</style>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const canvas = document.getElementById("signature-canvas");
+  const form = document.getElementById("draw-signature-form");
+  if (!canvas || !form) return;
+
+  const context = canvas.getContext("2d");
+  const dataInput = document.getElementById("{{ draw_form.signature_data.id_for_label }}");
+  const previewPanel = document.getElementById("signature-preview-panel");
+  const previewImage = document.getElementById("signature-preview-image");
+  const saveButton = document.getElementById("signature-save");
+  const undoButton = document.getElementById("signature-undo");
+  const clearButton = document.getElementById("signature-clear");
+  const previewButton = document.getElementById("signature-preview-button");
+  const cancelButton = document.getElementById("signature-cancel");
+  const history = [];
+  let drawing = false;
+  let hasInk = false;
+
+  context.strokeStyle = "#111827";
+  context.lineWidth = 5;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+
+  function pointFromEvent(event) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (event.clientX - rect.left) * (canvas.width / rect.width),
+      y: (event.clientY - rect.top) * (canvas.height / rect.height)
+    };
+  }
+
+  function invalidatePreview() {
+    dataInput.value = "";
+    saveButton.disabled = true;
+    previewPanel.classList.add("d-none");
+    previewImage.removeAttribute("src");
+  }
+
+  function snapshot() {
+    history.push(context.getImageData(0, 0, canvas.width, canvas.height));
+    if (history.length > 30) history.shift();
+  }
+
+  function clearCanvas() {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    history.length = 0;
+    hasInk = false;
+    invalidatePreview();
+  }
+
+  canvas.addEventListener("pointerdown", function (event) {
+    event.preventDefault();
+    snapshot();
+    drawing = true;
+    canvas.setPointerCapture(event.pointerId);
+    const point = pointFromEvent(event);
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+  });
+
+  canvas.addEventListener("pointermove", function (event) {
+    if (!drawing) return;
+    event.preventDefault();
+    const point = pointFromEvent(event);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+    hasInk = true;
+    invalidatePreview();
+  });
+
+  function endStroke(event) {
+    if (!drawing) return;
+    drawing = false;
+    context.closePath();
+    if (event.pointerId !== undefined && canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  }
+  canvas.addEventListener("pointerup", endStroke);
+  canvas.addEventListener("pointercancel", endStroke);
+
+  undoButton.addEventListener("click", function () {
+    const prior = history.pop();
+    if (!prior) return;
+    context.putImageData(prior, 0, 0);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    hasInk = false;
+    for (let index = 3; index < pixels.length; index += 4) {
+      if (pixels[index] !== 0) { hasInk = true; break; }
+    }
+    invalidatePreview();
+  });
+  clearButton.addEventListener("click", clearCanvas);
+  cancelButton.addEventListener("click", function () {
+    clearCanvas();
+    form.reset();
+  });
+  previewButton.addEventListener("click", function () {
+    if (!hasInk) {
+      window.alert("Draw your signature before previewing it.");
+      return;
+    }
+    const dataUrl = canvas.toDataURL("image/png");
+    dataInput.value = dataUrl;
+    previewImage.src = dataUrl;
+    previewPanel.classList.remove("d-none");
+    saveButton.disabled = false;
+  });
+  form.addEventListener("submit", function (event) {
+    if (!dataInput.value) {
+      event.preventDefault();
+      window.alert("Preview your drawn signature before saving.");
+    }
+  });
+});
+</script>
 {% endblock %}

@@ -160,7 +160,13 @@ from apps.grading.models import (
 from apps.grading.duplication import GradingTemplateDuplicationService
 from apps.grading.explanations import GradeExplanationService
 from apps.grading.notifications import CorrectionNotificationService
-from apps.grading.reporting import CorrectionOfficialReportService, FacultyFinalClearanceReportService
+from apps.grading.reporting import (
+    ClassTabulationSheetPdfService,
+    CompleteTabulationSheetDataService,
+    CorrectionOfficialReportService,
+    FacultyFinalClearanceReportService,
+    TabulationSheetAuthorizationService,
+)
 from apps.grading.services import (
     CourseOfferingSafetyService,
     CourseTemplateAssignmentSafetyService,
@@ -8131,6 +8137,41 @@ def offering_list_view(request):
     context["terms"] = AdminScopeService.active_scoped_terms(request)
     context["departments"] = AdminScopeService.course_offering_list_departments(request)
     return render(request, "admin_portal/academics/offering_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("offerings.read")
+def offering_complete_tabulation_sheet_view(request, offering_id: int):
+    scoped_offerings = AdminScopeService.scoped_course_offerings_for_list(request)
+    monitoring_offerings = AdminScopeService.scoped_monitoring_course_offerings(request)
+    offering = scoped_offerings.filter(id=offering_id).first()
+    if offering is None:
+        offering = monitoring_offerings.filter(id=offering_id).first()
+    if offering is None:
+        raise Http404("Course offering not found.")
+    faculty_user = TabulationSheetAuthorizationService.report_faculty_for_offering(offering=offering)
+    report = CompleteTabulationSheetDataService.build_report(
+        offering=offering,
+        faculty_user=faculty_user,
+        generated_by=request.user,
+        portal_code="ADMIN",
+    )
+    pdf_bytes = ClassTabulationSheetPdfService.build_pdf_bytes(report=report)
+    AuditService.log_event(
+        action="GENERATE_COMPLETE_TABULATION_SHEET",
+        portal="ADMIN",
+        entity_type="CourseOffering",
+        entity_id=offering.id,
+        actor=request.user,
+        tenant=offering.tenant,
+        campus=offering.campus,
+        metadata={"format": "PDF", "faculty_user_id": getattr(faculty_user, "id", None)},
+        request=request,
+    )
+    filename = f"complete-tabulation-{offering.course.code}-{offering.section.code}.pdf"
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{filename}"'
+    return response
 
 
 @portal_required("ADMIN")

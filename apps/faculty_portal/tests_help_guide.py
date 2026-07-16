@@ -103,6 +103,10 @@ class FacultyHelpGuideTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'class="faculty-utility-stack"', count=1, html=False)
+        self.assertContains(response, 'class="faculty-utility-toggle"', count=1, html=False)
+        self.assertContains(response, 'aria-controls="faculty-utility-actions"', count=1, html=False)
+        self.assertContains(response, 'class="faculty-utility-actions"', count=1, html=False)
+        self.assertContains(response, "Help &amp; Privacy", count=1, html=False)
         self.assertContains(response, 'class="help-fab"', count=1, html=False)
         self.assertContains(response, "<span>Quick Guide</span>", count=1, html=True)
         self.assertContains(response, 'data-tour-id="user-guide"', count=1, html=False)

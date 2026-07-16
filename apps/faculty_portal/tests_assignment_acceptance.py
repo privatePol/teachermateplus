@@ -1,12 +1,17 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from io import BytesIO
 
 from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from pypdf import PdfReader
+from PIL import Image
 
-from apps.accounts.models import User
+from apps.accounts.models import User, UserSignatureUsageLog
+from apps.accounts.services import UserSignatureService
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.academics.models import (
     AcademicYear,
@@ -2134,16 +2139,16 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         periods_response = self.client.get(
             reverse("faculty_portal:offering_periods", kwargs={"offering_id": self.offering.id})
         )
-        self.assertContains(periods_response, "Print Class Tabulation")
+        self.assertContains(periods_response, "Complete Tabulation Sheet")
 
         response = self.client.get(
             reverse("faculty_portal:offering_class_tabulation_sheet", kwargs={"offering_id": self.offering.id})
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Class Tabulation Sheet")
+        self.assertContains(response, "Complete Tabulation Sheet")
         self.assertContains(response, "/media/logos/ncba-logo.png")
-        self.assertContains(response, "Print PDF")
+        self.assertContains(response, "Print Official PDF")
         self.assertContains(response, "Q1")
         self.assertContains(response, "90.00")
         self.assertContains(response, "PRELIM")
@@ -2162,6 +2167,251 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertEqual(pdf_response.status_code, 200)
         self.assertEqual(pdf_response["Content-Type"], "application/pdf")
         self.assertTrue(pdf_response.content.startswith(b"%PDF"))
+        pdf = PdfReader(BytesIO(pdf_response.content))
+        self.assertGreaterEqual(len(pdf.pages), 4)
+        for page in pdf.pages:
+            self.assertGreater(float(page.mediabox.width), float(page.mediabox.height))
+            self.assertAlmostEqual(float(page.mediabox.width), 1008.0, places=1)
+            self.assertAlmostEqual(float(page.mediabox.height), 612.0, places=1)
+            self.assertIn("COMPLETE TABULATION SHEET", page.extract_text())
+        all_pdf_text = "\n".join(page.extract_text() for page in pdf.pages)
+        self.assertIn("PRELIM (PRELIM) - PART 1 OF", all_pdf_text)
+        self.assertIn("MIDTERM", all_pdf_text)
+        self.assertIn("PRE-FINAL", all_pdf_text)
+        self.assertIn("FINAL EXAM", all_pdf_text)
+        self.assertIn("Q1", all_pdf_text)
+        self.assertIn("90.00", all_pdf_text)
+
+    def test_complete_tabulation_pdf_handles_draft_many_activities_and_missing_zero_exempt(self):
+        self._accept_assignment()
+        first_student = self._create_active_student(
+            student_no="2025-COMPLETE-001",
+            last_name="Complete",
+            first_name="One",
+        )
+        second_student = self._create_active_student(
+            student_no="2025-COMPLETE-002",
+            last_name="Complete",
+            first_name="Two",
+        )
+        component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        active_activities = []
+        for index in range(1, 10):
+            active_activities.append(
+                GradeActivity.objects.create(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    offering=self.offering,
+                    template_period=self.prelim,
+                    template_component=component,
+                    title=f"Readable Activity {index}",
+                    total_score=Decimal("20.00"),
+                    activity_date=date(2025, 7, index),
+                    created_by_user=self.faculty_user,
+                )
+            )
+        archived_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=component,
+            title="Archived Activity Must Not Print",
+            total_score=Decimal("20.00"),
+            is_active=False,
+            created_by_user=self.faculty_user,
+        )
+        StudentActivityScore.objects.create(
+            activity=active_activities[0],
+            student=first_student,
+            raw_score=Decimal("0.00"),
+            computed_score=Decimal("50.00"),
+            encoded_by_user=self.faculty_user,
+        )
+        StudentActivityScore.objects.create(
+            activity=active_activities[1],
+            student=first_student,
+            raw_score=Decimal("0.00"),
+            computed_score=Decimal("0.00"),
+            is_excused=True,
+            encoded_by_user=self.faculty_user,
+        )
+        StudentActivityScore.objects.create(
+            activity=archived_activity,
+            student=first_student,
+            raw_score=Decimal("20.00"),
+            computed_score=Decimal("100.00"),
+            encoded_by_user=self.faculty_user,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:offering_class_tabulation_sheet", kwargs={"offering_id": self.offering.id})
+            + "?format=pdf"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        pdf = PdfReader(BytesIO(response.content))
+        texts = [page.extract_text() for page in pdf.pages]
+        combined = "\n".join(texts)
+        normalized_text = " ".join(combined.split())
+        self.assertIn("Readable Activity 1", normalized_text)
+        self.assertIn("Readable Activity 9", normalized_text)
+        self.assertNotIn("Archived Activity Must Not Print", combined)
+        self.assertIn("MISSING", combined)
+        self.assertIn("EXEMPT", combined)
+        self.assertIn("Not Submitted", combined)
+        self.assertGreaterEqual(combined.count("PRELIM (PRELIM) - PART"), 2)
+        for page_text in texts:
+            self.assertIn("Complete, One", page_text)
+            self.assertIn("Complete, Two", page_text)
+
+    def test_historical_accepted_faculty_keeps_report_only_access(self):
+        self._accept_assignment()
+        self.assignment.is_active = False
+        self.assignment.save(update_fields=["is_active", "updated_at"])
+        self.client.force_login(self.faculty_user)
+
+        courses_response = self.client.get(reverse("faculty_portal:my_courses"))
+        report_response = self.client.get(
+            reverse("faculty_portal:offering_class_tabulation_sheet", kwargs={"offering_id": self.offering.id})
+            + "?format=pdf"
+        )
+
+        self.assertEqual(courses_response.status_code, 200)
+        self.assertContains(courses_response, "Historical Tabulation Reports")
+        self.assertContains(courses_response, "Historical report only")
+        self.assertEqual(report_response.status_code, 200)
+        self.assertEqual(report_response["Content-Type"], "application/pdf")
+        self.assertEqual(
+            self.client.get(
+                reverse("faculty_portal:offering_periods", kwargs={"offering_id": self.offering.id})
+            ).status_code,
+            404,
+        )
+
+    def test_unassigned_faculty_cannot_open_complete_tabulation(self):
+        self._accept_assignment()
+        other_faculty = User.objects.create_user(
+            username="unassigned_report_faculty",
+            email="unassigned-report@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        faculty_role = Role.objects.get(code="FACULTY")
+        UserRole.objects.create(
+            user=other_faculty,
+            role=faculty_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        self.client.force_login(other_faculty)
+
+        response = self.client.get(
+            reverse("faculty_portal:offering_class_tabulation_sheet", kwargs={"offering_id": self.offering.id})
+            + "?format=pdf"
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_complete_tabulation_uses_only_faculty_of_record_signature(self):
+        self._accept_assignment()
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        other_user = User.objects.create_user(
+            username="other_signature_owner",
+            email="other-signature@example.com",
+            password="testpass123",
+        )
+
+        def signature_upload(color):
+            buffer = BytesIO()
+            Image.new("RGBA", (220, 80), color).save(buffer, format="PNG")
+            return SimpleUploadedFile("signature.png", buffer.getvalue(), content_type="image/png")
+
+        UserSignatureService.store_signature(
+            user=other_user,
+            uploaded_file=signature_upload((180, 10, 10, 255)),
+            actor=other_user,
+        )
+        self.client.force_login(self.faculty_user)
+        url = (
+            reverse("faculty_portal:offering_class_tabulation_sheet", kwargs={"offering_id": self.offering.id})
+            + "?format=pdf"
+        )
+
+        without_own_signature = self.client.get(url)
+        text_without_own = "\n".join(
+            page.extract_text() for page in PdfReader(BytesIO(without_own_signature.content)).pages
+        )
+        self.assertIn("No stored faculty signature.", text_without_own)
+        self.assertFalse(
+            UserSignatureUsageLog.objects.filter(
+                document_type=UserSignatureUsageLog.DocumentType.COMPLETE_TABULATION_SHEET
+            ).exists()
+        )
+
+        UserSignatureService.store_signature(
+            user=self.faculty_user,
+            uploaded_file=signature_upload((10, 80, 20, 255)),
+            actor=self.faculty_user,
+        )
+        html_with_own_signature = self.client.get(
+            reverse("faculty_portal:offering_class_tabulation_sheet", kwargs={"offering_id": self.offering.id})
+        )
+        self.assertContains(html_with_own_signature, 'class="signature-image"', html=False)
+        self.assertContains(html_with_own_signature, "data:image/png;base64,", html=False)
+        self.assertContains(html_with_own_signature, "Prepared and Submitted By")
+        with_own_signature = self.client.get(url)
+        text_with_own = "\n".join(
+            page.extract_text() for page in PdfReader(BytesIO(with_own_signature.content)).pages
+        )
+        self.assertNotIn("No stored faculty signature.", text_with_own)
+        self.assertTrue(
+            UserSignatureUsageLog.objects.filter(
+                user=self.faculty_user,
+                document_type=UserSignatureUsageLog.DocumentType.COMPLETE_TABULATION_SHEET,
+            ).exists()
+        )
+        self.assertFalse(
+            UserSignatureUsageLog.objects.filter(
+                user=other_user,
+                document_type=UserSignatureUsageLog.DocumentType.COMPLETE_TABULATION_SHEET,
+            ).exists()
+        )
+
+    def test_mobile_course_and_period_pages_keep_primary_actions_and_collapse_secondary_metadata(self):
+        self._accept_assignment()
+        self.client.force_login(self.faculty_user)
+
+        courses_response = self.client.get(reverse("faculty_portal:my_courses"))
+        periods_response = self.client.get(
+            reverse("faculty_portal:offering_periods", kwargs={"offering_id": self.offering.id})
+        )
+
+        self.assertEqual(courses_response.status_code, 200)
+        self.assertContains(courses_response, "course-card-mobile-details")
+        self.assertContains(courses_response, "Schedule and room")
+        self.assertContains(
+            courses_response,
+            reverse("faculty_portal:offering_periods", kwargs={"offering_id": self.offering.id}),
+        )
+        self.assertContains(
+            courses_response,
+            reverse("faculty_portal:offering_enrollment", kwargs={"offering_id": self.offering.id}),
+        )
+        self.assertEqual(periods_response.status_code, 200)
+        self.assertContains(periods_response, "period-page-toolbar-actions")
+        self.assertContains(periods_response, "Complete Tabulation Sheet")
+        self.assertContains(periods_response, "View Grading Template")
 
     def test_period_summary_hides_official_period_and_final_grades_before_deadline(self):
         student = Student.objects.create(

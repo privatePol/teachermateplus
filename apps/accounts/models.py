@@ -264,6 +264,7 @@ class UserSignatureUsageLog(models.Model):
     class DocumentType(models.TextChoices):
         FINAL_CLEARANCE = "FINAL_CLEARANCE", "Faculty Final Clearance"
         CORRECTION_OFFICIAL_REPORT = "CORRECTION_OFFICIAL_REPORT", "Correction Official Report"
+        COMPLETE_TABULATION_SHEET = "COMPLETE_TABULATION_SHEET", "Complete Tabulation Sheet"
 
     user = models.ForeignKey(
         "accounts.User",

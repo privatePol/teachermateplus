@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
+import base64
 import hashlib
 from io import BytesIO
 from pathlib import Path
@@ -17,10 +18,12 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape, legal
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from apps.accounts.models import UserSignatureUsageLog
 from apps.accounts.services import UserSignatureService
+from apps.academics.models import FacultyAssignment, FacultyAssignmentReplacementLog
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
@@ -33,6 +36,301 @@ from apps.grading.models import (
     StudentPeriodGrade,
 )
 from apps.grading.services import FacultyGradingService
+from apps.grading.tabulation import DetailedTabulationSheetGridService
+
+
+class InstitutionalReportPdfConfig:
+    """Single source of truth for institutional report page geometry."""
+
+    LEGAL_LANDSCAPE_PAGE_SIZE = landscape(legal)
+    LEFT_MARGIN = 8 * mm
+    RIGHT_MARGIN = 8 * mm
+    TOP_MARGIN = 29 * mm
+    BOTTOM_MARGIN = 14 * mm
+    CSS_PAGE_SIZE = "legal landscape"
+    CSS_PAGE_MARGIN = "10mm"
+
+
+class TabulationSheetAuthorizationService:
+    @staticmethod
+    def faculty_assignments_for_offering(*, faculty_user, offering_id):
+        queryset = FacultyAssignment.objects.filter(
+                faculty_user=faculty_user,
+                response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+                accepted_at__isnull=False,
+                offering__is_active=True,
+                offering__tenant__is_active=True,
+                offering__campus__is_active=True,
+                offering__academic_year__is_active=True,
+                offering__term__is_active=True,
+                offering__course__is_active=True,
+                offering__section__is_active=True,
+            )
+        if offering_id is not None:
+            queryset = queryset.filter(offering_id=offering_id)
+        return (
+            queryset
+            .exclude(
+                replacement_logs_as_old_assignment__replacement_type__in=(
+                    FacultyAssignmentReplacementLog.ReplacementType.PERMANENT,
+                    FacultyAssignmentReplacementLog.ReplacementType.ADMINISTRATIVE,
+                    FacultyAssignmentReplacementLog.ReplacementType.WRONG_ASSIGNMENT,
+                )
+            )
+            .select_related(
+                "offering",
+                "offering__tenant",
+                "offering__campus",
+                "offering__department",
+                "offering__program",
+                "offering__academic_year",
+                "offering__term",
+                "offering__course",
+                "offering__section",
+                "faculty_user",
+            )
+            .order_by("-is_active", "-is_primary", "-accepted_at", "-id")
+            .distinct()
+        )
+
+    @staticmethod
+    def report_faculty_for_offering(*, offering):
+        assignment = (
+            offering.faculty_assignments.filter(
+                is_active=True,
+                response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+                accepted_at__isnull=False,
+            )
+            .select_related("faculty_user")
+            .order_by("-is_active", "-is_primary", "-accepted_at", "-id")
+            .first()
+        )
+        return assignment.faculty_user if assignment else None
+
+
+class TabulationSheetSignatureService:
+    """Resolve only the offering faculty's signature for this document type."""
+
+    @staticmethod
+    def signature_bytes_for_report(*, offering, faculty_user):
+        if not faculty_user:
+            return None
+        if not FeatureSettingsService.is_user_signatures_enabled(
+            tenant_id=offering.tenant_id,
+            default=False,
+        ):
+            return None
+        return UserSignatureService.signature_image_bytes_for_user(user=faculty_user)
+
+
+class CompleteTabulationSheetDataService:
+    @staticmethod
+    def _format_decimal(value):
+        if value in (None, ""):
+            return ""
+        decimal_value = Decimal(str(value)).quantize(Decimal("0.01"))
+        return format(decimal_value, "f").rstrip("0").rstrip(".")
+
+    @staticmethod
+    def _student_name(student):
+        middle = f" {student.middle_name.strip()}" if getattr(student, "middle_name", "") else ""
+        return f"{student.last_name}, {student.first_name}{middle}".strip()
+
+    @classmethod
+    def build_report(cls, *, offering, faculty_user, generated_by, portal_code):
+        template = FacultyGradingService.resolve_template_for_offering(offering)
+        periods = list(FacultyGradingService.get_template_periods(template))
+        enrollments = list(
+            Enrollment.objects.filter(course_offering=offering, is_active=True)
+            .select_related("student")
+            .order_by("student__last_name", "student__first_name", "student__student_no")
+        )
+        student_ids = [row.student_id for row in enrollments]
+        period_ids = [period.id for period in periods]
+        activities = list(
+            GradeActivity.objects.filter(
+                offering=offering,
+                template_period_id__in=period_ids,
+                is_active=True,
+            )
+            .select_related("template_period", "template_component", "template_subcomponent", "template_detail")
+            .order_by(
+                "template_period__sequence_no",
+                "template_component__sort_order",
+                "template_subcomponent__sort_order",
+                "template_detail__sort_order",
+                "activity_date",
+                "id",
+            )
+        )
+        activity_ids = [activity.id for activity in activities]
+        scores = StudentActivityScore.objects.filter(
+            activity_id__in=activity_ids,
+            student_id__in=student_ids,
+            is_active=True,
+            activity__is_active=True,
+        )
+        score_map = {(row.activity_id, row.student_id): row for row in scores}
+        period_grade_map = {
+            (row.template_period_id, row.student_id): row
+            for row in StudentPeriodGrade.objects.filter(
+                offering=offering,
+                template_period_id__in=period_ids,
+                student_id__in=student_ids,
+            )
+        }
+        final_grade_map = {
+            row.student_id: row
+            for row in StudentFinalGrade.objects.filter(offering=offering, student_id__in=student_ids)
+        }
+        submission_map = {
+            row.template_period_id: row
+            for row in GradeSubmission.objects.filter(offering=offering, template_period_id__in=period_ids)
+        }
+        passing_threshold = FacultyGradingService.resolve_passing_threshold(offering)
+        activities_by_period = defaultdict(list)
+        for activity in activities:
+            activities_by_period[activity.template_period_id].append(activity)
+
+        student_rows = []
+        for number, enrollment in enumerate(enrollments, start=1):
+            period_values = {
+                period.id: (
+                    period_grade_map[(period.id, enrollment.student_id)].period_grade
+                    if (period.id, enrollment.student_id) in period_grade_map
+                    else None
+                )
+                for period in periods
+            }
+            final_detail = FacultyGradingService.compute_final_grade_detail_from_period_values(
+                offering=offering,
+                template=template,
+                period_values_by_period_id=period_values,
+            )
+            stored_final = final_grade_map.get(enrollment.student_id)
+            official_final = stored_final.final_grade if stored_final else final_detail["official_value"]
+            enrollment_label = enrollment.get_enrollment_status_display()
+            if enrollment.enrollment_status == Enrollment.Status.ACTIVE:
+                if stored_final and stored_final.remarks:
+                    remarks = stored_final.remarks
+                elif official_final is None:
+                    remarks = "Incomplete Record"
+                else:
+                    remarks = "Passed" if Decimal(official_final) >= passing_threshold else "Failed"
+            else:
+                remarks = enrollment_label
+            student_rows.append(
+                {
+                    "number": number,
+                    "student_id": enrollment.student_id,
+                    "student_no": enrollment.student.student_no,
+                    "student_name": cls._student_name(enrollment.student),
+                    "status": enrollment_label,
+                    "period_values": period_values,
+                    "computed_final_grade": final_detail["raw_value"],
+                    "official_final_grade": official_final,
+                    "remarks": remarks,
+                }
+            )
+
+        period_sections = []
+        for period in periods:
+            period_activities = activities_by_period.get(period.id, [])
+            activity_rows = []
+            for activity in period_activities:
+                component_bits = [activity.template_component.name]
+                if activity.template_subcomponent:
+                    component_bits.append(activity.template_subcomponent.name)
+                if activity.template_detail:
+                    component_bits.append(activity.template_detail.name)
+                values = {}
+                for enrollment in enrollments:
+                    score = score_map.get((activity.id, enrollment.student_id))
+                    if score is None:
+                        values[enrollment.student_id] = "MISSING"
+                    elif score.is_excused:
+                        values[enrollment.student_id] = "EXEMPT"
+                    else:
+                        values[enrollment.student_id] = cls._format_decimal(score.raw_score)
+                activity_rows.append(
+                    {
+                        "id": activity.id,
+                        "title": activity.title,
+                        "component": " / ".join(bit for bit in component_bits if bit),
+                        "maximum_score": cls._format_decimal(activity.total_score),
+                        "values": values,
+                    }
+                )
+            submission = submission_map.get(period.id)
+            period_sections.append(
+                {
+                    "period": period,
+                    "label": period.name or period.code,
+                    "submission_status": submission.get_status_display() if submission else "Not Submitted",
+                    "activities": activity_rows,
+                }
+            )
+
+        faculty_name = (
+            faculty_user.full_name or faculty_user.username
+            if faculty_user
+            else "No assigned faculty"
+        )
+        generated_by_name = generated_by.full_name or generated_by.username
+        signature_bytes = TabulationSheetSignatureService.signature_bytes_for_report(
+            offering=offering,
+            faculty_user=faculty_user,
+        )
+        stored_grade_map = defaultdict(dict)
+        for (period_id, student_id), grade_row in period_grade_map.items():
+            stored_grade_map[period_id][student_id] = grade_row
+        detailed_grid = DetailedTabulationSheetGridService.build(
+            offering=offering,
+            periods=periods,
+            enrollments=enrollments,
+            stored_grade_map=stored_grade_map,
+            final_grade_map={
+                student_id: grade_row.final_grade
+                for student_id, grade_row in final_grade_map.items()
+            },
+        )
+        for group in detailed_grid["period_column_groups"]:
+            submission = submission_map.get(group["period"].id)
+            group["submission_status"] = (
+                submission.get_status_display() if submission else "Not Submitted"
+            )
+        return {
+            "offering": offering,
+            "template": template,
+            "periods": periods,
+            "period_sections": period_sections,
+            "student_rows": student_rows,
+            "faculty_user": faculty_user,
+            "faculty_name": faculty_name,
+            "generated_by_user": generated_by,
+            "generated_by_name": generated_by_name,
+            "generated_at": timezone.localtime(),
+            "portal_code": portal_code,
+            "print_header_name": SystemSettingService.get(
+                "PRINT_HEADER_SCHOOL_NAME",
+                tenant_id=offering.tenant_id,
+                default=offering.tenant.name,
+            ),
+            "print_header_address": SystemSettingService.get(
+                "PRINT_HEADER_SCHOOL_ADDRESS",
+                tenant_id=offering.tenant_id,
+                default=getattr(offering.campus, "address", "") or "",
+            ),
+            "signature_bytes": signature_bytes,
+            "signature_data_uri": (
+                f"data:image/png;base64,{base64.b64encode(signature_bytes).decode('ascii')}"
+                if signature_bytes
+                else ""
+            ),
+            "print_page_css_size": InstitutionalReportPdfConfig.CSS_PAGE_SIZE,
+            "print_page_css_margin": InstitutionalReportPdfConfig.CSS_PAGE_MARGIN,
+            **detailed_grid,
+        }
 
 
 class CorrectionOfficialReportService:
@@ -683,7 +981,7 @@ class ClassTabulationSheetPdfService:
 
     @classmethod
     def _column_widths(cls, dynamic_column_count):
-        usable_width = landscape(legal)[0] - (16 * mm)
+        usable_width = InstitutionalReportPdfConfig.LEGAL_LANDSCAPE_PAGE_SIZE[0] - (16 * mm)
         fixed_widths = [8 * mm, 22 * mm, 45 * mm, 11 * mm]
         final_width = 14 * mm
         remaining = usable_width - sum(fixed_widths) - final_width
@@ -691,11 +989,11 @@ class ClassTabulationSheetPdfService:
         return fixed_widths + ([dynamic_width] * dynamic_column_count) + [final_width]
 
     @classmethod
-    def build_pdf_bytes(cls, *, report):
+    def _build_legacy_pdf_bytes(cls, *, report):
         buffer = BytesIO()
         doc = SimpleDocTemplate(
             buffer,
-            pagesize=landscape(legal),
+            pagesize=InstitutionalReportPdfConfig.LEGAL_LANDSCAPE_PAGE_SIZE,
             leftMargin=8 * mm,
             rightMargin=8 * mm,
             topMargin=8 * mm,
@@ -872,6 +1170,503 @@ class ClassTabulationSheetPdfService:
         story.append(signature_table)
 
         doc.build(story, onFirstPage=cls._draw_page_background, onLaterPages=cls._draw_page_background)
+        return buffer.getvalue()
+
+    MAX_ACTIVITY_COLUMNS_PER_PAGE = 12
+    MAX_SUMMARY_PERIOD_COLUMNS_PER_PAGE = 6
+
+    @staticmethod
+    def _fit_canvas_text(value, *, font_name, font_size, max_width):
+        text = str(value or "")
+        if stringWidth(text, font_name, font_size) <= max_width:
+            return text
+        suffix = "..."
+        while text and stringWidth(text + suffix, font_name, font_size) > max_width:
+            text = text[:-1]
+        return text + suffix
+
+    @classmethod
+    def _complete_page_header(cls, canvas, doc):
+        report = doc.complete_tabulation_report
+        offering = report["offering"]
+        page_width, page_height = doc.pagesize
+        canvas.saveState()
+        canvas.saveState()
+        canvas.setFillColor(colors.HexColor("#edf4ee"))
+        canvas.setFont("Helvetica-Bold", 72)
+        canvas.translate(page_width / 2, page_height / 2)
+        canvas.rotate(28)
+        canvas.drawCentredString(0, 0, "NCBA")
+        canvas.restoreState()
+
+        canvas.setFillColor(colors.HexColor("#123b25"))
+        if cls.LOGO_PATH.exists():
+            canvas.drawImage(
+                str(cls.LOGO_PATH),
+                (page_width / 2) - (78 * mm),
+                page_height - 18 * mm,
+                width=12 * mm,
+                height=12 * mm,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+        canvas.setFont("Helvetica-Bold", 9.5)
+        canvas.drawCentredString(page_width / 2, page_height - 7 * mm, report["print_header_name"].upper())
+        canvas.setFont("Helvetica", 6.2)
+        canvas.drawCentredString(page_width / 2, page_height - 11 * mm, report.get("print_header_address") or "")
+        canvas.setFont("Helvetica-Bold", 9)
+        canvas.drawCentredString(page_width / 2, page_height - 15.5 * mm, "COMPLETE TABULATION SHEET")
+        canvas.setFont("Helvetica", 6.5)
+        course_line = (
+            f"{offering.course.code} - {offering.course.title} | Section {offering.section.code} | "
+            f"{offering.academic_year.code} / {offering.term.name or offering.term.code}"
+        )
+        canvas.drawCentredString(
+            page_width / 2,
+            page_height - 20.5 * mm,
+            cls._fit_canvas_text(
+                course_line,
+                font_name="Helvetica",
+                font_size=6.5,
+                max_width=page_width - doc.leftMargin - doc.rightMargin,
+            ),
+        )
+        canvas.setStrokeColor(colors.HexColor("#94a38f"))
+        canvas.setLineWidth(0.4)
+        canvas.line(doc.leftMargin, page_height - 23.5 * mm, page_width - doc.rightMargin, page_height - 23.5 * mm)
+        canvas.line(doc.leftMargin, 11 * mm, page_width - doc.rightMargin, 11 * mm)
+        canvas.setFillColor(colors.HexColor("#4b5563"))
+        canvas.setFont("Helvetica", 6.5)
+        canvas.drawString(doc.leftMargin, 6.5 * mm, "Legal landscape - 14 x 8.5 inches")
+        canvas.drawRightString(page_width - doc.rightMargin, 6.5 * mm, f"Page {doc.page}")
+        canvas.restoreState()
+
+    @staticmethod
+    def _chunked(items, size):
+        if not items:
+            return [[]]
+        return [items[index : index + size] for index in range(0, len(items), size)]
+
+    @classmethod
+    def _complete_styles(cls):
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name="ReportTiny", fontSize=6.4, leading=7.6))
+        styles.add(ParagraphStyle(name="ReportTinyCenter", fontSize=6.4, leading=7.6, alignment=1))
+        styles.add(
+            ParagraphStyle(
+                name="ReportTinyBold",
+                fontSize=6.4,
+                leading=7.6,
+                fontName="Helvetica-Bold",
+            )
+        )
+        styles.add(
+            ParagraphStyle(
+                name="ReportSection",
+                fontSize=9,
+                leading=11,
+                fontName="Helvetica-Bold",
+                textColor=colors.HexColor("#123b25"),
+                spaceAfter=4,
+            )
+        )
+        return styles
+
+    @classmethod
+    def _complete_metadata_table(cls, report, styles):
+        offering = report["offering"]
+        rows = [
+            [
+                cls._paragraph("Tenant", styles["ReportTinyBold"]),
+                cls._paragraph(offering.tenant.name, styles["ReportTiny"]),
+                cls._paragraph("Campus", styles["ReportTinyBold"]),
+                cls._paragraph(offering.campus.name, styles["ReportTiny"]),
+            ],
+            [
+                cls._paragraph("Academic Year", styles["ReportTinyBold"]),
+                cls._paragraph(offering.academic_year.code, styles["ReportTiny"]),
+                cls._paragraph("Semester / Term", styles["ReportTinyBold"]),
+                cls._paragraph(offering.term.name or offering.term.code, styles["ReportTiny"]),
+            ],
+            [
+                cls._paragraph("Section", styles["ReportTinyBold"]),
+                cls._paragraph(offering.section.code, styles["ReportTiny"]),
+                cls._paragraph("Faculty", styles["ReportTinyBold"]),
+                cls._paragraph(report["faculty_name"], styles["ReportTiny"]),
+            ],
+            [
+                cls._paragraph("Course Code", styles["ReportTinyBold"]),
+                cls._paragraph(offering.course.code, styles["ReportTiny"]),
+                cls._paragraph("Room", styles["ReportTinyBold"]),
+                cls._paragraph(offering.room or "TBA", styles["ReportTiny"]),
+            ],
+            [
+                cls._paragraph("Course Title", styles["ReportTinyBold"]),
+                cls._paragraph(offering.course.title, styles["ReportTiny"]),
+                cls._paragraph("Generated", styles["ReportTinyBold"]),
+                cls._paragraph(report["generated_at"].strftime("%Y-%m-%d %H:%M %Z"), styles["ReportTiny"]),
+            ],
+        ]
+        table = Table(rows, colWidths=[25 * mm, 130 * mm, 30 * mm, 130 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                ]
+            )
+        )
+        return table
+
+    @classmethod
+    def _summary_table(cls, report, styles, *, periods):
+        header = [
+            cls._paragraph("No.", styles["ReportTinyBold"]),
+            cls._paragraph("Student No", styles["ReportTinyBold"]),
+            cls._paragraph("Student Name", styles["ReportTinyBold"]),
+            cls._paragraph("Status", styles["ReportTinyBold"]),
+            *[cls._paragraph(period.name or period.code, styles["ReportTinyBold"]) for period in periods],
+            cls._paragraph("Computed Final", styles["ReportTinyBold"]),
+            cls._paragraph("Official Final", styles["ReportTinyBold"]),
+            cls._paragraph("Remarks", styles["ReportTinyBold"]),
+        ]
+        rows = [header]
+        for row in report["student_rows"]:
+            rows.append(
+                [
+                    str(row["number"]),
+                    cls._paragraph(row["student_no"], styles["ReportTiny"]),
+                    cls._paragraph(row["student_name"], styles["ReportTiny"]),
+                    cls._paragraph(row["status"], styles["ReportTiny"]),
+                    *[
+                        cls._paragraph(
+                            CompleteTabulationSheetDataService._format_decimal(row["period_values"].get(period.id)) or "MISSING",
+                            styles["ReportTinyCenter"],
+                        )
+                        for period in periods
+                    ],
+                    cls._paragraph(
+                        CompleteTabulationSheetDataService._format_decimal(row["computed_final_grade"]) or "-",
+                        styles["ReportTinyCenter"],
+                    ),
+                    cls._paragraph(
+                        CompleteTabulationSheetDataService._format_decimal(row["official_final_grade"]) or "-",
+                        styles["ReportTinyCenter"],
+                    ),
+                    cls._paragraph(row["remarks"], styles["ReportTiny"]),
+                ]
+            )
+        if len(rows) == 1:
+            rows.append(["", "", cls._paragraph("No enrolled students.", styles["ReportTinyBold"])] + [""] * (len(header) - 3))
+        period_width = min(24 * mm, max(16 * mm, 95 * mm / max(len(periods), 1)))
+        widths = [8 * mm, 23 * mm, 52 * mm, 19 * mm] + ([period_width] * len(periods)) + [23 * mm, 23 * mm, 40 * mm]
+        table = Table(rows, colWidths=widths, repeatRows=1)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#b8c5b8")),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8f2e8")),
+                    ("BACKGROUND", (-3, 1), (-2, -1), colors.HexColor("#fff7d6")),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+        return table
+
+    @classmethod
+    def _period_detail_table(cls, report, section, activity_chunk, styles):
+        activity_count = max(len(activity_chunk), 1)
+        first_header = [
+            cls._paragraph("No.", styles["ReportTinyBold"]),
+            cls._paragraph("Student No", styles["ReportTinyBold"]),
+            cls._paragraph("Student Name", styles["ReportTinyBold"]),
+            cls._paragraph("Status", styles["ReportTinyBold"]),
+        ]
+        second_header = ["", "", "", ""]
+        if activity_chunk:
+            for activity in activity_chunk:
+                first_header.append(cls._paragraph(activity["title"], styles["ReportTinyBold"]))
+                second_header.append(
+                    Paragraph(
+                        f"{cls._safe_text(activity['component'])}<br/>"
+                        f"Max: {cls._safe_text(activity['maximum_score'])}",
+                        styles["ReportTinyCenter"],
+                    )
+                )
+        else:
+            first_header.append(cls._paragraph("Activities", styles["ReportTinyBold"]))
+            second_header.append(cls._paragraph("No active graded activities", styles["ReportTinyCenter"]))
+        first_header.append(cls._paragraph("Period Grade", styles["ReportTinyBold"]))
+        second_header.append(cls._paragraph(section["submission_status"], styles["ReportTinyCenter"]))
+        rows = [first_header, second_header]
+        for row in report["student_rows"]:
+            activity_values = (
+                [cls._paragraph(activity["values"].get(row["student_id"], "MISSING"), styles["ReportTinyCenter"]) for activity in activity_chunk]
+                if activity_chunk
+                else [""]
+            )
+            rows.append(
+                [
+                    str(row["number"]),
+                    cls._paragraph(row["student_no"], styles["ReportTiny"]),
+                    cls._paragraph(row["student_name"], styles["ReportTiny"]),
+                    cls._paragraph(row["status"], styles["ReportTiny"]),
+                    *activity_values,
+                    cls._paragraph(
+                        CompleteTabulationSheetDataService._format_decimal(row["period_values"].get(section["period"].id)) or "MISSING",
+                        styles["ReportTinyCenter"],
+                    ),
+                ]
+            )
+        if len(rows) == 2:
+            rows.append(["", "", cls._paragraph("No enrolled students.", styles["ReportTinyBold"])] + [""] * (len(first_header) - 3))
+        identity_widths = [8 * mm, 23 * mm, 50 * mm, 18 * mm]
+        activity_width = min(28 * mm, 174 * mm / activity_count)
+        widths = identity_widths + ([activity_width] * activity_count) + [22 * mm]
+        table = Table(rows, colWidths=widths, repeatRows=2)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#b8c5b8")),
+                    ("BACKGROUND", (0, 0), (-1, 1), colors.HexColor("#e8f2e8")),
+                    ("BACKGROUND", (-1, 0), (-1, -1), colors.HexColor("#fff7d6")),
+                    ("SPAN", (0, 0), (0, 1)),
+                    ("SPAN", (1, 0), (1, 1)),
+                    ("SPAN", (2, 0), (2, 1)),
+                    ("SPAN", (3, 0), (3, 1)),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+        return table
+
+    @classmethod
+    def _certification_panel(cls, report, styles):
+        signature_cell = cls._paragraph("No stored faculty signature.", styles["ReportTinyCenter"])
+        if report.get("signature_bytes"):
+            signature_cell = Image(BytesIO(report["signature_bytes"]), width=42 * mm, height=14 * mm, kind="proportional")
+            signature_cell.hAlign = "CENTER"
+        table = Table(
+            [
+                [signature_cell],
+                [cls._paragraph(report["faculty_name"].upper(), styles["ReportTinyBold"])],
+                [cls._paragraph("Prepared and Submitted By", styles["ReportTinyCenter"])],
+                [cls._paragraph(report["generated_at"].strftime("%Y-%m-%d"), styles["ReportTinyCenter"])],
+            ],
+            colWidths=[75 * mm],
+            hAlign="RIGHT",
+        )
+        table.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("LINEABOVE", (0, 1), (0, 1), 0.5, colors.black),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+        return table
+
+    @classmethod
+    def _canonical_grid_table(
+        cls,
+        report,
+        group,
+        column_chunk,
+        *,
+        chunk_start,
+        styles,
+        include_nothing_follows=False,
+    ):
+        dynamic_count = max(len(column_chunk), 1)
+        first_header = [
+            cls._paragraph("No.", styles["ReportTinyBold"]),
+            cls._paragraph("Student No", styles["ReportTinyBold"]),
+            cls._paragraph("Student Name", styles["ReportTinyBold"]),
+            cls._paragraph("Status", styles["ReportTinyBold"]),
+            cls._paragraph(group["label"], styles["ReportTinyBold"]),
+            *([""] * max(dynamic_count - 1, 0)),
+            cls._paragraph("Final Grade", styles["ReportTinyBold"]),
+        ]
+        second_header = ["", "", "", ""]
+        if column_chunk:
+            second_header.extend(cls._paragraph(column["label"], styles["ReportTinyBold"]) for column in column_chunk)
+        else:
+            second_header.append(cls._paragraph("No active grade columns", styles["ReportTinyCenter"]))
+        second_header.append("")
+        highest_values = group["highest_values"][chunk_start : chunk_start + len(column_chunk)]
+        if not column_chunk:
+            highest_values = [""]
+        rows = [
+            first_header,
+            second_header,
+            [
+                "",
+                "",
+                cls._paragraph("Highest Possible Score", styles["ReportTinyBold"]),
+                "",
+                *[cls._paragraph(value, styles["ReportTinyCenter"]) for value in highest_values],
+                "",
+            ],
+        ]
+        value_start = group["value_offset"] + chunk_start
+        value_end = value_start + len(column_chunk)
+        for row in report["sheet_rows"]:
+            selected_values = row["values"][value_start:value_end] if column_chunk else [""]
+            rows.append(
+                [
+                    str(row["number"]),
+                    cls._paragraph(row["student_no"], styles["ReportTiny"]),
+                    cls._paragraph(row["student_name"], styles["ReportTiny"]),
+                    cls._paragraph(row["status"], styles["ReportTiny"]),
+                    *[cls._paragraph(value, styles["ReportTinyCenter"]) for value in selected_values],
+                    cls._paragraph(row["final_grade"], styles["ReportTinyBold"]),
+                ]
+            )
+        if not report["sheet_rows"]:
+            rows.append(["", "", cls._paragraph("No enrolled students.", styles["ReportTinyBold"]), ""] + ([""] * dynamic_count) + [""])
+        if include_nothing_follows:
+            rows.append(
+                [
+                    "",
+                    "",
+                    cls._paragraph("**** NOTHING FOLLOWS *****", styles["ReportTinyBold"]),
+                    "",
+                    *([""] * dynamic_count),
+                    "",
+                ]
+            )
+
+        usable_width = (
+            InstitutionalReportPdfConfig.LEGAL_LANDSCAPE_PAGE_SIZE[0]
+            - InstitutionalReportPdfConfig.LEFT_MARGIN
+            - InstitutionalReportPdfConfig.RIGHT_MARGIN
+        )
+        fixed_widths = [7 * mm, 22 * mm, 46 * mm, 12 * mm]
+        final_width = 15 * mm
+        dynamic_width = (usable_width - sum(fixed_widths) - final_width) / dynamic_count
+        table = Table(
+            rows,
+            colWidths=fixed_widths + ([dynamic_width] * dynamic_count) + [final_width],
+            repeatRows=3,
+        )
+        last_dynamic_col = 4 + dynamic_count - 1
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#b8c5b8")),
+                    ("BACKGROUND", (0, 0), (-1, 1), colors.HexColor("#e8f2e8")),
+                    ("BACKGROUND", (0, 2), (-1, 2), colors.HexColor("#f1f7f1")),
+                    ("BACKGROUND", (-1, 0), (-1, -1), colors.HexColor("#fff7d6")),
+                    ("SPAN", (0, 0), (0, 1)),
+                    ("SPAN", (1, 0), (1, 1)),
+                    ("SPAN", (2, 0), (2, 1)),
+                    ("SPAN", (3, 0), (3, 1)),
+                    ("SPAN", (4, 0), (last_dynamic_col, 0)),
+                    ("SPAN", (-1, 0), (-1, 1)),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("ALIGN", (2, 2), (2, -1), "LEFT"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 1.6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 1.6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1.6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1.6),
+                ]
+            )
+        )
+        return table
+
+    @classmethod
+    def build_pdf_bytes(cls, *, report):
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=InstitutionalReportPdfConfig.LEGAL_LANDSCAPE_PAGE_SIZE,
+            leftMargin=InstitutionalReportPdfConfig.LEFT_MARGIN,
+            rightMargin=InstitutionalReportPdfConfig.RIGHT_MARGIN,
+            topMargin=InstitutionalReportPdfConfig.TOP_MARGIN,
+            bottomMargin=InstitutionalReportPdfConfig.BOTTOM_MARGIN,
+            title="Complete Tabulation Sheet",
+        )
+        doc.complete_tabulation_report = report
+        styles = cls._complete_styles()
+        grid_parts = []
+        for group in report["period_column_groups"]:
+            chunks = cls._chunked(group["columns"], cls.MAX_ACTIVITY_COLUMNS_PER_PAGE)
+            for chunk_number, column_chunk in enumerate(chunks, start=1):
+                grid_parts.append((group, column_chunk, chunk_number, len(chunks)))
+        if not grid_parts:
+            grid_parts.append(
+                (
+                    {"label": "TABULATION", "columns": [], "highest_values": [], "value_offset": 0},
+                    [],
+                    1,
+                    1,
+                )
+            )
+
+        story = []
+        for part_index, (group, column_chunk, chunk_number, chunk_total) in enumerate(grid_parts):
+            if part_index:
+                story.append(PageBreak())
+            story.extend(
+                [
+                    cls._complete_metadata_table(report, styles),
+                    Spacer(1, 4),
+                    Paragraph(
+                        f"{group['label']} - PART {chunk_number} OF {chunk_total} - "
+                        f"{group.get('submission_status', 'Not Submitted')}",
+                        styles["ReportSection"],
+                    ),
+                    cls._canonical_grid_table(
+                        report,
+                        group,
+                        column_chunk,
+                        chunk_start=(chunk_number - 1) * cls.MAX_ACTIVITY_COLUMNS_PER_PAGE,
+                        styles=styles,
+                        include_nothing_follows=part_index == len(grid_parts) - 1,
+                    ),
+                ]
+            )
+            if part_index == 0:
+                story.extend(
+                    [
+                        Spacer(1, 4),
+                        Paragraph(
+                            "Legend: MISSING = no active score row; 0.00 = encoded zero; "
+                            "EXEMPT = excused/not applicable. Inactive activities are excluded.",
+                            styles["ReportTiny"],
+                        ),
+                    ]
+                )
+        story.extend([Spacer(1, 12), cls._certification_panel(report, styles)])
+        doc.build(story, onFirstPage=cls._complete_page_header, onLaterPages=cls._complete_page_header)
+
+        if report.get("signature_bytes") and report.get("faculty_user"):
+            UserSignatureService.log_signature_usage(
+                user=report["faculty_user"],
+                document_type=UserSignatureUsageLog.DocumentType.COMPLETE_TABULATION_SHEET,
+                document_reference=f"offering:{report['offering'].id}",
+                usage_role="FACULTY_OF_RECORD",
+                actor=report.get("generated_by_user") or report["faculty_user"],
+                portal_code=report["portal_code"],
+                metadata={"offering_id": report["offering"].id},
+            )
         return buffer.getvalue()
 
 

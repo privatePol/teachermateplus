@@ -250,6 +250,36 @@ class UserSignatureUploadForm(forms.Form):
         return value
 
 
+class UserSignatureDrawForm(forms.Form):
+    signature_data = forms.CharField(
+        widget=forms.HiddenInput(),
+        max_length=3 * 1024 * 1024,
+    )
+    current_password = forms.CharField(
+        widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),
+        label="Current Password",
+        help_text="Re-enter your current password to authorize the drawn signature.",
+    )
+    ownership_confirmation = forms.BooleanField(
+        label=(
+            "I confirm this is my signature and authorize TeacherMate+ to use it "
+            "on approved institutional documents."
+        ),
+    )
+
+    def __init__(self, user, *args, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+        self.fields["current_password"].widget.attrs.update({"class": "form-control"})
+        self.fields["ownership_confirmation"].widget.attrs.update({"class": "form-check-input"})
+
+    def clean_current_password(self):
+        value = (self.cleaned_data.get("current_password") or "").strip()
+        if not self.user.check_password(value):
+            raise DjangoValidationError("Current password is incorrect.")
+        return value
+
+
 class UserSignatureDeleteForm(forms.Form):
     current_password = forms.CharField(
         widget=forms.PasswordInput(attrs={"autocomplete": "current-password"}),

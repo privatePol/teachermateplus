@@ -59,14 +59,14 @@ FACULTY_HELP_SECTIONS = [
             {
                 "code": "dashboard",
                 "title": "Dashboard and Grade Encoding Status",
-                "purpose": "Shows your accepted classes, current-period encoding status, and gradebook blockers without displaying student names.",
+                "purpose": "Shows your accepted classes, current-period encoding status, and gradebook blockers without displaying student names. Detailed update, encoding-status, issue, analytics, performance-trend, and activity-history panels are intentionally hidden on phone-width screens.",
                 "how_to_open": ["From the left navigation bar, click Dashboard."],
                 "screenshot": "faculty_helpguide/1_dashboard.png",
                 "check_first": ["Confirm the academic scope.", "Check each class period and status.", "Open Pending Grade Issues before a deadline."],
                 "actions": [
                     {"name": "Open My Classes", "does": "Opens your accepted teaching assignments.", "when": "Use it to enter a class or grading period.", "avoid": "Do not use another faculty member's account to open a class.", "result": "Your assigned class cards are displayed.", "editable": "No records change."},
                     {"name": "Continue Encoding", "does": "Opens the selected period's activity workspace.", "when": "Use it for Not Started or In Progress gradebooks.", "avoid": "Do not encode until the class list and grading setup are correct.", "result": "You can continue creating activities or entering scores while policy permits.", "editable": "The gradebook remains editable only while open."},
-                    {"name": "Review / Submit Grades", "does": "Opens the Summary when required records appear complete.", "when": "Use it after checking activities, scores, and attendance.", "avoid": "Do not submit without reviewing the Summary.", "result": "The current computed gradebook is displayed for review.", "editable": "Submission locks normal editing."},
+                    {"name": "Review / Submit Grades", "does": "Opens the Summary when required records appear complete.", "when": "Use it after checking activities, scores, and attendance.", "avoid": "Do not submit without reviewing the Summary.", "result": "The current computed gradebook is displayed for review. On phones, the grade table shows wrapped student names, the current official periodic grade, and Explain.", "editable": "Submission locks normal editing."},
                     {"name": "View Performance", "does": "Opens the selected class snapshot and students requiring attention.", "when": "Use it after scores are encoded.", "avoid": "Do not present a partial snapshot as a final submitted grade.", "result": "Class average, risk count, missing outputs, weakest component, and attention rows are displayed.", "editable": "No grade records change."},
                 ],
                 "avoid": "The dashboard intentionally does not show student names or student-level alerts. Open a selected class to review those records privately.",
@@ -76,7 +76,7 @@ FACULTY_HELP_SECTIONS = [
                 "code": "feedback",
                 "title": "Send Page Feedback",
                 "purpose": "Lets you quickly tell the system team whether the current Faculty Portal page felt helpful, neutral, or difficult.",
-                "how_to_open": ["Use Feedback in the bottom-left utility controls on an authenticated Faculty Portal page."],
+                "how_to_open": ["Use Feedback in the bottom-left utility controls on an authenticated Faculty Portal page. On a phone, open Help & Privacy first."],
                 "check_first": [
                     "Stay on the page you want to comment about.",
                     "Choose Happy, Neutral, or Sad.",

@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from io import BytesIO
 import re
 
 from django.conf import settings
@@ -10,6 +11,7 @@ from django.http import Http404
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
+from pypdf import PdfReader
 
 from apps.accounts.models import User
 from apps.admin_portal.views import (
@@ -279,6 +281,87 @@ class FacultyMonitoringScopeTests(TestCase):
         )
 
         self.assertNotIn(self.offering.id, offering_ids)
+
+    def test_complete_tabulation_pdf_is_available_only_inside_admin_offering_scope(self):
+        self._seed_gradebook_explanation_fixture()
+        for code in ("admin_portal.access", "offerings.read"):
+            permission, _ = Permission.objects.get_or_create(
+                code=code,
+                defaults={"module": code.split(".")[0], "action": code.split(".")[-1]},
+            )
+            RolePermission.objects.get_or_create(role=self.ac_role, permission=permission)
+        self.ac_user.must_change_password = False
+        self.ac_user.privacy_consent_version = getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03")
+        self.ac_user.privacy_consent_at = timezone.now()
+        self.ac_user.save(
+            update_fields=["must_change_password", "privacy_consent_version", "privacy_consent_at"]
+        )
+        self.client.force_login(self.ac_user)
+
+        response = self.client.get(
+            reverse(
+                "admin_portal:offering_complete_tabulation_sheet",
+                kwargs={"offering_id": self.offering.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        pdf = PdfReader(BytesIO(response.content))
+        self.assertGreater(float(pdf.pages[0].mediabox.width), float(pdf.pages[0].mediabox.height))
+        pdf_text = "\n".join(page.extract_text() for page in pdf.pages)
+        self.assertIn("COMPLETE TABULATION SHEET", pdf_text)
+        self.assertIn("PRELIM (PRELIM) - PART 1 OF", pdf_text)
+        self.assertIn("Quiz", pdf_text)
+        self.assertIn("2025-10777", pdf_text)
+        self.assertIn("87.00", pdf_text)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                actor_user=self.ac_user,
+                action="GENERATE_COMPLETE_TABULATION_SHEET",
+                entity_id=str(self.offering.id),
+            ).exists()
+        )
+
+        other_campus = Campus.objects.create(tenant=self.tenant, code="OTHER-CAMPUS", name="Other Campus")
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="OTHER-DEPT",
+            name="Other Department",
+        )
+        other_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+            code="OTHER-PROG",
+            name="Other Program",
+        )
+        other_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+            program=other_program,
+            code="OTHER-1A",
+            name="Other 1A",
+        )
+        other_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+            program=other_program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=other_section,
+        )
+        denied = self.client.get(
+            reverse(
+                "admin_portal:offering_complete_tabulation_sheet",
+                kwargs={"offering_id": other_offering.id},
+            )
+        )
+        self.assertEqual(denied.status_code, 404)
 
     def test_grade_governance_queues_follow_accepted_supervised_assignment(self):
         template = GradingTemplate.objects.create(

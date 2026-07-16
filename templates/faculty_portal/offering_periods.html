@@ -385,25 +385,43 @@
       justify-content: flex-start;
     }
   }
+  @media (max-width: 575.98px) {
+    .period-page-toolbar {
+      align-items: stretch !important;
+      flex-direction: column;
+    }
+    .period-page-toolbar-actions {
+      display: grid !important;
+      grid-template-columns: 1fr;
+      width: 100%;
+    }
+    .period-page-toolbar-actions .btn {
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .period-meta {
+      padding: 0.65rem 0.75rem;
+    }
+  }
 </style>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-3 period-page-toolbar">
   <h2 class="h4 mb-0 period-page-title">
     {{ offering.course.code }} | {{ offering.section.code }} | {{ offering.term.code }}
   </h2>
-  <div class="d-flex gap-2">
-    {% if all_periods_submitted %}
+  <div class="d-flex gap-2 period-page-toolbar-actions">
     <a class="btn btn-sm btn-success" href="{% url 'faculty_portal:offering_class_tabulation_sheet' offering.id %}">
-      Print Class Tabulation
+      Complete Tabulation Sheet
     </a>
-    {% endif %}
     <a class="btn btn-sm btn-outline-primary" href="{% url 'faculty_portal:offering_grading_template' offering.id %}">View Grading Template</a>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:my_courses' %}">Back</a>
   </div>
 </div>
 
 {% if template %}
-<div class="alert period-meta mb-3">
+<div class="alert period-meta mb-3 faculty-mobile-hidden period-template-summary-card">
   Template: <strong>{{ template.name }}</strong> | Students: <strong>{{ enrollment_count }}</strong>
 </div>
 {% endif %}
@@ -423,10 +441,12 @@
 {% endif %}
 
 {% if deadline_banner %}
+<div class="faculty-mobile-hidden period-deadline-card">
 {% include "faculty_portal/partials/deadline_banner.html" with reminder=deadline_banner %}
+</div>
 {% endif %}
 
-<div class="period-guidance">
+<div class="period-guidance faculty-mobile-hidden">
   <div class="period-guidance-row">
     <span class="label">What to do</span>
     <span class="text">Set up the required activities, encode scores and attendance, then review the Summary before submitting the period gradebook. Finalize all records before the final period closes.</span>

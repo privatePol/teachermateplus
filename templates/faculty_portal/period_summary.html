@@ -111,6 +111,31 @@
   .class-record-table {
     min-width: 1320px;
   }
+  .mobile-period-grade-table-wrap {
+    display: none;
+  }
+  .mobile-period-grade-table {
+    width: 100%;
+    table-layout: fixed;
+  }
+  .mobile-period-grade-table th,
+  .mobile-period-grade-table td {
+    vertical-align: middle;
+  }
+  .mobile-period-grade-table .mobile-student-name-col {
+    width: 48%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+  .mobile-period-grade-table .mobile-period-grade-col {
+    width: 52%;
+    text-align: center;
+  }
+  .mobile-period-grade-value {
+    display: block;
+    margin-bottom: 0.35rem;
+  }
   .class-record-table thead th {
     font-size: 0.9rem;
     vertical-align: middle;
@@ -292,6 +317,25 @@
     }
     .class-record-caption .caption-side {
       text-align: left;
+    }
+  }
+  @media (max-width: 767.98px) {
+    .desktop-class-record-table-wrap {
+      display: none;
+    }
+    .mobile-period-grade-table-wrap {
+      display: block;
+    }
+    .mobile-period-grade-table {
+      font-size: 0.86rem;
+    }
+    .mobile-period-grade-table th,
+    .mobile-period-grade-table td {
+      padding: 0.65rem 0.5rem;
+    }
+    .mobile-period-grade-table .grade-explain-btn {
+      margin-left: 0 !important;
+      white-space: nowrap;
     }
   }
   @media print {
@@ -866,7 +910,7 @@
       <div>Campus: <strong>{{ offering.campus.name|default:offering.campus.code }}</strong></div>
     </div>
   </div>
-  <div class="table-responsive">
+  <div class="table-responsive desktop-class-record-table-wrap">
     <table class="table table-hover mb-0 align-middle class-record-table">
       <thead>
         <tr>
@@ -1035,6 +1079,36 @@
         </tr>
       {% empty %}
         <tr><td colspan="{{ summary_table_colspan }}" class="text-center text-muted py-4">No summary rows available.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="mobile-period-grade-table-wrap" data-mobile-period-grade-table>
+    <table class="table table-hover mb-0 align-middle mobile-period-grade-table">
+      <caption class="visually-hidden">Mobile periodic grade summary showing student names and current official periodic grades.</caption>
+      <thead>
+        <tr>
+          <th class="mobile-student-name-col">Student Name</th>
+          <th class="mobile-period-grade-col">{{ period_grade_header_label }}</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td class="mobile-student-name-col">{{ row.student.last_name }}, {{ row.student.first_name }}</td>
+          <td class="mobile-period-grade-col">
+            {% if show_official_period_grade %}
+              <strong class="mobile-period-grade-value">{{ row.period_grade|default:"" }}</strong>
+              {% if row.period_explain_url %}
+              <button type="button" class="btn btn-sm grade-explain-btn" data-grade-explain-url="{{ row.period_explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
+              {% endif %}
+            {% else %}
+              <span class="text-muted small">Not available</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="2" class="text-center text-muted py-4">No summary rows available.</td></tr>
       {% endfor %}
       </tbody>
     </table>
