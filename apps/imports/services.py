@@ -75,7 +75,11 @@ class ImportTemplateService:
         },
         ImportBatch.ImportType.FACULTY_ASSIGNMENTS: {
             "duplicate_rule": "An existing assignment for the same offering and faculty user is rejected.",
-            "change_warning": "This importer creates faculty assignments only. It does not replace an existing assignment.",
+            "change_warning": (
+                "This importer creates faculty assignments only and does not replace an existing assignment. "
+                "It may assign an inactive Faculty account, but it never activates or changes that account; "
+                "the existing login and portal-access rules continue to apply."
+            ),
         },
         ImportBatch.ImportType.FACULTY_USERS: {
             "duplicate_rule": (
@@ -966,18 +970,25 @@ class BulkImportService:
         return runtime["student_cache"][key]
 
     @staticmethod
-    def _resolve_faculty_user(identifier: str, tenant, campus, runtime: dict, errors: list[str]):
+    def _resolve_faculty_user(
+        identifier: str,
+        tenant,
+        campus,
+        runtime: dict,
+        errors: list[str],
+        *,
+        allow_inactive_account: bool = False,
+    ):
         identifier = identifier.strip()
         if not identifier:
             errors.append("faculty_username is required.")
             return None
-        key = identifier.lower()
+        key = (identifier.lower(), allow_inactive_account)
         if key not in runtime["faculty_cache"]:
-            runtime["faculty_cache"][key] = (
-                User.objects.filter(Q(username__iexact=identifier) | Q(email__iexact=identifier), is_active=True)
-                .order_by("id")
-                .first()
-            )
+            query = User.objects.filter(Q(username__iexact=identifier) | Q(email__iexact=identifier))
+            if not allow_inactive_account:
+                query = query.filter(is_active=True)
+            runtime["faculty_cache"][key] = query.order_by("id").first()
         user = runtime["faculty_cache"][key]
         if not user:
             errors.append(f"faculty_username '{identifier}' does not match any username/email.")
@@ -1474,7 +1485,14 @@ class BulkImportService:
                 errors=errors,
             )
         if tenant and campus:
-            faculty_user = cls._resolve_faculty_user(row["faculty_username"], tenant, campus, runtime, errors)
+            faculty_user = cls._resolve_faculty_user(
+                row["faculty_username"],
+                tenant,
+                campus,
+                runtime,
+                errors,
+                allow_inactive_account=True,
+            )
 
         is_primary = cls._parse_bool(cls._normalize_value(row["is_primary"]), "is_primary", errors, default=False)
         if offering and faculty_user:
