@@ -1,0 +1,19 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb small">
+    <li class="breadcrumb-item"><a href="{% url 'admin_portal:grade_submission_readiness' %}">Grade Submission Readiness</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Class Details</li>
+  </ol>
+</nav>
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-4">
+    <span class="badge bg-secondary mb-2">Phase 2</span>
+    <h2 class="h4">Class Readiness Breakdown — Coming Soon</h2>
+    <p class="mb-1"><strong>{{ assignment.offering.course.code }}</strong> / {{ assignment.offering.section.code }}</p>
+    <p class="text-muted">The detailed completion checklist, blockers, and grading activity timeline are intentionally reserved for Phase 2.</p>
+    <a class="btn btn-outline-success" href="{% url 'admin_portal:grade_submission_readiness' %}">Back to Readiness</a>
+  </div>
+</div>
+{% endblock %}

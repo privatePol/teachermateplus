@@ -1,0 +1,29 @@
+{% extends "admin_portal/base.html" %}
+
+{% block title %}Survey Questions | TeacherMate+{% endblock %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+  <div><p class="text-success text-uppercase small fw-semibold mb-1">{{ session.get_survey_type_display }}</p><h1 class="h4 mb-1">Survey Questions</h1><p class="text-muted mb-0">Review the complete question set. Wording and required flags may be changed only while the survey is a draft.</p></div>
+  <a class="btn btn-outline-secondary" href="{% url 'orientation_feedback:facilitator' session.public_id %}">Facilitator Screen</a>
+</div>
+
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ formset.management_form }}
+  {% if formset.non_form_errors %}<div class="alert alert-danger">{{ formset.non_form_errors }}</div>{% endif %}
+  {% for row in question_forms %}
+    {% ifchanged row.question.section_code %}<h2 class="h5 mt-4 mb-2">Section {{ row.question.section_code }}: {{ row.question.section_title }}</h2>{% endifchanged %}
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        {{ row.form.id }}
+        <div class="d-flex justify-content-between align-items-start gap-3 mb-2"><span class="badge text-bg-light border">{{ row.question.get_question_type_display }}</span>{% if row.question.reverse_scored %}<span class="badge text-bg-info">Reverse scored in composite only</span>{% endif %}</div>
+        <label class="form-label fw-semibold" for="{{ row.form.text.id_for_label }}">Question {{ row.question.display_order }}</label>{{ row.form.text }}{{ row.form.text.errors }}
+        <div class="form-check mt-3">{{ row.form.is_required }}<label class="form-check-label" for="{{ row.form.is_required.id_for_label }}">Required response</label>{{ row.form.is_required.errors }}</div>
+        {% if row.question.choices.exists %}<div class="small text-muted mt-3">Choices: {% for choice in row.question.choices.all %}{% if choice.emoji %}{{ choice.emoji }} {% endif %}{{ choice.label }}{% if not forloop.last %}; {% endif %}{% endfor %}</div>{% endif %}
+      </div>
+    </div>
+  {% endfor %}
+  {% if session.status == 'DRAFT' %}<div class="d-flex justify-content-end"><button class="btn btn-success px-4" type="submit">Save Question Wording</button></div>{% else %}<div class="alert alert-info">This published question snapshot is read-only.</div>{% endif %}
+</form>
+{% endblock %}

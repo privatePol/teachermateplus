@@ -1,0 +1,59 @@
+{% extends "admin_portal/base.html" %}
+
+{% block title %}Facilitate Orientation Survey | TeacherMate+{% endblock %}
+
+{% block admin_content %}
+<style>.orientation-qr{max-width:320px;width:100%;background:#fff}.public-link{word-break:break-all}.count-value{font-size:2rem;font-weight:750}</style>
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+  <div><p class="text-success text-uppercase small fw-semibold mb-1">{{ session.get_survey_type_display }}</p><h1 class="h4 mb-1">{{ session.title }}</h1><p class="text-muted mb-0">{{ session.campus.name }}{% if session.orientation_date %} · {{ session.orientation_date|date:"M j, Y" }}{% endif %}</p></div>
+  <div class="d-flex gap-2"><span id="survey-status" class="badge fs-6 {% if session.status == 'OPEN' %}text-bg-success{% elif session.status == 'CANCELLED' %}text-bg-danger{% elif session.status == 'DRAFT' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">{{ session.get_status_display }}</span><a class="btn btn-sm btn-outline-secondary" href="{% url 'orientation_feedback:session_list' %}">All Surveys</a></div>
+</div>
+
+{% if session.status == 'CANCELLED' %}<div class="alert alert-danger"><strong>Cancelled:</strong> {{ session.cancellation_reason }} Existing submitted responses remain preserved and are excluded from official consolidated reporting by default.</div>{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm h-100"><div class="card-body text-center">
+      <img class="orientation-qr border rounded p-2" src="{% url 'orientation_feedback:qr' session.public_id %}" alt="QR code for {{ session.title }}">
+      <div class="small text-muted mt-2">Public reference: {{ session.public_id|stringformat:"s"|slice:":8" }}</div>
+      <div class="public-link small mt-3" id="public-link">{{ public_url }}</div>
+      <div class="d-flex justify-content-center flex-wrap gap-2 mt-3"><button class="btn btn-outline-success" type="button" id="copy-link">Copy Public Link</button><a class="btn btn-outline-secondary" target="_blank" rel="noopener" href="{% url 'orientation_feedback:qr' session.public_id %}?full=1">Open Full-Screen QR</a><a class="btn btn-outline-secondary" href="{% url 'orientation_feedback:qr' session.public_id %}?download=1">Download QR</a></div>
+      {% if session.status == 'DRAFT' %}<div class="alert alert-warning small mt-3 mb-0">QR preview only. The link cannot validate or accept responses until the survey is started.</div>{% endif %}
+    </div></div>
+  </div>
+  <div class="col-lg-7">
+    <div class="row g-3 mb-3">
+      <div class="col-6"><div class="card border-0 shadow-sm"><div class="card-body"><div class="small text-muted text-uppercase">Completed</div><div class="count-value" id="completed-count" aria-live="polite" aria-atomic="true">{{ completed_count }}</div></div></div></div>
+      <div class="col-6"><div class="card border-0 shadow-sm"><div class="card-body"><div class="small text-muted text-uppercase">Eligible</div><div class="count-value" id="eligible-count">{{ session.eligible_count_snapshot|default:"—" }}</div></div></div></div>
+    </div>
+    <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+      <h2 class="h5">Session details</h2>
+      {% if session.description %}<p>{{ session.description }}</p>{% endif %}
+      <dl class="row mb-0"><dt class="col-sm-4">Intended time</dt><dd class="col-sm-8">{% if session.orientation_date %}{{ session.orientation_date|date:"M j, Y" }}{% endif %} {% if session.intended_start_time %}{{ session.intended_start_time|time:"g:i A" }}{% endif %}{% if session.intended_end_time %}–{{ session.intended_end_time|time:"g:i A" }}{% endif %}</dd><dt class="col-sm-4">Started</dt><dd class="col-sm-8">{{ session.started_at|date:"M j, Y g:i A"|default:"Not started" }}</dd><dt class="col-sm-4">Automatic close</dt><dd class="col-sm-8">{{ session.auto_close_at|date:"M j, Y g:i A"|default:"Not set" }}</dd></dl>
+    </div></div>
+    <div class="d-flex flex-wrap gap-2">
+      {% if session.status == 'DRAFT' and can_manage %}<a class="btn btn-outline-secondary" href="{% url 'orientation_feedback:session_edit' session.public_id %}">Edit Settings</a><a class="btn btn-outline-secondary" href="{% url 'orientation_feedback:session_questions' session.public_id %}">Review Questions</a>{% endif %}
+      {% if session.status == 'DRAFT' and can_start %}<form method="post" action="{% url 'orientation_feedback:start' session.public_id %}" onsubmit="return confirm('Start this survey and freeze its eligible roster and questions?');">{% csrf_token %}<button class="btn btn-success" type="submit">Start Survey</button></form>{% endif %}
+      {% if session.status == 'OPEN' and can_close %}<form method="post" action="{% url 'orientation_feedback:close' session.public_id %}" onsubmit="return confirm('End this survey now? New validations and submissions will stop immediately.');">{% csrf_token %}<button class="btn btn-warning" type="submit">End Survey</button></form>{% endif %}
+      {% if session.status == 'DRAFT' or session.status == 'OPEN' %}{% if can_cancel %}<button class="btn btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#cancel-panel" aria-expanded="false">Cancel Survey</button>{% endif %}{% endif %}
+      {% if session.status == 'CLOSED' or session.status == 'CANCELLED' %}{% if can_view_analytics %}<a class="btn btn-success" href="{% url 'orientation_feedback:analytics' session.public_id %}">View Aggregate Analytics</a>{% endif %}{% endif %}
+    </div>
+    {% if can_cancel %}<div class="collapse mt-3" id="cancel-panel"><form class="card border-danger" method="post" action="{% url 'orientation_feedback:cancel' session.public_id %}"><div class="card-body">{% csrf_token %}<label class="form-label fw-semibold" for="{{ cancel_form.reason.id_for_label }}">{{ cancel_form.reason.label }}</label>{{ cancel_form.reason }}<div class="form-text">Cancellation stops responses immediately and preserves submitted answers for audit.</div><button class="btn btn-danger mt-3" type="submit">Confirm Cancellation</button></div></form></div>{% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+(function(){
+  const copyButton=document.getElementById('copy-link');
+  if(copyButton){copyButton.addEventListener('click',async function(){try{await navigator.clipboard.writeText(document.getElementById('public-link').textContent.trim());copyButton.textContent='Copied';}catch(error){copyButton.textContent='Copy failed';}});}
+  {% if session.status == 'OPEN' %}
+  const statusUrl="{% url 'orientation_feedback:facilitator_status' session.public_id %}";
+  async function refreshCount(){try{const response=await fetch(statusUrl,{headers:{'X-Requested-With':'XMLHttpRequest'},cache:'no-store'});if(!response.ok)return;const data=await response.json();document.getElementById('completed-count').textContent=data.completed;document.getElementById('eligible-count').textContent=data.eligible===null?'—':data.eligible;if(data.status!=='OPEN'){window.location.reload();}}catch(error){}}
+  window.setInterval(refreshCount,5000);
+  {% endif %}
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,158 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-2">
+  <ol class="breadcrumb small mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'admin_portal:dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Grade Submission Readiness</li>
+  </ol>
+</nav>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h2 class="h4 mb-1">Grade Submission Readiness</h2>
+    <p class="text-muted mb-0">Identify classes that are ready and those that need follow-up before submission.</p>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">Academic Year</label>
+        <select class="form-select" name="academic_year_id">
+          <option value="">All</option>
+          {% for ay in academic_year_options %}<option value="{{ ay.id }}" {% if selected_ay_id == ay.id %}selected{% endif %}>{{ ay.code }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">Term</label>
+        <select class="form-select" name="term_id">
+          {% for term in term_options %}<option value="{{ term.id }}" {% if selected_term_id == term.id %}selected{% endif %}>{{ term.academic_year.code }} / {{ term.code }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">Grading Period</label>
+        <select class="form-select" name="period_code">
+          <option value="">Active period</option>
+          {% for period in period_options %}<option value="{{ period.code }}" {% if selected_period_code == period.code %}selected{% endif %}>{{ period.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">Campus</label>
+        <select class="form-select" name="campus_id">
+          <option value="all" {% if all_campuses_selected %}selected{% endif %}>All authorized campuses</option>
+          {% for campus in campus_options %}<option value="{{ campus.id }}" {% if selected_campus_id == campus.id %}selected{% endif %}>{{ campus.code }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">College</label>
+        <select class="form-select" name="college_id">
+          <option value="">All</option>
+          {% for college in college_options %}<option value="{{ college.id }}" {% if selected_college_id == college.id %}selected{% endif %}>{{ college.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">Department</label>
+        <select class="form-select" name="department_id">
+          <option value="">All</option>
+          {% for department in department_options %}<option value="{{ department.id }}" {% if selected_department_id == department.id %}selected{% endif %}>{{ department.campus.code }} / {{ department.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">Faculty</label>
+        <select class="form-select" name="faculty_user_id">
+          <option value="">All</option>
+          {% for faculty in faculty_options %}<option value="{{ faculty.id }}" {% if selected_faculty_id == faculty.id %}selected{% endif %}>{{ faculty.full_name|default:faculty.username }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">Readiness Status</label>
+        <select class="form-select" name="status">
+          <option value="">All</option>
+          {% for code, label in status_options %}<option value="{{ code }}" {% if selected_status == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">Course Code</label>
+        <select class="form-select" name="course_code">
+          <option value="">All</option>
+          {% for code, title in course_options %}<option value="{{ code }}" {% if selected_course_code == code %}selected{% endif %}>{{ code }}{% if title %} - {{ title }}{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 col-xl-2">
+        <label class="form-label mb-1">Section</label>
+        <input class="form-control" name="section" value="{{ selected_section }}" maxlength="80" placeholder="Code or name">
+      </div>
+      <div class="col-md-4 col-xl-2 d-flex gap-2">
+        <button class="btn btn-success flex-fill" type="submit">Apply</button>
+        <a class="btn btn-outline-secondary flex-fill" href="{% url 'admin_portal:grade_submission_readiness' %}">Clear</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Total Faculty</div><div class="h3 mb-0">{{ summary.total_faculty }}</div></div></div></div>
+  <div class="col-6 col-lg"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Ready</div><div class="h3 mb-0 text-success">{{ summary.ready }}</div></div></div></div>
+  <div class="col-6 col-lg"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Needs Attention</div><div class="h3 mb-0 text-warning">{{ summary.needs_attention }}</div></div></div></div>
+  <div class="col-6 col-lg"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Submitted</div><div class="h3 mb-0 text-primary">{{ summary.submitted }}</div></div></div></div>
+  <div class="col-6 col-lg"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Overdue</div><div class="h3 mb-0 text-danger">{{ summary.overdue }}</div></div></div></div>
+</div>
+
+<div class="card border-success-subtle bg-success-subtle mb-3">
+  <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-2">
+    <div><strong>Overall Readiness</strong><div class="small text-muted">{{ summary.readiness_percent }}% of visible assigned classes are ready or already submitted.</div></div>
+    <div class="display-6 fw-semibold text-success">{{ summary.readiness_percent }}%</div>
+  </div>
+</div>
+
+{% for group in faculty_groups %}
+<section class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white py-3">
+    <h3 class="h6 mb-0">{{ group.faculty_name }}</h3>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Course Code</th><th>Section</th><th>Readiness Status</th><th>Progress</th><th>Last Activity</th><th>Submission Deadline</th><th class="text-end">View Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in group.rows %}
+        <tr>
+          <td><strong>{{ row.assignment.offering.course.code }}</strong></td>
+          <td>{{ row.assignment.offering.section.code }}</td>
+          <td>
+            {% if row.status == "READY" %}<span class="badge bg-success">Ready</span>
+            {% elif row.status == "NEARLY_READY" %}<span class="badge bg-info text-dark">Nearly Ready</span>
+            {% elif row.status == "NEEDS_ATTENTION" %}<span class="badge bg-warning text-dark">Needs Attention</span>
+            {% elif row.status == "SUBMITTED" %}<span class="badge bg-primary">Submitted</span>
+            {% else %}<span class="badge bg-danger">Overdue</span>{% endif %}
+          </td>
+          <td><span class="fw-semibold">{{ row.progress_percent }}%</span></td>
+          <td>{% if row.last_activity_at %}{{ row.last_activity_at|timesince }} ago{% else %}<span class="text-muted">No activity</span>{% endif %}</td>
+          <td>{% if row.submission_deadline %}{{ row.submission_deadline|date:"M j, Y g:i A" }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="text-end"><a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:grade_submission_readiness_detail' row.assignment.offering_id %}">View Details</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% empty %}
+<div class="alert alert-secondary border">No accepted faculty assignments match the selected filters and authorized scope.</div>
+{% endfor %}
+
+{% if page_obj.paginator.num_pages > 1 %}
+<nav aria-label="Readiness pages">
+  <ul class="pagination justify-content-center">
+    {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?{% if pagination_query %}{{ pagination_query }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a></li>{% endif %}
+    <li class="page-item disabled"><span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+    {% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?{% if pagination_query %}{{ pagination_query }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a></li>{% endif %}
+  </ul>
+</nav>
+{% endif %}
+{% endblock %}

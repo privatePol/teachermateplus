@@ -512,6 +512,15 @@ class Command(BaseCommand):
             ),
             (
                 "ADMIN",
+                "GRADE_SUBMISSION_READINESS",
+                groups["GRADING"],
+                "Submission Readiness",
+                "admin_portal:grade_submission_readiness",
+                74,
+                "faculty_activity_monitor.read",
+            ),
+            (
+                "ADMIN",
                 "STUDENTS",
                 groups["STUDENTS"],
                 "Students",

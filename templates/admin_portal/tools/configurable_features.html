@@ -780,6 +780,28 @@
   </div>
 
   <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-orientation-feedback" aria-expanded="false" aria-controls="feature-card-orientation-feedback">
+      <strong>Orientation Feedback Surveys</strong>
+      <span class="toggle-indicator" aria-hidden="true">&#8964;</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-orientation-feedback" aria-expanded="false" aria-controls="feature-card-orientation-feedback">
+      <span class="settings-card-summary-title">Orientation Feedback Surveys</span>
+      <span class="settings-card-summary-text">Control public QR-based Faculty and Academic Heads orientation surveys.</span>
+    </button>
+    <div id="feature-card-orientation-feedback" class="collapse">
+      <div class="card-body">
+        <div class="form-check form-switch mb-3">
+          {{ form.orientation_feedback_enabled }}
+          <label class="form-check-label" for="{{ form.orientation_feedback_enabled.id_for_label }}">{{ form.orientation_feedback_enabled.label }}</label>
+          {% if form.orientation_feedback_enabled.help_text %}<div class="form-text">{{ form.orientation_feedback_enabled.help_text }}</div>{% endif %}
+          {% for error in form.orientation_feedback_enabled.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        <div class="alert alert-light border small mb-0">A short-lived code sent to the registered email verifies eligibility and prevents response theft. Detailed results and CSV are released only after at least five completed responses. Disabling hides new/public survey activity while ended historical reports remain available to authorized users.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
     <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-non-compliance" aria-expanded="false" aria-controls="feature-card-non-compliance">
       <strong>Submission Non-Compliance Notices</strong>
       <span class="toggle-indicator" aria-hidden="true">âŒ„</span>

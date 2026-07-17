@@ -942,6 +942,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertContains(response, "Official Grade Release to Faculty")
         self.assertContains(response, "Role-Based Help Guide")
         self.assertContains(response, "Enable Exit Pulse")
+        self.assertContains(response, "Enable Orientation Feedback Surveys")
 
     def test_assignment_dashboard_view_loads(self):
         self.client.force_login(self.admin_user)
@@ -971,6 +972,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
                 "faculty_reminder_center_enabled": "",
                 "faculty_reminder_email_enabled": "",
                 "faculty_memo_center_enabled": "",
+                "orientation_feedback_enabled": "on",
                 "enrollment_ownership_mode": "ADMIN_ONLY",
                 "grade_deadline_enforcement_policy": "AUTO_CLOSE_REQUIRES_REOPEN",
                 "login_lockout_enabled": "",
@@ -1017,6 +1019,9 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         )
         self.assertFalse(
             FeatureSettingsService.is_single_device_session_enforcement_enabled(tenant_id=self.tenant.id)
+        )
+        self.assertTrue(
+            FeatureSettingsService.is_orientation_feedback_enabled(tenant_id=self.tenant.id)
         )
         self.assertEqual(
             FeatureSettingsService.get_submission_non_compliance_first_notice_after_days(tenant_id=self.tenant.id),

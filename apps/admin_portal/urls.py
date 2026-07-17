@@ -43,6 +43,8 @@ from .views import (
     admin_guide_view,
     grading_setup_guide_view,
     grade_distribution_monitor_view,
+    grade_submission_readiness_detail_view,
+    grade_submission_readiness_view,
     grading_analytics_view,
     grade_prediction_monitor_view,
     department_create_view,
@@ -344,6 +346,16 @@ urlpatterns = [
         "admin-portal/academics/faculty-activity-monitor/",
         faculty_activity_monitor_view,
         name="faculty_activity_monitor",
+    ),
+    path(
+        "admin-portal/grading/submission-readiness/",
+        grade_submission_readiness_view,
+        name="grade_submission_readiness",
+    ),
+    path(
+        "admin-portal/grading/submission-readiness/<int:offering_id>/",
+        grade_submission_readiness_detail_view,
+        name="grade_submission_readiness_detail",
     ),
     path(
         "admin-portal/academics/faculty-final-clearance/",

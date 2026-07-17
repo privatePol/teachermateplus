@@ -127,6 +127,18 @@ def portal_menu(request):
                     if node["item"].code != "ACADEMIC_PERFORMANCE_INSIGHTS"
                 ]
             menu = [group for group in menu if group["items"]]
+        admin_orientation_feedback_enabled = FeatureSettingsService.is_orientation_feedback_enabled(
+            tenant_id=scope.get("tenant_id"),
+            default=True,
+        )
+        if not admin_orientation_feedback_enabled:
+            for group in menu:
+                group["items"] = [
+                    node
+                    for node in group["items"]
+                    if node["item"].code != "ORIENTATION_FEEDBACK"
+                ]
+            menu = [group for group in menu if group["items"]]
     if portal == "ADMIN":
         admin_user_role_label = _admin_role_label(
             request.user,

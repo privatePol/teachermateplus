@@ -1,0 +1,30 @@
+{% extends "admin_portal/base.html" %}
+
+{% block title %}{{ page_title }} | TeacherMate+{% endblock %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+  <div><h1 class="h4 mb-1">{{ page_title }}</h1><p class="text-muted mb-0">Settings remain editable while the survey is a draft.</p></div>
+  <a class="btn btn-outline-secondary" href="{% if session %}{% url 'orientation_feedback:facilitator' session.public_id %}{% else %}{% url 'orientation_feedback:session_list' %}{% endif %}">Cancel</a>
+</div>
+
+<form method="post" class="card border-0 shadow-sm" novalidate>
+  {% csrf_token %}
+  <div class="card-body">
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row g-3">
+      <div class="col-md-6"><label class="form-label" for="{{ form.survey_type.id_for_label }}">{{ form.survey_type.label }}</label>{{ form.survey_type }}{{ form.survey_type.errors }}</div>
+      <div class="col-md-6"><label class="form-label" for="{{ form.title.id_for_label }}">{{ form.title.label }}</label>{{ form.title }}{{ form.title.errors }}</div>
+      <div class="col-12"><label class="form-label" for="{{ form.description.id_for_label }}">Respondent instructions or description</label>{{ form.description }}{{ form.description.errors }}</div>
+      <div class="col-md-6"><label class="form-label" for="{{ form.academic_year.id_for_label }}">Academic year <span class="text-muted">(optional)</span></label>{{ form.academic_year }}{{ form.academic_year.errors }}</div>
+      <div class="col-md-6"><label class="form-label" for="{{ form.term.id_for_label }}">Term <span class="text-muted">(optional)</span></label>{{ form.term }}{{ form.term.errors }}</div>
+      <div class="col-md-4"><label class="form-label" for="{{ form.orientation_date.id_for_label }}">Orientation date</label>{{ form.orientation_date }}{{ form.orientation_date.errors }}</div>
+      <div class="col-md-4"><label class="form-label" for="{{ form.intended_start_time.id_for_label }}">Intended start time</label>{{ form.intended_start_time }}{{ form.intended_start_time.errors }}</div>
+      <div class="col-md-4"><label class="form-label" for="{{ form.intended_end_time.id_for_label }}">Intended end time</label>{{ form.intended_end_time }}{{ form.intended_end_time.errors }}</div>
+      <div class="col-md-6"><label class="form-label" for="{{ form.auto_close_at.id_for_label }}">Automatic closing time <span class="text-muted">(optional)</span></label>{{ form.auto_close_at }}{% if form.auto_close_at.help_text %}<div class="form-text">{{ form.auto_close_at.help_text }}</div>{% endif %}{{ form.auto_close_at.errors }}</div>
+      <div class="col-md-6"><label class="form-label" for="{{ form.eligible_head_roles.id_for_label }}">{{ form.eligible_head_roles.label }}</label>{{ form.eligible_head_roles }}{% if form.eligible_head_roles.help_text %}<div class="form-text">{{ form.eligible_head_roles.help_text }}</div>{% endif %}{{ form.eligible_head_roles.errors }}</div>
+    </div>
+  </div>
+  <div class="card-footer bg-white d-flex justify-content-end"><button class="btn btn-success px-4" type="submit">Save Draft</button></div>
+</form>
+{% endblock %}

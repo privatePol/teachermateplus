@@ -2,6 +2,22 @@ AC, Dean, and CAO may also have `FACULTY` role. The important rule is:
 
 > Give them **two separate roles** when needed: one for teaching, one for admin/governance visibility.
 
+## Orientation Feedback Permissions
+
+Orientation Feedback uses separate Admin Portal permissions instead of granting access to every Admin Portal user:
+
+- `orientation_feedback.view`
+- `orientation_feedback.manage`
+- `orientation_feedback.start`
+- `orientation_feedback.close`
+- `orientation_feedback.cancel`
+- `orientation_feedback.view_analytics`
+- `orientation_feedback.export`
+
+The migration grants these permissions only to the active `SUPER_ADMIN` role by default. Assign only the specific actions an orientation facilitator or reporting user needs within the correct tenant/campus scope.
+
+These management permissions are independent from respondent eligibility. A respondent may have both an active scoped `FACULTY` role and an academic-head role such as `AC`, `COLLEGE_DEAN`, or `CAO`; that dual-role user remains eligible for one response in each separate survey session.
+
 The `FACULTY` role should allow faculty portal/class work.  
 The `AC`, `Dean`, or `CAO` role should control Admin Portal monitoring scope.
 

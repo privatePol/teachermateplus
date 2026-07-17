@@ -14,7 +14,7 @@
 <div class="card border-0 shadow-sm mb-3">
   <div class="card-body">
     <form method="get" class="row g-2 align-items-end">
-      <div class="col-md-3">
+      <div class="col-md-6 col-xl-2">
         <label class="form-label mb-1">Campus</label>
         <select class="form-select" name="campus_id">
           <option value="all" {% if all_campuses_selected %}selected{% endif %}>All Campuses</option>
@@ -23,7 +23,7 @@
           {% endfor %}
         </select>
       </div>
-      <div class="col-md-3">
+      <div class="col-md-6 col-xl-2">
         <label class="form-label mb-1">Academic Year</label>
         <select class="form-select" name="academic_year_id">
           <option value="">All Academic Years</option>
@@ -32,7 +32,7 @@
           {% endfor %}
         </select>
       </div>
-      <div class="col-md-3">
+      <div class="col-md-6 col-xl-2">
         <label class="form-label mb-1">Term</label>
         <select class="form-select" name="term_id">
           <option value="">All Terms</option>
@@ -41,17 +41,44 @@
           {% endfor %}
         </select>
       </div>
-      <div class="col-md-3 d-flex gap-2">
-        <button class="btn btn-outline-success w-100" type="submit">Apply Filters</button>
-        <a class="btn btn-outline-secondary" href="{% url 'admin_portal:grading_analytics' %}">Reset</a>
+      <div class="col-md-6 col-xl-2">
+        <label class="form-label mb-1">Course</label>
+        <select class="form-select" name="course_code">
+          <option value="">All Courses</option>
+          {% for course in course_options %}
+          <option value="{{ course.code }}" {% if selected_course_code == course.code %}selected{% endif %}>{{ course.code }}{% if course.title %} - {{ course.title }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-8 col-xl-3">
+        <label class="form-label mb-1" for="grading-analytics-search">Search</label>
+        <input
+          class="form-control"
+          id="grading-analytics-search"
+          name="q"
+          type="search"
+          value="{{ search_query }}"
+          maxlength="100"
+          placeholder="Course, section, or faculty"
+        >
+      </div>
+      <div class="col-md-4 col-xl-1 d-flex gap-2 flex-md-column">
+        <button class="btn btn-outline-success w-100" type="submit">Apply</button>
+        <a class="btn btn-outline-secondary w-100" href="{% url 'admin_portal:grading_analytics' %}">Clear</a>
       </div>
     </form>
   </div>
 </div>
 
+{% if filters_active %}
+<div class="alert alert-light border mb-3" role="status">
+  Showing {{ summary.offerings }} offering{{ summary.offerings|pluralize }}{% if selected_course_code %} for <strong>{{ selected_course_code }}</strong>{% endif %}{% if search_query %} matching <strong>"{{ search_query }}"</strong>{% endif %} within your authorized analytics scope.
+</div>
+{% endif %}
+
 {% if summary.offerings == 0 %}
 <div class="alert alert-secondary border mb-3">
-  No accepted faculty assignments were found under your current campus, department, and selected filters.
+  No course offerings match the selected filters within your authorized scope.
 </div>
 {% elif summary.graded_rows == 0 %}
 <div class="alert alert-info border mb-3">
@@ -116,6 +143,42 @@
         <div class="h5 mb-0">{% if summary.avg_period_grade is not None %}{{ summary.avg_period_grade|floatformat:2 }}{% else %}-{% endif %}</div>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header bg-white">
+    <div class="fw-semibold">Course Offerings</div>
+    <div class="small text-muted">Each row is one class offering. Course filtering does not combine sections.</div>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+      <tr>
+        <th>Campus</th>
+        <th>Course</th>
+        <th>Section</th>
+        <th>Faculty</th>
+        <th>Academic Year / Term</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for row in offering_rows %}
+      <tr>
+        <td>{{ row.campus_code }}</td>
+        <td>
+          <div class="fw-semibold">{{ row.course_code }}</div>
+          <div class="small text-muted">{{ row.course_title }}</div>
+        </td>
+        <td>{{ row.section_code }}</td>
+        <td>{{ row.faculty_name }}</td>
+        <td>{{ row.academic_year_code }} / {{ row.term_code }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="text-center text-muted py-3">No course offerings match the selected filters within your authorized scope.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 

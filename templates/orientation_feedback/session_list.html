@@ -1,0 +1,39 @@
+{% extends "admin_portal/base.html" %}
+
+{% block title %}Orientation Feedback | TeacherMate+{% endblock %}
+
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+  <div>
+    <h1 class="h4 mb-1">Orientation Feedback Surveys</h1>
+    <p class="text-muted mb-0">Create and facilitate separate Faculty and Academic Heads orientation surveys in the active tenant and campus scope.</p>
+  </div>
+  {% if can_manage %}<a class="btn btn-success" href="{% url 'orientation_feedback:session_create' %}">Create Survey</a>{% endif %}
+</div>
+
+<div class="alert alert-light border shadow-sm">
+  Respondent identity is used only for eligibility and duplicate prevention. Standard results and exports contain aggregate answers and anonymous comments without names or email addresses.
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead><tr><th>Survey</th><th>Type</th><th>Orientation</th><th>Status</th><th>Scope</th><th class="text-end">Action</th></tr></thead>
+      <tbody>
+      {% for session in sessions %}
+        <tr>
+          <td><div class="fw-semibold">{{ session.title }}</div><div class="small text-muted">{{ session.created_at|date:"M j, Y g:i A" }}</div></td>
+          <td>{{ session.get_survey_type_display }}</td>
+          <td>{% if session.orientation_date %}{{ session.orientation_date|date:"M j, Y" }}{% else %}<span class="text-muted">Not set</span>{% endif %}{% if session.intended_start_time %}<div class="small text-muted">{{ session.intended_start_time|time:"g:i A" }}{% if session.intended_end_time %}–{{ session.intended_end_time|time:"g:i A" }}{% endif %}</div>{% endif %}</td>
+          <td><span class="badge {% if session.status == 'OPEN' %}text-bg-success{% elif session.status == 'CANCELLED' %}text-bg-danger{% elif session.status == 'DRAFT' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">{{ session.get_status_display }}</span></td>
+          <td>{{ session.campus.name }}</td>
+          <td class="text-end"><a class="btn btn-sm btn-outline-success" href="{% url 'orientation_feedback:facilitator' session.public_id %}">Open</a></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" class="text-center text-muted py-5">No orientation feedback surveys exist in this scope.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

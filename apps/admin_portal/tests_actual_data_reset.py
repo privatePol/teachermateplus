@@ -57,15 +57,30 @@ class ActualDataResetTests(TestCase):
         RolePermission.objects.create(role=self.role, permission=self.admin_access)
         RolePermission.objects.create(role=self.role, permission=self.settings_update)
         RolePermission.objects.create(role=self.role, permission=self.actual_data_reset)
-        self.group = MenuGroup.objects.create(portal="ADMIN", code="IMPORTS", label="Tools")
-        self.item = MenuItem.objects.create(
-            menu_group=self.group,
+        self.group, _ = MenuGroup.objects.update_or_create(
+            portal="ADMIN",
+            code="IMPORTS",
+            defaults={
+                "label": "Tools",
+                "sort_order": 95,
+                "is_active": True,
+            },
+        )
+        self.item, _ = MenuItem.objects.update_or_create(
             portal="ADMIN",
             code="ACTUAL_DATA_RESET",
-            label="Actual Data Reset",
-            route_name="admin_portal:actual_data_reset",
+            defaults={
+                "menu_group": self.group,
+                "label": "Actual Data Reset",
+                "route_name": "admin_portal:actual_data_reset",
+                "sort_order": 70,
+                "is_active": True,
+            },
         )
-        MenuItemPermission.objects.create(menu_item=self.item, permission=self.actual_data_reset)
+        MenuItemPermission.objects.get_or_create(
+            menu_item=self.item,
+            permission=self.actual_data_reset,
+        )
 
         self.tenant = Tenant.objects.create(code="NCBA", name="NCBA")
         self.campus = Campus.objects.create(tenant=self.tenant, code="MAIN", name="Main")

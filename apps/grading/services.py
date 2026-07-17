@@ -3097,44 +3097,52 @@ class GradingGovernanceService:
         *,
         offering,
         template_period: GradingTemplatePeriod,
+        components=None,
+        activity_buckets=None,
     ):
-        components = list(
-            template_period.components.filter(is_active=True)
-            .prefetch_related(
-                Prefetch(
-                    "subcomponents",
-                    queryset=GradingTemplateSubcomponent.objects.filter(is_active=True)
-                    .prefetch_related(
-                        Prefetch(
-                            "details",
-                            queryset=GradingTemplateDetail.objects.filter(is_active=True).order_by("sort_order", "id"),
+        if components is None:
+            components = list(
+                template_period.components.filter(is_active=True)
+                .prefetch_related(
+                    Prefetch(
+                        "subcomponents",
+                        queryset=GradingTemplateSubcomponent.objects.filter(is_active=True)
+                        .prefetch_related(
+                            Prefetch(
+                                "details",
+                                queryset=GradingTemplateDetail.objects.filter(is_active=True).order_by("sort_order", "id"),
+                            )
                         )
+                        .order_by("sort_order", "id"),
                     )
-                    .order_by("sort_order", "id"),
                 )
+                .order_by("sort_order", "id")
             )
-            .order_by("sort_order", "id")
-        )
-        activity_buckets = set(
-            GradeActivity.objects.filter(
-                offering_id=offering.id,
-                template_period_id=template_period.id,
-                is_active=True,
-                template_component__is_active=True,
-            )
-            .filter(
-                Q(template_subcomponent__isnull=True, template_detail__isnull=True)
-                | Q(
-                    template_subcomponent__is_active=True,
-                    template_detail__isnull=True,
+        else:
+            components = list(components)
+        if activity_buckets is None:
+            activity_buckets = set(
+                GradeActivity.objects.filter(
+                    offering_id=offering.id,
+                    template_period_id=template_period.id,
+                    is_active=True,
+                    template_component__is_active=True,
                 )
-                | Q(
-                    template_subcomponent__is_active=True,
-                    template_detail__is_active=True,
+                .filter(
+                    Q(template_subcomponent__isnull=True, template_detail__isnull=True)
+                    | Q(
+                        template_subcomponent__is_active=True,
+                        template_detail__isnull=True,
+                    )
+                    | Q(
+                        template_subcomponent__is_active=True,
+                        template_detail__is_active=True,
+                    )
                 )
+                .values_list("template_component_id", "template_subcomponent_id", "template_detail_id")
             )
-            .values_list("template_component_id", "template_subcomponent_id", "template_detail_id")
-        )
+        else:
+            activity_buckets = set(activity_buckets)
         required_items = []
         missing_items = []
 

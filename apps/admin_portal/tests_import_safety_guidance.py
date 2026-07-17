@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
+from django.utils.html import escape
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -41,7 +42,28 @@ class ImportSafetyGuidanceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Import Safety Measures")
         self.assertContains(response, "Uploading validates and stages records without changing operational data.")
-        self.assertContains(response, "Duplicate rule:", count=6)
+        expected_importers = [
+            (ImportBatch.ImportType.SECTIONS, "Sections"),
+            (ImportBatch.ImportType.COURSES, "Courses"),
+            (ImportBatch.ImportType.STUDENTS, "Students"),
+            (ImportBatch.ImportType.COURSE_OFFERINGS, "Course Offerings"),
+            (ImportBatch.ImportType.FACULTY_ASSIGNMENTS, "Faculty Assignments"),
+            (ImportBatch.ImportType.FACULTY_USERS, "Faculty Users"),
+            (ImportBatch.ImportType.ENROLLMENT, "Enrollment"),
+        ]
+        cards = response.context["import_cards"]
+        self.assertEqual(
+            [(card["import_type"], card["label"]) for card in cards],
+            expected_importers,
+        )
+        self.assertContains(response, "Duplicate rule:", count=len(expected_importers))
+        rendered = response.content.decode(response.charset)
+        for card in cards:
+            with self.subTest(import_type=card["import_type"]):
+                duplicate_rule = card["safety"].get("duplicate_rule", "").strip()
+                self.assertTrue(duplicate_rule)
+                self.assertIn(escape(card["label"]), rendered)
+                self.assertIn(escape(duplicate_rule), rendered)
         self.assertContains(response, "Existing sections and repeated section rows are skipped")
         self.assertContains(response, "UPSERT updates an existing student")
         self.assertContains(response, "course/section offering is rejected as a duplicate")

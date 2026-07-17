@@ -3386,6 +3386,14 @@ class ConfigurableFeatureSettingForm(forms.Form):
             "Exit Pulse does not affect attendance, grades, or faculty evaluation."
         ),
     )
+    orientation_feedback_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Orientation Feedback Surveys",
+        help_text=(
+            "Allows authorized Admin Portal users to run identity-validated Faculty and Academic Heads "
+            "orientation surveys with aggregate results reported without names."
+        ),
+    )
     submission_non_compliance_notice_enabled = forms.BooleanField(
         required=False,
         label="Enable non-compliance notices for overdue grade submissions",

@@ -556,6 +556,14 @@ ADMIN_HELP_SECTIONS = [
                         "faculty through the Area Chairs assigned within the Dean's campuses and departments."
                     ),
                     "Set the campus, academic year, term, period, course, or status filters before reviewing results.",
+                    (
+                        "On Grading Analytics, choose one Course code to show every authorized section or "
+                        "offering for that code. The rows stay separate; the filter does not combine sections."
+                    ),
+                    (
+                        "Use Search to find a course code, course title, section, or supervised faculty name. "
+                        "Course and Search work together, and Clear returns to the normal scoped view."
+                    ),
                     "Open the underlying class or record when a count or warning needs confirmation.",
                     "Generate, export, or print only after confirming that the source status is appropriate.",
                 ],
@@ -805,6 +813,63 @@ ADMIN_HELP_SECTIONS = [
                 ],
                 "avoid": "Do not copy confidential suggestion text into ordinary logs, email threads, or public documents.",
                 "next_step": "Use the feedback trend to improve the related Faculty Portal page or guide text.",
+            },
+            {
+                "code": "orientation-feedback",
+                "title": "Orientation Feedback Surveys",
+                "audience": "Superadmin and explicitly authorized orientation facilitators",
+                "permissions": [
+                    "orientation_feedback.view",
+                    "orientation_feedback.manage",
+                    "orientation_feedback.start",
+                    "orientation_feedback.close",
+                    "orientation_feedback.cancel",
+                    "orientation_feedback.view_analytics",
+                    "orientation_feedback.export",
+                ],
+                "purpose": "Runs separate QR-based Faculty and Academic Heads orientation surveys and reports answers without respondent names.",
+                "menu_path": "Admin Portal -> Tools -> Orientation Feedback",
+                "steps": [
+                    "Set the correct tenant and campus scope, then create the required survey type.",
+                    "Review the title, orientation time, eligible roles, question wording, and required items while the survey is a draft.",
+                    "Start the survey to freeze its question and eligible-user snapshots and activate the public QR link and registered-email verification codes.",
+                    "Display the facilitator screen and monitor only the aggregate completed count.",
+                    "End the survey immediately after the response period, or cancel it with a clear reason when the event cannot continue.",
+                    "Open aggregate analytics after closure. Detailed results and CSV become available only after at least five completed responses.",
+                ],
+                "check_first": [
+                    "Confirm the selected tenant and campus before creating or opening a survey.",
+                    "Confirm Faculty and academic-head roles are active and correctly scoped; inactive accounts may still respond when their qualifying role remains active.",
+                    "Confirm the public wording says identity is used for eligibility and duplicate prevention while answers are reported without names.",
+                ],
+                "actions": [
+                    {
+                        "name": "Start Survey",
+                        "does": "Freezes the eligible roster and published question snapshot and activates registered-email OTP verification.",
+                        "when": "Use it when the facilitator is ready to accept responses.",
+                        "avoid": "Do not start before verifying the survey type, role eligibility, scope, and wording.",
+                        "result": "The QR/public link accepts one response per eligible user for this survey session.",
+                        "editable": "Published wording and scoring are no longer editable.",
+                    },
+                    {
+                        "name": "End Survey",
+                        "does": "Stops new validation and submission immediately and preserves completed responses.",
+                        "when": "Use it at the end of the response period.",
+                        "avoid": "Do not expect already validated respondents to receive a grace period.",
+                        "result": "Aggregate analytics and export become available.",
+                        "editable": "Historical question meaning remains frozen.",
+                    },
+                    {
+                        "name": "Cancel Survey",
+                        "does": "Stops responses immediately, records the required reason, and preserves existing submissions.",
+                        "when": "Use it only when the session should not count as an official completed survey.",
+                        "avoid": "Do not cancel merely to edit or reopen a published survey.",
+                        "result": "Analytics and exports are clearly marked Cancelled.",
+                        "editable": "Cancelled sessions cannot be reopened in this release.",
+                    },
+                ],
+                "avoid": "Do not ask for respondent passwords, expose participation identities beside answers, or treat email-only validation as strong authentication.",
+                "next_step": "Review aggregate trends and anonymous comments without trying to identify individual respondents.",
             },
         ],
     },

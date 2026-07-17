@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "apps.notifications.apps.NotificationsConfig",
     "apps.predictions.apps.PredictionsConfig",
     "apps.exit_pulse.apps.ExitPulseConfig",
+    "apps.orientation_feedback.apps.OrientationFeedbackConfig",
     "apps.student_portal.apps.StudentPortalConfig",
     "apps.admin_portal.apps.AdminPortalConfig",
     "apps.faculty_portal.apps.FacultyPortalConfig",
@@ -183,6 +184,24 @@ EXIT_PULSE_VERIFICATION_BROWSER_RATE_LIMIT_PER_MINUTE = int(
 )
 EXIT_PULSE_VERIFICATION_IP_RATE_LIMIT_PER_MINUTE = int(
     os.getenv("EXIT_PULSE_VERIFICATION_IP_RATE_LIMIT_PER_MINUTE", "60")
+)
+ORIENTATION_FEEDBACK_BROWSER_RATE_LIMIT_PER_MINUTE = int(
+    os.getenv("ORIENTATION_FEEDBACK_BROWSER_RATE_LIMIT_PER_MINUTE", "6")
+)
+ORIENTATION_FEEDBACK_IP_RATE_LIMIT_PER_MINUTE = int(
+    os.getenv("ORIENTATION_FEEDBACK_IP_RATE_LIMIT_PER_MINUTE", "60")
+)
+ORIENTATION_FEEDBACK_EMAIL_OTP_EXPIRY_MINUTES = max(
+    1,
+    int(os.getenv("ORIENTATION_FEEDBACK_EMAIL_OTP_EXPIRY_MINUTES", "10")),
+)
+ORIENTATION_FEEDBACK_EMAIL_OTP_MAX_ATTEMPTS = max(
+    1,
+    int(os.getenv("ORIENTATION_FEEDBACK_EMAIL_OTP_MAX_ATTEMPTS", "5")),
+)
+ORIENTATION_FEEDBACK_MINIMUM_REPORT_RESPONSES = max(
+    5,
+    int(os.getenv("ORIENTATION_FEEDBACK_MINIMUM_REPORT_RESPONSES", "5")),
 )
 PRIVACY_CONSENT_VERSION = os.getenv("PRIVACY_CONSENT_VERSION", "2026-03")
 ENFORCE_SINGLE_DEVICE_SESSION = env_bool("ENFORCE_SINGLE_DEVICE_SESSION", True)

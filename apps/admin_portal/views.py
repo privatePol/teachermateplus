@@ -18,7 +18,8 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Avg, Count, Max, Prefetch, Q, Sum
+from django.db.models import Avg, Count, Max, Prefetch, Q, Sum, Value
+from django.db.models.functions import Coalesce, Concat
 from django.db.models.deletion import ProtectedError, RestrictedError
 from io import BytesIO
 
@@ -103,6 +104,7 @@ from apps.academics.services import (
 from apps.admin_portal.data_reset import ActualDataResetService
 from apps.admin_portal.academic_performance import AcademicPerformanceInsightService
 from apps.admin_portal.services import AdminScopeService, model_before_after
+from apps.admin_portal.submission_readiness import GradeSubmissionReadinessService
 from apps.admin_portal.tenant_data_export import TenantDataExportChallengeService, TenantSQLiteExportService
 from apps.admin_portal.grade_distribution import GradeDistributionMonitorService
 from apps.admin_portal.help_guide import build_admin_help_sections
@@ -2157,13 +2159,223 @@ def faculty_activity_monitor_view(request):
 
 
 @portal_required("ADMIN")
+@permission_required("faculty_activity_monitor.read")
+def grade_submission_readiness_view(request):
+    campus_value = (request.GET.get("campus_id") or "").strip().lower()
+    all_campuses_selected = campus_value == "all"
+    selected_campus_id = None if all_campuses_selected else _safe_int(request.GET.get("campus_id"))
+    selected_ay_id = _safe_int(request.GET.get("academic_year_id"))
+    selected_term_id = _safe_int(request.GET.get("term_id"))
+    selected_period_code = (request.GET.get("period_code") or "").strip()[:50]
+    selected_college_id = _safe_int(request.GET.get("college_id"))
+    selected_department_id = _safe_int(request.GET.get("department_id"))
+    selected_faculty_id = _safe_int(request.GET.get("faculty_user_id"))
+    selected_status = (request.GET.get("status") or "").strip().upper()
+    selected_course_code = (request.GET.get("course_code") or "").strip()[:50]
+    selected_section = (request.GET.get("section") or "").strip()[:80]
+
+    campus_options = AdminScopeService.active_scoped_campuses(request).order_by("code", "name")
+    academic_year_options = AdminScopeService.active_scoped_academic_years(request).order_by("-start_date", "code")
+    term_options = AdminScopeService.active_scoped_terms(request).order_by(
+        "-academic_year__start_date", "sequence_no", "code"
+    )
+    department_options = AdminScopeService.active_scoped_departments(request).order_by(
+        "campus__code", "name"
+    )
+    college_parent_ids = Department.objects.filter(
+        id__in=department_options.values_list("id", flat=True),
+        children__is_active=True,
+    ).values_list("id", flat=True)
+    college_options = department_options.filter(id__in=college_parent_ids).distinct()
+
+    if selected_term_id is None:
+        tenant_id = getattr(request, "scope", {}).get("tenant_id")
+        active_term = None
+        if tenant_id:
+            _active_ay, active_term = AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id)
+        if active_term and term_options.filter(id=active_term.id).exists():
+            selected_term_id = active_term.id
+            selected_ay_id = active_term.academic_year_id
+        else:
+            default_term = term_options.first()
+            selected_term_id = getattr(default_term, "id", None)
+            selected_ay_id = selected_ay_id or getattr(default_term, "academic_year_id", None)
+
+    if selected_campus_id is None and not all_campuses_selected:
+        scope_campus_id = getattr(request, "scope", {}).get("campus_id")
+        if scope_campus_id and campus_options.filter(id=scope_campus_id).exists():
+            selected_campus_id = scope_campus_id
+
+    assignments_qs = AdminScopeService.scoped_faculty_assignments(
+        request,
+        include_all_campuses=all_campuses_selected,
+    ).filter(
+        is_active=True,
+        response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+        faculty_user__is_active=True,
+    )
+    if selected_campus_id:
+        assignments_qs = assignments_qs.filter(offering__campus_id=selected_campus_id)
+    if selected_ay_id:
+        assignments_qs = assignments_qs.filter(offering__academic_year_id=selected_ay_id)
+    if selected_term_id:
+        assignments_qs = assignments_qs.filter(offering__term_id=selected_term_id)
+
+    filter_base_qs = assignments_qs
+    faculty_options = User.objects.filter(
+        id__in=filter_base_qs.values_list("faculty_user_id", flat=True),
+        is_active=True,
+    ).order_by("last_name", "first_name", "username")
+    course_options = list(
+        filter_base_qs.values_list("offering__course__code", "offering__course__title")
+        .order_by("offering__course__code")
+        .distinct()
+    )
+    period_options = TenantTermGradingPeriod.objects.filter(is_active=True)
+    if selected_term_id:
+        period_options = period_options.filter(term_id=selected_term_id)
+    else:
+        period_options = period_options.none()
+    period_options = period_options.order_by("sequence_no", "name", "id")
+
+    if selected_college_id:
+        college_department_ids = ScopeService.expand_department_ids(
+            [selected_college_id],
+            tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+            campus_id=selected_campus_id,
+        )
+        assignments_qs = assignments_qs.filter(offering__department_id__in=college_department_ids)
+    if selected_department_id:
+        department_ids = AdminScopeService.expand_department_filter_ids(
+            selected_department_id,
+            tenant_id=getattr(request, "scope", {}).get("tenant_id"),
+            campus_id=selected_campus_id,
+        )
+        assignments_qs = assignments_qs.filter(offering__department_id__in=department_ids)
+    if selected_faculty_id:
+        assignments_qs = assignments_qs.filter(faculty_user_id=selected_faculty_id)
+    if selected_course_code:
+        assignments_qs = assignments_qs.filter(offering__course__code=selected_course_code)
+    if selected_section:
+        assignments_qs = assignments_qs.filter(
+            Q(offering__section__code__icontains=selected_section)
+            | Q(offering__section__name__icontains=selected_section)
+        )
+
+    assignments = list(
+        assignments_qs.select_related(
+            "faculty_user",
+            "offering",
+            "offering__tenant",
+            "offering__campus",
+            "offering__academic_year",
+            "offering__term",
+            "offering__course",
+            "offering__section",
+            "offering__section__program",
+            "offering__department",
+            "offering__program",
+        ).order_by("faculty_user__last_name", "faculty_user__first_name", "id")
+    )
+    readiness_rows = GradeSubmissionReadinessService.calculate(
+        assignments,
+        selected_period_code=selected_period_code or None,
+    )
+    valid_statuses = set(GradeSubmissionReadinessService.STATUS_LABELS)
+    if selected_status in valid_statuses:
+        readiness_rows = [row for row in readiness_rows if row.status == selected_status]
+    else:
+        selected_status = ""
+    readiness_rows.sort(key=GradeSubmissionReadinessService.sort_key)
+    summary = GradeSubmissionReadinessService.summary(readiness_rows)
+
+    grouped = {}
+    for row in readiness_rows:
+        faculty = row.assignment.faculty_user
+        group = grouped.setdefault(
+            faculty.id,
+            {
+                "faculty": faculty,
+                "faculty_name": faculty.full_name or faculty.username,
+                "rows": [],
+            },
+        )
+        group["rows"].append(row)
+    faculty_groups = list(grouped.values())
+    for group in faculty_groups:
+        group["rows"].sort(key=GradeSubmissionReadinessService.sort_key)
+        group["priority_key"] = GradeSubmissionReadinessService.sort_key(group["rows"][0])
+    faculty_groups.sort(key=lambda group: (group["priority_key"], group["faculty_name"].casefold()))
+
+    paginator = Paginator(faculty_groups, 20)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    query_params = request.GET.copy()
+    query_params.pop("page", None)
+
+    context = {
+        "page_obj": page_obj,
+        "faculty_groups": page_obj.object_list,
+        "summary": summary,
+        "campus_options": campus_options,
+        "academic_year_options": academic_year_options,
+        "term_options": term_options,
+        "period_options": period_options,
+        "college_options": college_options,
+        "department_options": department_options,
+        "faculty_options": faculty_options,
+        "course_options": course_options,
+        "status_options": GradeSubmissionReadinessService.STATUS_LABELS.items(),
+        "all_campuses_selected": all_campuses_selected,
+        "selected_campus_id": selected_campus_id,
+        "selected_ay_id": selected_ay_id,
+        "selected_term_id": selected_term_id,
+        "selected_period_code": selected_period_code,
+        "selected_college_id": selected_college_id,
+        "selected_department_id": selected_department_id,
+        "selected_faculty_id": selected_faculty_id,
+        "selected_status": selected_status,
+        "selected_course_code": selected_course_code,
+        "selected_section": selected_section,
+        "pagination_query": query_params.urlencode(),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/submission_readiness.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("faculty_activity_monitor.read")
+def grade_submission_readiness_detail_view(request, offering_id):
+    assignment = get_object_or_404(
+        AdminScopeService.scoped_faculty_assignments(request).filter(
+            is_active=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            faculty_user__is_active=True,
+        ),
+        offering_id=offering_id,
+    )
+    context = {"assignment": assignment}
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/grading/submission_readiness_detail.html", context)
+
+
+@portal_required("ADMIN")
 @permission_required("grading_analytics.read")
 def grading_analytics_view(request):
     campus_filter_value = (request.GET.get("campus_id") or "").strip().lower()
     all_campuses_selected = campus_filter_value == "all"
+    selected_course_code = (request.GET.get("course_code") or "").strip()[:100]
+    search_query = (request.GET.get("q") or "").strip()[:100]
     offerings_qs = AdminScopeService.scoped_monitoring_course_offerings(
         request,
         include_all_campuses=all_campuses_selected,
+    )
+    authorized_assignment_qs = AdminScopeService.scoped_faculty_assignments(
+        request,
+        include_all_campuses=all_campuses_selected,
+    ).filter(
+        is_active=True,
+        response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+        faculty_user__is_active=True,
     )
     campus_options = AdminScopeService.active_scoped_campuses(request).order_by("code")
     academic_year_options = AdminScopeService.active_scoped_academic_years(request).order_by("-start_date")
@@ -2180,6 +2392,61 @@ def grading_analytics_view(request):
         offerings_qs = offerings_qs.filter(academic_year_id=selected_ay_id)
     if selected_term_id:
         offerings_qs = offerings_qs.filter(term_id=selected_term_id)
+
+    course_option_rows = list(
+        offerings_qs.values_list("course__code", "course__title")
+        .order_by("course__code", "course__title")
+        .distinct()
+    )
+    course_titles_by_code = defaultdict(list)
+    for course_code, course_title in course_option_rows:
+        course_titles_by_code[course_code]
+        if course_title and course_title not in course_titles_by_code[course_code]:
+            course_titles_by_code[course_code].append(course_title)
+    course_options = [
+        {
+            "code": course_code,
+            "title": " / ".join(course_titles_by_code[course_code]),
+        }
+        for course_code in sorted(course_titles_by_code, key=lambda value: value.casefold())
+    ]
+
+    if selected_course_code:
+        offerings_qs = offerings_qs.filter(course__code=selected_course_code)
+    if search_query:
+        matching_faculty_offering_ids = (
+            authorized_assignment_qs.annotate(
+                analytics_first_last_name=Concat(
+                    "faculty_user__first_name",
+                    Value(" "),
+                    "faculty_user__last_name",
+                ),
+                analytics_first_middle_last_name=Concat(
+                    "faculty_user__first_name",
+                    Value(" "),
+                    Coalesce("faculty_user__middle_name", Value("")),
+                    Value(" "),
+                    "faculty_user__last_name",
+                ),
+            )
+            .filter(
+                Q(faculty_user__first_name__icontains=search_query)
+                | Q(faculty_user__middle_name__icontains=search_query)
+                | Q(faculty_user__last_name__icontains=search_query)
+                | Q(faculty_user__username__icontains=search_query)
+                | Q(analytics_first_last_name__icontains=search_query)
+                | Q(analytics_first_middle_last_name__icontains=search_query)
+            )
+            .order_by()
+            .values_list("offering_id", flat=True)
+        )
+        offerings_qs = offerings_qs.filter(
+            Q(course__code__icontains=search_query)
+            | Q(course__title__icontains=search_query)
+            | Q(section__code__icontains=search_query)
+            | Q(section__name__icontains=search_query)
+            | Q(id__in=matching_faculty_offering_ids)
+        )
 
     offerings = list(
         offerings_qs.select_related(
@@ -2685,11 +2952,7 @@ def grading_analytics_view(request):
     )
 
     assignment_rows = (
-        FacultyAssignment.objects.filter(
-            offering_id__in=offering_ids,
-            is_active=True,
-            faculty_user__is_active=True,
-        )
+        authorized_assignment_qs.filter(offering_id__in=offering_ids)
         .select_related("faculty_user")
         .order_by("offering_id", "-is_primary", "id")
     )
@@ -2697,6 +2960,32 @@ def grading_analytics_view(request):
     for assignment in assignment_rows:
         if assignment.offering_id not in offering_faculty_map:
             offering_faculty_map[assignment.offering_id] = assignment.faculty_user
+
+    offering_rows = [
+        {
+            "id": offering.id,
+            "campus_code": offering.campus.code,
+            "course_code": offering.course.code,
+            "course_title": offering.course.title,
+            "section_code": offering.section.code,
+            "academic_year_code": offering.academic_year.code,
+            "term_code": offering.term.code,
+            "faculty_name": (
+                offering_faculty_map[offering.id].full_name
+                if offering.id in offering_faculty_map
+                else "Unassigned Faculty"
+            ),
+        }
+        for offering in sorted(
+            offerings,
+            key=lambda item: (
+                item.course.code.casefold(),
+                item.section.code.casefold(),
+                item.campus.code.casefold(),
+                item.id,
+            ),
+        )
+    ]
 
     class_fail_map = {}
     for row in period_grade_rows:
@@ -2807,15 +3096,27 @@ def grading_analytics_view(request):
         "detail_fail_rows": detail_fail_rows,
         "faculty_class_fail_rows": faculty_class_fail_rows,
         "faculty_course_compare_rows": faculty_course_compare_rows,
+        "offering_rows": offering_rows,
         "campus_rows": campus_rows,
         "top_failing_offerings": top_failing_offerings,
         "campus_options": campus_options,
         "academic_year_options": academic_year_options,
         "term_options": term_options,
+        "course_options": course_options,
         "selected_campus_id": selected_campus_id,
         "all_campuses_selected": all_campuses_selected,
         "selected_ay_id": selected_ay_id,
         "selected_term_id": selected_term_id,
+        "selected_course_code": selected_course_code,
+        "search_query": search_query,
+        "filters_active": bool(
+            all_campuses_selected
+            or request.GET.get("campus_id")
+            or selected_ay_id
+            or selected_term_id
+            or selected_course_code
+            or search_query
+        ),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/analytics.html", context)
@@ -4208,6 +4509,10 @@ def configurable_features_settings_view(request):
         tenant_id=tenant_id,
         default=True,
     )
+    current_orientation_feedback_enabled = FeatureSettingsService.is_orientation_feedback_enabled(
+        tenant_id=tenant_id,
+        default=True,
+    )
     current_submission_non_compliance_notice_enabled = (
         FeatureSettingsService.is_submission_non_compliance_notice_enabled(
             tenant_id=tenant_id,
@@ -4428,6 +4733,7 @@ def configurable_features_settings_view(request):
             "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
             "faculty_quick_score_encoding_enabled": current_faculty_quick_score_encoding_enabled,
             "exit_pulse_enabled": current_exit_pulse_enabled,
+            "orientation_feedback_enabled": current_orientation_feedback_enabled,
             "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
             "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
             "submission_non_compliance_first_notice_after_days": current_submission_non_compliance_first_notice_after_days,
@@ -4704,6 +5010,13 @@ def configurable_features_settings_view(request):
         SystemSettingService.set(
             FeatureSettingsService.EXIT_PULSE_ENABLED_KEY,
             bool(form.cleaned_data["exit_pulse_enabled"]),
+            tenant_id=tenant_id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.ORIENTATION_FEEDBACK_ENABLED_KEY,
+            bool(form.cleaned_data["orientation_feedback_enabled"]),
             tenant_id=tenant_id,
             value_type="BOOL",
             is_active=True,
@@ -5026,6 +5339,7 @@ def configurable_features_settings_view(request):
                 "faculty_quick_tour_enabled": current_faculty_quick_tour_enabled,
                 "faculty_quick_score_encoding_enabled": current_faculty_quick_score_encoding_enabled,
                 "exit_pulse_enabled": current_exit_pulse_enabled,
+                "orientation_feedback_enabled": current_orientation_feedback_enabled,
                 "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
                 "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
                 "submission_non_compliance_first_notice_after_days": current_submission_non_compliance_first_notice_after_days,
@@ -5113,6 +5427,9 @@ def configurable_features_settings_view(request):
                     form.cleaned_data["faculty_quick_score_encoding_enabled"]
                 ),
                 "exit_pulse_enabled": bool(form.cleaned_data["exit_pulse_enabled"]),
+                "orientation_feedback_enabled": bool(
+                    form.cleaned_data["orientation_feedback_enabled"]
+                ),
                 "submission_non_compliance_notice_enabled": bool(
                     form.cleaned_data["submission_non_compliance_notice_enabled"]
                 ),

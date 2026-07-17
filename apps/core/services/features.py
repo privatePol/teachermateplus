@@ -23,6 +23,7 @@ class FeatureSettingsService:
     FACULTY_QUICK_TOUR_ENABLED_KEY = "FEATURE_FACULTY_QUICK_TOUR_ENABLED"
     FACULTY_QUICK_SCORE_ENCODING_KEY = "FEATURE_FACULTY_QUICK_SCORE_ENCODING"
     EXIT_PULSE_ENABLED_KEY = "FEATURE_EXIT_PULSE_ENABLED"
+    ORIENTATION_FEEDBACK_ENABLED_KEY = "FEATURE_ORIENTATION_FEEDBACK_ENABLED"
     LOGIN_LOCKOUT_ENABLED_KEY = "FEATURE_LOGIN_LOCKOUT_ENABLED"
     LOGIN_LOCKOUT_MAX_ATTEMPTS_KEY = "FEATURE_LOGIN_LOCKOUT_MAX_ATTEMPTS"
     LOGIN_LOCKOUT_WINDOW_MINUTES_KEY = "FEATURE_LOGIN_LOCKOUT_WINDOW_MINUTES"
@@ -275,6 +276,16 @@ class FeatureSettingsService:
         return bool(
             SystemSettingService.get(
                 cls.EXIT_PULSE_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_orientation_feedback_enabled(cls, *, tenant_id: int | None, default: bool = True) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.ORIENTATION_FEEDBACK_ENABLED_KEY,
                 tenant_id=tenant_id,
                 default=default,
             )

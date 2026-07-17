@@ -1,0 +1,34 @@
+{% extends "admin_portal/base.html" %}
+
+{% block title %}Orientation Survey Analytics | TeacherMate+{% endblock %}
+
+{% block admin_content %}
+<style>.metric-value{font-size:1.8rem;font-weight:750}.distribution-bar{height:.65rem}.anonymous-comment{white-space:pre-wrap;overflow-wrap:anywhere}</style>
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+  <div><p class="text-success text-uppercase small fw-semibold mb-1">Aggregate analytics</p><h1 class="h4 mb-1">{{ session.title }}</h1><p class="text-muted mb-0">{{ session.get_survey_type_display }} · {{ session.campus.name }}</p></div>
+  <div class="d-flex gap-2"><a class="btn btn-outline-secondary" href="{% url 'orientation_feedback:facilitator' session.public_id %}">Facilitator Screen</a>{% if can_export and analytics.results_released %}<a class="btn btn-success" href="{% url 'orientation_feedback:export' session.public_id %}">Export Aggregate CSV</a>{% endif %}</div>
+</div>
+{% if session.status == 'CANCELLED' %}<div class="alert alert-danger"><strong>Cancelled session.</strong> These preserved results are clearly marked as cancelled and should not be included in official consolidated analytics by default.</div>{% endif %}
+<div class="alert alert-light border">Results are aggregate-first. Names, usernames, email addresses, and participation-to-answer links are not displayed or exported.</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-2"><div class="card border-0 shadow-sm h-100"><div class="card-body"><div class="small text-muted">Eligible</div><div class="metric-value">{{ analytics.eligible|default:"—" }}</div></div></div></div>
+  <div class="col-6 col-lg-2"><div class="card border-0 shadow-sm h-100"><div class="card-body"><div class="small text-muted">Completed</div><div class="metric-value">{{ analytics.completed }}</div></div></div></div>
+  <div class="col-6 col-lg-2"><div class="card border-0 shadow-sm h-100"><div class="card-body"><div class="small text-muted">Response rate</div><div class="metric-value">{% if analytics.response_rate != None %}{{ analytics.response_rate }}%{% else %}—{% endif %}</div></div></div></div>
+  {% if analytics.results_released %}<div class="col-6 col-lg-2"><div class="card border-0 shadow-sm h-100"><div class="card-body"><div class="small text-muted">Overall rating</div><div class="metric-value">{{ analytics.overall_rating|default:"—" }}</div></div></div></div>
+  <div class="col-6 col-lg-2"><div class="card border-0 shadow-sm h-100"><div class="card-body"><div class="small text-muted">Confidence</div><div class="metric-value">{{ analytics.confidence|default:"—" }}</div></div></div></div>
+  <div class="col-6 col-lg-2"><div class="card border-0 shadow-sm h-100"><div class="card-body"><div class="small text-muted">Readiness</div><div class="metric-value">{{ analytics.readiness|default:"—" }}</div></div></div></div>{% endif %}
+</div>
+
+{% if not analytics.results_released %}<div class="alert alert-warning" role="status"><strong>Detailed results are protected.</strong> At least {{ analytics.minimum_responses }} completed responses are required before ratings, distributions, composite summaries, comments, or exports are released.</div>{% else %}
+<h2 class="h5 mb-3">Five-point scale results</h2>
+{% for row in analytics.scale_rows %}<div class="card border-0 shadow-sm mb-3"><div class="card-body"><div class="d-flex justify-content-between align-items-start gap-3 flex-wrap"><h3 class="h6 mb-1">{{ row.question.text }}</h3><span class="badge text-bg-success">Mean {{ row.mean|default:"—" }} · {{ row.interpretation }}</span></div><div class="small text-muted mb-3">{{ row.answered }} answered{% if row.unanswered %} · {{ row.unanswered }} unanswered{% endif %}</div>{% for item in row.distributions %}<div class="mb-2"><div class="d-flex justify-content-between small"><span>{{ item.emoji }} {{ item.label }} ({{ item.score }})</span><span>{{ item.count }} · {{ item.percent }}%</span></div><div class="progress distribution-bar" role="img" aria-label="{{ item.label }}: {{ item.percent }} percent"><div class="progress-bar bg-success" style="width:{{ item.percent }}%"></div></div></div>{% endfor %}</div></div>{% empty %}<div class="alert alert-light border">No scale responses were submitted.</div>{% endfor %}
+
+{% if analytics.indexes %}<h2 class="h5 mt-4 mb-3">Composite summaries</h2><div class="row g-3 mb-4">{% for index in analytics.indexes %}<div class="col-md-4"><div class="card border-0 shadow-sm"><div class="card-body"><div class="small text-muted">{{ index.label }}</div><div class="metric-value">{{ index.mean }}</div><div class="small text-muted mb-2">Composite source questions:</div><ul class="small mb-0">{% for source in index.sources %}<li>{{ source.question.text }} — {{ source.answered }} answered{% if source.reverse_scored %}; reverse scored from original mean {{ source.original_mean }}{% endif %}</li>{% endfor %}</ul></div></div></div>{% endfor %}</div>{% endif %}
+
+{% for row in analytics.checkbox_rows %}<h2 class="h5 mt-4 mb-3">{{ row.question.text }}</h2><div class="card border-0 shadow-sm mb-4"><div class="card-body">{% for option in row.options %}<div class="mb-3"><div class="d-flex justify-content-between small"><span>{{ option.label }}</span><span>{{ option.count }} · {{ option.percent }}%</span></div><div class="progress distribution-bar"><div class="progress-bar bg-warning" style="width:{{ option.percent }}%"></div></div></div>{% endfor %}<div class="small text-muted">Respondents may select more than one guidance area; percentages therefore may total more than 100%.</div></div></div>{% endfor %}
+
+<h2 class="h5 mt-4 mb-3">Anonymous open feedback</h2>
+{% for comment in analytics.comments %}<div class="card border-0 shadow-sm mb-3"><div class="card-body"><div class="small text-muted mb-2">{{ comment.question }}</div><div class="anonymous-comment">{{ comment.text }}</div></div></div>{% empty %}<div class="alert alert-light border">No open feedback was submitted.</div>{% endfor %}
+{% endif %}
+{% endblock %}
