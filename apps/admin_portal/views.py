@@ -2169,7 +2169,6 @@ def grade_submission_readiness_view(request):
     selected_period_code = (request.GET.get("period_code") or "").strip()[:50]
     selected_college_id = _safe_int(request.GET.get("college_id"))
     selected_department_id = _safe_int(request.GET.get("department_id"))
-    selected_faculty_id = _safe_int(request.GET.get("faculty_user_id"))
     selected_status = (request.GET.get("status") or "").strip().upper()
     selected_course_code = (request.GET.get("course_code") or "").strip()[:50]
     selected_section = (request.GET.get("section") or "").strip()[:80]
@@ -2222,10 +2221,6 @@ def grade_submission_readiness_view(request):
         assignments_qs = assignments_qs.filter(offering__term_id=selected_term_id)
 
     filter_base_qs = assignments_qs
-    faculty_options = User.objects.filter(
-        id__in=filter_base_qs.values_list("faculty_user_id", flat=True),
-        is_active=True,
-    ).order_by("last_name", "first_name", "username")
     course_options = list(
         filter_base_qs.values_list("offering__course__code", "offering__course__title")
         .order_by("offering__course__code")
@@ -2252,8 +2247,6 @@ def grade_submission_readiness_view(request):
             campus_id=selected_campus_id,
         )
         assignments_qs = assignments_qs.filter(offering__department_id__in=department_ids)
-    if selected_faculty_id:
-        assignments_qs = assignments_qs.filter(faculty_user_id=selected_faculty_id)
     if selected_course_code:
         assignments_qs = assignments_qs.filter(offering__course__code=selected_course_code)
     if selected_section:
@@ -2322,7 +2315,6 @@ def grade_submission_readiness_view(request):
         "period_options": period_options,
         "college_options": college_options,
         "department_options": department_options,
-        "faculty_options": faculty_options,
         "course_options": course_options,
         "status_options": GradeSubmissionReadinessService.STATUS_LABELS.items(),
         "all_campuses_selected": all_campuses_selected,
@@ -2332,7 +2324,6 @@ def grade_submission_readiness_view(request):
         "selected_period_code": selected_period_code,
         "selected_college_id": selected_college_id,
         "selected_department_id": selected_department_id,
-        "selected_faculty_id": selected_faculty_id,
         "selected_status": selected_status,
         "selected_course_code": selected_course_code,
         "selected_section": selected_section,
@@ -2345,14 +2336,19 @@ def grade_submission_readiness_view(request):
 @portal_required("ADMIN")
 @permission_required("faculty_activity_monitor.read")
 def grade_submission_readiness_detail_view(request, offering_id):
-    assignment = get_object_or_404(
-        AdminScopeService.scoped_faculty_assignments(request).filter(
+    assignment = (
+        AdminScopeService.scoped_faculty_assignments(request)
+        .filter(
             is_active=True,
             response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
             faculty_user__is_active=True,
-        ),
-        offering_id=offering_id,
+            offering_id=offering_id,
+        )
+        .order_by("-is_primary", "id")
+        .first()
     )
+    if assignment is None:
+        raise Http404("Class assignment not found in your authorized scope.")
     context = {"assignment": assignment}
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/submission_readiness_detail.html", context)

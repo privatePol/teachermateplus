@@ -115,7 +115,7 @@ class GradeSubmissionReadinessService:
         template_ids = {template.id for template in template_cache.values() if template is not None}
         periods = list(
             GradingTemplatePeriod.objects.filter(
-                grading_template_id__in=template_ids,
+                template_id__in=template_ids,
                 is_active=True,
             )
             .prefetch_related(
@@ -144,8 +144,8 @@ class GradeSubmissionReadinessService:
         )
         period_map = {}
         for period in periods:
-            period_map[(period.grading_template_id, cls._normalized_period(period.code))] = period
-            period_map.setdefault((period.grading_template_id, cls._normalized_period(period.name)), period)
+            period_map[(period.template_id, cls._normalized_period(period.code))] = period
+            period_map.setdefault((period.template_id, cls._normalized_period(period.name)), period)
 
         result = {}
         for assignment in assignments:
