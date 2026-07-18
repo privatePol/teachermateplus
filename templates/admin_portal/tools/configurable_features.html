@@ -802,6 +802,29 @@
   </div>
 
   <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-readiness-email" aria-expanded="false" aria-controls="feature-card-readiness-email">
+      <strong>Submission Readiness Email Alerts</strong>
+      <span class="toggle-indicator" aria-hidden="true">+</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-readiness-email" aria-expanded="false" aria-controls="feature-card-readiness-email">
+      <span class="settings-card-summary-title">Submission Readiness Email Alerts</span>
+      <span class="settings-card-summary-text">Email scoped Area Chairs, College Deans, and CAOs about assignments below the configured readiness threshold before the submission deadline.</span>
+    </button>
+    <div id="feature-card-readiness-email" class="collapse"><div class="card-body border-bottom">
+      <div class="form-check form-switch mb-3">{{ form.submission_readiness_email_enabled }} <label class="form-check-label" for="{{ form.submission_readiness_email_enabled.id_for_label }}">{{ form.submission_readiness_email_enabled.label }}</label></div>
+      <div class="row g-3">
+        <div class="col-md-6"><label class="form-label">{{ form.submission_readiness_email_days_before.label }}</label>{{ form.submission_readiness_email_days_before }}</div>
+        <div class="col-md-6"><label class="form-label">{{ form.submission_readiness_email_threshold.label }}</label>{{ form.submission_readiness_email_threshold }}</div>
+        <div class="col-12"><label class="form-label">{{ form.submission_readiness_email_roles.label }}</label>{{ form.submission_readiness_email_roles }}{% for error in form.submission_readiness_email_roles.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div>
+        <div class="col-md-4 form-check">{{ form.submission_readiness_email_send_empty }} <label>{{ form.submission_readiness_email_send_empty.label }}</label>{% if form.submission_readiness_email_send_empty.help_text %}<div class="form-text">{{ form.submission_readiness_email_send_empty.help_text }}</div>{% endif %}</div>
+        <div class="col-md-4 form-check">{{ form.submission_readiness_email_include_link }} <label>{{ form.submission_readiness_email_include_link.label }}</label></div>
+        <div class="col-md-4 form-check">{{ form.submission_readiness_email_repeat }} <label>{{ form.submission_readiness_email_repeat.label }}</label></div>
+      </div>
+      <div class="alert alert-info mt-3 mb-0 small">Opt-in only. Run <code>python manage.py send_submission_readiness_alerts --dry-run</code> before enabling the daily 1:00 AM Asia/Manila scheduler.</div>
+    </div></div>
+  </div>
+
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
     <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-non-compliance" aria-expanded="false" aria-controls="feature-card-non-compliance">
       <strong>Submission Non-Compliance Notices</strong>
       <span class="toggle-indicator" aria-hidden="true">âŒ„</span>

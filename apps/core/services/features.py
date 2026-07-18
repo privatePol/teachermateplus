@@ -54,6 +54,13 @@ class FeatureSettingsService:
     SUBMISSION_NON_COMPLIANCE_MAX_NOTICE_COUNT_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_MAX_NOTICE_COUNT"
     SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HEAD_ROLE_CODES"
     SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS_KEY = "FEATURE_SUBMISSION_NON_COMPLIANCE_HR_RECIPIENTS"
+    SUBMISSION_READINESS_EMAIL_ENABLED_KEY = "FEATURE_SUBMISSION_READINESS_EMAIL_ENABLED"
+    SUBMISSION_READINESS_EMAIL_DAYS_BEFORE_KEY = "FEATURE_SUBMISSION_READINESS_EMAIL_DAYS_BEFORE"
+    SUBMISSION_READINESS_EMAIL_THRESHOLD_KEY = "FEATURE_SUBMISSION_READINESS_EMAIL_THRESHOLD"
+    SUBMISSION_READINESS_EMAIL_ROLE_CODES_KEY = "FEATURE_SUBMISSION_READINESS_EMAIL_ROLE_CODES"
+    SUBMISSION_READINESS_EMAIL_SEND_EMPTY_KEY = "FEATURE_SUBMISSION_READINESS_EMAIL_SEND_EMPTY"
+    SUBMISSION_READINESS_EMAIL_INCLUDE_LINK_KEY = "FEATURE_SUBMISSION_READINESS_EMAIL_INCLUDE_LINK"
+    SUBMISSION_READINESS_EMAIL_REPEAT_KEY = "FEATURE_SUBMISSION_READINESS_EMAIL_REPEAT"
     GRADE_DEADLINE_ENFORCEMENT_POLICY_KEY = "FEATURE_GRADE_DEADLINE_ENFORCEMENT_POLICY"
     STUDENT_PORTAL_ENABLED_KEY = "FEATURE_STUDENT_PORTAL_ENABLED"
     STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY = "FEATURE_STUDENT_PORTAL_PERIOD_GRADES_AFTER_SUBMISSION"
@@ -79,6 +86,27 @@ class FeatureSettingsService:
         if not isinstance(value, list):
             return []
         return [str(item).strip().upper() for item in value if str(item).strip()]
+
+    @classmethod
+    def get_submission_readiness_email_policy(cls, *, tenant_id: int | None):
+        threshold = SystemSettingService.get(cls.SUBMISSION_READINESS_EMAIL_THRESHOLD_KEY, tenant_id=tenant_id, default=50)
+        try:
+            threshold = max(0, min(100, int(threshold)))
+        except (TypeError, ValueError):
+            threshold = 50
+        days_before = cls._positive_int(
+            SystemSettingService.get(cls.SUBMISSION_READINESS_EMAIL_DAYS_BEFORE_KEY, tenant_id=tenant_id, default=5),
+            default=5,
+        )
+        return {
+            "enabled": bool(SystemSettingService.get(cls.SUBMISSION_READINESS_EMAIL_ENABLED_KEY, tenant_id=tenant_id, default=False)),
+            "days_before": min(days_before, 365),
+            "threshold": threshold,
+            "role_codes": cls._role_code_list(SystemSettingService.get(cls.SUBMISSION_READINESS_EMAIL_ROLE_CODES_KEY, tenant_id=tenant_id, default=["AREA_CHAIR", "COLLEGE_DEAN", "CAO"])),
+            "send_empty": bool(SystemSettingService.get(cls.SUBMISSION_READINESS_EMAIL_SEND_EMPTY_KEY, tenant_id=tenant_id, default=False)),
+            "include_link": bool(SystemSettingService.get(cls.SUBMISSION_READINESS_EMAIL_INCLUDE_LINK_KEY, tenant_id=tenant_id, default=True)),
+            "repeat": bool(SystemSettingService.get(cls.SUBMISSION_READINESS_EMAIL_REPEAT_KEY, tenant_id=tenant_id, default=False)),
+        }
 
     @staticmethod
     def _user_role_codes(user) -> set[str]:

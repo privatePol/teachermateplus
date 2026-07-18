@@ -336,3 +336,49 @@ class SubmissionNonComplianceNotice(TimeStampedModel):
 
     def __str__(self):
         return f"{self.faculty_user_id}:{self.offering_id}:{self.template_period_id}:{self.notice_level}:{self.sequence_no}"
+
+
+class SubmissionReadinessNotificationLog(TimeStampedModel):
+    class Status(models.TextChoices):
+        DRY_RUN = "DRY_RUN", "Dry run"
+        PROCESSING = "PROCESSING", "Processing"
+        SENT = "SENT", "Sent"
+        FAILED = "FAILED", "Failed"
+        SKIPPED = "SKIPPED", "Skipped"
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="readiness_notification_logs")
+    campus = models.ForeignKey(
+        "tenants.Campus", on_delete=models.PROTECT, related_name="readiness_notification_logs", null=True, blank=True
+    )
+    recipient = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="submission_readiness_notification_logs"
+    )
+    recipient_email = models.EmailField(blank=True)
+    recipient_roles_json = models.JSONField(default=list)
+    scope_context_json = models.JSONField(default=dict)
+    academic_year = models.ForeignKey("academics.AcademicYear", on_delete=models.PROTECT)
+    term = models.ForeignKey("academics.Term", on_delete=models.PROTECT)
+    template_period = models.ForeignKey("grading.GradingTemplatePeriod", on_delete=models.PROTECT)
+    deadline_at = models.DateTimeField()
+    threshold = models.DecimalField(max_digits=5, decimal_places=2)
+    days_before = models.PositiveSmallIntegerField()
+    policy_version = models.CharField(max_length=32, default="v1")
+    generated_at = models.DateTimeField()
+    faculty_count = models.PositiveIntegerField(default=0)
+    assignment_count = models.PositiveIntegerField(default=0)
+    attempt_count = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=12, choices=Status.choices)
+    failure_reason = models.CharField(max_length=255, blank=True)
+    idempotency_key = models.CharField(max_length=64, unique=True)
+    metadata_json = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "submission_readiness_notification_logs"
+        ordering = ["-generated_at", "-id"]
+        indexes = [
+            models.Index(fields=["tenant", "recipient", "generated_at"], name="idx_srnotif_recipient"),
+            models.Index(fields=["status", "generated_at"], name="idx_srnotif_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.recipient_id}:{self.template_period_id}:{self.status}"

@@ -1,0 +1,25 @@
+Dear {{ recipient.full_name }},
+
+This is an automated notification from TeacherMate+.
+
+As of {{ generated_at|date:"F j, Y g:i A" }} Asia/Manila, assignments within your authorized academic scope had readiness below {{ threshold }}%.
+
+Academic Year / Term: {{ academic_year.code }} / {{ term.name }}
+Grading Period: {{ period.name }}
+Submission Deadline: {{ deadline|date:"F j, Y g:i A" }}
+Remaining Days: {{ days_before }}
+Readiness Threshold: Below {{ threshold }}%
+
+{% for row in rows %}{{ row.result.assignment.faculty_user.full_name }} | {{ row.result.assignment.offering.campus.code }} - {{ row.result.assignment.offering.course.code }} - {{ row.result.assignment.offering.section.code }} | {{ row.result.progress_percent }}% | Last activity: {{ row.result.last_activity_at|default:"None recorded" }} | {{ row.concern }}
+{% endfor %}
+Faculty Members Requiring Follow-up: {{ faculty_count }}
+Assignments Below Threshold: {{ assignment_count }}
+
+Please coordinate with the faculty members listed above regarding their incomplete grading requirements.
+
+Before initiating follow-up, please review the faculty member's Grade Book in TeacherMate+ to verify the accuracy and current status of this scheduled snapshot. Faculty members may have made updates after it was generated.
+
+This report is intended as an early monitoring and follow-up tool. It does not automatically indicate faculty non-compliance.
+{% if dashboard_url %}
+Submission Readiness: {{ dashboard_url }}
+{% endif %}

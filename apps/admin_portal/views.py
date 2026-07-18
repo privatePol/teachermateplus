@@ -4515,6 +4515,7 @@ def configurable_features_settings_view(request):
             default=False,
         )
     )
+    current_submission_readiness_email_policy = FeatureSettingsService.get_submission_readiness_email_policy(tenant_id=tenant_id)
     current_submission_non_compliance_notice_interval_days = (
         FeatureSettingsService.get_submission_non_compliance_notice_interval_days(
             tenant_id=tenant_id,
@@ -4731,6 +4732,13 @@ def configurable_features_settings_view(request):
             "exit_pulse_enabled": current_exit_pulse_enabled,
             "orientation_feedback_enabled": current_orientation_feedback_enabled,
             "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
+            "submission_readiness_email_enabled": current_submission_readiness_email_policy["enabled"],
+            "submission_readiness_email_days_before": current_submission_readiness_email_policy["days_before"],
+            "submission_readiness_email_threshold": current_submission_readiness_email_policy["threshold"],
+            "submission_readiness_email_roles": current_submission_readiness_email_policy["role_codes"],
+            "submission_readiness_email_send_empty": current_submission_readiness_email_policy["send_empty"],
+            "submission_readiness_email_include_link": current_submission_readiness_email_policy["include_link"],
+            "submission_readiness_email_repeat": current_submission_readiness_email_policy["repeat"],
             "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
             "submission_non_compliance_first_notice_after_days": current_submission_non_compliance_first_notice_after_days,
             "submission_non_compliance_level_interval_days": current_submission_non_compliance_level_interval_days,
@@ -5024,6 +5032,17 @@ def configurable_features_settings_view(request):
             value_type="BOOL",
             is_active=True,
         )
+        readiness_setting_values = (
+            (FeatureSettingsService.SUBMISSION_READINESS_EMAIL_ENABLED_KEY, bool(form.cleaned_data["submission_readiness_email_enabled"]), "BOOL"),
+            (FeatureSettingsService.SUBMISSION_READINESS_EMAIL_DAYS_BEFORE_KEY, int(form.cleaned_data["submission_readiness_email_days_before"]), "INT"),
+            (FeatureSettingsService.SUBMISSION_READINESS_EMAIL_THRESHOLD_KEY, int(form.cleaned_data["submission_readiness_email_threshold"]), "INT"),
+            (FeatureSettingsService.SUBMISSION_READINESS_EMAIL_ROLE_CODES_KEY, form.cleaned_data["submission_readiness_email_roles"], "JSON"),
+            (FeatureSettingsService.SUBMISSION_READINESS_EMAIL_SEND_EMPTY_KEY, bool(form.cleaned_data["submission_readiness_email_send_empty"]), "BOOL"),
+            (FeatureSettingsService.SUBMISSION_READINESS_EMAIL_INCLUDE_LINK_KEY, bool(form.cleaned_data["submission_readiness_email_include_link"]), "BOOL"),
+            (FeatureSettingsService.SUBMISSION_READINESS_EMAIL_REPEAT_KEY, bool(form.cleaned_data["submission_readiness_email_repeat"]), "BOOL"),
+        )
+        for setting_key, setting_value, value_type in readiness_setting_values:
+            SystemSettingService.set(setting_key, setting_value, tenant_id=tenant_id, value_type=value_type, is_active=True)
         SystemSettingService.set(
             FeatureSettingsService.SUBMISSION_NON_COMPLIANCE_NOTICE_INTERVAL_DAYS_KEY,
             int(form.cleaned_data["submission_non_compliance_notice_interval_days"]),
@@ -5337,6 +5356,7 @@ def configurable_features_settings_view(request):
                 "exit_pulse_enabled": current_exit_pulse_enabled,
                 "orientation_feedback_enabled": current_orientation_feedback_enabled,
                 "submission_non_compliance_notice_enabled": current_submission_non_compliance_notice_enabled,
+                "submission_readiness_email_policy": current_submission_readiness_email_policy,
                 "submission_non_compliance_notice_interval_days": current_submission_non_compliance_notice_interval_days,
                 "submission_non_compliance_first_notice_after_days": current_submission_non_compliance_first_notice_after_days,
                 "submission_non_compliance_level_interval_days": current_submission_non_compliance_level_interval_days,
@@ -5429,6 +5449,15 @@ def configurable_features_settings_view(request):
                 "submission_non_compliance_notice_enabled": bool(
                     form.cleaned_data["submission_non_compliance_notice_enabled"]
                 ),
+                "submission_readiness_email_policy": {
+                    "enabled": bool(form.cleaned_data["submission_readiness_email_enabled"]),
+                    "days_before": int(form.cleaned_data["submission_readiness_email_days_before"]),
+                    "threshold": int(form.cleaned_data["submission_readiness_email_threshold"]),
+                    "role_codes": form.cleaned_data["submission_readiness_email_roles"],
+                    "send_empty": bool(form.cleaned_data["submission_readiness_email_send_empty"]),
+                    "include_link": bool(form.cleaned_data["submission_readiness_email_include_link"]),
+                    "repeat": bool(form.cleaned_data["submission_readiness_email_repeat"]),
+                },
                 "submission_non_compliance_notice_interval_days": int(
                     form.cleaned_data["submission_non_compliance_notice_interval_days"]
                 ),

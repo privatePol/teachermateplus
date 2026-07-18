@@ -3402,6 +3402,18 @@ class ConfigurableFeatureSettingForm(forms.Form):
             "faculty plus Area Chair, then faculty plus Area Chair plus CAO."
         ),
     )
+    submission_readiness_email_enabled = forms.BooleanField(required=False, label="Enable submission readiness email alerts")
+    submission_readiness_email_days_before = forms.IntegerField(required=False, min_value=0, max_value=365, initial=5, label="Days before deadline")
+    submission_readiness_email_threshold = forms.IntegerField(required=False, min_value=0, max_value=100, initial=50, label="Readiness threshold (%)")
+    submission_readiness_email_roles = forms.MultipleChoiceField(required=False, widget=forms.CheckboxSelectMultiple, choices=[("AREA_CHAIR", "Area Chair"), ("COLLEGE_DEAN", "College Dean"), ("CAO", "Chief Academic Officer")], label="Recipient roles")
+    submission_readiness_email_send_empty = forms.BooleanField(
+        required=False,
+        disabled=True,
+        label="Send empty reports",
+        help_text="Disabled for this exception-only workflow. Emails are sent only when matching assignments exist.",
+    )
+    submission_readiness_email_include_link = forms.BooleanField(required=False, label="Include Submission Readiness dashboard link")
+    submission_readiness_email_repeat = forms.BooleanField(required=False, label="Allow repeat reminders")
     submission_non_compliance_notice_interval_days = forms.IntegerField(
         required=False,
         min_value=1,
@@ -3849,6 +3861,13 @@ class ConfigurableFeatureSettingForm(forms.Form):
             cleaned["exit_pulse_enabled"] = False
         if not cleaned.get("submission_non_compliance_notice_enabled"):
             cleaned["submission_non_compliance_notice_enabled"] = False
+        if cleaned.get("submission_readiness_email_days_before") is None:
+            cleaned["submission_readiness_email_days_before"] = 5
+        if cleaned.get("submission_readiness_email_threshold") is None:
+            cleaned["submission_readiness_email_threshold"] = 50
+        cleaned["submission_readiness_email_send_empty"] = False
+        if cleaned.get("submission_readiness_email_enabled") and not cleaned.get("submission_readiness_email_roles"):
+            self.add_error("submission_readiness_email_roles", "Select at least one recipient role when alerts are enabled.")
         cleaned["submission_non_compliance_notice_interval_days"] = 1
         if cleaned.get("submission_non_compliance_first_notice_after_days") is None:
             cleaned["submission_non_compliance_first_notice_after_days"] = 1

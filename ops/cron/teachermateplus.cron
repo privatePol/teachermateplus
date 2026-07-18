@@ -1,8 +1,13 @@
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+
 */5 * * * * cd /opt/teachermateplus && source /etc/teachermateplus/teachermateplus.env && /opt/teachermateplus/.venv/bin/python manage.py auto_lock_period_deadlines >> /var/log/teachermateplus/auto_lock_period_deadlines.log 2>&1
 */10 * * * * cd /opt/teachermateplus && source /etc/teachermateplus/teachermateplus.env && /opt/teachermateplus/.venv/bin/python manage.py auto_lapse_correction_windows >> /var/log/teachermateplus/auto_lapse_correction_windows.log 2>&1
 0 * * * * cd /opt/teachermateplus && source /etc/teachermateplus/teachermateplus.env && /opt/teachermateplus/.venv/bin/python manage.py queue_period_reminders >> /var/log/teachermateplus/queue_period_reminders.log 2>&1
 5 * * * * cd /opt/teachermateplus && source /etc/teachermateplus/teachermateplus.env && /opt/teachermateplus/.venv/bin/python manage.py anonymize_exit_pulse_identifiers >> /var/log/teachermateplus/anonymize_exit_pulse_identifiers.log 2>&1
-15 7 * * * cd /opt/teachermateplus && source /etc/teachermateplus/teachermateplus.env && /opt/teachermateplus/.venv/bin/python manage.py issue_submission_non_compliance_notices >> /var/log/teachermateplus/submission_non_compliance_notices.log 2>&1
+
+# The following daily jobs use Asia/Manila time.
+CRON_TZ=Asia/Manila
+15 4 * * * cd /opt/teachermateplus && source /etc/teachermateplus/teachermateplus.env && /opt/teachermateplus/.venv/bin/python manage.py issue_submission_non_compliance_notices >> /var/log/teachermateplus/submission_non_compliance_notices.log 2>&1
+0 1 * * * flock -n /run/lock/teachermateplus-submission-readiness.lock bash -lc 'cd /opt/teachermateplus && source /etc/teachermateplus/teachermateplus.env && /opt/teachermateplus/.venv/bin/python manage.py send_submission_readiness_alerts' >> /var/log/teachermateplus/submission_readiness_alerts.log 2>&1

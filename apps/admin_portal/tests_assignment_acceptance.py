@@ -943,6 +943,11 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertContains(response, "Role-Based Help Guide")
         self.assertContains(response, "Enable Exit Pulse")
         self.assertContains(response, "Enable Orientation Feedback Surveys")
+        self.assertContains(response, "Submission Readiness Email Alerts", count=2)
+        self.assertContains(
+            response,
+            "Email scoped Area Chairs, College Deans, and CAOs about assignments below the configured readiness threshold",
+        )
 
     def test_assignment_dashboard_view_loads(self):
         self.client.force_login(self.admin_user)

@@ -1429,6 +1429,7 @@
             Best practice is to run the notice scheduler daily. TeacherMate+ checks the deadline age and only issues the next communication when that stage is due.
           </div>
           <div class="guide-note mt-3">
+            Early readiness email command: <code>manage.py send_submission_readiness_alerts</code> (daily at 1:00 AM Asia/Manila; disabled by default). Configure the days, strict below-threshold percentage, and scoped Area Chair/Dean/CAO recipients under Configuration Management.<br>
             Scheduled job command: <code>manage.py issue_submission_non_compliance_notices</code><br>
             Optional dry run: <code>manage.py issue_submission_non_compliance_notices --dry-run</code><br>
             Optional tenant scope: <code>manage.py issue_submission_non_compliance_notices --tenant-id 1</code>

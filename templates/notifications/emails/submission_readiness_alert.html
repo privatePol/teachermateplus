@@ -1,0 +1,18 @@
+<!doctype html>
+<html><body style="font-family:Arial,sans-serif;color:#212529">
+<p>Dear {{ recipient.full_name }},</p>
+<p>This is an automated notification from TeacherMate+.</p>
+<p>As of <strong>{{ generated_at|date:"F j, Y g:i A" }} Asia/Manila</strong>, assignments within your authorized academic scope had readiness below <strong>{{ threshold }}%</strong>.</p>
+<p>Academic Year / Term: {{ academic_year.code }} / {{ term.name }}<br>
+Grading Period: {{ period.name }}<br>Submission Deadline: {{ deadline|date:"F j, Y g:i A" }}<br>
+Remaining Days: {{ days_before }}<br>Readiness Threshold: Below {{ threshold }}%</p>
+<table style="border-collapse:collapse;width:100%" border="1" cellpadding="7">
+<thead><tr><th>Faculty Member</th><th>Course and Section</th><th>Readiness</th><th>Last Activity</th><th>Primary Concern</th></tr></thead>
+<tbody>{% for row in rows %}<tr><td>{{ row.result.assignment.faculty_user.full_name }}</td><td>{{ row.result.assignment.offering.campus.code }} - {{ row.result.assignment.offering.course.code }} - {{ row.result.assignment.offering.section.code }}</td><td>{{ row.result.progress_percent }}%</td><td>{{ row.result.last_activity_at|date:"F j, Y g:i A"|default:"None recorded" }}</td><td>{{ row.concern }}</td></tr>{% endfor %}</tbody>
+</table>
+<p>Faculty Members Requiring Follow-up: {{ faculty_count }}<br>Assignments Below Threshold: {{ assignment_count }}</p>
+<p>Please coordinate with the faculty members listed above regarding their incomplete grading requirements.</p>
+<p>Before initiating follow-up, please review the faculty member's Grade Book in TeacherMate+ to verify the accuracy and current status of this scheduled snapshot. Faculty members may have made updates after it was generated.</p>
+<p><strong>This report is intended as an early monitoring and follow-up tool. It does not automatically indicate faculty non-compliance.</strong></p>
+{% if dashboard_url %}<p><a href="{{ dashboard_url }}">Open Submission Readiness</a> (normal sign-in and authorization are required).</p>{% endif %}
+</body></html>
