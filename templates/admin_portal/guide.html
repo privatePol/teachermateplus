@@ -1391,6 +1391,13 @@
           <div class="guide-note">
             If the link is still missing, check three items: Grade Prediction is enabled, the faculty role is selected, and the At-Risk Monitor option is enabled.
           </div>
+          <div class="guide-subhead">Student Academic Intervention Tracking</div>
+          <ul class="guide-list">
+            <li>Enable this feature only through <strong>Configuration Management</strong> when the user has the explicit <code>academic_interventions.configure</code> permission.</li>
+            <li>Faculty analytics flags are recommendations for review, not automatic intervention requirements. The faculty owner records the professional decision.</li>
+            <li>Read-only monitoring requires <code>academic_interventions.monitor</code> plus valid assigned scope. Monitoring users cannot change a faculty decision, action, follow-up, close, or void a record.</li>
+            <li>Guidance does not receive intervention-record access by referral. Record only a controlled academic destination, optional approved-office label, date, and brief reason.</li>
+          </ul>
           <ul class="guide-list">
             <li>Prediction is unofficial and read-only. Enable it first in <strong>Configuration Management</strong>.</li>
             <li>Open <strong>Grade Prediction Monitor</strong> to review projected outcomes for the scoped faculty, class, and period.</li>

@@ -1,0 +1,309 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .intervention-detail-page {
+    --detail-green: #176b4d;
+    --detail-green-dark: #0f5138;
+    --detail-mint: #edf8f3;
+    --detail-border: #dce8e1;
+    --detail-text: #244237;
+  }
+  .intervention-detail-hero {
+    border: 0;
+    border-radius: 1.15rem;
+    overflow: hidden;
+    background: linear-gradient(135deg, #0f5138 0%, #198754 65%, #61a976 100%);
+    color: #fff;
+    box-shadow: 0 0.85rem 2rem rgba(15, 81, 56, 0.18);
+  }
+  .intervention-detail-hero .hero-muted { color: rgba(255, 255, 255, 0.78); }
+  .intervention-status-badge {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 0.5rem 0.8rem;
+  }
+  .intervention-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+  .intervention-meta-item {
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 0.85rem;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.8rem 0.9rem;
+  }
+  .intervention-meta-label {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .intervention-meta-value { font-weight: 700; margin-top: 0.15rem; }
+  .intervention-section-card {
+    border: 1px solid var(--detail-border);
+    border-radius: 1rem;
+    overflow: hidden;
+    box-shadow: 0 0.35rem 1rem rgba(34, 70, 54, 0.07);
+  }
+  .intervention-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    padding: 0.95rem 1.1rem;
+    background: linear-gradient(90deg, var(--detail-mint), #fbfdfc);
+    border-bottom: 1px solid var(--detail-border);
+  }
+  .intervention-section-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 2.15rem;
+    height: 2.15rem;
+    border-radius: 0.7rem;
+    background: var(--detail-green);
+    color: #fff;
+    font-weight: 800;
+  }
+  .intervention-section-title { color: var(--detail-text); font-weight: 800; margin: 0; }
+  .intervention-form {
+    border: 1px solid #e3ece7;
+    border-radius: 0.9rem;
+    background: #fbfdfc;
+    padding: 1rem;
+  }
+  .intervention-form p { margin-bottom: 1rem; }
+  .intervention-form p:last-of-type { margin-bottom: 0; }
+  .intervention-form label {
+    display: block;
+    color: #315444;
+    font-size: 0.82rem;
+    font-weight: 750;
+    margin-bottom: 0.35rem;
+  }
+  .intervention-form .form-control,
+  .intervention-form .form-select {
+    border-color: #cbdcd3;
+    border-radius: 0.7rem;
+    min-height: 2.7rem;
+  }
+  .intervention-form textarea.form-control { min-height: 6.5rem; resize: vertical; }
+  .intervention-form .form-control:focus,
+  .intervention-form .form-select:focus {
+    border-color: #56a77b;
+    box-shadow: 0 0 0 0.2rem rgba(25, 135, 84, 0.12);
+  }
+  .intervention-form .form-check-input { margin-right: 0.45rem; }
+  .intervention-form .helptext {
+    display: block;
+    color: #6b7c73;
+    font-size: 0.78rem;
+    margin-top: 0.3rem;
+  }
+  .intervention-form .errorlist {
+    color: #b02a37;
+    font-size: 0.82rem;
+    margin: 0 0 0.35rem;
+    padding-left: 1.1rem;
+  }
+  .intervention-action-bar {
+    border: 1px solid var(--detail-border);
+    border-radius: 0.9rem;
+    background: #fff;
+    padding: 0.85rem;
+  }
+  .intervention-concern-box {
+    border-left: 0.3rem solid #e3a008;
+    border-radius: 0.75rem;
+    background: #fff9e8;
+    color: #55430f;
+    padding: 1rem 1.1rem;
+  }
+  .intervention-timeline {
+    position: relative;
+    margin-left: 0.4rem;
+    padding-left: 1.35rem;
+  }
+  .intervention-timeline::before {
+    content: "";
+    position: absolute;
+    top: 0.35rem;
+    bottom: 0.35rem;
+    left: 0.25rem;
+    width: 2px;
+    background: #cfe2d8;
+  }
+  .intervention-timeline-item { position: relative; padding: 0 0 1rem 0.35rem; }
+  .intervention-timeline-item:last-child { padding-bottom: 0; }
+  .intervention-timeline-item::before {
+    content: "";
+    position: absolute;
+    top: 0.35rem;
+    left: -1.55rem;
+    width: 0.72rem;
+    height: 0.72rem;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: var(--detail-green);
+    box-shadow: 0 0 0 2px #abd0bc;
+  }
+  .intervention-record-row {
+    border: 1px solid #e3ece7;
+    border-radius: 0.85rem;
+    background: #fff;
+    padding: 0.9rem 1rem;
+  }
+  .intervention-edit-panel {
+    border-top: 1px dashed #cbdcd3;
+    margin-top: 0.8rem;
+    padding-top: 0.8rem;
+  }
+  .intervention-edit-panel summary {
+    color: var(--detail-green-dark);
+    cursor: pointer;
+    font-weight: 700;
+    list-style-position: inside;
+  }
+  @media (max-width: 991.98px) {
+    .intervention-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 575.98px) {
+    .intervention-detail-hero .card-body { padding: 1.25rem !important; }
+    .intervention-meta-grid { grid-template-columns: 1fr; }
+    .intervention-action-bar .btn,
+    .intervention-action-bar form,
+    .intervention-action-bar input { width: 100%; }
+    .intervention-section-card .card-body { padding: 1rem !important; }
+  }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="intervention-detail-page">
+  <div class="mb-3">
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:academic_intervention_list' %}?offering_id={{ case.offering_id }}&period_id={{ case.grading_period_id }}">← Back to intervention list</a>
+  </div>
+
+  <section class="card intervention-detail-hero mb-4">
+    <div class="card-body p-4">
+      <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-4">
+        <div>
+          <div class="small text-uppercase fw-semibold hero-muted mb-2">Faculty-owned academic record</div>
+          <h1 class="h3 fw-bold mb-2">{{ case.student.last_name }}, {{ case.student.first_name }}{% if case.student.middle_name %} {{ case.student.middle_name }}{% endif %}</h1>
+          <p class="mb-0 hero-muted">Review the academic concern, record your professional decision, and document only the support you personally provide.</p>
+        </div>
+        <span class="intervention-status-badge">{{ case.get_review_status_display }}</span>
+      </div>
+      <div class="intervention-meta-grid">
+        <div class="intervention-meta-item"><div class="intervention-meta-label">Course</div><div class="intervention-meta-value">{{ case.offering.course.code }}</div></div>
+        <div class="intervention-meta-item"><div class="intervention-meta-label">Section</div><div class="intervention-meta-value">{{ case.offering.section.code }}</div></div>
+        <div class="intervention-meta-item"><div class="intervention-meta-label">Grading period</div><div class="intervention-meta-value">{{ case.grading_period.name }}</div></div>
+        <div class="intervention-meta-item"><div class="intervention-meta-label">Concern source</div><div class="intervention-meta-value">{{ case.get_detection_source_display }}</div></div>
+      </div>
+    </div>
+  </section>
+
+  {% if is_open %}
+    <div class="intervention-action-bar d-flex flex-column flex-md-row align-items-md-center gap-2 mb-4">
+      <div class="small text-muted me-md-auto">Record controls</div>
+      <form method="post" action="{% url 'faculty_portal:academic_intervention_close' case.id %}">{% csrf_token %}<button class="btn btn-outline-secondary btn-sm fw-semibold">Close record</button></form>
+      {% if can_void %}
+        <form method="post" action="{% url 'faculty_portal:academic_intervention_void' case.id %}" class="d-flex flex-column flex-sm-row gap-2">
+          {% csrf_token %}
+          <input class="form-control form-control-sm" name="void_reason" required maxlength="500" placeholder="Reason for voiding this mistaken record">
+          <button class="btn btn-outline-danger btn-sm fw-semibold text-nowrap">Void eligible record</button>
+        </form>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <section class="card intervention-section-card mb-4">
+    <header class="intervention-section-header"><span class="intervention-section-icon">!</span><h2 class="h5 intervention-section-title">Academic Concern — For Faculty Review</h2></header>
+    <div class="card-body p-4">
+      <div class="intervention-concern-box">{% if case.detection_source == 'ANALYTICS' %}{{ case.concern_snapshot_json.primary_reason }}{% else %}{{ case.distinct_concern_summary }}{% endif %}</div>
+    </div>
+  </section>
+
+  <section class="card intervention-section-card mb-4">
+    <header class="intervention-section-header"><span class="intervention-section-icon">1</span><div><h2 class="h5 intervention-section-title">Faculty decision</h2><div class="small text-muted">Record or correct your professional academic decision.</div></div></header>
+    <div class="card-body p-4">
+      {% if is_open %}
+        <form method="post" action="{% url 'faculty_portal:academic_intervention_decision' case.id %}" class="intervention-form mb-4">{% csrf_token %}{{ decision_form.as_p }}<div class="d-flex justify-content-end"><button class="btn btn-success fw-semibold px-4">Save faculty decision</button></div></form>
+      {% else %}
+        <div class="alert alert-secondary mb-4">
+          <strong>This record is read-only.</strong> It has been closed or voided.
+        </div>
+      {% endif %}
+      {% if decision_revisions %}
+        <h3 class="h6 fw-bold text-success-emphasis mb-3">Decision history</h3>
+        <div class="intervention-timeline">
+          {% for revision in decision_revisions %}
+            <div class="intervention-timeline-item">
+              <div class="fw-bold">Revision {{ revision.revision_no }} · {{ revision.get_decision_display }}</div>
+              <div class="small text-muted">{{ revision.decided_at|date:"M j, Y g:i A" }}</div>
+              {% if revision.correction_reason %}<div class="small mt-1"><strong>Correction reason:</strong> {{ revision.correction_reason }}</div>{% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="mb-0 text-muted">No faculty decision has been recorded.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if case.faculty_decision == 'CONDUCT' %}
+    <section class="card intervention-section-card mb-4">
+      <header class="intervention-section-header"><span class="intervention-section-icon">2</span><div><h2 class="h5 intervention-section-title">Intervention actions</h2><div class="small text-muted">Plan an action or record one that has already been conducted.</div></div></header>
+      <div class="card-body p-4">
+        {% if is_open %}
+          <form method="post" action="{% url 'faculty_portal:academic_intervention_action_create' case.id %}" class="intervention-form mb-4">{% csrf_token %}{{ action_form.as_p }}<div class="d-flex justify-content-end"><button class="btn btn-success fw-semibold px-4">Save action</button></div></form>
+        {% endif %}
+        <div class="d-grid gap-3">
+          {% for action in actions %}
+            <article class="intervention-record-row">
+              <div class="d-flex flex-column flex-md-row justify-content-between gap-2">
+                <div><div class="fw-bold text-success-emphasis">{{ action.intervention_type }}</div><div class="small text-muted">{{ action.get_status_display }}{% if action.planned_for %} · Planned {{ action.planned_for }}{% endif %}{% if action.conducted_on %} · Conducted {{ action.conducted_on }}{% endif %}</div></div>
+                <span class="badge rounded-pill text-bg-light border align-self-start">{{ action.get_status_display }}</span>
+              </div>
+              {% if action.action_summary %}<p class="mb-0 mt-2">{{ action.action_summary }}</p>{% endif %}
+              {% for planned_action, form in action_forms %}{% if planned_action.id == action.id %}<details class="intervention-edit-panel"><summary>Update planned action</summary><form method="post" action="{% url 'faculty_portal:academic_intervention_action_update' case.id action.id %}" class="intervention-form mt-3">{% csrf_token %}{{ form.as_p }}<button class="btn btn-sm btn-success fw-semibold">Update action</button></form></details>{% endif %}{% endfor %}
+            </article>
+          {% empty %}
+            <p class="mb-0 text-muted">No intervention action has been recorded.</p>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
+  <section class="card intervention-section-card mb-4">
+    <header class="intervention-section-header"><span class="intervention-section-icon">3</span><div><h2 class="h5 intervention-section-title">Follow-up</h2><div class="small text-muted">Schedule and record the outcome of your academic follow-up.</div></div></header>
+    <div class="card-body p-4">
+      {% if is_open %}
+        <form method="post" action="{% url 'faculty_portal:academic_intervention_follow_up_create' case.id %}" class="intervention-form mb-4">{% csrf_token %}{{ follow_up_form.as_p }}<div class="d-flex justify-content-end"><button class="btn btn-outline-success fw-semibold px-4">Save follow-up</button></div></form>
+      {% endif %}
+      <div class="d-grid gap-3">
+        {% for follow_up, form in follow_up_forms %}
+          <article class="intervention-record-row">
+            <div class="d-flex flex-column flex-md-row justify-content-between gap-2"><div><div class="fw-bold text-success-emphasis">{{ follow_up.effective_status_display }}</div><div class="small text-muted">{% if follow_up.due_on %}Due {{ follow_up.due_on }}{% else %}No due date{% endif %}{% if follow_up.completed_on %} · Completed {{ follow_up.completed_on }}{% endif %}</div></div><span class="badge rounded-pill text-bg-light border align-self-start">{{ follow_up.effective_status_display }}</span></div>
+            {% if follow_up.result_summary %}<p class="mb-0 mt-2">{{ follow_up.result_summary }}</p>{% endif %}
+            {% if is_open %}<details class="intervention-edit-panel"><summary>Update follow-up</summary><form method="post" action="{% url 'faculty_portal:academic_intervention_follow_up_update' case.id follow_up.id %}" class="intervention-form mt-3">{% csrf_token %}{{ form.as_p }}<button class="btn btn-sm btn-outline-success fw-semibold">Update follow-up</button></form></details>{% endif %}
+          </article>
+        {% empty %}
+          <p class="mb-0 text-muted">No follow-up has been recorded.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

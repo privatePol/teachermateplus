@@ -69,6 +69,7 @@ class FeatureSettingsService:
     SIS_PERIODIC_GRADES_API_ENABLED_KEY = "FEATURE_SIS_PERIODIC_GRADES_API_ENABLED"
     ROLE_BASED_HELP_GUIDE_ENABLED_KEY = "FEATURE_ROLE_BASED_HELP_GUIDE_ENABLED"
     ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY = "FEATURE_ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED"
+    STUDENT_ACADEMIC_INTERVENTION_TRACKING_ENABLED_KEY = "FEATURE_STUDENT_ACADEMIC_INTERVENTION_TRACKING_ENABLED"
     GRADE_DEADLINE_POLICY_COMPLIANCE_ONLY = "COMPLIANCE_ONLY"
     GRADE_DEADLINE_POLICY_DISABLED = "DISABLED"
     GRADE_DEADLINE_POLICY_AUTO_CLOSE_REQUIRES_REOPEN = "AUTO_CLOSE_REQUIRES_REOPEN"
@@ -840,6 +841,18 @@ class FeatureSettingsService:
         return bool(
             SystemSettingService.get(
                 cls.ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY,
+                tenant_id=tenant_id,
+                default=default,
+            )
+        )
+
+    @classmethod
+    def is_student_academic_intervention_tracking_enabled(
+        cls, *, tenant_id: int | None, default: bool = False
+    ) -> bool:
+        return bool(
+            SystemSettingService.get(
+                cls.STUDENT_ACADEMIC_INTERVENTION_TRACKING_ENABLED_KEY,
                 tenant_id=tenant_id,
                 default=default,
             )

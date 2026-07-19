@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "apps.attendance.apps.AttendanceConfig",
     "apps.notifications.apps.NotificationsConfig",
     "apps.predictions.apps.PredictionsConfig",
+    "apps.interventions.apps.InterventionsConfig",
     "apps.exit_pulse.apps.ExitPulseConfig",
     "apps.orientation_feedback.apps.OrientationFeedbackConfig",
     "apps.student_portal.apps.StudentPortalConfig",

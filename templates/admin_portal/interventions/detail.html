@@ -1,0 +1,15 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<a class="btn btn-sm btn-outline-secondary mb-3" href="{% url 'admin_portal:academic_intervention_monitor' %}">Back</a>
+<h1 class="h4">Academic Intervention Record</h1>
+<p>{{ case.student }} · {{ case.offering.course.code }} / {{ case.offering.section.code }}</p>
+<div class="alert alert-secondary">Read-only monitoring record. No faculty workflow action is available in the Admin Portal.</div>
+<div class="card mb-3"><div class="card-body"><dl>
+  <dt>Status</dt><dd>{{ case.get_review_status_display }}</dd>
+  <dt>Faculty decision</dt><dd>{{ case.get_faculty_decision_display|default:"Pending" }}</dd>
+  <dt>Faculty rationale</dt><dd>{{ case.faculty_rationale|default:"—" }}</dd>
+  <dt>Referral</dt><dd>{% if case.referral_destination %}{{ case.get_referral_destination_display }}{% if case.referral_destination_label %} — {{ case.referral_destination_label }}{% endif %} · {{ case.referral_date }} · {{ case.referral_reason }}{% else %}—{% endif %}</dd>
+</dl></div></div>
+{% if decision_revisions %}<div class="card mb-3"><div class="card-header">Decision history</div><div class="card-body">{% for revision in decision_revisions %}<p>Revision {{ revision.revision_no }}: {{ revision.get_decision_display }} · {{ revision.decided_at }}</p>{% endfor %}</div></div>{% endif %}
+<div class="card"><div class="card-header">Intervention and follow-up status</div><div class="card-body">{% for action in actions %}<p>{{ action.get_status_display }} — {{ action.intervention_type }}</p>{% empty %}<p>No action recorded.</p>{% endfor %}{% for follow_up in follow_ups %}<p>{{ follow_up.effective_status_display }} — {{ follow_up.due_on|default:"No date" }}</p>{% endfor %}</div></div>
+{% endblock %}

@@ -7,6 +7,7 @@ import re
 from django.contrib import messages
 from django import forms as django_forms
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError
 from django.db.models import Avg, Count, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.template.loader import render_to_string
@@ -15,7 +16,7 @@ from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from apps.accounts.forms import FacultyLoginForm
 from apps.accounts.models import UserSignatureUsageLog
@@ -91,6 +92,13 @@ from apps.grading.services import (
     GradingTemplateTestingCalculatorService,
     TemplateGovernanceWorkflowService,
     TemplateHotfixService,
+)
+from apps.interventions.forms import FacultyDecisionForm, FollowUpForm, InterventionActionForm, ManualInterventionCaseForm
+from apps.interventions.models import AcademicInterventionAction, AcademicInterventionCase
+from apps.interventions.services import (
+    AcademicConcernDetectionService,
+    AcademicInterventionAuthorizationService,
+    AcademicInterventionCaseService,
 )
 from apps.predictions.services import (
     PredictionAuditService,
@@ -3257,6 +3265,350 @@ def student_at_risk_monitor_view(request):
         "using_active_period_filter": intervention_result["using_active_period_filter"],
     }
     return render(request, "faculty_portal/student_at_risk_monitor.html", context)
+
+
+def _owned_intervention_cases_for_request(request):
+    scope = getattr(request, "scope", {})
+    tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    campus_id = scope.get("campus_id") or getattr(request.user, "default_campus_id", None)
+    return AcademicInterventionCase.objects.filter(
+        faculty_owner=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    )
+
+
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+@require_GET
+def academic_intervention_list_view(request):
+    scope = getattr(request, "scope", {})
+    tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    campus_id = scope.get("campus_id") or getattr(request.user, "default_campus_id", None)
+    AcademicInterventionAuthorizationService.require_enabled(tenant_id=tenant_id, user=request.user, campus_id=campus_id)
+    offerings = list(
+        _faculty_offering_queryset(request.user)
+        .filter(tenant_id=tenant_id, campus_id=campus_id)
+        .distinct()
+    )
+    selected_offering_id = _safe_int(request.GET.get("offering_id"))
+    selected_offering = next(
+        (offering for offering in offerings if offering.id == selected_offering_id),
+        None,
+    )
+    visible_offerings = [selected_offering] if selected_offering else offerings
+    selected_period_id = _safe_int(request.GET.get("period_id"))
+
+    period_map = {}
+    for offering in visible_offerings:
+        try:
+            template = FacultyGradingService.resolve_template_for_offering(offering)
+        except ValidationError:
+            continue
+        for period in FacultyGradingService.get_template_periods(template):
+            period_map[period.id] = period
+    period_options = sorted(
+        period_map.values(),
+        key=lambda period: (period.sequence_no, period.name, period.id),
+    )
+    if selected_period_id not in period_map:
+        selected_period_id = None
+
+    candidates = []
+    for offering in visible_offerings:
+        candidates.extend(
+            {"offering": offering, **candidate}
+            for candidate in AcademicConcernDetectionService.candidates_for_offering(
+                offering=offering,
+                faculty_owner=request.user,
+            )
+            if not candidate["has_owner_case"]
+        )
+    if selected_period_id:
+        candidates = [item for item in candidates if item["period"].id == selected_period_id]
+
+    cases_queryset = _owned_intervention_cases_for_request(request).select_related(
+        "offering", "offering__course", "offering__section", "student", "grading_period"
+    )
+    if selected_offering:
+        cases_queryset = cases_queryset.filter(offering_id=selected_offering.id)
+    if selected_period_id:
+        cases_queryset = cases_queryset.filter(grading_period_id=selected_period_id)
+    cases = list(cases_queryset)
+
+    period_groups_by_id = {}
+    for item in candidates:
+        period = item["period"]
+        group = period_groups_by_id.setdefault(
+            period.id,
+            {"period": period, "candidates": [], "cases": []},
+        )
+        group["candidates"].append(item)
+    for case in cases:
+        period = case.grading_period
+        group = period_groups_by_id.setdefault(
+            period.id,
+            {"period": period, "candidates": [], "cases": []},
+        )
+        group["cases"].append(case)
+    period_groups = sorted(
+        period_groups_by_id.values(),
+        key=lambda group: (
+            group["period"].sequence_no,
+            group["period"].name,
+            group["period"].id,
+        ),
+    )
+
+    return render(request, "faculty_portal/academic_interventions/list.html", {
+        "cases": cases,
+        "candidates": candidates,
+        "offerings": offerings,
+        "selected_offering": selected_offering,
+        "selected_offering_id": selected_offering.id if selected_offering else None,
+        "period_options": period_options,
+        "selected_period_id": selected_period_id,
+        "period_groups": period_groups,
+        "manual_offering": selected_offering or (offerings[0] if offerings else None),
+    })
+
+
+@require_POST
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+def academic_intervention_analytics_create_view(request):
+    offering_id = _safe_int(request.POST.get("offering_id"))
+    student_id = _safe_int(request.POST.get("student_id"))
+    period_id = _safe_int(request.POST.get("period_id"))
+    fingerprint = (request.POST.get("fingerprint") or "").strip()
+    offering = AcademicInterventionAuthorizationService.authorized_current_offering(user=request.user, offering_id=offering_id)
+    candidate = next((item for item in AcademicConcernDetectionService.candidates_for_offering(offering=offering, faculty_owner=request.user)
+                      if item["student"].id == student_id and item["period"].id == period_id and item["fingerprint"] == fingerprint), None)
+    if candidate is None:
+        raise Http404("Academic concern is unavailable.")
+    try:
+        case = AcademicInterventionCaseService.create_analytics(
+            user=request.user, offering_id=offering.id, student=candidate["student"], grading_period_id=period_id,
+            fingerprint=fingerprint, snapshot=candidate["snapshot"], request=request,
+        )
+    except (ValidationError, IntegrityError) as exc:
+        messages.error(request, str(exc))
+        return redirect("faculty_portal:academic_intervention_list")
+    return redirect("faculty_portal:academic_intervention_detail", case_id=case.id)
+
+
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+def academic_intervention_manual_create_view(request):
+    scope = getattr(request, "scope", {})
+    tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    campus_id = scope.get("campus_id") or getattr(request.user, "default_campus_id", None)
+    AcademicInterventionAuthorizationService.require_enabled(tenant_id=tenant_id, user=request.user, campus_id=campus_id)
+    offerings = list(_faculty_offering_queryset(request.user).filter(tenant_id=tenant_id, campus_id=campus_id).distinct())
+    selected_offering_id = _safe_int(request.GET.get("offering_id") or request.POST.get("offering_id"))
+    offering = next((row for row in offerings if row.id == selected_offering_id), None)
+    if not offering:
+        raise Http404("Choose an authorized course offering.")
+    template = FacultyGradingService.resolve_template_for_offering(offering)
+    periods = FacultyGradingService.get_template_periods(template)
+    student_queryset = Student.objects.filter(
+        enrollments__course_offering=offering,
+        enrollments__is_active=True,
+        is_active=True,
+    ).exclude(enrollments__enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES).distinct()
+    form = ManualInterventionCaseForm(
+        request.POST or None,
+        student_queryset=student_queryset,
+        period_queryset=periods,
+        initial={"offering_id": offering.id, "grading_period_id": periods.first().id if periods.exists() else None},
+    )
+    _style_form(form)
+    if request.method == "POST" and form.is_valid():
+        try:
+            case = AcademicInterventionCaseService.create_manual(
+                user=request.user, offering_id=offering.id, student=form.cleaned_data["student"],
+                grading_period_id=form.cleaned_data["grading_period_id"], summary=form.cleaned_data["distinct_concern_summary"], request=request,
+            )
+        except (ValidationError, IntegrityError) as exc:
+            form.add_error(None, str(exc))
+        else:
+            return redirect("faculty_portal:academic_intervention_detail", case_id=case.id)
+    return render(request, "faculty_portal/academic_interventions/manual_form.html", {"form": form, "offering": offering, "periods": periods})
+
+
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+@require_GET
+def academic_intervention_detail_view(request, case_id):
+    scope = getattr(request, "scope", {})
+    tenant_id = scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None)
+    campus_id = scope.get("campus_id") or getattr(request.user, "default_campus_id", None)
+    case = get_object_or_404(
+        _owned_intervention_cases_for_request(request).select_related(
+            "offering", "offering__course", "offering__section", "student", "grading_period"
+        ), pk=case_id
+    )
+    AcademicInterventionAuthorizationService.require_owner(user=request.user, case=case)
+    is_open = not case.closed_at and not case.voided_at
+    decision_form = _style_form(
+        FacultyDecisionForm(
+            initial={
+                "decision": case.faculty_decision,
+                "rationale": case.faculty_rationale,
+                "referral_destination": case.referral_destination,
+                "referral_destination_label": case.referral_destination_label,
+                "referral_date": case.referral_date,
+                "referral_reason": case.referral_reason,
+            }
+        )
+    )
+    action_form = _style_form(InterventionActionForm())
+    follow_up_form = _style_form(FollowUpForm())
+    actions = list(case.actions.all())
+    follow_ups = list(case.follow_ups.select_related("action").all())
+    follow_up_forms = [
+        (row, _style_form(FollowUpForm(instance=row))) for row in follow_ups
+    ]
+    action_forms = [
+        (row, _style_form(InterventionActionForm(instance=row)))
+        for row in actions
+        if row.status == AcademicInterventionAction.Status.PLANNED
+    ]
+    return render(request, "faculty_portal/academic_interventions/detail.html", {
+        "case": case,
+        "decision_form": decision_form,
+        "action_form": action_form,
+        "follow_up_form": follow_up_form,
+        "actions": actions,
+        "follow_ups": follow_ups,
+        "follow_up_forms": follow_up_forms,
+        "decision_revisions": case.decision_revisions.select_related("decided_by", "supersedes").all(),
+        "action_forms": action_forms,
+        "is_open": is_open,
+        "can_void": is_open and not any(
+            action.status == AcademicInterventionAction.Status.CONDUCTED for action in actions
+        ),
+    })
+
+
+@require_POST
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+def academic_intervention_decision_view(request, case_id):
+    case = get_object_or_404(_owned_intervention_cases_for_request(request), pk=case_id)
+    form = FacultyDecisionForm(request.POST)
+    if form.is_valid():
+        try:
+            AcademicInterventionCaseService.record_decision(case_id=case.id, user=request.user, request=request, **form.cleaned_data)
+            messages.success(request, "Faculty decision saved.")
+        except (ValidationError, IntegrityError) as exc:
+            messages.error(request, str(exc))
+    else:
+        messages.error(request, "Correct the faculty decision form and try again.")
+    return redirect("faculty_portal:academic_intervention_detail", case_id=case.id)
+
+
+@require_POST
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+def academic_intervention_action_create_view(request, case_id):
+    case = get_object_or_404(_owned_intervention_cases_for_request(request), pk=case_id)
+    form = InterventionActionForm(request.POST)
+    if form.is_valid():
+        try:
+            AcademicInterventionCaseService.add_action(case_id=case.id, user=request.user, form=form, request=request)
+        except (ValidationError, IntegrityError) as exc:
+            messages.error(request, str(exc))
+    else:
+        messages.error(request, "Correct the intervention action form and try again.")
+    return redirect("faculty_portal:academic_intervention_detail", case_id=case.id)
+
+
+@require_POST
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+def academic_intervention_action_update_view(request, case_id, action_id):
+    case = get_object_or_404(_owned_intervention_cases_for_request(request), pk=case_id)
+    action = get_object_or_404(case.actions.filter(status="PLANNED"), pk=action_id)
+    form = InterventionActionForm(request.POST, instance=action)
+    if form.is_valid():
+        try:
+            AcademicInterventionCaseService.update_action(
+                case_id=case.id,
+                action_id=action.id,
+                user=request.user,
+                form=form,
+                request=request,
+            )
+        except (ValidationError, IntegrityError) as exc:
+            messages.error(request, str(exc))
+    else:
+        messages.error(request, "Correct the intervention action form and try again.")
+    return redirect("faculty_portal:academic_intervention_detail", case_id=case.id)
+
+
+@require_POST
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+def academic_intervention_follow_up_create_view(request, case_id):
+    case = get_object_or_404(_owned_intervention_cases_for_request(request), pk=case_id)
+    form = FollowUpForm(request.POST)
+    if form.is_valid():
+        try:
+            AcademicInterventionCaseService.add_follow_up(case_id=case.id, user=request.user, form=form, request=request)
+        except (ValidationError, IntegrityError) as exc:
+            messages.error(request, str(exc))
+    else:
+        messages.error(request, "Correct the follow-up form and try again.")
+    return redirect("faculty_portal:academic_intervention_detail", case_id=case.id)
+
+
+@require_POST
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+def academic_intervention_follow_up_update_view(request, case_id, follow_up_id):
+    case = get_object_or_404(_owned_intervention_cases_for_request(request), pk=case_id)
+    follow_up = get_object_or_404(case.follow_ups.all(), pk=follow_up_id)
+    form = FollowUpForm(request.POST, instance=follow_up)
+    if form.is_valid():
+        try:
+            AcademicInterventionCaseService.update_follow_up(case_id=case.id, follow_up_id=follow_up.id, user=request.user, form=form, request=request)
+        except (ValidationError, IntegrityError) as exc:
+            messages.error(request, str(exc))
+    else:
+        messages.error(request, "Correct the follow-up form and try again.")
+    return redirect("faculty_portal:academic_intervention_detail", case_id=case.id)
+
+
+@require_POST
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+def academic_intervention_close_view(request, case_id):
+    case = get_object_or_404(_owned_intervention_cases_for_request(request), pk=case_id)
+    try:
+        AcademicInterventionCaseService.close(case_id=case.id, user=request.user, request=request)
+        messages.success(request, "Intervention record closed.")
+    except (ValidationError, IntegrityError) as exc:
+        messages.error(request, str(exc))
+    return redirect("faculty_portal:academic_intervention_detail", case_id=case.id)
+
+
+@require_POST
+@portal_required("FACULTY")
+@permission_required("academic_interventions.manage_own")
+def academic_intervention_void_view(request, case_id):
+    case = get_object_or_404(_owned_intervention_cases_for_request(request), pk=case_id)
+    try:
+        AcademicInterventionCaseService.void(
+            case_id=case.id,
+            user=request.user,
+            reason=(request.POST.get("void_reason") or ""),
+            request=request,
+        )
+        messages.success(request, "Eligible mistaken intervention record voided.")
+    except (ValidationError, IntegrityError) as exc:
+        messages.error(request, str(exc))
+    return redirect("faculty_portal:academic_intervention_detail", case_id=case.id)
 
 
 @portal_required("FACULTY")

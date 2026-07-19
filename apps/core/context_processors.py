@@ -65,6 +65,7 @@ def portal_menu(request):
     faculty_quick_tour_enabled = False
     faculty_grade_prediction_enabled = False
     faculty_at_risk_monitor_enabled = False
+    faculty_academic_interventions_enabled = False
     exit_pulse_enabled = False
     faculty_portal_identity_warning = None
     if portal == "FACULTY":
@@ -82,6 +83,13 @@ def portal_menu(request):
             and FeatureSettingsService.is_grade_prediction_at_risk_enabled(
                 tenant_id=faculty_tenant_id,
                 default=True,
+            )
+        )
+        faculty_academic_interventions_enabled = (
+            "academic_interventions.manage_own" in permissions
+            and FeatureSettingsService.is_student_academic_intervention_tracking_enabled(
+                tenant_id=faculty_tenant_id,
+                default=False,
             )
         )
         exit_pulse_enabled = (
@@ -127,6 +135,14 @@ def portal_menu(request):
                     if node["item"].code != "ACADEMIC_PERFORMANCE_INSIGHTS"
                 ]
             menu = [group for group in menu if group["items"]]
+        if not FeatureSettingsService.is_student_academic_intervention_tracking_enabled(
+            tenant_id=scope.get("tenant_id"), default=False
+        ):
+            for group in menu:
+                group["items"] = [
+                    node for node in group["items"] if node["item"].code != "ACADEMIC_INTERVENTION_TRACKING"
+                ]
+            menu = [group for group in menu if group["items"]]
         admin_orientation_feedback_enabled = FeatureSettingsService.is_orientation_feedback_enabled(
             tenant_id=scope.get("tenant_id"),
             default=True,
@@ -159,6 +175,7 @@ def portal_menu(request):
         "faculty_quick_tour_enabled": faculty_quick_tour_enabled,
         "faculty_grade_prediction_enabled": faculty_grade_prediction_enabled,
         "faculty_at_risk_monitor_enabled": faculty_at_risk_monitor_enabled,
+        "faculty_academic_interventions_enabled": faculty_academic_interventions_enabled,
         "exit_pulse_enabled": exit_pulse_enabled,
         "faculty_portal_identity_warning": faculty_portal_identity_warning,
         "admin_active_academic_year": admin_active_academic_year,

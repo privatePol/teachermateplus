@@ -31,6 +31,7 @@ from django.utils.dateparse import parse_date
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_GET
 
 from apps.accounts.models import FacultyInvitation, PortalLoginLockoutState, UserDeactivationSchedule
 from apps.accounts.faculty_provisioning import FacultyInvitationService, ScopedUserRoleAssignmentService
@@ -103,6 +104,12 @@ from apps.academics.services import (
 )
 from apps.admin_portal.data_reset import ActualDataResetService
 from apps.admin_portal.academic_performance import AcademicPerformanceInsightService
+from apps.interventions.models import AcademicInterventionCase
+from apps.interventions.services import (
+    AcademicInterventionAuthorizationService,
+    AcademicInterventionConfigurationService,
+    AcademicInterventionMonitoringService,
+)
 from apps.admin_portal.services import AdminScopeService, model_before_after
 from apps.admin_portal.submission_readiness import GradeSubmissionReadinessService
 from apps.admin_portal.tenant_data_export import TenantDataExportChallengeService, TenantSQLiteExportService
@@ -3276,6 +3283,52 @@ def academic_performance_section_detail_view(request, offering_id, period_code):
 
 
 @portal_required("ADMIN")
+@permission_required("academic_interventions.monitor")
+@require_GET
+def academic_intervention_monitor_view(request):
+    cases = AcademicInterventionMonitoringService.filtered_cases(request)
+    summary = AcademicInterventionMonitoringService.summary(cases)
+    paginator = Paginator(cases, 30)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    context = {
+        "title": "Student Academic Intervention Tracking",
+        "cases": page_obj,
+        "summary": summary,
+        "status_choices": AcademicInterventionCase.ReviewStatus.choices,
+        "decision_choices": AcademicInterventionCase.Decision.choices,
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/interventions/monitor.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("academic_interventions.monitor")
+@require_GET
+def academic_intervention_monitor_detail_view(request, case_id):
+    case = get_object_or_404(AcademicInterventionMonitoringService.filtered_cases(request), pk=case_id)
+    AcademicInterventionAuthorizationService.require_admin_monitor(request=request, case=case)
+    AuditService.log_event(
+        action="ACADEMIC_INTERVENTION_ADMIN_VIEW",
+        portal="ADMIN",
+        entity_type="AcademicInterventionCase",
+        entity_id=case.id,
+        actor=request.user,
+        tenant=case.tenant,
+        campus=case.campus,
+        request=request,
+    )
+    context = {
+        "title": "Academic Intervention Record",
+        "case": case,
+        "actions": case.actions.all(),
+        "follow_ups": case.follow_ups.select_related("action").all(),
+        "decision_revisions": case.decision_revisions.select_related("decided_by", "supersedes").all(),
+    }
+    context.update(_scope_context(request))
+    return render(request, "admin_portal/interventions/detail.html", context)
+
+
+@portal_required("ADMIN")
 @permission_required("grade_distribution_monitor.read")
 def grade_distribution_monitor_view(request):
     context = GradeDistributionMonitorService.build_context(request)
@@ -4359,6 +4412,12 @@ def configurable_features_settings_view(request):
     if not tenant_id:
         messages.error(request, "Select a tenant scope first.")
         return _redirect_back_or_default(request, "admin_portal:dashboard")
+    can_configure_interventions = PermissionService.has_permission(
+        request.user,
+        "academic_interventions.configure",
+        tenant_id=tenant_id,
+        campus_id=current_campus_id,
+    )
 
     campus_queryset = AdminScopeService.scoped_campuses(request).filter(tenant_id=tenant_id).order_by("code", "name")
     term_queryset = AdminScopeService.scoped_terms(request).filter(tenant_id=tenant_id).order_by(
@@ -4701,10 +4760,14 @@ def configurable_features_settings_view(request):
             default=False,
         )
     )
+    current_student_academic_intervention_tracking_enabled = (
+        FeatureSettingsService.is_student_academic_intervention_tracking_enabled(tenant_id=tenant_id, default=False)
+    )
 
     form = ConfigurableFeatureSettingForm(
         request.POST or None,
         initial={
+            "student_academic_intervention_tracking_enabled": current_student_academic_intervention_tracking_enabled,
             "academic_performance_insights_enabled": current_academic_performance_insights_enabled,
             "role_based_help_guide_enabled": current_role_based_help_guide_enabled,
             "student_portal_enabled": current_student_portal_enabled,
@@ -4801,9 +4864,15 @@ def configurable_features_settings_view(request):
     _style_form(form)
     if not request.user.is_superuser:
         form.fields["academic_performance_insights_enabled"].disabled = True
+    if not can_configure_interventions:
+        form.fields["student_academic_intervention_tracking_enabled"].disabled = True
     form.fields["class_master_list_offering"].label_from_instance = lambda obj: offering_labels.get(obj.id, obj.course.code)
 
     if request.method == "POST" and form.is_valid():
+        if not can_configure_interventions:
+            form.cleaned_data[
+                "student_academic_intervention_tracking_enabled"
+            ] = current_student_academic_intervention_tracking_enabled
         selected_submission_email_role_codes = list(
             form.cleaned_data["correction_submission_approval_email_roles"].values_list("code", flat=True)
         )
@@ -4836,6 +4905,14 @@ def configurable_features_settings_view(request):
             else:
                 updated_enrollment_override_map.pop(override_key, None)
 
+        if can_configure_interventions:
+            AcademicInterventionConfigurationService.set_enabled(
+                user=request.user,
+                tenant_id=tenant_id,
+                campus_id=current_campus_id,
+                enabled=bool(form.cleaned_data["student_academic_intervention_tracking_enabled"]),
+                request=request,
+            )
         SystemSettingService.set(
             FeatureSettingsService.ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY,
             bool(form.cleaned_data["academic_performance_insights_enabled"]),
@@ -5333,6 +5410,7 @@ def configurable_features_settings_view(request):
             tenant=tenant_id,
             campus=getattr(request, "scope", {}).get("campus_id"),
             before_data={
+                "student_academic_intervention_tracking_enabled": current_student_academic_intervention_tracking_enabled,
                 "academic_performance_insights_enabled": current_academic_performance_insights_enabled,
                 "role_based_help_guide_enabled": current_role_based_help_guide_enabled,
                 "correction_official_report_enabled": current_report_enabled,
@@ -5399,6 +5477,9 @@ def configurable_features_settings_view(request):
                 "sis_periodic_grades_api_enabled": current_sis_periodic_grades_api_enabled,
             },
             after_data={
+                "student_academic_intervention_tracking_enabled": bool(
+                    form.cleaned_data["student_academic_intervention_tracking_enabled"]
+                ),
                 "academic_performance_insights_enabled": bool(
                     form.cleaned_data["academic_performance_insights_enabled"]
                 ),

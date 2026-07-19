@@ -1,0 +1,248 @@
+{% extends "faculty_portal/base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .intervention-list-page {
+    --intervention-green: #176b4d;
+    --intervention-green-dark: #0f5138;
+    --intervention-mint: #eaf7f1;
+    --intervention-border: #dbe7e1;
+  }
+  .intervention-list-hero {
+    border: 0;
+    border-radius: 1.1rem;
+    background: linear-gradient(135deg, #0f5138 0%, #198754 62%, #55a66f 100%);
+    color: #fff;
+    box-shadow: 0 0.75rem 1.75rem rgba(15, 81, 56, 0.16);
+  }
+  .intervention-list-hero .text-white-soft { color: rgba(255, 255, 255, 0.82); }
+  .intervention-filter-card,
+  .intervention-period-card {
+    border: 1px solid var(--intervention-border);
+    border-radius: 1rem;
+    overflow: hidden;
+    box-shadow: 0 0.35rem 1rem rgba(32, 71, 55, 0.07);
+  }
+  .intervention-filter-card .form-label {
+    color: #315444;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .intervention-period-header {
+    padding: 1rem 1.15rem;
+    background: linear-gradient(90deg, #edf8f3 0%, #f8fbf9 100%);
+    border-bottom: 1px solid var(--intervention-border);
+  }
+  .intervention-period-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 0.8rem;
+    background: var(--intervention-green);
+    color: #fff;
+    font-weight: 800;
+  }
+  .intervention-count-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border: 1px solid #cfe2d8;
+    border-radius: 999px;
+    background: #fff;
+    color: #315444;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 0.35rem 0.65rem;
+  }
+  .intervention-subsection-title {
+    color: #315444;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .intervention-student-name { color: #163c2c; font-weight: 700; }
+  .intervention-reason {
+    max-width: 34rem;
+    color: #52665d;
+    white-space: normal;
+  }
+  .intervention-table { margin-bottom: 0; }
+  .intervention-table > :not(caption) > * > * {
+    padding: 0.85rem 0.75rem;
+    border-bottom-color: #edf2ef;
+    vertical-align: middle;
+  }
+  .intervention-table thead th {
+    color: #5b6c64;
+    font-size: 0.76rem;
+    letter-spacing: 0.035em;
+    text-transform: uppercase;
+  }
+  .intervention-empty {
+    border: 1px dashed #cbdcd3;
+    border-radius: 1rem;
+    background: #fbfdfc;
+    color: #607168;
+    padding: 2.5rem 1.25rem;
+    text-align: center;
+  }
+  @media (max-width: 767.98px) {
+    .intervention-list-hero .card-body { padding: 1.25rem !important; }
+    .intervention-period-header { align-items: flex-start !important; }
+    .intervention-period-actions { width: 100%; }
+    .intervention-period-actions .btn { width: 100%; }
+    .intervention-table thead { display: none; }
+    .intervention-table,
+    .intervention-table tbody,
+    .intervention-table tr,
+    .intervention-table td { display: block; width: 100%; }
+    .intervention-table tr { padding: 0.75rem 0; border-bottom: 1px solid #edf2ef; }
+    .intervention-table td { padding: 0.25rem 0.75rem; border: 0; }
+    .intervention-table td:last-child .btn,
+    .intervention-table td:last-child form { width: 100%; }
+    .intervention-table td:last-child .btn { margin-top: 0.35rem; }
+  }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="intervention-list-page">
+  <section class="card intervention-list-hero mb-4">
+    <div class="card-body p-4">
+      <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+        <div>
+          <div class="small fw-semibold text-uppercase text-white-soft mb-2">Faculty-owned academic records</div>
+          <h1 class="h3 fw-bold mb-2">Academic Interventions</h1>
+          <p class="mb-0 text-white-soft">Academic concerns support your professional review. They never require intervention automatically.</p>
+        </div>
+        {% if manual_offering %}
+          <a class="btn btn-light fw-semibold px-3" href="{% url 'faculty_portal:academic_intervention_manual_create' %}?offering_id={{ manual_offering.id }}">Add manual concern</a>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card intervention-filter-card mb-4">
+    <div class="card-body p-3 p-lg-4">
+      <form method="get" class="row g-3 align-items-end">
+        <div class="col-lg-6">
+          <label class="form-label" for="intervention-offering-filter">Class</label>
+          <select class="form-select" id="intervention-offering-filter" name="offering_id">
+            <option value="">All authorized classes</option>
+            {% for offering in offerings %}
+              <option value="{{ offering.id }}" {% if offering.id == selected_offering_id %}selected{% endif %}>{{ offering.course.code }} / {{ offering.section.code }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label" for="intervention-period-filter">Grading period</label>
+          <select class="form-select" id="intervention-period-filter" name="period_id">
+            <option value="">All grading periods</option>
+            {% for period in period_options %}
+              <option value="{{ period.id }}" {% if period.id == selected_period_id %}selected{% endif %}>{{ period.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-lg-2 d-grid">
+          <button class="btn btn-success fw-semibold">Apply filters</button>
+        </div>
+        {% if selected_offering_id or selected_period_id %}
+          <div class="col-12"><a class="small link-secondary" href="{% url 'faculty_portal:academic_intervention_list' %}">Clear all filters</a></div>
+        {% endif %}
+      </form>
+    </div>
+  </section>
+
+  {% if selected_offering %}
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+      <div>
+        <div class="small text-muted">Showing records for</div>
+        <div class="fw-bold text-success-emphasis">{{ selected_offering.course.code }} / {{ selected_offering.section.code }}</div>
+      </div>
+      <a class="btn btn-sm btn-outline-success" href="{% url 'faculty_portal:academic_intervention_manual_create' %}?offering_id={{ selected_offering.id }}">Add concern for this class</a>
+    </div>
+  {% endif %}
+
+  {% for group in period_groups %}
+    <article class="card intervention-period-card mb-4">
+      <header class="intervention-period-header d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+        <div class="d-flex align-items-center gap-3">
+          <span class="intervention-period-index">{{ group.period.sequence_no }}</span>
+          <div>
+            <div class="small text-muted">Grading period</div>
+            <h2 class="h5 fw-bold mb-0">{{ group.period.name }}</h2>
+          </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <span class="intervention-count-pill">{{ group.candidates|length }} for review</span>
+          <span class="intervention-count-pill">{{ group.cases|length }} my record{{ group.cases|length|pluralize }}</span>
+        </div>
+      </header>
+
+      <div class="card-body p-3 p-lg-4">
+        {% if group.candidates %}
+          <div class="intervention-subsection-title mb-2">Academic Concern — For Faculty Review</div>
+          <div class="table-responsive mb-4">
+            <table class="table intervention-table align-middle">
+              <thead><tr><th>Student</th><th>Class</th><th>Academic indicator</th><th class="text-end">Action</th></tr></thead>
+              <tbody>
+                {% for item in group.candidates %}
+                  <tr>
+                    <td><span class="intervention-student-name">{{ item.student.last_name }}, {{ item.student.first_name }}{% if item.student.middle_name %} {{ item.student.middle_name }}{% endif %}</span></td>
+                    <td>{{ item.offering.course.code }} / {{ item.offering.section.code }}</td>
+                    <td><div class="intervention-reason">{{ item.snapshot.primary_reason }}</div></td>
+                    <td class="text-end">
+                      <form method="post" action="{% url 'faculty_portal:academic_intervention_analytics_create' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="offering_id" value="{{ item.offering.id }}">
+                        <input type="hidden" name="student_id" value="{{ item.student.id }}">
+                        <input type="hidden" name="period_id" value="{{ item.period.id }}">
+                        <input type="hidden" name="fingerprint" value="{{ item.fingerprint }}">
+                        <button class="btn btn-sm btn-success fw-semibold">Start Faculty Review</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+
+        <div class="intervention-subsection-title mb-2">My intervention records</div>
+        {% if group.cases %}
+          <div class="table-responsive">
+            <table class="table intervention-table align-middle">
+              <thead><tr><th>Student</th><th>Class</th><th>Status</th><th>Faculty decision</th><th class="text-end">Action</th></tr></thead>
+              <tbody>
+                {% for case in group.cases %}
+                  <tr>
+                    <td><span class="intervention-student-name">{{ case.student.last_name }}, {{ case.student.first_name }}{% if case.student.middle_name %} {{ case.student.middle_name }}{% endif %}</span></td>
+                    <td>{{ case.offering.course.code }} / {{ case.offering.section.code }}</td>
+                    <td><span class="badge rounded-pill text-bg-light border text-secondary">{{ case.get_review_status_display }}</span></td>
+                    <td>{{ case.get_faculty_decision_display|default:"Pending faculty decision" }}</td>
+                    <td class="text-end"><a class="btn btn-sm btn-outline-success fw-semibold" href="{% url 'faculty_portal:academic_intervention_detail' case.id %}">Open record</a></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="mb-0 text-muted">No intervention record has been created for this period.</p>
+        {% endif %}
+      </div>
+    </article>
+  {% empty %}
+    <div class="intervention-empty">
+      <div class="fs-2 mb-2">✓</div>
+      <h2 class="h5">No records match these filters</h2>
+      <p class="mb-0">Try another grading period or class, or add a manual concern when you personally identify one.</p>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

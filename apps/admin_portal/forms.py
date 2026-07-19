@@ -3228,6 +3228,11 @@ class DocumentPrintSettingForm(forms.Form):
 
 
 class ConfigurableFeatureSettingForm(forms.Form):
+    student_academic_intervention_tracking_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Student Academic Intervention Tracking",
+        help_text="Allows authorized faculty to record academic-intervention decisions and authorized academic heads to monitor them read-only.",
+    )
     academic_performance_insights_enabled = forms.BooleanField(
         required=False,
         label="Enable Academic Performance Insights",

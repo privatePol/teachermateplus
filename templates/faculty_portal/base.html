@@ -596,6 +596,11 @@
             <span class="sidebar-label">Student Intervention Monitor</span>
           </a>
         {% endif %}
+        {% if faculty_academic_interventions_enabled %}
+          <a href="{% url 'faculty_portal:academic_intervention_list' %}" class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:academic_intervention_list' %}active{% endif %}" title="Academic Interventions">
+            <span class="sidebar-icon">&#10003;</span><span class="sidebar-label">Academic Interventions</span>
+          </a>
+        {% endif %}
         <a
           href="{% url 'faculty_portal:my_courses' %}?archived=1"
           class="sidebar-link {% if request.resolver_match.view_name == 'faculty_portal:my_courses' and request.GET.archived == '1' %}active{% endif %}"

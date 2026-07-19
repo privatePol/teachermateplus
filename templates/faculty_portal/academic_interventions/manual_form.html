@@ -1,0 +1,10 @@
+{% extends "faculty_portal/base.html" %}
+{% block faculty_content %}
+<h1 class="h4">Add Manual Academic Concern</h1>
+<p class="text-muted">{{ offering.course.code }} / {{ offering.section.code }}. This record is owned only by you.</p>
+<form method="post" class="card card-body">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button class="btn btn-success">Create Faculty Review</button>
+</form>
+{% endblock %}

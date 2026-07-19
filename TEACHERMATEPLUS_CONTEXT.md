@@ -5,6 +5,17 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 
 ## 2. Current Operating Modules
 
+### Student Academic Intervention Tracking
+- `FEATURE_STUDENT_ACADEMIC_INTERVENTION_TRACKING_ENABLED` defaults off and is configurable only through the explicit `academic_interventions.configure` permission on the existing Configurable Features page.
+- A case has one immutable faculty owner. Co-faculty assignment alone grants no access; only the owner may make/supersede a decision, record actions and follow-ups, close, or void an eligible pre-conduct record.
+- Analytics creates only a faculty-review recommendation. Active analytics duplication is limited to the same owner, offering, student, grading period, and fingerprint; no cross-owner lookup/deduplication occurs.
+- `academic_interventions.monitor` is read-only and scope-filtered. It is seeded only for existing academic-monitor roles, not Campus Admin, Tenant Admin, or Guidance. Disabled-feature archive access additionally requires `academic_interventions.view_disabled_archive`.
+- Faculty decisions are current-state fields backed by append-only `AcademicInterventionDecisionRevision` rows. A correction creates a new revision linked to the revision it supersedes; it never overwrites the original revision.
+- Only one `PLANNED` action may exist per case. A planned action may be updated to `CONDUCTED` or `CANCELLED`, multiple conducted actions and follow-ups remain allowed, and a case cannot display `Intervention Conducted` without a conducted action.
+- Phase 1 records only a controlled academic referral destination, optional approved-office label, referral date, and brief academic reason. It stores no guidance counseling notes and creates no email/SMS/cron reminder.
+- The Faculty list supports class and grading-period filtering and groups both review candidates and owned records into responsive period cards. Student numbers are intentionally omitted from the list and detail presentation; the explicit student name remains visible. The owner detail page uses structured, responsive cards and styled decision, action, and follow-up forms without changing authorization or record lifecycle rules.
+- Migration `interventions.0002` adds decision revisions, controlled referral fields, and the one-active-planned database constraint. It maps legacy free-text destinations to `OTHER_APPROVED`, retains the original text as the approved-office label, cancels only surplus planned rows while retaining the newest plan, and backfills existing case decisions as revision 1.
+
 ### Faculty Signatures and Complete Tabulation
 - Faculty can draw a signature with pointer/touch/stylus input or keep using the existing PNG/JPG upload option while the tenant User Signatures feature is enabled. Drawn signatures require current-password and ownership confirmation, are validated and normalized server-side, encrypted in `UserSignatureCredential`, served only through authenticated preview routes, and audited for create/replace/remove.
 - The Complete Tabulation Sheet is available from an accepted faculty class and from scoped Admin Course Offerings. Faculty access includes their own accepted historical assignments as report-only access; wrong-assignment replacements are excluded, and historical access never restores grading, encoding, or submission permission. Admin access reuses existing offering and supervised-monitoring scope plus `offerings.read`.

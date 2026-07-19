@@ -15,6 +15,8 @@ from .views import (
     academic_activity_consistency_view,
     academic_performance_insights_view,
     academic_performance_section_detail_view,
+    academic_intervention_monitor_view,
+    academic_intervention_monitor_detail_view,
     academic_year_create_view,
     academic_year_list_view,
     academic_year_update_view,
@@ -198,6 +200,8 @@ urlpatterns = [
         academic_performance_section_detail_view,
         name="academic_performance_section_detail",
     ),
+    path("admin-portal/interventions/", academic_intervention_monitor_view, name="academic_intervention_monitor"),
+    path("admin-portal/interventions/<int:case_id>/", academic_intervention_monitor_detail_view, name="academic_intervention_monitor_detail"),
     path(
         "admin-portal/grading/grade-distribution-monitor/",
         grade_distribution_monitor_view,

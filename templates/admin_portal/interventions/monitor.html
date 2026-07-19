@@ -1,0 +1,10 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<h1 class="h4">Student Academic Intervention Tracking</h1>
+<p class="text-muted">Read-only monitoring. Faculty professional decisions cannot be changed here.</p>
+<form method="get" class="card card-body mb-3">
+  <div class="row g-2"><div class="col-md-3"><select class="form-select" name="status"><option value="">All statuses</option>{% for value, label in status_choices %}<option value="{{ value }}" {% if request.GET.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div><div class="col-md-3"><select class="form-select" name="decision"><option value="">All decisions</option>{% for value, label in decision_choices %}<option value="{{ value }}" {% if request.GET.decision == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div><div class="col-md-2"><button class="btn btn-outline-success">Filter</button></div></div>
+</form>
+<div class="row g-2 mb-3">{% for status, count in summary.items %}<div class="col-md-3"><div class="card card-body"><small>{{ status|title }}</small><strong>{{ count }}</strong></div></div>{% endfor %}</div>
+<div class="card"><div class="card-body table-responsive"><table class="table"><thead><tr><th>Student</th><th>Faculty</th><th>Offering</th><th>Status</th><th>Follow-up</th><th></th></tr></thead><tbody>{% for case in cases %}<tr><td>{{ case.student }}</td><td>{{ case.faculty_owner }}</td><td>{{ case.offering.course.code }} / {{ case.offering.section.code }}</td><td>{{ case.get_review_status_display }}</td><td>{% for follow_up in case.follow_ups.all %}{{ follow_up.effective_status_display }}{% empty %}—{% endfor %}</td><td><a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:academic_intervention_monitor_detail' case.id %}">View</a></td></tr>{% empty %}<tr><td colspan="6">No records in your authorized scope.</td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}
