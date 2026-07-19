@@ -19,6 +19,8 @@
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:academic_activity_consistency' %}">Activity Consistency</a>
+    <a class="btn btn-sm btn-outline-success" href="?{{ export_query }}{% if export_query %}&amp;{% endif %}export=sections">Export Sections CSV</a>
+    <a class="btn btn-sm btn-outline-success" href="?{{ export_query }}{% if export_query %}&amp;{% endif %}export=students">Export Student Review CSV</a>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
   </div>
 </div>
@@ -37,8 +39,8 @@
   <div class="row g-3 mb-3">
     <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Sections Compared</div><div class="h4 mb-0">{{ summary.sections }}</div></div></div></div>
     <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Overall Average</div><div class="h4 mb-0">{% if summary.overall_average is not None %}{{ summary.overall_average|floatformat:2 }}{% else %}-{% endif %}</div></div></div></div>
-    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">At-Risk Students</div><div class="h4 mb-0">{{ summary.at_risk_count }}</div></div></div></div>
-    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Missing Outputs</div><div class="h4 mb-0">{{ summary.missing_output_count }}</div></div></div></div>
+    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">Usable Computed Grades</div><div class="h4 mb-0">{{ summary.computed_grade_count }} <span class="small text-muted">/ {{ summary.active_enrollment_count }}</span></div></div></div></div>
+    <div class="col-md-3"><div class="card shadow-sm h-100 insight-card"><div class="card-body"><div class="small text-muted">No Usable Grade</div><div class="h4 mb-0">{{ summary.no_grade_count }}</div></div></div></div>
   </div>
 
   <div class="alert alert-light border border-success-subtle mb-3"><strong>Report Summary:</strong> {{ interpretation }}</div>
@@ -68,30 +70,29 @@
       <table class="table align-middle mb-0">
         <thead class="table-light">
           <tr>
-            <th>Campus</th><th>Course</th><th>Section</th><th>Faculty</th><th>Class Average</th>
-            <th>At-Risk Students</th><th>Missing Outputs</th><th>Weakest Component</th><th>Status</th><th></th>
+            <th>Campus</th><th>Course / Section</th><th>Faculty</th><th>Coverage</th><th>Grade Summary</th>
+            <th>Pass / Below Threshold</th><th>Threshold / Context</th><th>Readiness</th><th>Comparison</th><th></th>
           </tr>
         </thead>
         <tbody>
           {% for row in rows %}
           <tr>
             <td>{{ row.campus.code }}</td>
-            <td class="insight-course"><strong>{{ row.course_code }}</strong><div class="small text-muted lh-sm">{{ row.course_title }}</div></td>
-            <td>{{ row.section }}</td>
+            <td class="insight-course"><strong>{{ row.course_code }} / {{ row.section }}</strong><div class="small text-muted lh-sm">{{ row.course_title }}</div></td>
             <td class="insight-faculty"><span class="small">{{ row.faculty_name }}</span></td>
             <td>
-              {% if row.class_average is not None %}{{ row.class_average|floatformat:2 }}{% else %}-{% endif %}
-              <div class="insight-bar"><span style="width: {{ row.average_bar_width }}%"></span></div>
+              {{ row.coverage.computed_grade_count }} / {{ row.coverage.active_enrollment_count }} usable
+              <div class="small text-muted">{{ row.coverage.coverage_rate }}% coverage; {{ row.coverage.no_grade_count }} no usable grade</div>
             </td>
-            <td>{{ row.at_risk_count }}<div class="insight-bar risk"><span style="width: {{ row.at_risk_bar_width }}%"></span></div></td>
-            <td>{{ row.missing_output_count }}<div class="insight-bar missing"><span style="width: {{ row.missing_bar_width }}%"></span></div></td>
-            <td>{% if row.weakest_component %}{{ row.weakest_component.name }}<div class="small text-muted">{{ row.weakest_component.average|floatformat:2 }}</div>{% else %}-{% endif %}</td>
             <td>
-              {% if row.status == "Normal" %}<span class="badge text-bg-success">{{ row.status }}</span>
-              {% elif row.status == "Needs Attention" %}<span class="badge text-bg-warning">{{ row.status }}</span>
-              {% elif row.status == "High Risk" %}<span class="badge text-bg-danger">{{ row.status }}</span>
-              {% else %}<span class="badge text-bg-secondary">{{ row.status }}</span>{% endif %}
-              <div class="small text-muted mt-1">{{ row.main_concern }}</div>
+              Avg {% firstof row.coverage.average "-" %}; median {% firstof row.coverage.median "-" %}
+              <div class="small text-muted">High {% firstof row.coverage.highest "-" %}; low {% firstof row.coverage.lowest "-" %}</div>
+              <div class="small text-muted">Trends: {{ row.trend_summary.improving }} improving, {{ row.trend_summary.stable }} stable, {{ row.trend_summary.declining }} declining, {{ row.trend_summary.insufficient }} insufficient{% if row.coverage.is_provisional %} (current period provisional){% endif %}</div>
+            </td>
+            <td>{{ row.coverage.passing_count }} / {{ row.coverage.computed_grade_count }} ({{ row.coverage.passing_rate }}%)<div class="small text-muted">Below: {{ row.coverage.below_threshold_count }} / {{ row.coverage.computed_grade_count }} ({{ row.coverage.below_threshold_rate }}%)</div></td>
+            <td>{{ row.coverage.passing_threshold|floatformat:2 }}<div class="small text-muted">{{ row.period.name }}; {{ row.grading_context.template_label }}</div></td>
+            <td><span class="badge {% if row.coverage.is_provisional %}text-bg-warning{% else %}text-bg-success{% endif %}">{{ row.coverage.state }}</span></td>
+            <td><span class="badge {% if row.comparison_status == 'Comparable' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ row.comparison_status }}</span><div class="small text-muted">{{ row.comparison_detail }}</div></td>
             </td>
             <td class="insight-action"><a class="btn btn-sm btn-outline-success text-nowrap" href="{% url 'admin_portal:academic_performance_section_detail' row.offering.id row.period.code %}?{% if request.GET %}{{ request.GET.urlencode }}&amp;{% endif %}next={{ request.get_full_path|urlencode }}">View Details</a></td>
           </tr>
@@ -110,6 +111,14 @@
       </div>
     </div>
     {% endif %}
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white fw-semibold">Students for Faculty Review</div>
+    <div class="card-body py-2 small text-muted">Advisory only. An academic concern does not require or create an intervention case.</div>
+    <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead class="table-light"><tr><th>Course / Section</th><th>Student</th><th>Current Grade</th><th>Threshold</th><th>Indicators</th></tr></thead><tbody>
+      {% for row in student_review %}<tr><td>{{ row.course_code }} / {{ row.section }}<div class="small text-muted">{{ row.period.name }}</div></td><td>Protected student record</td><td>{% if row.current_grade is not None %}{{ row.current_grade }}{% else %}No usable grade{% endif %}</td><td>{{ row.passing_threshold }}</td><td><span class="badge text-bg-secondary">{{ row.advisory_label }}</span><div class="small mt-1">{{ row.indicators|join:"; " }}</div></td></tr>{% empty %}<tr><td colspan="5" class="text-center text-muted py-3">No advisory student-review rows for this scope.</td></tr>{% endfor %}
+    </tbody></table></div>
   </div>
 
   {% if filter_options.role_scope.can_compare_campuses %}

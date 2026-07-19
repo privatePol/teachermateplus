@@ -1,3 +1,5 @@
+import csv
+import io
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -8,6 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.admin_portal.academic_performance import AcademicPerformanceInsightService
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.settings import SystemSettingService
@@ -18,9 +21,12 @@ from apps.grading.models import (
     GradingTemplate,
     GradingTemplateComponent,
     GradingTemplatePeriod,
+    ScoreInputMode,
     StudentActivityScore,
     StudentPeriodGrade,
+    TenantGradingProfile,
 )
+from apps.interventions.models import AcademicInterventionCase
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
@@ -195,7 +201,7 @@ class AcademicPerformanceInsightsTests(TestCase):
             response = self.client.get(self.url, self.filters)
 
         self.assertEqual(response.status_code, 200)
-        self.assertGreaterEqual(official_snapshot.call_count, 2)
+        self.assertEqual(official_snapshot.call_count, 2)
         self.assertContains(response, "ITAPPS")
         self.assertContains(response, "BSIS-1A")
         self.assertContains(response, "BSIS-1B")
@@ -377,7 +383,11 @@ class AcademicPerformanceInsightsTests(TestCase):
         self.assertContains(response, "Authorized Campus Summary")
 
     def test_activity_consistency_labels_minor_difference_and_incomplete_setup(self):
-        self._activity(self.offering_b, "Q2", 50)
+        second_activity = self._activity(self.offering_b, "Q2", 50)
+        # This case verifies the comparison-count rule, not missing-score coverage.
+        # Give the added activity score records so it remains a valid minor setup difference.
+        self._score(second_activity, self.student_b1, 40, 80)
+        self._score(second_activity, self.student_b2, 45, 90)
         activity_url = reverse("admin_portal:academic_activity_consistency")
         self.client.force_login(self.area_chair)
 
@@ -519,6 +529,211 @@ class AcademicPerformanceInsightsTests(TestCase):
         self.assertEqual(after_scores, before_scores)
         self.assertEqual(StudentPeriodGrade.objects.count(), before_period_grades)
 
+    def test_threshold_bands_place_boundary_scores_once(self):
+        rows = AcademicPerformanceInsightService._distribution(
+            [Decimal("66"), Decimal("67"), Decimal("77"), Decimal("82"), Decimal("97")],
+            Decimal("82"),
+        )
+
+        self.assertEqual(
+            [(row["label"], row["count"]) for row in rows],
+            [
+                ("Strongly above threshold", 1),
+                ("Above threshold", 1),
+                ("Near threshold", 1),
+                ("Below threshold", 1),
+                ("Well below threshold", 1),
+            ],
+        )
+
+    def test_section_csv_preserves_zero_and_neutralizes_formula_text(self):
+        self.component.score_input_mode = ScoreInputMode.DIRECT_PERCENTAGE
+        self.component.save(update_fields=["score_input_mode", "updated_at"])
+        StudentActivityScore.objects.filter(activity=self.activity_a).update(
+            raw_score=Decimal("0"),
+            computed_score=Decimal("0"),
+        )
+        self.client.force_login(self.area_chair)
+
+        for unsafe_prefix in ("=", "+", "-", "@"):
+            self.faculty.first_name = f"{unsafe_prefix}Faculty"
+            self.faculty.save(update_fields=["first_name", "updated_at"])
+            response = self.client.get(self.url, {**self.filters, "export": "sections"})
+
+            self.assertEqual(response.status_code, 200)
+            row = next(
+                item
+                for item in csv.DictReader(io.StringIO(response.content.decode()))
+                if item["Section"] == "BSIS-1A"
+            )
+            self.assertEqual(row["Average"], "0.00")
+            self.assertEqual(row["Highest"], "0.00")
+            self.assertEqual(row["Lowest"], "0.00")
+            self.assertEqual(row["Faculty"], f"'{unsafe_prefix}Faculty User")
+
+    def test_student_review_csv_masks_without_identity_permission_and_unmasks_with_it(self):
+        self.client.force_login(self.area_chair)
+
+        masked_response = self.client.get(self.url, {**self.filters, "export": "students"})
+
+        self.assertEqual(masked_response.status_code, 200)
+        masked_content = masked_response.content.decode()
+        self.assertNotIn("Test Beta", masked_content)
+        self.assertNotIn(self.student_a2.student_no, masked_content)
+        self.assertIn("T**t B**a", masked_content)
+        self.assertIn("20*5-*02", masked_content)
+
+        permission, _ = Permission.objects.get_or_create(
+            code="gradebook.view_student_identity",
+            defaults={"module": "gradebook", "action": "view_student_identity"},
+        )
+        RolePermission.objects.get_or_create(role=self.area_role, permission=permission)
+
+        visible_response = self.client.get(self.url, {**self.filters, "export": "students"})
+
+        self.assertEqual(visible_response.status_code, 200)
+        self.assertIn("Test Beta", visible_response.content.decode())
+        self.assertIn(self.student_a2.student_no, visible_response.content.decode())
+
+    def test_incomplete_student_is_not_counted_as_at_risk_or_declining(self):
+        second_activity = self._activity(self.offering_a, "Q2", 100)
+        self._score(second_activity, self.student_a1, 90, 90)
+
+        summary = AcademicPerformanceInsightService.get_section_performance_summary(
+            self.offering_a,
+            self.period,
+        )
+        review = AcademicPerformanceInsightService.get_students_for_review(
+            None,
+            self.filters,
+            comparison={"rows": [summary], "limited": False},
+        )
+        student_row = next(row for row in review["rows"] if row["student_id"] == self.student_a2.id)
+
+        self.assertEqual(summary["at_risk_count"], 0)
+        self.assertEqual(summary["class_average"], Decimal("90.00"))
+        self.assertIn("Missing required scores", student_row["indicators"])
+        self.assertNotIn("Below applicable passing threshold", student_row["indicators"])
+        self.assertNotIn("Material decline", student_row["indicators"])
+
+    def test_activity_coverage_excludes_inactive_student_score_records(self):
+        StudentActivityScore.objects.filter(activity=self.activity_b).delete()
+        inactive_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="2025-INACTIVE",
+            first_name="Inactive",
+            last_name="Record",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=inactive_student,
+            course_offering=self.offering_b,
+            is_active=False,
+        )
+        self._score(self.activity_b, inactive_student, 100, 100)
+        self.client.force_login(self.area_chair)
+
+        response = self.client.get(reverse("admin_portal:academic_activity_consistency"), self.filters)
+
+        target = next(row for row in response.context["rows"] if row["section"] == "BSIS-1B")
+        self.assertEqual(target["category_missing_score_rates"]["Quizzes"], Decimal("100.0"))
+        self.assertEqual(target["no_score_categories"], ["Quizzes"])
+
+    def test_activity_consistency_excludes_incompatible_same_course_section(self):
+        second_campus = Campus.objects.create(tenant=self.tenant, code="CUB", name="Cubao")
+        second_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            code="INFOSYS-CUB",
+            name="Information Systems Cubao",
+        )
+        second_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            code="BSIS-CUB",
+            name="BSIS Cubao",
+        )
+        second_template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="BSIS-CUB",
+            name="Cubao Template",
+            is_active=True,
+            is_published=True,
+            passing_grade_threshold=Decimal("82"),
+        )
+        second_period = GradingTemplatePeriod.objects.create(
+            template=second_template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+        )
+        second_component = GradingTemplateComponent.objects.create(
+            template_period=second_period,
+            code="QUIZZES",
+            name="Quizzes",
+            weight_percentage=Decimal("100"),
+            sort_order=1,
+        )
+        TenantGradingProfile.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            department=second_department,
+            grading_template=second_template,
+            profile_code="CUB-PROFILE",
+            profile_name="Cubao Profile",
+            passing_grade_threshold=Decimal("82"),
+            priority=1,
+        )
+        second_chair = self._user("area-chair-cub", second_campus, second_department)
+        second_faculty = self._user("faculty-cub", second_campus, second_department)
+        UserRole.objects.create(user=second_chair, role=self.area_role, tenant=self.tenant, campus=second_campus, department=second_department)
+        UserRole.objects.create(user=second_faculty, role=self.faculty_role, tenant=self.tenant, campus=second_campus, department=second_department)
+        offering = self._offering("BSIS-CUB-1A", second_campus, second_department, second_program)
+        self._assign(offering, second_faculty)
+        student = self._student(offering, "CUB-001", "CrossCampus")
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=second_campus,
+            offering=offering,
+            template_period=second_period,
+            template_component=second_component,
+            title="Q1",
+            total_score=Decimal("100"),
+            created_by_user=second_faculty,
+        )
+        self._score(activity, student, 90, 90)
+        dean = self._user("college-dean", self.campus, self.department)
+        dean_role = self._role_with_access("COLLEGE_DEAN", "College Dean")
+        for campus, department in [(self.campus, self.department), (second_campus, second_department)]:
+            UserRole.objects.create(user=dean, role=dean_role, tenant=self.tenant, campus=campus, department=department)
+        self.client.force_login(dean)
+
+        response = self.client.get(
+            reverse("admin_portal:academic_activity_consistency"),
+            {**self.filters, "campus_id": "all"},
+        )
+
+        statuses = {row["section"]: row["consistency_status"] for row in response.context["rows"]}
+        self.assertNotEqual(statuses["BSIS-1A"], "Not Comparable")
+        self.assertNotEqual(statuses["BSIS-1B"], "Not Comparable")
+        self.assertEqual(statuses["BSIS-CUB-1A"], "Not Comparable")
+
+    def test_reports_do_not_create_intervention_cases(self):
+        self.client.force_login(self.area_chair)
+        before = AcademicInterventionCase.objects.count()
+
+        self.client.get(self.url, self.filters)
+        self.client.get(reverse("admin_portal:academic_activity_consistency"), self.filters)
+
+        self.assertEqual(AcademicInterventionCase.objects.count(), before)
+
     def _enable_feature(self):
         SystemSettingService.set(
             FeatureSettingsService.ACADEMIC_PERFORMANCE_INSIGHTS_ENABLED_KEY,
@@ -623,3 +838,44 @@ class AcademicPerformanceInsightsTests(TestCase):
             raw_score=Decimal(str(raw)),
             computed_score=Decimal(str(computed)),
         )
+
+    def test_threshold_aware_coverage_excludes_incomplete_grade_from_pass_fail_denominator(self):
+        self.template.passing_grade_threshold = Decimal("82")
+        self.template.save(update_fields=["passing_grade_threshold", "updated_at"])
+        StudentActivityScore.objects.filter(activity=self.activity_a, student=self.student_a2).delete()
+
+        summary = AcademicPerformanceInsightService.get_section_performance_summary(
+            self.offering_a,
+            self.period,
+        )
+
+        coverage = summary["coverage"]
+        self.assertEqual(coverage["active_enrollment_count"], 2)
+        self.assertEqual(coverage["computed_grade_count"], 1)
+        self.assertEqual(coverage["no_grade_count"], 1)
+        self.assertEqual(coverage["passing_count"], 1)
+        self.assertEqual(coverage["below_threshold_count"], 0)
+        self.assertEqual(coverage["passing_rate"], Decimal("100.0"))
+        self.assertEqual(coverage["coverage_rate"], Decimal("50.0"))
+        self.assertEqual(
+            [(row["label"], row["count"]) for row in coverage["distribution"]],
+            [
+                ("Strongly above threshold", 0),
+                ("Above threshold", 1),
+                ("Near threshold", 0),
+                ("Below threshold", 0),
+                ("Well below threshold", 0),
+            ],
+        )
+
+    def test_section_csv_uses_same_scope_and_includes_explicit_denominators(self):
+        self.client.force_login(self.area_chair)
+
+        response = self.client.get(self.url, {**self.filters, "export": "sections"})
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("Usable Computed Grades", content)
+        self.assertIn("No Usable Grade", content)
+        self.assertIn("Passing Threshold", content)
+        self.assertIn("ITAPPS", content)

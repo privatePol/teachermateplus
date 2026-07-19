@@ -182,13 +182,11 @@
         <th>Faculty</th>
         <th>Class</th>
         <th>Period / Level</th>
-        <th>Graded</th>
+        <th>Coverage</th>
+        <th>Threshold</th>
         <th>Average</th>
-        <th>90-100</th>
-        <th>80-89</th>
-        <th>75-79</th>
-        <th>Below Passing</th>
-        <th>Exact 100</th>
+        <th>Threshold-aware Distribution</th>
+        <th>Review Flags</th>
       </tr>
       </thead>
       <tbody>
@@ -212,20 +210,17 @@
           <div class="small text-muted">{{ row.level_label }}{% if row.component %} / {{ row.component }}{% endif %}{% if row.subcomponent %} / {{ row.subcomponent }}{% endif %}</div>
           {% if row.activity_title %}<div class="small text-muted">{{ row.activity_title }}</div>{% endif %}
         </td>
-        <td>{{ row.graded_count }}{% if row.active_count %}<span class="text-muted"> / {{ row.active_count }}</span>{% endif %}</td>
+        <td>{{ row.graded_count }} / {{ row.active_count }}<div class="small text-muted">{{ row.coverage_rate }}% coverage; {{ row.no_grade_count }} without stored score</div></td>
+        <td>{{ row.passing_threshold|floatformat:2 }}</td>
         <td>{% if row.average is not None %}{{ row.average|floatformat:2 }}{% else %}-{% endif %}</td>
         <td>
-          <div class="small fw-semibold">{{ row.high_pct }}%</div>
-          <div class="progress" style="height: 5px;"><div class="progress-bar bg-success" style="width: {{ row.high_pct }}%"></div></div>
+          {% for band in row.distribution %}<div class="small">{{ band.label }}: <strong>{{ band.count }} / {{ band.denominator }}</strong> ({{ band.percentage }}%)</div>{% endfor %}
         </td>
-        <td>{{ row.band_80_89_pct }}%</td>
-        <td>{{ row.band_75_79_pct }}%</td>
-        <td>{{ row.below_passing_pct }}%</td>
-        <td>{{ row.exact_100_pct }}%</td>
+        <td>{% for flag in row.flags %}<span class="badge {{ flag.class }}">{{ flag.label }}</span>{% endfor %}</td>
       </tr>
       {% empty %}
       <tr>
-        <td colspan="10" class="text-center text-muted py-4">No grade distribution data is available for the selected filters.</td>
+        <td colspan="8" class="text-center text-muted py-4">No grade distribution data is available for the selected filters.</td>
       </tr>
       {% endfor %}
       </tbody>

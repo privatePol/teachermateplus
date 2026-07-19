@@ -11,6 +11,7 @@ from django.db.models import Count
 
 from apps.academics.models import CourseOffering, FacultyAssignment
 from apps.admin_portal.services import AdminScopeService
+from apps.admin_portal.academic_performance import AcademicPerformanceInsightService
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 from apps.grading.models import GradeActivity, GradingTemplatePeriod, StudentActivityScore, StudentPeriodGrade
@@ -55,7 +56,11 @@ class GradeDistributionMonitorService:
         offering_map = {offering.id: offering for offering in offerings}
 
         faculty_by_offering = cls._faculty_by_offering(offering_ids)
-        active_counts = cls._active_enrollment_counts(offering_ids)
+        eligible_student_ids = cls._eligible_student_ids_by_offering(offering_ids)
+        active_counts = {
+            offering_id: len(student_ids)
+            for offering_id, student_ids in eligible_student_ids.items()
+        }
         threshold_info = cls._passing_thresholds(offerings)
         thresholds = threshold_info["thresholds"]
         missing_template_offering_ids = threshold_info["missing_template_offering_ids"]
@@ -67,6 +72,7 @@ class GradeDistributionMonitorService:
                 offering_map=offering_map,
                 faculty_by_offering=faculty_by_offering,
                 active_counts=active_counts,
+                eligible_student_ids=eligible_student_ids,
                 thresholds=thresholds,
                 missing_template_offering_ids=missing_template_offering_ids,
                 settings=settings,
@@ -78,6 +84,7 @@ class GradeDistributionMonitorService:
                 offering_map=offering_map,
                 faculty_by_offering=faculty_by_offering,
                 active_counts=active_counts,
+                eligible_student_ids=eligible_student_ids,
                 thresholds=thresholds,
                 missing_template_offering_ids=missing_template_offering_ids,
                 settings=settings,
@@ -181,17 +188,44 @@ class GradeDistributionMonitorService:
         return faculty_by_offering
 
     @classmethod
-    def _active_enrollment_counts(cls, offering_ids):
+    def _eligible_student_ids_by_offering(cls, offering_ids):
         rows = (
             Enrollment.objects.filter(
                 course_offering_id__in=offering_ids,
                 is_active=True,
-                enrollment_status=Enrollment.Status.ACTIVE,
+                student__is_active=True,
+                student__department__is_active=True,
             )
-            .values("course_offering_id")
-            .annotate(total=Count("id"))
+            .filter(
+                models.Q(student__program__isnull=True)
+                | models.Q(student__program__is_active=True)
+            )
+            .exclude(enrollment_status__in=Enrollment.NON_ACTIVE_GRADING_STATUSES)
+            .values_list("course_offering_id", "student_id")
         )
-        return {row["course_offering_id"]: row["total"] for row in rows}
+        student_ids = {offering_id: set() for offering_id in offering_ids}
+        for offering_id, student_id in rows:
+            student_ids.setdefault(offering_id, set()).add(student_id)
+        return student_ids
+
+    @staticmethod
+    def _eligible_period_grade_filter(eligible_student_ids):
+        query = models.Q(pk__in=[])
+        for offering_id, student_ids in eligible_student_ids.items():
+            if student_ids:
+                query |= models.Q(offering_id=offering_id, student_id__in=student_ids)
+        return query
+
+    @staticmethod
+    def _eligible_activity_score_filter(eligible_student_ids):
+        query = models.Q(pk__in=[])
+        for offering_id, student_ids in eligible_student_ids.items():
+            if student_ids:
+                query |= models.Q(
+                    activity__offering_id=offering_id,
+                    student_id__in=student_ids,
+                )
+        return query
 
     @classmethod
     def _passing_thresholds(cls, offerings):
@@ -225,6 +259,7 @@ class GradeDistributionMonitorService:
         offering_map,
         faculty_by_offering,
         active_counts,
+        eligible_student_ids,
         thresholds,
         missing_template_offering_ids,
         settings,
@@ -233,7 +268,7 @@ class GradeDistributionMonitorService:
         grades = StudentPeriodGrade.objects.filter(
             offering_id__in=offering_ids,
             period_grade__isnull=False,
-        )
+        ).filter(cls._eligible_period_grade_filter(eligible_student_ids))
         if selected["period_id"]:
             grades = grades.filter(template_period_id=selected["period_id"])
 
@@ -291,6 +326,7 @@ class GradeDistributionMonitorService:
         offering_map,
         faculty_by_offering,
         active_counts,
+        eligible_student_ids,
         thresholds,
         missing_template_offering_ids,
         settings,
@@ -301,7 +337,7 @@ class GradeDistributionMonitorService:
             activity__is_active=True,
             is_active=True,
             computed_score__isnull=False,
-        )
+        ).filter(cls._eligible_activity_score_filter(eligible_student_ids))
         if selected["period_id"]:
             scores = scores.filter(activity__template_period_id=selected["period_id"])
 
@@ -391,8 +427,6 @@ class GradeDistributionMonitorService:
         high_min = settings["high_grade_band_min"]
         high_max = settings["high_grade_band_max"]
         high_count = sum(1 for value in values if high_min <= value <= high_max)
-        band_80_89 = sum(1 for value in values if Decimal("80") <= value < Decimal("90"))
-        band_75_79 = sum(1 for value in values if Decimal("75") <= value < Decimal("80"))
         below_passing = sum(1 for value in values if value < passing_threshold)
         exact_100 = sum(1 for value in values if value == Decimal("100"))
         incomplete = active_count > 0 and graded_count < active_count
@@ -427,9 +461,11 @@ class GradeDistributionMonitorService:
             "lowest": cls._round(lowest) if lowest is not None else None,
             "spread": spread,
             "high_pct": cls._pct(high_count, graded_count),
-            "band_80_89_pct": cls._pct(band_80_89, graded_count),
-            "band_75_79_pct": cls._pct(band_75_79, graded_count),
             "below_passing_pct": cls._pct(below_passing, graded_count),
+            "distribution": AcademicPerformanceInsightService._distribution(values, passing_threshold),
+            "passing_threshold": passing_threshold,
+            "no_grade_count": max(active_count - graded_count, 0),
+            "coverage_rate": cls._pct(graded_count, active_count),
             "exact_100_pct": cls._pct(exact_100, graded_count),
             "flags": flags,
             "missing_template": missing_template,

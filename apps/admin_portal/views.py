@@ -2587,19 +2587,16 @@ def grading_analytics_view(request):
         row["width_pct"] = _pct(row["total"], max_submission_total) if max_submission_total else 0
         row["badge_class"] = submission_status_palette.get(row["status"], "bg-light text-dark")
 
-    distribution_ranges = [
-        ("90+", Decimal("90"), None),
-        ("85-89.99", Decimal("85"), Decimal("90")),
-        ("80-84.99", Decimal("80"), Decimal("85")),
-        ("75-79.99", Decimal("75"), Decimal("80")),
-        ("Below 75", None, Decimal("75")),
-    ]
+    distribution_ranges = AcademicPerformanceInsightService.DISTRIBUTION_BANDS
     grade_distribution_rows = []
     max_distribution_count = 0
-    for label, lower, upper in distribution_ranges:
+    for label, lower_offset, upper_offset in distribution_ranges:
         total = 0
         for row in period_grade_rows:
             value = Decimal(row.period_grade)
+            threshold = offering_threshold_map.get(row.offering_id, Decimal("75.00"))
+            lower = threshold + lower_offset if lower_offset is not None else None
+            upper = threshold + upper_offset if upper_offset is not None else None
             if lower is not None and value < lower:
                 continue
             if upper is not None and value >= upper:
@@ -2990,106 +2987,6 @@ def grading_analytics_view(request):
         )
     ]
 
-    class_fail_map = {}
-    for row in period_grade_rows:
-        offering = offerings_by_id.get(row.offering_id)
-        if not offering:
-            continue
-        threshold = offering_threshold_map.get(row.offering_id, Decimal("75.00"))
-        faculty_user = offering_faculty_map.get(row.offering_id)
-        faculty_id = faculty_user.id if faculty_user else 0
-        faculty_name = faculty_user.full_name if faculty_user else "Unassigned Faculty"
-        class_key = (offering.campus_id, offering.id, faculty_id)
-        bucket = class_fail_map.setdefault(
-            class_key,
-            {
-                "campus_code": offering.campus.code,
-                "campus_name": offering.campus.name,
-                "course_code": offering.course.code,
-                "course_title": offering.course.title,
-                "section_code": offering.section.code,
-                "academic_year_code": offering.academic_year.code,
-                "term_code": offering.term.code,
-                "faculty_name": faculty_name,
-                "graded": 0,
-                "failed": 0,
-                "threshold_min": None,
-                "threshold_max": None,
-                "missing_template": offering.id in missing_template_offering_ids,
-            },
-        )
-        bucket["graded"] += 1
-        if Decimal(row.period_grade) < threshold:
-            bucket["failed"] += 1
-        if bucket["threshold_min"] is None or threshold < bucket["threshold_min"]:
-            bucket["threshold_min"] = threshold
-        if bucket["threshold_max"] is None or threshold > bucket["threshold_max"]:
-            bucket["threshold_max"] = threshold
-
-    faculty_class_fail_rows = []
-    for bucket in class_fail_map.values():
-        graded = bucket["graded"]
-        if graded <= 0:
-            continue
-        failed = bucket["failed"]
-        passed = max(graded - failed, 0)
-        fail_rate = _pct(failed, graded)
-        bucket["passed"] = passed
-        bucket["fail_rate"] = fail_rate
-        bucket["pass_fail_ratio"] = f"{passed}:{failed}"
-        bucket["threshold_display"] = _threshold_label(bucket["threshold_min"], bucket["threshold_max"])
-        faculty_class_fail_rows.append(bucket)
-    faculty_class_fail_rows.sort(
-        key=lambda row: (-row["fail_rate"], -row["failed"], -row["graded"], row["course_code"], row["section_code"])
-    )
-    faculty_class_fail_rows = faculty_class_fail_rows[:10]
-
-    course_faculty_map = {}
-    for bucket in class_fail_map.values():
-        course_key = (bucket["campus_code"], bucket["course_code"])
-        faculty_name = bucket["faculty_name"]
-        agg = course_faculty_map.setdefault(course_key, {})
-        teacher_bucket = agg.setdefault(
-            faculty_name,
-            {
-                "campus_code": bucket["campus_code"],
-                "campus_name": bucket["campus_name"],
-                "course_code": bucket["course_code"],
-                "course_title": bucket["course_title"],
-                "faculty_name": faculty_name,
-                "graded": 0,
-                "failed": 0,
-            },
-        )
-        teacher_bucket["graded"] += bucket["graded"]
-        teacher_bucket["failed"] += bucket["failed"]
-
-    faculty_course_compare_rows = []
-    for teacher_map in course_faculty_map.values():
-        compared_count = len(teacher_map)
-        if compared_count <= 1:
-            continue
-        for teacher_bucket in teacher_map.values():
-            graded = teacher_bucket["graded"]
-            failed = teacher_bucket["failed"]
-            passed = max(graded - failed, 0)
-            teacher_bucket["passed"] = passed
-            teacher_bucket["fail_rate"] = _pct(failed, graded)
-            teacher_bucket["pass_fail_ratio"] = f"{passed}:{failed}"
-            teacher_bucket["compared_faculty_count"] = compared_count
-            faculty_course_compare_rows.append(teacher_bucket)
-    faculty_course_compare_rows.sort(
-        key=lambda row: (
-            -row["fail_rate"],
-            -row["failed"],
-            -row["graded"],
-            row["campus_code"],
-            row["course_code"],
-            row["faculty_name"],
-        )
-    )
-    faculty_course_compare_rows = faculty_course_compare_rows[:10]
-
     context = {
         "summary": summary,
         "submission_status_rows": submission_status_rows,
@@ -3097,8 +2994,6 @@ def grading_analytics_view(request):
         "period_fail_rows": period_fail_rows,
         "component_fail_rows": component_fail_rows,
         "detail_fail_rows": detail_fail_rows,
-        "faculty_class_fail_rows": faculty_class_fail_rows,
-        "faculty_course_compare_rows": faculty_course_compare_rows,
         "offering_rows": offering_rows,
         "campus_rows": campus_rows,
         "top_failing_offerings": top_failing_offerings,
@@ -3142,6 +3037,74 @@ def academic_performance_insights_view(request):
     filter_options = AcademicPerformanceInsightService.get_filter_options(request, filters)
     comparison = AcademicPerformanceInsightService.get_course_section_comparison(request, filters)
     rows = comparison["rows"]
+    student_review = AcademicPerformanceInsightService.get_students_for_review(
+        request,
+        filters,
+        comparison=comparison,
+    )
+    if request.GET.get("export") in {"sections", "students"}:
+        response = HttpResponse(content_type="text/csv")
+        export_kind = request.GET["export"]
+        response["Content-Disposition"] = f'attachment; filename="academic_performance_{export_kind}.csv"'
+        writer = csv.writer(response)
+        csv_number = lambda value: value if value is not None else ""
+        report_scope = (
+            "Limited to the first 100 authorized classes; narrow filters for a complete export."
+            if comparison["limited"]
+            else "Complete within the selected authorized scope."
+        )
+        if export_kind == "sections":
+            writer.writerow([
+                "Campus", "Academic Year", "Term", "Course", "Section", "Faculty", "Grading Period",
+                "Template/Profile", "Formula", "Passing Threshold", "Active Enrollment", "Usable Computed Grades",
+                "No Usable Grade", "Grade Coverage %", "Passing Count", "Passing Rate %", "Below Threshold Count",
+                "Below Threshold Rate %", "Average", "Median", "Highest", "Lowest", "Readiness State", "Comparison Status",
+                "Report Completeness",
+            ])
+            for row in rows:
+                coverage = row["coverage"]
+                context = row["grading_context"]
+                writer.writerow([
+                    csv_safe(row["campus"].code), csv_safe(row["offering"].academic_year.code), csv_safe(row["offering"].term.code),
+                    csv_safe(row["course_code"]), csv_safe(row["section"]), csv_safe(row["faculty_name"]), csv_safe(row["period"].name),
+                    csv_safe(f'{context["template_label"]} / {context["profile_label"]}'), csv_safe(context["formula_mode"]),
+                    csv_number(coverage["passing_threshold"]), csv_number(coverage["active_enrollment_count"]), csv_number(coverage["computed_grade_count"]),
+                    csv_number(coverage["no_grade_count"]), csv_number(coverage["coverage_rate"]), csv_number(coverage["passing_count"]), csv_number(coverage["passing_rate"]),
+                    csv_number(coverage["below_threshold_count"]), csv_number(coverage["below_threshold_rate"]), csv_number(coverage["average"]),
+                    csv_number(coverage["median"]), csv_number(coverage["highest"]), csv_number(coverage["lowest"]),
+                    csv_safe(coverage["state"]), csv_safe(row["comparison_status"]), csv_safe(report_scope),
+                ])
+        else:
+            writer.writerow([
+                "Campus", "Academic Year", "Term", "Course", "Section", "Grading Period", "Student", "Student No.",
+                "Current Grade", "Usable Computed Grade", "Passing Threshold", "Missing Records", "Advisory Label", "Indicators",
+                "Report Completeness",
+            ])
+            for row in student_review["rows"]:
+                offering = row["offering"]
+                can_view_identity = _can_view_gradebook_student_identity(
+                    request.user,
+                    tenant_id=offering.tenant_id,
+                    campus_id=offering.campus_id,
+                )
+                student_name = (
+                    f'{row["student"].first_name} {row["student"].last_name}'.strip()
+                    if can_view_identity
+                    else _mask_student_name(row["student"])
+                )
+                student_no = (
+                    row["student"].student_no
+                    if can_view_identity
+                    else _mask_student_number(row["student"].student_no)
+                )
+                writer.writerow([
+                    csv_safe(offering.campus.code), csv_safe(offering.academic_year.code), csv_safe(offering.term.code),
+                    csv_safe(row["course_code"]), csv_safe(row["section"]), csv_safe(row["period"].name),
+                    csv_safe(student_name), csv_safe(student_no), csv_number(row["current_grade"]),
+                    "Yes" if row["usable_grade"] else "No", csv_number(row["passing_threshold"]), csv_number(row["missing_output_count"]),
+                    csv_safe(row["advisory_label"]), csv_safe("; ".join(row["indicators"])), csv_safe(report_scope),
+                ])
+        return response
     grades = [Decimal(row["class_average"]) for row in rows if row["class_average"] is not None]
     summary = {
         "sections": len(rows),
@@ -3152,6 +3115,9 @@ def academic_performance_insights_view(request):
         ),
         "at_risk_count": sum(row["at_risk_count"] for row in rows),
         "missing_output_count": sum(row["missing_output_count"] for row in rows),
+        "active_enrollment_count": sum(row["coverage"]["active_enrollment_count"] for row in rows),
+        "computed_grade_count": sum(row["coverage"]["computed_grade_count"] for row in rows),
+        "no_grade_count": sum(row["coverage"]["no_grade_count"] for row in rows),
     }
     paginator = Paginator(rows, 25)
     page_obj = paginator.get_page(request.GET.get("page"))
@@ -3174,6 +3140,9 @@ def academic_performance_insights_view(request):
         ),
         "limited": comparison["limited"],
         "selected_all_campuses": (request.GET.get("campus_id") or "").strip().lower() == "all",
+        "student_review": student_review["rows"],
+        "student_review_limited": student_review["limited"],
+        "export_query": request.GET.urlencode(),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/academic_performance_insights.html", context)
@@ -3187,6 +3156,30 @@ def academic_activity_consistency_view(request):
     filter_options = AcademicPerformanceInsightService.get_filter_options(request, filters)
     comparison = AcademicPerformanceInsightService.get_activity_consistency_comparison(request, filters)
     rows = comparison["rows"]
+    if request.GET.get("export") == "csv":
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="academic_activity_consistency.csv"'
+        writer = csv.writer(response)
+        report_scope = (
+            "Limited to the first 100 authorized classes; narrow filters for a complete export."
+            if comparison["limited"]
+            else "Complete within the selected authorized scope."
+        )
+        writer.writerow([
+            "Campus", "Academic Year", "Term", "Course", "Section", "Faculty", "Grading Period",
+            "Active Enrollment", "Activity Count", "Missing Categories", "No Score Categories",
+            "Category Missing Score Rates", "Concentrated Categories", "Review Status", "Report Completeness",
+        ])
+        for row in rows:
+            writer.writerow([
+                csv_safe(row["campus"].code), csv_safe(row["offering"].academic_year.code), csv_safe(row["offering"].term.code),
+                csv_safe(row["course_code"]), csv_safe(row["section"]), csv_safe(row["faculty_name"]), csv_safe(row["period"].name),
+                row["active_student_count"], row["total_activities"], csv_safe("; ".join(row["missing_components"])),
+                csv_safe("; ".join(row["no_score_categories"])),
+                csv_safe("; ".join(f"{name}: {rate}%" for name, rate in row["category_missing_score_rates"].items())),
+                csv_safe("; ".join(row["concentrated_categories"])), csv_safe(row["consistency_status"]), csv_safe(report_scope),
+            ])
+        return response
     paginator = Paginator(rows, 25)
     page_obj = paginator.get_page(request.GET.get("page"))
     page_query = request.GET.copy()
@@ -3204,6 +3197,7 @@ def academic_activity_consistency_view(request):
         ),
         "limited": comparison["limited"],
         "selected_all_campuses": (request.GET.get("campus_id") or "").strip().lower() == "all",
+        "export_query": request.GET.urlencode(),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/grading/academic_activity_consistency.html", context)
@@ -3336,6 +3330,7 @@ def grade_distribution_monitor_view(request):
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="grade_distribution_monitor.csv"'
         writer = csv.writer(response)
+        csv_number = lambda value: value if value is not None else ""
         writer.writerow(
             [
                 "Faculty",
@@ -3347,11 +3342,13 @@ def grade_distribution_monitor_view(request):
                 "Period",
                 "Level",
                 "Activity",
-                "Graded Count",
+                "Passing Threshold",
+                "Active Enrollment",
+                "Usable Stored Scores",
+                "No Stored Score",
+                "Coverage % (usable/active)",
                 "Class Average",
-                "90-100 %",
-                "80-89 %",
-                "75-79 %",
+                "Threshold-aware distribution (count/usable denominator)",
                 "Below Passing %",
                 "Exact 100 %",
                 "Highest",
@@ -3361,24 +3358,29 @@ def grade_distribution_monitor_view(request):
         for row in context["rows"]:
             writer.writerow(
                 [
-                    row["faculty_name"],
-                    row["campus"],
-                    row["department"],
-                    f'{row["course_code"]} - {row["course_title"]}',
-                    row["section"],
-                    f'{row["school_year"]} / {row["term"]}',
-                    row["period"],
-                    row["level_label"],
-                    row["activity_title"],
-                    row["graded_count"],
-                    row["average"] or "",
-                    row["high_pct"],
-                    row["band_80_89_pct"],
-                    row["band_75_79_pct"],
-                    row["below_passing_pct"],
-                    row["exact_100_pct"],
-                    row["highest"] or "",
-                    row["lowest"] or "",
+                    csv_safe(row["faculty_name"]),
+                    csv_safe(row["campus"]),
+                    csv_safe(row["department"]),
+                    csv_safe(f'{row["course_code"]} - {row["course_title"]}'),
+                    csv_safe(row["section"]),
+                    csv_safe(f'{row["school_year"]} / {row["term"]}'),
+                    csv_safe(row["period"]),
+                    csv_safe(row["level_label"]),
+                    csv_safe(row["activity_title"]),
+                    csv_number(row["passing_threshold"]),
+                    csv_number(row["active_count"]),
+                    csv_number(row["graded_count"]),
+                    csv_number(row["no_grade_count"]),
+                    csv_number(row["coverage_rate"]),
+                    csv_number(row["average"]),
+                    csv_safe("; ".join(
+                        f'{band["label"]}: {band["count"]}/{band["denominator"]} ({band["percentage"]}%)'
+                        for band in row["distribution"]
+                    )),
+                    csv_number(row["below_passing_pct"]),
+                    csv_number(row["exact_100_pct"]),
+                    csv_number(row["highest"]),
+                    csv_number(row["lowest"]),
                 ]
             )
         return response

@@ -10,7 +10,14 @@ from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
-from apps.grading.models import GradingTemplate, GradingTemplatePeriod, StudentPeriodGrade
+from apps.grading.models import (
+    GradeActivity,
+    GradingTemplate,
+    GradingTemplateComponent,
+    GradingTemplatePeriod,
+    StudentActivityScore,
+    StudentPeriodGrade,
+)
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.students.models import Student
 from apps.tenants.models import Campus, Department, Program, Tenant
@@ -124,6 +131,8 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Accounting 101")
         self.assertContains(response, "80.0%")
+        self.assertContains(response, "Threshold-aware Distribution")
+        self.assertContains(response, "75.00")
         self.assertContains(response, 'id="gradeDistributionLoadingOverlay"')
         self.assertContains(response, 'id="gradeDistributionFilterForm"')
         self.assertNotContains(response, "Course / Subject")
@@ -139,11 +148,23 @@ class GradeDistributionMonitorTests(TestCase):
         self.assertNotContains(response, "Classes in Scope")
         self.assertNotContains(response, "Rows Reviewed")
         self.assertNotContains(response, "For Review")
-        self.assertNotContains(response, "High Grade Concentration")
-        self.assertNotContains(response, "High Perfect Score Rate")
+        self.assertContains(response, "High Grade Concentration")
         self.assertNotContains(response, "<th>Spread</th>", html=True)
         self.assertNotContains(response, "<th>Comparison</th>", html=True)
         self.assertNotContains(response, "<th>Status</th>", html=True)
+
+    def test_custom_threshold_uses_threshold_aware_distribution_in_screen_and_csv(self):
+        self.template.passing_grade_threshold = Decimal("82")
+        self.template.save(update_fields=["passing_grade_threshold", "updated_at"])
+        self.client.force_login(self.admin_user)
+
+        screen = self.client.get(self.url)
+        export = self.client.get(self.url, {"export": "csv"})
+
+        self.assertContains(screen, "82.00")
+        self.assertContains(screen, "Near threshold")
+        self.assertIn("Passing Threshold", export.content.decode())
+        self.assertIn("82.00", export.content.decode())
 
     def test_period_filter_uses_templates_resolved_for_monitored_classes(self):
         unrelated_department = Department.objects.create(
@@ -268,6 +289,77 @@ class GradeDistributionMonitorTests(TestCase):
         row_flags = [flag["label"] for flag in target_row["flags"]]
         self.assertIn("Incomplete Data", row_flags)
         self.assertNotIn("High Grade Concentration", row_flags)
+
+    def test_monitor_excludes_ineligible_historical_period_grades_and_activity_scores(self):
+        historical_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="ACC101-HISTORICAL",
+            first_name="Historical",
+            last_name="Record",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=historical_student,
+            course_offering=self.offering,
+            is_active=False,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            student=historical_student,
+            period_grade=Decimal("100"),
+        )
+        component = GradingTemplateComponent.objects.create(
+            template_period=self.period,
+            code="QUIZZES",
+            name="Quizzes",
+            weight_percentage=Decimal("100"),
+            sort_order=1,
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=component,
+            title="Q1",
+            total_score=Decimal("100"),
+            created_by_user=self.faculty_user,
+        )
+        active_student = Enrollment.objects.filter(course_offering=self.offering, is_active=True).first().student
+        StudentActivityScore.objects.create(
+            activity=activity,
+            student=active_student,
+            raw_score=Decimal("80"),
+            computed_score=Decimal("80"),
+        )
+        StudentActivityScore.objects.create(
+            activity=activity,
+            student=historical_student,
+            raw_score=Decimal("100"),
+            computed_score=Decimal("100"),
+        )
+        self.client.force_login(self.admin_user)
+
+        period_response = self.client.get(self.url)
+        activity_response = self.client.get(self.url, {"source": "activity"})
+
+        period_row = next(row for row in period_response.context["rows"] if row["course_code"] == "ACC101")
+        activity_row = next(row for row in activity_response.context["rows"] if row["course_code"] == "ACC101")
+        self.assertEqual(period_row["active_count"], 10)
+        self.assertEqual(period_row["graded_count"], 10)
+        self.assertEqual(period_row["highest"], Decimal("97.00"))
+        self.assertEqual(activity_row["active_count"], 10)
+        self.assertEqual(activity_row["graded_count"], 1)
+        self.assertEqual(activity_row["highest"], Decimal("80.00"))
 
     def test_monitor_loads_when_offering_has_no_published_template(self):
         self.template.is_published = False
