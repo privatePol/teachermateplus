@@ -23,7 +23,7 @@ from django.db.models.functions import Coalesce, Concat
 from django.db.models.deletion import ProtectedError, RestrictedError
 from io import BytesIO
 
-from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -11027,56 +11027,93 @@ def _enrollment_adjustment_offering_label(offering):
 
 
 def _enrollment_adjustment_offering_option(offering):
-    course_title = (offering.course.title or "").strip()
-    course_code = (offering.course.code or "").strip()
     return {
         "id": offering.id,
         "label": _enrollment_adjustment_offering_label(offering),
-        "course_title": course_title,
-        "course_code": course_code,
-        "search_text": f"{course_code} {course_title}".strip().lower(),
-        "academic_year_id": offering.academic_year_id,
-        "term_id": offering.term_id,
-        "campus_id": offering.campus_id,
     }
 
 
-def _enrollment_adjustment_form_context(request, *, data=None, initial=None):
-    offering_qs = AdminScopeService.scoped_course_offerings(request).select_related(
-        "academic_year",
-        "term",
-        "campus",
-        "course",
-        "section",
-    ).order_by(
-        "course__title",
-        "course__code",
-        "section__code",
-        "academic_year__code",
-        "term__sequence_no",
-        "campus__code",
+def _enrollment_adjustment_offerings_queryset(request):
+    return (
+        AdminScopeService.scoped_course_offerings(request)
+        .filter(is_active=True)
+        .select_related(None)
+        .select_related("course", "section")
+        .only(
+            "id",
+            "tenant_id",
+            "campus_id",
+            "department_id",
+            "program_id",
+            "academic_year_id",
+            "term_id",
+            "course_id",
+            "section_id",
+            "course__id",
+            "course__code",
+            "course__title",
+            "section__id",
+            "section__code",
+            "section__name",
+        )
     )
-    source_offering_qs = offering_qs
-    destination_offering_qs = offering_qs
+
+
+def _enrollment_adjustment_selected_offering_queryset(
+    base_queryset,
+    *,
+    offering_id,
+    academic_year_id,
+    term_id,
+    campus_id,
+):
+    if not offering_id:
+        return base_queryset.none()
+    parsed_values = {}
+    for field_name, value in (
+        ("id", offering_id),
+        ("academic_year_id", academic_year_id),
+        ("term_id", term_id),
+        ("campus_id", campus_id),
+    ):
+        if value in (None, ""):
+            continue
+        try:
+            parsed_values[field_name] = int(value)
+        except (TypeError, ValueError):
+            return base_queryset.none()
+    queryset = base_queryset.filter(**parsed_values)
+    return queryset
+
+
+def _enrollment_adjustment_form_context(request, *, data=None, initial=None):
+    offering_qs = _enrollment_adjustment_offerings_queryset(request)
     academic_year_id = (data or initial or {}).get("academic_year") or (data or initial or {}).get("academic_year_id")
     term_id = (data or initial or {}).get("term") or (data or initial or {}).get("term_id")
     campus_id = (data or initial or {}).get("campus") or (data or initial or {}).get("campus_id")
     source_offering_id = (data or initial or {}).get("source_offering")
-    if academic_year_id:
-        source_offering_qs = source_offering_qs.filter(academic_year_id=academic_year_id)
-        destination_offering_qs = destination_offering_qs.filter(academic_year_id=academic_year_id)
-    if term_id:
-        source_offering_qs = source_offering_qs.filter(term_id=term_id)
-        destination_offering_qs = destination_offering_qs.filter(term_id=term_id)
-    if campus_id:
-        source_offering_qs = source_offering_qs.filter(campus_id=campus_id)
-        destination_offering_qs = destination_offering_qs.filter(campus_id=campus_id)
+    destination_offering_id = (data or initial or {}).get("destination_offering")
+    source_offering_qs = _enrollment_adjustment_selected_offering_queryset(
+        offering_qs,
+        offering_id=source_offering_id,
+        academic_year_id=academic_year_id,
+        term_id=term_id,
+        campus_id=campus_id,
+    )
+    destination_offering_qs = _enrollment_adjustment_selected_offering_queryset(
+        offering_qs,
+        offering_id=destination_offering_id,
+        academic_year_id=academic_year_id,
+        term_id=term_id,
+        campus_id=campus_id,
+    )
 
     source_offering = None
     enrollment_qs = Enrollment.objects.none()
     if source_offering_id:
-        source_offering = get_object_or_404(AdminScopeService.scoped_course_offerings(request), id=source_offering_id)
-        enrollment_qs = EnrollmentAdjustmentService.get_active_source_enrollments(source_offering=source_offering)
+        source_offering = source_offering_qs.first()
+        if source_offering is not None:
+            enrollment_qs = EnrollmentAdjustmentService.get_active_source_enrollments(source_offering=source_offering)
 
     form = EnrollmentAdjustmentForm(
         data,
@@ -11090,8 +11127,49 @@ def _enrollment_adjustment_form_context(request, *, data=None, initial=None):
     )
     form.fields["source_offering"].label_from_instance = _enrollment_adjustment_offering_label
     form.fields["destination_offering"].label_from_instance = _enrollment_adjustment_offering_label
-    offering_options = [_enrollment_adjustment_offering_option(offering) for offering in offering_qs]
-    return form, source_offering, enrollment_qs, offering_options
+    return form, source_offering, enrollment_qs
+
+
+@never_cache
+@require_GET
+@portal_required("ADMIN")
+@permission_required("enrollment_adjustment.view")
+def enrollment_adjustment_offering_search_view(request):
+    academic_year_id = request.GET.get("academic_year") or request.GET.get("academic_year_id")
+    term_id = request.GET.get("term") or request.GET.get("term_id")
+    campus_id = request.GET.get("campus") or request.GET.get("campus_id")
+    if not academic_year_id or not term_id or not campus_id:
+        return JsonResponse(
+            {"results": [], "more": False, "error": "Select an academic year, term, and campus first."},
+            status=400,
+        )
+    try:
+        academic_year_id = int(academic_year_id)
+        term_id = int(term_id)
+        campus_id = int(campus_id)
+    except (TypeError, ValueError):
+        return JsonResponse({"results": [], "more": False, "error": "Invalid scope selection."}, status=400)
+
+    queryset = _enrollment_adjustment_offerings_queryset(request).filter(
+        academic_year_id=academic_year_id,
+        term_id=term_id,
+        campus_id=campus_id,
+    )
+    search_text = (request.GET.get("q") or "").strip()[:100]
+    if search_text:
+        queryset = queryset.filter(
+            Q(course__code__icontains=search_text)
+            | Q(course__title__icontains=search_text)
+            | Q(section__code__icontains=search_text)
+            | Q(section__name__icontains=search_text)
+        )
+    offerings = list(queryset.order_by("course__code", "section__code", "id")[:51])
+    return JsonResponse(
+        {
+            "results": [_enrollment_adjustment_offering_option(offering) for offering in offerings[:50]],
+            "more": len(offerings) > 50,
+        }
+    )
 
 
 @portal_required("ADMIN")
@@ -11108,7 +11186,7 @@ def enrollment_adjustments_view(request):
     )
 
     if request.method == "POST":
-        form, source_offering, enrollment_qs, offering_options = _enrollment_adjustment_form_context(
+        form, source_offering, enrollment_qs = _enrollment_adjustment_form_context(
             request,
             data=request.POST,
         )
@@ -11150,7 +11228,7 @@ def enrollment_adjustments_view(request):
             "source_offering": request.GET.get("source_offering"),
             "destination_offering": request.GET.get("destination_offering"),
         }
-        form, source_offering, enrollment_qs, offering_options = _enrollment_adjustment_form_context(
+        form, source_offering, enrollment_qs = _enrollment_adjustment_form_context(
             request,
             initial=initial,
         )
@@ -11181,7 +11259,7 @@ def enrollment_adjustments_view(request):
         "selected_student_ids": selected_student_ids,
         "can_process": can_process,
         "history": history,
-        "offering_options": offering_options,
+        "offering_search_url": reverse("admin_portal:enrollment_adjustment_offering_search"),
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/enrollment/enrollment_adjustments.html", context)

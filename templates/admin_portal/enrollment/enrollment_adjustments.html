@@ -44,11 +44,14 @@
           id="{{ form.source_offering.id_for_label }}-search"
           data-enrollment-adjustment-offering-search="true"
           data-target-select="{{ form.source_offering.id_for_label }}"
-          placeholder="Filter by course code or title"
+          placeholder="Search by course code, title, or section"
           autocomplete="off"
+          aria-label="Search source offerings"
+          aria-controls="{{ form.source_offering.id_for_label }}"
         >
         {{ form.source_offering }}
-        <div class="form-text">The class where the student is currently enrolled.</div>
+        {% if form.source_offering.errors %}<div class="text-danger small">{{ form.source_offering.errors }}</div>{% endif %}
+        <div class="form-text" id="{{ form.source_offering.id_for_label }}-status" aria-live="polite">The class where the student is currently enrolled.</div>
       </div>
       <div class="col-md-6">
         <label class="form-label" for="{{ form.destination_offering.id_for_label }}">Destination Offering</label>
@@ -58,11 +61,14 @@
           id="{{ form.destination_offering.id_for_label }}-search"
           data-enrollment-adjustment-offering-search="true"
           data-target-select="{{ form.destination_offering.id_for_label }}"
-          placeholder="Filter by course code or title"
+          placeholder="Search by course code, title, or section"
           autocomplete="off"
+          aria-label="Search destination offerings"
+          aria-controls="{{ form.destination_offering.id_for_label }}"
         >
         {{ form.destination_offering }}
-        <div class="form-text">The class where the student should be moved.</div>
+        {% if form.destination_offering.errors %}<div class="text-danger small">{{ form.destination_offering.errors }}</div>{% endif %}
+        <div class="form-text" id="{{ form.destination_offering.id_for_label }}-status" aria-live="polite">The class where the student should be moved.</div>
       </div>
     </div>
 
@@ -277,11 +283,9 @@
     </table>
   </div>
 </div>
-{{ offering_options|json_script:"enrollment-adjustment-offering-options" }}
 <script>
   document.addEventListener("DOMContentLoaded", function () {
     const selectAllButton = document.getElementById("select-all-students");
-    const offeringOptionsElement = document.getElementById("enrollment-adjustment-offering-options");
     const academicYearField = document.getElementById("{{ form.academic_year.id_for_label }}");
     const termField = document.getElementById("{{ form.term.id_for_label }}");
     const campusField = document.getElementById("{{ form.campus.id_for_label }}");
@@ -289,38 +293,33 @@
     const destinationOfferingField = document.getElementById("{{ form.destination_offering.id_for_label }}");
     const sourceOfferingSearchField = document.getElementById("{{ form.source_offering.id_for_label }}-search");
     const destinationOfferingSearchField = document.getElementById("{{ form.destination_offering.id_for_label }}-search");
+    const offeringSearchUrl = "{{ offering_search_url|escapejs }}";
+    const requestControllers = new Map();
+    const debounceTimers = new Map();
 
-    let offeringOptions = [];
-    if (offeringOptionsElement) {
-      try {
-        offeringOptions = JSON.parse(offeringOptionsElement.textContent || "[]");
-      } catch (error) {
-        offeringOptions = [];
-      }
+    function selectedScope() {
+      return {
+        academicYear: academicYearField ? academicYearField.value : "",
+        term: termField ? termField.value : "",
+        campus: campusField ? campusField.value : ""
+      };
     }
 
-    function getFilteredOfferingOptions() {
-      const selectedAcademicYearId = academicYearField ? academicYearField.value : "";
-      const selectedTermId = termField ? termField.value : "";
-      const selectedCampusId = campusField ? campusField.value : "";
-
-      return offeringOptions.filter(function (option) {
-        const matchesAcademicYear = !selectedAcademicYearId || String(option.academic_year_id) === String(selectedAcademicYearId);
-        const matchesTerm = !selectedTermId || String(option.term_id) === String(selectedTermId);
-        const matchesCampus = !selectedCampusId || String(option.campus_id) === String(selectedCampusId);
-        return matchesAcademicYear && matchesTerm && matchesCampus;
-      });
+    function scopeKey(scope) {
+      return [scope.academicYear, scope.term, scope.campus].join(":");
     }
 
-    function rebuildOfferingField(selectField, searchField) {
-      if (!selectField) {
-        return;
-      }
+    function setOfferingStatus(selectField, message) {
+      const statusElement = document.getElementById(selectField.id + "-status");
+      if (statusElement) statusElement.textContent = message;
+    }
 
+    function replaceOfferingOptions(selectField, results, currentScopeKey) {
       const previousValue = selectField.value;
-      const searchValue = searchField && searchField.value ? searchField.value.trim().toLowerCase() : "";
+      const previousOption = selectField.options[selectField.selectedIndex];
+      const previousLabel = previousOption ? previousOption.textContent : "";
+      const scopeChanged = selectField.dataset.loadedScope && selectField.dataset.loadedScope !== currentScopeKey;
       const placeholderLabel = selectField.dataset.placeholder || "---------";
-
       selectField.innerHTML = "";
 
       const placeholderOption = document.createElement("option");
@@ -328,52 +327,100 @@
       placeholderOption.textContent = placeholderLabel;
       selectField.appendChild(placeholderOption);
 
-      const filteredOptions = getFilteredOfferingOptions().filter(function (option) {
-        if (!searchValue) {
-          return true;
-        }
-        const haystack = (option.search_text || option.label || "").toLowerCase();
-        return haystack.indexOf(searchValue) !== -1;
-      });
+      const resultIds = new Set(results.map(function (option) { return String(option.id); }));
+      if (!scopeChanged && previousValue && !resultIds.has(String(previousValue))) {
+        const selectedOption = document.createElement("option");
+        selectedOption.value = previousValue;
+        selectedOption.textContent = previousLabel;
+        selectedOption.selected = true;
+        selectField.appendChild(selectedOption);
+      }
 
-      let hasPreviousValue = false;
-      filteredOptions.forEach(function (option) {
+      results.forEach(function (option) {
         const optionElement = document.createElement("option");
         optionElement.value = option.id;
         optionElement.textContent = option.label;
-        if (String(option.id) === String(previousValue)) {
-          optionElement.selected = true;
-          hasPreviousValue = true;
-        }
+        if (!scopeChanged && String(option.id) === String(previousValue)) optionElement.selected = true;
         selectField.appendChild(optionElement);
       });
+      selectField.dataset.loadedScope = currentScopeKey;
+    }
 
-      if (!hasPreviousValue) {
-        selectField.value = "";
+    async function refreshOfferingField(selectField, searchField) {
+      if (!selectField) return;
+      const scope = selectedScope();
+      const currentScopeKey = scopeKey(scope);
+      const previousController = requestControllers.get(selectField.id);
+      if (previousController) previousController.abort();
+      if (!scope.academicYear || !scope.term || !scope.campus) {
+        replaceOfferingOptions(selectField, [], currentScopeKey);
+        setOfferingStatus(selectField, "Select an academic year, term, and campus first.");
+        return;
+      }
+
+      if (selectField.dataset.loadedScope && selectField.dataset.loadedScope !== currentScopeKey) {
+        replaceOfferingOptions(selectField, [], currentScopeKey);
+      }
+      const controller = new AbortController();
+      requestControllers.set(selectField.id, controller);
+      const params = new URLSearchParams({
+        academic_year: scope.academicYear,
+        term: scope.term,
+        campus: scope.campus,
+        q: searchField && searchField.value ? searchField.value.trim() : ""
+      });
+      setOfferingStatus(selectField, "Searching authorized offerings...");
+      try {
+        const response = await fetch(offeringSearchUrl + "?" + params.toString(), {
+          credentials: "same-origin",
+          headers: {"Accept": "application/json"},
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error("Offering search failed");
+        const payload = await response.json();
+        replaceOfferingOptions(selectField, payload.results || [], currentScopeKey);
+        const suffix = payload.more ? " Refine the search to see more." : "";
+        setOfferingStatus(selectField, (payload.results || []).length + " authorized offering(s) found." + suffix);
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          setOfferingStatus(selectField, "Offering search is unavailable. Refresh the page and try again.");
+        }
       }
     }
 
-    function rebuildAllOfferingFields() {
-      rebuildOfferingField(sourceOfferingField, sourceOfferingSearchField);
-      rebuildOfferingField(destinationOfferingField, destinationOfferingSearchField);
+    function scheduleOfferingRefresh(selectField, searchField) {
+      const timerKey = selectField ? selectField.id : "";
+      if (debounceTimers.has(timerKey)) clearTimeout(debounceTimers.get(timerKey));
+      debounceTimers.set(timerKey, setTimeout(function () {
+        refreshOfferingField(selectField, searchField);
+      }, 250));
+    }
+
+    function refreshAllOfferingFields() {
+      refreshOfferingField(sourceOfferingField, sourceOfferingSearchField);
+      refreshOfferingField(destinationOfferingField, destinationOfferingSearchField);
     }
 
     if (academicYearField) {
-      academicYearField.addEventListener("change", rebuildAllOfferingFields);
+      academicYearField.addEventListener("change", refreshAllOfferingFields);
     }
     if (termField) {
-      termField.addEventListener("change", rebuildAllOfferingFields);
+      termField.addEventListener("change", refreshAllOfferingFields);
     }
     if (campusField) {
-      campusField.addEventListener("change", rebuildAllOfferingFields);
+      campusField.addEventListener("change", refreshAllOfferingFields);
     }
     if (sourceOfferingSearchField) {
-      sourceOfferingSearchField.addEventListener("input", rebuildAllOfferingFields);
+      sourceOfferingSearchField.addEventListener("input", function () {
+        scheduleOfferingRefresh(sourceOfferingField, sourceOfferingSearchField);
+      });
     }
     if (destinationOfferingSearchField) {
-      destinationOfferingSearchField.addEventListener("input", rebuildAllOfferingFields);
+      destinationOfferingSearchField.addEventListener("input", function () {
+        scheduleOfferingRefresh(destinationOfferingField, destinationOfferingSearchField);
+      });
     }
-    rebuildAllOfferingFields();
+    refreshAllOfferingFields();
 
     if (!selectAllButton) return;
     selectAllButton.addEventListener("click", function () {

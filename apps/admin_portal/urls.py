@@ -58,6 +58,7 @@ from .views import (
     department_update_view,
     enrollment_create_view,
     enrollment_adjustment_detail_view,
+    enrollment_adjustment_offering_search_view,
     enrollment_adjustments_view,
     class_list_change_request_list_view,
     class_list_change_request_review_view,
@@ -457,6 +458,11 @@ urlpatterns = [
         name="class_list_change_request_review",
     ),
     path("admin-portal/enrollment/adjustments/", enrollment_adjustments_view, name="enrollment_adjustments"),
+    path(
+        "admin-portal/enrollment/adjustments/offerings/",
+        enrollment_adjustment_offering_search_view,
+        name="enrollment_adjustment_offering_search",
+    ),
     path(
         "admin-portal/enrollment/adjustments/<int:log_id>/",
         enrollment_adjustment_detail_view,

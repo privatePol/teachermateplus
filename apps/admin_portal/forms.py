@@ -183,6 +183,7 @@ class EnrollmentAdjustmentForm(forms.Form):
         for field_name in ("source_offering", "destination_offering"):
             self.fields[field_name].widget.attrs["data-enrollment-adjustment-offering"] = "true"
             self.fields[field_name].widget.attrs["data-placeholder"] = "---------"
+            self.fields[field_name].widget.attrs["aria-describedby"] = f"id_{field_name}-status"
         self.fields["reason"].widget.attrs.update({"class": "form-control"})
 
     def clean(self):

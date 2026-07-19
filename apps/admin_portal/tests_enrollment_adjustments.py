@@ -1,10 +1,13 @@
 from datetime import date
 from decimal import Decimal
+import re
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
 from django.test.client import RequestFactory
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -12,6 +15,7 @@ from apps.academics.models import AcademicYear, Course, CourseOffering, Section,
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.enrollment.models import Enrollment, EnrollmentAdjustmentLog
 from apps.enrollment.services import EnrollmentAdjustmentService
+from apps.admin_portal.services import AdminScopeService
 from apps.admin_portal.views import _enrollment_adjustment_form_context, _enrollment_adjustment_offering_label
 from apps.grading.models import (
     GradeActivity,
@@ -249,6 +253,7 @@ class EnrollmentAdjustmentTests(TestCase):
             "tenant_ids": [self.tenant.id],
             "campus_id": self.campus.id,
             "campus_ids": campus_ids,
+            "department_ids": [self.department.id, self.other_department.id],
         }
         return request
 
@@ -510,6 +515,39 @@ class EnrollmentAdjustmentTests(TestCase):
         process_response = self.client.post(self.url, self._post_data([self.student], action="process"))
         self.assertEqual(process_response.status_code, 403)
 
+    def test_offering_search_requires_login_and_view_permission(self):
+        search_url = reverse("admin_portal:enrollment_adjustment_offering_search")
+        self.client.logout()
+        anonymous_response = self.client.get(search_url)
+
+        portal_only_role = Role.objects.create(code="PORTAL_ONLY", name="Portal Only")
+        RolePermission.objects.create(
+            role=portal_only_role,
+            permission=Permission.objects.get(code="admin_portal.access"),
+        )
+        portal_only_user = User.objects.create_user(
+            username="portal-only",
+            email="portal-only@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(
+            user=portal_only_user,
+            role=portal_only_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        self.client.force_login(portal_only_user)
+        forbidden_response = self.client.get(search_url)
+
+        self.assertEqual(anonymous_response.status_code, 302)
+        self.assertEqual(forbidden_response.status_code, 403)
+
     def test_history_and_detail_display(self):
         EnrollmentAdjustmentLog.objects.create(
             student=self.student,
@@ -540,48 +578,288 @@ class EnrollmentAdjustmentTests(TestCase):
         self.assertNotIn(self.term.code, label)
         self.assertNotIn(self.campus.code, label)
 
-    def test_enrollment_adjustment_form_context_filters_source_and_destination_by_campus(self):
+    def test_enrollment_adjustment_form_context_loads_only_selected_offerings(self):
         request = self._request_with_scope(campus_ids=[self.campus.id, self.other_campus.id])
 
-        form, _, _, offering_options = _enrollment_adjustment_form_context(
+        form, _, _ = _enrollment_adjustment_form_context(
             request,
             initial={
+                "academic_year": self.academic_year.id,
+                "term": self.term.id,
+                "campus": self.campus.id,
+                "source_offering": self.source_offering.id,
+                "destination_offering": self.destination_offering.id,
+            },
+        )
+
+        source_ids = set(form.fields["source_offering"].queryset.values_list("id", flat=True))
+        destination_ids = set(form.fields["destination_offering"].queryset.values_list("id", flat=True))
+        self.assertEqual(source_ids, {self.source_offering.id})
+        self.assertEqual(destination_ids, {self.destination_offering.id})
+
+    def test_enrollment_adjustment_post_revalidates_selected_offering_scope(self):
+        response = self.client.post(
+            self.url,
+            self._post_data([self.student], destination_offering=self.other_offering.id, action="process"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Select a valid choice")
+        self.enrollment.refresh_from_db()
+        self.assertTrue(self.enrollment.is_active)
+        self.assertFalse(
+            Enrollment.objects.filter(course_offering=self.other_offering, student=self.student).exists()
+        )
+
+    def test_enrollment_adjustment_malformed_selected_ids_fail_form_validation(self):
+        response = self.client.post(
+            self.url,
+            self._post_data([self.student], source_offering="not-an-id", action="process"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Select a valid choice")
+        self.enrollment.refresh_from_db()
+        self.assertTrue(self.enrollment.is_active)
+
+    def test_enrollment_adjustment_initial_form_does_not_load_offering_choices(self):
+        request = self._request_with_scope(campus_ids=[self.campus.id, self.other_campus.id])
+
+        form, _, _ = _enrollment_adjustment_form_context(request)
+
+        self.assertFalse(form.fields["source_offering"].queryset.exists())
+        self.assertFalse(form.fields["destination_offering"].queryset.exists())
+
+    def test_enrollment_adjustment_offering_search_filters_and_labels_results(self):
+        search_url = reverse("admin_portal:enrollment_adjustment_offering_search")
+
+        response = self.client.get(
+            search_url,
+            {
+                "academic_year": self.academic_year.id,
+                "term": self.term.id,
+                "campus": self.campus.id,
+                "q": self.section.code,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([row["id"] for row in payload["results"]], [self.source_offering.id])
+        self.assertEqual(payload["results"][0]["label"], _enrollment_adjustment_offering_label(self.source_offering))
+
+    def test_enrollment_adjustment_offering_search_preserves_campus_scope(self):
+        user = self._view_only_user()
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("admin_portal:enrollment_adjustment_offering_search"),
+            {
                 "academic_year": self.academic_year.id,
                 "term": self.term.id,
                 "campus": self.other_campus.id,
             },
         )
 
-        source_ids = set(form.fields["source_offering"].queryset.values_list("id", flat=True))
-        destination_ids = set(form.fields["destination_offering"].queryset.values_list("id", flat=True))
-        self.assertEqual(source_ids, {self.other_offering.id})
-        self.assertEqual(destination_ids, {self.other_offering.id})
-        option_labels = {option["label"] for option in offering_options}
-        self.assertIn(_enrollment_adjustment_offering_label(self.source_offering), option_labels)
-        self.assertIn(_enrollment_adjustment_offering_label(self.other_offering), option_labels)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"], [])
 
-    def test_enrollment_adjustment_offering_options_sorted_by_course_title(self):
-        request = self._request_with_scope(campus_ids=[self.campus.id, self.other_campus.id])
+    def test_enrollment_adjustment_offering_search_preserves_department_scope(self):
+        sibling_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="SIBLING",
+            name="Sibling Department",
+        )
+        sibling_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=sibling_department,
+            code="SIBLING-PROG",
+            name="Sibling Program",
+        )
+        sibling_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=sibling_department,
+            program=sibling_program,
+            code="SIBLING-1A",
+            name="Sibling 1A",
+        )
+        CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=sibling_department,
+            program=sibling_program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course,
+            section=sibling_section,
+        )
+        self.client.force_login(self._view_only_user())
 
-        _, _, _, offering_options = _enrollment_adjustment_form_context(request)
-
-        self.assertEqual(
-            [option["label"] for option in offering_options],
-            [
-                _enrollment_adjustment_offering_label(self.other_offering),
-                _enrollment_adjustment_offering_label(self.source_offering),
-                _enrollment_adjustment_offering_label(self.destination_offering),
-            ],
+        response = self.client.get(
+            reverse("admin_portal:enrollment_adjustment_offering_search"),
+            {
+                "academic_year": self.academic_year.id,
+                "term": self.term.id,
+                "campus": self.campus.id,
+                "q": sibling_section.code,
+            },
         )
 
-    def test_enrollment_adjustment_offering_options_include_course_search_text(self):
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"], [])
+
+    def test_enrollment_adjustment_offering_search_rejects_invalid_scope_ids(self):
+        response = self.client.get(
+            reverse("admin_portal:enrollment_adjustment_offering_search"),
+            {"academic_year": "invalid", "term": self.term.id, "campus": self.campus.id},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["results"], [])
+
+    def test_enrollment_adjustment_initial_get_does_not_select_full_offering_rows(self):
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        offering_selects = [
+            query["sql"]
+            for query in captured.captured_queries
+            if query["sql"].lstrip().upper().startswith("SELECT")
+            and "course_offerings" in query["sql"].lower()
+        ]
+        self.assertTrue(offering_selects)
+        normalized_sql = [sql.replace('"', '').replace('`', '') for sql in offering_selects]
+        self.assertTrue(
+            all(
+                not re.match(r"^\s*SELECT\s+(?:DISTINCT\s+)?course_offerings\.", sql, flags=re.IGNORECASE)
+                for sql in normalized_sql
+            )
+        )
+
+    def test_enrollment_adjustment_initial_get_query_count_is_independent_of_offering_count(self):
+        with CaptureQueriesContext(connection) as small_capture:
+            small_response = self.client.get(self.url)
+
+        sections = Section.objects.bulk_create(
+            [
+                Section(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    department=self.department,
+                    program=self.program,
+                    code=f"PERF-{index:03d}",
+                    name=f"Performance Section {index:03d}",
+                )
+                for index in range(60)
+            ]
+        )
+        CourseOffering.objects.bulk_create(
+            [
+                CourseOffering(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    department=self.department,
+                    program=self.program,
+                    academic_year=self.academic_year,
+                    term=self.term,
+                    course=self.course,
+                    section=section,
+                )
+                for section in sections
+            ]
+        )
+
+        with CaptureQueriesContext(connection) as large_capture:
+            large_response = self.client.get(self.url)
+
+        self.assertEqual((small_response.status_code, large_response.status_code), (200, 200))
+        self.assertLessEqual(len(large_capture), len(small_capture) + 1)
+
+    def test_enrollment_adjustment_offering_search_is_limited(self):
+        sections = Section.objects.bulk_create(
+            [
+                Section(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    department=self.department,
+                    program=self.program,
+                    code=f"SEARCH-{index:03d}",
+                    name=f"Search Section {index:03d}",
+                )
+                for index in range(60)
+            ]
+        )
+        CourseOffering.objects.bulk_create(
+            [
+                CourseOffering(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    department=self.department,
+                    program=self.program,
+                    academic_year=self.academic_year,
+                    term=self.term,
+                    course=self.course,
+                    section=section,
+                )
+                for section in sections
+            ]
+        )
+
+        response = self.client.get(
+            reverse("admin_portal:enrollment_adjustment_offering_search"),
+            {
+                "academic_year": self.academic_year.id,
+                "term": self.term.id,
+                "campus": self.campus.id,
+                "q": "SEARCH-",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["results"]), 50)
+        self.assertTrue(response.json()["more"])
+
+    def test_scoped_course_offering_sql_has_no_nested_scope_subquery(self):
         request = self._request_with_scope(campus_ids=[self.campus.id, self.other_campus.id])
 
-        _, _, _, offering_options = _enrollment_adjustment_form_context(request)
-        target_option = next(option for option in offering_options if option["id"] == self.source_offering.id)
+        sql = " ".join(str(AdminScopeService.scoped_course_offerings(request).query).upper().split())
 
-        self.assertIn(self.course.code.lower(), target_option["search_text"])
-        self.assertIn(self.course.title.lower(), target_option["search_text"])
+        self.assertNotIn(" IN (SELECT", sql)
+
+    def test_scoped_course_offerings_keeps_programless_offerings_in_section_scope(self):
+        generic_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="CS-GENERIC",
+            title="Generic Course",
+        )
+        generic_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="GEN-1A",
+            name="Generic 1A",
+        )
+        generic_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=None,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=generic_course,
+            section=generic_section,
+        )
+
+        request = self._request_with_scope(campus_ids=[self.campus.id])
+
+        self.assertIn(generic_offering.id, AdminScopeService.scoped_course_offerings(request).values_list("id", flat=True))
 
     def test_enrollment_adjustments_page_shows_step_labels(self):
         response = self.client.get(self.url)
@@ -589,4 +867,4 @@ class EnrollmentAdjustmentTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Step 1 - Adjustment Setup")
         self.assertContains(response, "Step 2 - Student Selection")
-        self.assertContains(response, "Filter by course code or title")
+        self.assertContains(response, "Search by course code, title, or section")

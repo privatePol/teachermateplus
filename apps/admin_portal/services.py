@@ -76,6 +76,23 @@ class AdminScopeService:
         return tenants, campuses, departments
 
     @staticmethod
+    def _course_offering_scope_ids(request):
+        cached = getattr(request, "_admin_course_offering_scope_ids", None)
+        if cached is not None:
+            return cached
+        tenants, campuses, departments = AdminScopeService._scoped_tenant_campus_department_ids(request)
+        cached = (
+            tenants,
+            campuses,
+            departments,
+            list(AdminScopeService.active_scoped_academic_years(request).values_list("id", flat=True)),
+            list(AdminScopeService.active_scoped_terms(request).values_list("id", flat=True)),
+            list(AdminScopeService.active_scoped_programs(request).values_list("id", flat=True)),
+        )
+        request._admin_course_offering_scope_ids = cached
+        return cached
+
+    @staticmethod
     def _visible_queryset(request, queryset):
         """
         Super admin can view active/inactive records.
@@ -216,20 +233,36 @@ class AdminScopeService:
 
     @staticmethod
     def scoped_course_offerings(request):
-        terms = AdminScopeService.active_scoped_terms(request).values_list("id", flat=True)
-        sections = AdminScopeService.active_scoped_sections(request).values_list("id", flat=True)
+        tenants, campuses, departments, academic_years, terms, programs = (
+            AdminScopeService._course_offering_scope_ids(request)
+        )
         queryset = (
-            CourseOffering.objects.filter(term_id__in=terms, section_id__in=sections)
+            CourseOffering.objects.filter(
+                tenant_id__in=tenants,
+                campus_id__in=campuses,
+                department_id__in=departments,
+                academic_year_id__in=academic_years,
+                term_id__in=terms,
+                section__tenant_id__in=tenants,
+                section__campus_id__in=campuses,
+                section__department_id__in=departments,
+                section__program_id__in=programs,
+            )
+            .filter(models.Q(program_id__in=programs) | models.Q(program__isnull=True))
             .filter(
+                tenant__is_active=True,
+                campus__is_active=True,
                 department__is_active=True,
-                program__is_active=True,
-                program__department__is_active=True,
+                academic_year__is_active=True,
+                term__is_active=True,
+                term__academic_year__is_active=True,
                 course__is_active=True,
                 section__is_active=True,
                 section__department__is_active=True,
                 section__program__is_active=True,
                 section__program__department__is_active=True,
             )
+            .filter(models.Q(program__isnull=True) | models.Q(program__is_active=True, program__department__is_active=True))
             .filter(models.Q(course__department__isnull=True) | models.Q(course__department__is_active=True))
             .select_related(
                 "tenant",
@@ -303,7 +336,7 @@ class AdminScopeService:
 
         tenant_id = getattr(request, "scope", {}).get("tenant_id")
         campus_id = getattr(request, "scope", {}).get("campus_id")
-        terms = AdminScopeService.active_scoped_terms(request).values_list("id", flat=True)
+        terms = list(AdminScopeService.active_scoped_terms(request).values_list("id", flat=True))
         queryset = (
             CourseOffering.objects.filter(
                 tenant_id=tenant_id,

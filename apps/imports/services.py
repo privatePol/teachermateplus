@@ -4,6 +4,7 @@ import csv
 import io
 import re
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
@@ -561,6 +562,7 @@ class BulkImportService:
             "student_cache": {},
             "faculty_cache": {},
             "offering_cache": {},
+            "offering_cache_preloaded": False,
         }
 
     @staticmethod
@@ -1005,8 +1007,9 @@ class BulkImportService:
             return None
         return user
 
-    @staticmethod
+    @classmethod
     def _resolve_offering_for_reference(
+        cls,
         *,
         tenant,
         campus,
@@ -1023,19 +1026,22 @@ class BulkImportService:
             return None
         key = (tenant.id, campus.id, academic_year.id, term.id, course.id, section_code.upper())
         if key not in runtime["offering_cache"]:
-            matches = list(
-                CourseOffering.objects.filter(
-                    tenant=tenant,
-                    campus=campus,
-                    academic_year=academic_year,
-                    term=term,
-                    course=course,
-                    section__code__iexact=section_code,
-                    is_active=True,
+            if runtime.get("offering_cache_preloaded"):
+                matches = []
+            else:
+                matches = list(
+                    cls._allowed_offerings_for_runtime(runtime)
+                    .filter(
+                        tenant=tenant,
+                        campus=campus,
+                        academic_year=academic_year,
+                        term=term,
+                        course=course,
+                        section__code__iexact=section_code,
+                    )
+                    .select_related("section")
+                    .order_by("id")
                 )
-                .select_related("section")
-                .order_by("id")
-            )
             runtime["offering_cache"][key] = matches
         matches = runtime["offering_cache"][key]
         if not matches:
@@ -1048,6 +1054,67 @@ class BulkImportService:
             )
             return None
         return matches[0]
+
+    @staticmethod
+    def _allowed_offerings_for_runtime(runtime: dict):
+        queryset = (
+            CourseOffering.objects.filter(
+                is_active=True,
+                tenant__is_active=True,
+                campus__is_active=True,
+                department__is_active=True,
+                academic_year__is_active=True,
+                term__is_active=True,
+                term__academic_year__is_active=True,
+                course__is_active=True,
+                section__is_active=True,
+                section__department__is_active=True,
+                section__program__is_active=True,
+                section__program__department__is_active=True,
+            )
+            .filter(Q(program__isnull=True) | Q(program__is_active=True, program__department__is_active=True))
+            .filter(Q(course__department__isnull=True) | Q(course__department__is_active=True))
+        )
+        if runtime.get("tenant_ids") is not None:
+            queryset = queryset.filter(tenant_id__in=runtime["tenant_ids"])
+        if runtime.get("campus_ids") is not None:
+            queryset = queryset.filter(campus_id__in=runtime["campus_ids"])
+        if runtime.get("department_ids") is not None:
+            queryset = queryset.filter(
+                department_id__in=runtime["department_ids"],
+                section__department_id__in=runtime["department_ids"],
+                section__program__department_id__in=runtime["department_ids"],
+            ).filter(
+                Q(program__isnull=True) | Q(program__department_id__in=runtime["department_ids"])
+            )
+        return queryset
+
+    @classmethod
+    def _preload_reference_offerings(cls, runtime: dict):
+        if runtime.get("offering_cache_preloaded"):
+            return
+        offerings = cls._allowed_offerings_for_runtime(runtime).select_related("section").only(
+            "id",
+            "tenant_id",
+            "campus_id",
+            "academic_year_id",
+            "term_id",
+            "course_id",
+            "section_id",
+            "section__id",
+            "section__code",
+        )
+        for offering in offerings:
+            key = (
+                offering.tenant_id,
+                offering.campus_id,
+                offering.academic_year_id,
+                offering.term_id,
+                offering.course_id,
+                (offering.section.code or "").strip().upper(),
+            )
+            runtime["offering_cache"].setdefault(key, []).append(offering)
+        runtime["offering_cache_preloaded"] = True
 
     @classmethod
     def _validate_section_row(cls, row: dict, runtime: dict):
@@ -1855,6 +1922,11 @@ class BulkImportService:
             runtime["duplicate_faculty_usernames"] = {
                 value for value, count in username_counts.items() if count > 1
             }
+        if import_type in {
+            ImportBatch.ImportType.ENROLLMENT,
+            ImportBatch.ImportType.FACULTY_ASSIGNMENTS,
+        }:
+            cls._preload_reference_offerings(runtime)
         row_objects = []
         seen_keys = set()
         dedup_skipped_count = 0
@@ -2318,18 +2390,79 @@ class BulkImportService:
         return "User", result.user, True, result.role_assignment
 
     @classmethod
-    def _resolve_or_create_enrollment_student(cls, normalized: dict, *, actor):
+    def _build_enrollment_confirmation_runtime(cls, *, candidate_rows, actor, request, batch):
+        runtime_request = request
+        if runtime_request is None:
+            stored_scope = ((batch.metadata_json or {}).get("scope") or {})
+            runtime_request = SimpleNamespace(scope=stored_scope)
+        scope_runtime = cls._build_runtime(user=actor, request=runtime_request)
+        offering_ids = {
+            row.normalized_data_json.get("course_offering_id")
+            for row in candidate_rows
+            if isinstance(row.normalized_data_json, dict) and row.normalized_data_json.get("course_offering_id")
+        }
+        student_ids = {
+            row.normalized_data_json.get("student_id")
+            for row in candidate_rows
+            if isinstance(row.normalized_data_json, dict) and row.normalized_data_json.get("student_id")
+        }
+        allowed_offerings = {
+            offering.id: offering
+            for offering in cls._allowed_offerings_for_runtime(scope_runtime)
+            .filter(id__in=offering_ids)
+            .select_related("section")
+            .only(
+                "id",
+                "tenant_id",
+                "campus_id",
+                "academic_year_id",
+                "term_id",
+                "section_id",
+                "section__id",
+                "section__department_id",
+                "section__year_level",
+            )
+        }
+        students_by_id = Student.objects.filter(id__in=student_ids, is_active=True).in_bulk()
+        existing_enrollment_keys = set(
+            Enrollment.objects.filter(
+                course_offering_id__in=offering_ids,
+                student_id__in=student_ids,
+            ).values_list("course_offering_id", "student_id")
+        )
+        return {
+            "allowed_offerings": allowed_offerings,
+            "students_by_id": students_by_id,
+            "existing_enrollment_keys": existing_enrollment_keys,
+        }
+
+    @classmethod
+    def _resolve_or_create_enrollment_student(
+        cls,
+        normalized: dict,
+        *,
+        actor,
+        offering,
+        confirmation_runtime=None,
+    ):
         student_id = normalized.get("student_id")
         student_mode = normalized.get("student_mode") or cls.ENROLLMENT_STUDENT_MODE_STRICT
         student_no = cls._normalize_value(normalized.get("student_no"))
-        tenant_id = normalized.get("tenant_id")
-        campus_id = normalized.get("campus_id")
+        tenant_id = offering.tenant_id
+        campus_id = offering.campus_id
         offering_id = normalized.get("course_offering_id")
 
         if student_id:
-            student = Student.objects.filter(id=student_id, is_active=True).first()
+            if confirmation_runtime is not None:
+                student = confirmation_runtime["students_by_id"].get(student_id)
+            else:
+                student = Student.objects.filter(id=student_id, is_active=True).first()
             if not student:
                 raise ValidationError("Student reference is invalid or inactive.")
+            if student.tenant_id != tenant_id:
+                raise ValidationError("Student and offering tenant no longer match.")
+            if student.campus_id != campus_id:
+                raise ValidationError("Student and offering campus no longer match.")
             return student
 
         if student_mode != cls.ENROLLMENT_STUDENT_MODE_AUTO_CREATE:
@@ -2368,14 +2501,6 @@ class BulkImportService:
                 "student_last_name and student_first_name are required when AUTO_CREATE creates new students."
             )
 
-        offering = (
-            CourseOffering.objects.select_related("section")
-            .filter(id=offering_id, is_active=True)
-            .first()
-        )
-        if not offering:
-            raise ValidationError("Offering is invalid for enrollment row.")
-
         year_level = cls._normalize_value(student_payload.get("year_level")) or offering.section.year_level
         created_student = Student.objects.create(
             tenant_id=tenant_id,
@@ -2413,19 +2538,48 @@ class BulkImportService:
         return created_student
 
     @classmethod
-    def _create_enrollment(cls, normalized: dict, *, actor):
-        student = cls._resolve_or_create_enrollment_student(normalized, actor=actor)
-        if Enrollment.objects.filter(
-            course_offering_id=normalized["course_offering_id"],
-            student=student,
-        ).exists():
+    def _create_enrollment(cls, normalized: dict, *, actor, confirmation_runtime=None):
+        offering_id = normalized["course_offering_id"]
+        if confirmation_runtime is not None:
+            offering = confirmation_runtime["allowed_offerings"].get(offering_id)
+        else:
+            offering = (
+                CourseOffering.objects.select_related("section")
+                .filter(id=offering_id, is_active=True)
+                .first()
+            )
+        if offering is None:
+            raise ValidationError("Offering is inactive or outside the current authorized scope.")
+        for field_name, expected_value in (
+            ("tenant_id", offering.tenant_id),
+            ("campus_id", offering.campus_id),
+            ("academic_year_id", offering.academic_year_id),
+            ("term_id", offering.term_id),
+        ):
+            if normalized.get(field_name) != expected_value:
+                raise ValidationError("Offering scope changed after preview; upload and validate the file again.")
+        student = cls._resolve_or_create_enrollment_student(
+            normalized,
+            actor=actor,
+            offering=offering,
+            confirmation_runtime=confirmation_runtime,
+        )
+        enrollment_key = (offering_id, student.id)
+        if confirmation_runtime is not None:
+            duplicate_exists = enrollment_key in confirmation_runtime["existing_enrollment_keys"]
+        else:
+            duplicate_exists = Enrollment.objects.filter(
+                course_offering_id=offering_id,
+                student=student,
+            ).exists()
+        if duplicate_exists:
             raise ValidationError("Enrollment already exists for this student and offering.")
 
         row = Enrollment.objects.create(
-            tenant_id=normalized["tenant_id"],
-            campus_id=normalized["campus_id"],
-            academic_year_id=normalized["academic_year_id"],
-            term_id=normalized["term_id"],
+            tenant_id=offering.tenant_id,
+            campus_id=offering.campus_id,
+            academic_year_id=offering.academic_year_id,
+            term_id=offering.term_id,
             student=student,
             course_offering_id=normalized["course_offering_id"],
             enrollment_status=normalized["enrollment_status"],
@@ -2433,6 +2587,8 @@ class BulkImportService:
             encoded_via_portal=Enrollment.SourcePortal.ADMIN,
             is_active=bool(normalized.get("is_active", True)),
         )
+        if confirmation_runtime is not None:
+            confirmation_runtime["existing_enrollment_keys"].add(enrollment_key)
         return "Enrollment", row
 
     @classmethod
@@ -2475,7 +2631,7 @@ class BulkImportService:
         )
 
     @classmethod
-    def _create_from_row(cls, import_type: str, normalized: dict, *, actor):
+    def _create_from_row(cls, import_type: str, normalized: dict, *, actor, confirmation_runtime=None):
         if import_type == ImportBatch.ImportType.SECTIONS:
             return cls._create_section(normalized)
         if import_type == ImportBatch.ImportType.COURSES:
@@ -2487,7 +2643,11 @@ class BulkImportService:
         if import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS:
             return cls._create_faculty_assignment(normalized)
         if import_type == ImportBatch.ImportType.ENROLLMENT:
-            return cls._create_enrollment(normalized, actor=actor)
+            return cls._create_enrollment(
+                normalized,
+                actor=actor,
+                confirmation_runtime=confirmation_runtime,
+            )
         raise ValidationError("Unsupported import type.")
 
     @classmethod
@@ -2531,6 +2691,14 @@ class BulkImportService:
         candidate_rows = list(batch.rows.filter(row_status=ImportBatchRow.RowStatus.VALID).order_by("row_number"))
         if not candidate_rows:
             raise ValidationError("No valid rows available for import.")
+        enrollment_confirmation_runtime = None
+        if batch.import_type == ImportBatch.ImportType.ENROLLMENT:
+            enrollment_confirmation_runtime = cls._build_enrollment_confirmation_runtime(
+                candidate_rows=candidate_rows,
+                actor=actor,
+                request=request,
+                batch=batch,
+            )
 
         imported_count = 0
         failed_count = 0
@@ -2548,7 +2716,12 @@ class BulkImportService:
                             batch_row=row,
                         )
                     else:
-                        entity_type, entity_obj = cls._create_from_row(batch.import_type, normalized, actor=actor)
+                        entity_type, entity_obj = cls._create_from_row(
+                            batch.import_type,
+                            normalized,
+                            actor=actor,
+                            confirmation_runtime=enrollment_confirmation_runtime,
+                        )
                     if not faculty_user_import:
                         cls._audit_import_row_write(
                             batch=batch,
