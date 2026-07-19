@@ -1,0 +1,6 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb small mb-0"><li class="breadcrumb-item"><a href="{% url 'admin_portal:academic_data_reconciliation' %}">Academic Data Reconciliation</a></li><li class="breadcrumb-item active" aria-current="page">Class Roster</li></ol></nav>
+<div class="card border-0 shadow-sm"><div class="card-body">{% include "admin_portal/academics/_academic_data_reconciliation_roster.html" %}</div></div>
+{% endblock %}

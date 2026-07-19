@@ -1,7 +1,10 @@
 from django.urls import path
 
 from .api_views import sis_periodic_grades_api_view
-from .academic_data_reconciliation import academic_data_reconciliation_view
+from .academic_data_reconciliation import (
+    academic_data_reconciliation_roster_view,
+    academic_data_reconciliation_view,
+)
 from .import_views import (
     email_diagnostics_view,
     faculty_invitation_resend_view,
@@ -189,6 +192,11 @@ urlpatterns = [
         "admin-portal/academic-data-reconciliation/",
         academic_data_reconciliation_view,
         name="academic_data_reconciliation",
+    ),
+    path(
+        "admin-portal/academic-data-reconciliation/offerings/<int:offering_id>/roster/",
+        academic_data_reconciliation_roster_view,
+        name="academic_data_reconciliation_roster",
     ),
     path("admin-portal/grading/analytics/", grading_analytics_view, name="grading_analytics"),
     path(

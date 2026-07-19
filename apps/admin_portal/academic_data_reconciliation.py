@@ -6,9 +6,10 @@ from django.contrib.auth import get_user_model
 from django.core.paginator import Paginator
 from django.db.models import Count, Min, Prefetch, Q, Value
 from django.db.models.functions import Concat
-from django.http import HttpResponse, QueryDict
-from django.shortcuts import render
+from django.http import Http404, HttpResponse, QueryDict
+from django.shortcuts import get_object_or_404, render
 from django.utils.text import slugify
+from django.views.decorators.http import require_GET
 
 from apps.academics.models import CourseOffering, FacultyAssignment
 from apps.academics.services import AcademicGovernanceService
@@ -28,8 +29,10 @@ CATEGORY_FACULTY = "faculty"
 VALID_CATEGORIES = {CATEGORY_OFFERINGS, CATEGORY_FACULTY}
 PAGE_SIZE = 50
 HIGH_EXCEPTION_RATIO = 0.80
-OFFERING_SORTS = {"course_code", "course_title", "section", "faculty"}
+OFFERING_SORTS = {"course_code", "course_title", "schedule", "room", "class_size", "section", "faculty"}
 FACULTY_SORTS = {"faculty_name", "faculty_id"}
+CLASS_SIZE_FILTERS = {"all", "0", "1_10", "11_20", "21_30", "31_40", "41_50", "51_plus"}
+FACULTY_ASSIGNMENT_FILTERS = {"all", "none", "assigned", "multiple"}
 
 
 def _safe_int(value):
@@ -171,7 +174,7 @@ def _offering_query(request, *, tenant_id, campus_id, academic_year_id, term_id,
         campus_id=campus_id,
         academic_year_id=academic_year_id,
         term_id=term_id,
-    ).annotate(
+    ).select_related("course", "section", "campus", "academic_year", "term").annotate(
         active_enrollment_count=Count(
             "enrollments",
             filter=Q(
@@ -196,6 +199,8 @@ def _offering_query(request, *, tenant_id, campus_id, academic_year_id, term_id,
         queryset = queryset.filter(
             Q(course__code__icontains=search_query)
             | Q(course__title__icontains=search_query)
+            | Q(schedule_text__icontains=search_query)
+            | Q(room__icontains=search_query)
             | Q(section__code__icontains=search_query)
             | Q(section__name__icontains=search_query)
             | Q(faculty_assignments__is_active=True, faculty_assignments__faculty_user__first_name__icontains=search_query)
@@ -203,6 +208,32 @@ def _offering_query(request, *, tenant_id, campus_id, academic_year_id, term_id,
             | Q(faculty_assignments__is_active=True, faculty_assignments__faculty_user__last_name__icontains=search_query)
             | Q(faculty_assignments__is_active=True, faculty_assignments__faculty_user__username__icontains=search_query)
         ).distinct()
+    return queryset
+
+
+def _selected_offering_filter(value, allowed):
+    return value if value in allowed else "all"
+
+
+def _apply_offering_filters(queryset, *, class_size, faculty_assignment):
+    size_filters = {
+        "0": Q(active_enrollment_count=0),
+        "1_10": Q(active_enrollment_count__gte=1, active_enrollment_count__lte=10),
+        "11_20": Q(active_enrollment_count__gte=11, active_enrollment_count__lte=20),
+        "21_30": Q(active_enrollment_count__gte=21, active_enrollment_count__lte=30),
+        "31_40": Q(active_enrollment_count__gte=31, active_enrollment_count__lte=40),
+        "41_50": Q(active_enrollment_count__gte=41, active_enrollment_count__lte=50),
+        "51_plus": Q(active_enrollment_count__gte=51),
+    }
+    assignment_filters = {
+        "none": Q(active_assignment_count=0),
+        "assigned": Q(active_assignment_count__gte=1),
+        "multiple": Q(active_assignment_count__gt=1),
+    }
+    if class_size in size_filters:
+        queryset = queryset.filter(size_filters[class_size])
+    if faculty_assignment in assignment_filters:
+        queryset = queryset.filter(assignment_filters[faculty_assignment])
     return queryset
 
 
@@ -244,6 +275,9 @@ def _apply_sort(queryset, *, category, sort):
         ordering = {
             "course_code": ("course__code", "section__code", "id"),
             "course_title": ("course__title", "course__code", "section__code", "id"),
+            "schedule": ("schedule_text", "course__code", "section__code", "id"),
+            "room": ("room", "course__code", "section__code", "id"),
+            "class_size": ("active_enrollment_count", "course__code", "section__code", "id"),
             "section": ("section__code", "course__code", "id"),
             "faculty": ("faculty_sort_name", "course__code", "section__code", "id"),
         }
@@ -285,8 +319,19 @@ def _faculty_names(offering):
     return ", ".join(assignment.faculty_user.full_name for assignment in assignments) or "No faculty assigned"
 
 
+def _offering_findings(offering):
+    findings = []
+    if offering.active_assignment_count == 0:
+        findings.append("No assigned faculty")
+    elif offering.active_assignment_count > 1:
+        findings.append("Multiple faculty assigned")
+    if offering.active_enrollment_count == 0:
+        findings.append("No active enrollment")
+    return "; ".join(findings) if findings else "No additional finding"
+
+
 def _csv_response(*, category, offerings, faculty, campus, academic_year, term):
-    filename_prefix = "course_offerings_without_enrollment" if category == CATEGORY_OFFERINGS else "faculty_without_assignments"
+    filename_prefix = "course_offerings" if category == CATEGORY_OFFERINGS else "faculty_without_assignments"
     filename = "_".join(
         slugify(value) or "scope" for value in (filename_prefix, campus.code, academic_year.code, term.code)
     ) + ".csv"
@@ -295,14 +340,15 @@ def _csv_response(*, category, offerings, faculty, campus, academic_year, term):
     writer = csv.writer(response)
     if category == CATEGORY_OFFERINGS:
         writer.writerow([
-            "Campus", "Course Code", "Course Title", "Section Code", "Section Name", "Faculty Assigned", "Number of Faculty Assignments",
-            "Enrollment Count", "Academic Year", "Term", "Reconciliation Status",
+            "Course Code", "Course Title", "Schedule Text", "Room", "Class Size", "Section Code", "Section Name",
+            "Faculty Assigned", "Other Finding",
         ])
         for offering in offerings:
             writer.writerow([
-                csv_safe(offering.campus.code), csv_safe(offering.course.code), csv_safe(offering.course.title),
-                csv_safe(offering.section.code), csv_safe(offering.section.name), csv_safe(_faculty_names(offering)), offering.active_assignment_count,
-                offering.active_enrollment_count, csv_safe(offering.academic_year.code), csv_safe(offering.term.code), "No Enrollment",
+                csv_safe(offering.course.code), csv_safe(offering.course.title),
+                csv_safe(offering.schedule_text or "Not specified"), csv_safe(offering.room or "Not specified"),
+                offering.active_enrollment_count, csv_safe(offering.section.code), csv_safe(offering.section.name),
+                csv_safe(_faculty_names(offering)), csv_safe(_offering_findings(offering)),
             ])
     else:
         writer.writerow(["Campus", "Faculty ID", "Faculty Name", "Email", "Assignment Count", "Academic Year", "Term", "Reconciliation Status"])
@@ -332,6 +378,11 @@ def academic_data_reconciliation_view(request):
     category = category if category in VALID_CATEGORIES else CATEGORY_OFFERINGS
     search_query = (request.GET.get("q") or "").strip()[:100]
     selected_sort = _selected_sort(category, (request.GET.get("sort") or "").strip())
+    class_size = _selected_offering_filter((request.GET.get("class_size") or "all").strip(), CLASS_SIZE_FILTERS)
+    faculty_assignment = _selected_offering_filter(
+        (request.GET.get("faculty_assignment") or "all").strip(),
+        FACULTY_ASSIGNMENT_FILTERS,
+    )
 
     offerings = CourseOffering.objects.none()
     faculty = get_user_model().objects.none()
@@ -371,14 +422,22 @@ def academic_data_reconciliation_view(request):
             summary["faculty_without_assignments"], summary["total_active_faculty"]
         )
         if category == CATEGORY_OFFERINGS:
-            offerings = _apply_sort(_offering_query(
-                request,
-                tenant_id=tenant_id,
-                campus_id=selected_campus.id,
-                academic_year_id=selected_year.id,
-                term_id=selected_term.id,
-                search_query=search_query,
-            ).filter(active_enrollment_count=0), category=category, sort=selected_sort)
+            offerings = _apply_sort(
+                _apply_offering_filters(
+                    _offering_query(
+                        request,
+                        tenant_id=tenant_id,
+                        campus_id=selected_campus.id,
+                        academic_year_id=selected_year.id,
+                        term_id=selected_term.id,
+                        search_query=search_query,
+                    ),
+                    class_size=class_size,
+                    faculty_assignment=faculty_assignment,
+                ),
+                category=category,
+                sort=selected_sort,
+            )
         else:
             faculty = _apply_sort(_faculty_query(
                 request,
@@ -412,6 +471,9 @@ def academic_data_reconciliation_view(request):
     query_params["sort"] = selected_sort
     if search_query:
         query_params["q"] = search_query
+    if category == CATEGORY_OFFERINGS:
+        query_params["class_size"] = class_size
+        query_params["faculty_assignment"] = faculty_assignment
     sort_links = {}
     for sort_code in OFFERING_SORTS if category == CATEGORY_OFFERINGS else FACULTY_SORTS:
         sort_params = query_params.copy()
@@ -422,6 +484,9 @@ def academic_data_reconciliation_view(request):
         tab_params = query_params.copy()
         tab_params["category"] = tab_category
         tab_params.pop("page", None)
+        if tab_category == CATEGORY_FACULTY:
+            tab_params.pop("class_size", None)
+            tab_params.pop("faculty_assignment", None)
         tab_queries[tab_category] = tab_params.urlencode()
     lazy_next_url = ""
     next_page_url = ""
@@ -434,14 +499,34 @@ def academic_data_reconciliation_view(request):
         lazy_params["lazy"] = "1"
         lazy_next_url = f"?{lazy_params.urlencode()}"
     active_tab_description = (
-        "Showing active, non-archived course offerings in the selected scope with no active student enrollment records."
+        "Showing all active, non-archived course offerings in the selected validated scope. "
+        "Class Size counts active ACTIVE enrollments only."
         if category == CATEGORY_OFFERINGS
         else "Showing active faculty members with a scoped FACULTY role and no active teaching assignments in the selected term."
     )
+    no_enrollment_params = query_params.copy()
+    no_enrollment_params["category"] = CATEGORY_OFFERINGS
+    no_enrollment_params["class_size"] = "0"
+    no_enrollment_params["faculty_assignment"] = "all"
+    no_enrollment_params.pop("page", None)
+    roster_params = query_params.copy()
+    roster_params["category"] = CATEGORY_OFFERINGS
+    roster_params.pop("page", None)
+    roster_params.pop("export", None)
+    roster_params.pop("lazy", None)
+    reset_params = QueryDict(mutable=True)
+    reset_params["campus_id"] = selected_campus.id
+    if selected_year:
+        reset_params["academic_year_id"] = selected_year.id
+    if selected_term:
+        reset_params["term_id"] = selected_term.id
+    reset_params["category"] = category
     context = {
         "category": category,
         "search_query": search_query,
         "selected_sort": selected_sort,
+        "class_size": class_size,
+        "faculty_assignment": faculty_assignment,
         "selected_campus": selected_campus,
         "selected_campus_id": selected_campus.id,
         "selected_year": selected_year,
@@ -457,13 +542,16 @@ def academic_data_reconciliation_view(request):
         "summary": summary,
         "high_exception_warnings": _high_exception_warnings(summary),
         "active_tab_description": active_tab_description,
-        "export_label": "Export No-Enrollment Offerings" if category == CATEGORY_OFFERINGS else "Export Unassigned Faculty",
+        "export_label": "Export Course Offerings" if category == CATEGORY_OFFERINGS else "Export Unassigned Faculty",
         "sort_links": sort_links,
         "tab_queries": tab_queries,
         "result_total": paginator.count,
         "pagination_query": query_params.urlencode(),
         "lazy_next_url": lazy_next_url,
         "next_page_url": next_page_url,
+        "no_enrollment_query": no_enrollment_params.urlencode(),
+        "roster_query": roster_params.urlencode(),
+        "reset_query": reset_params.urlencode(),
     }
     context.update(_scope_context(request))
     if category == CATEGORY_OFFERINGS and request.GET.get("lazy") == "1":
@@ -474,3 +562,58 @@ def academic_data_reconciliation_view(request):
             response["X-Reconciliation-Next-Page-Url"] = next_page_url
         return response
     return render(request, "admin_portal/academics/academic_data_reconciliation.html", context)
+
+
+@require_GET
+@portal_required("ADMIN")
+@permission_required(RECONCILIATION_PERMISSION)
+def academic_data_reconciliation_roster_view(request, offering_id):
+    """Read-only, scope-resolved active class roster with a normal-page fallback."""
+    tenant_id, selected_campus, _tenant_options, _campus_options = _selected_scope(request)
+    if not tenant_id or selected_campus is None:
+        raise Http404("No authorized reconciliation scope is available.")
+    selected_year, selected_term, _year_options, _term_options = _selected_period(request, tenant_id)
+    if not selected_year or not selected_term:
+        raise Http404("No authorized academic period is available.")
+    offering = get_object_or_404(
+        _offering_query(
+            request,
+            tenant_id=tenant_id,
+            campus_id=selected_campus.id,
+            academic_year_id=selected_year.id,
+            term_id=selected_term.id,
+        ),
+        pk=offering_id,
+    )
+    enrollments = Enrollment.objects.filter(
+        course_offering=offering,
+        is_active=True,
+        enrollment_status=Enrollment.Status.ACTIVE,
+    ).select_related("student").order_by(
+        "student__last_name",
+        "student__first_name",
+        "student__student_no",
+    )
+    paginator = Paginator(enrollments, PAGE_SIZE)
+    page_obj = paginator.get_page(request.GET.get("roster_page"))
+    context = {
+        "offering": offering,
+        "enrollments": page_obj.object_list,
+        "page_obj": page_obj,
+        "active_class_size": offering.active_enrollment_count,
+        "roster_query": _roster_query(request),
+    }
+    template = (
+        "admin_portal/academics/_academic_data_reconciliation_roster.html"
+        if request.GET.get("modal") == "1"
+        else "admin_portal/academics/academic_data_reconciliation_roster.html"
+    )
+    return render(request, template, context)
+
+
+def _roster_query(request):
+    """Keep the validated scope in roster pager links, not modal transport state."""
+    query = QueryDict(request.META.get("QUERY_STRING", ""), mutable=True)
+    query.pop("modal", None)
+    query.pop("roster_page", None)
+    return query.urlencode()

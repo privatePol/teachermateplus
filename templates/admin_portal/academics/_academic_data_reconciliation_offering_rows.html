@@ -1,8 +1,11 @@
 {% for offering in offerings %}
   <tr>
     <td class="text-wrap"><span class="fw-semibold d-block">{{ offering.course.code }}</span><span>{{ offering.course.title }}</span></td>
+    <td class="text-wrap">{{ offering.schedule_text|default:"Not specified" }}</td>
+    <td class="text-wrap">{{ offering.room|default:"Not specified" }}</td>
+    <td><span class="badge {% if offering.active_enrollment_count == 0 %}text-bg-warning{% else %}text-bg-secondary{% endif %}">{{ offering.active_enrollment_count }}</span></td>
     <td class="text-wrap"><span class="fw-semibold d-block">{{ offering.section.code }}</span><span class="text-muted small">{{ offering.section.name }}</span></td>
-    <td class="text-wrap">{% for assignment in offering.reconciliation_assignments %}{% if not forloop.first %}, {% endif %}{{ assignment.faculty_user.full_name }}{% empty %}<span class="text-muted">No faculty assigned</span>{% endfor %}</td>
-    <td>{% if offering.active_assignment_count == 0 %}<span class="badge text-bg-warning">No faculty assigned</span>{% elif offering.active_assignment_count > 1 %}<span class="badge text-bg-info">Multiple faculty assigned</span>{% else %}<span class="text-muted small">No additional finding</span>{% endif %}</td>
+    <td class="text-wrap">{% for assignment in offering.reconciliation_assignments %}{% if not forloop.first %}, {% endif %}{{ assignment.faculty_user.full_name }}{% empty %}<span class="text-muted">No faculty assigned</span>{% endfor %}{% if offering.active_assignment_count > 1 %}<div class="small text-info">Multiple faculty assigned</div>{% endif %}</td>
+    <td><a class="btn btn-sm btn-outline-secondary" data-roster-url href="{% url 'admin_portal:academic_data_reconciliation_roster' offering.id %}?{{ roster_query }}" title="View class roster" aria-label="View enrolled students for {{ offering.course.code }} {{ offering.section.code }}"><span aria-hidden="true">🔍</span><span class="visually-hidden">View class roster</span></a></td>
   </tr>
 {% endfor %}

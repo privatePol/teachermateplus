@@ -34,29 +34,44 @@
         </div>
         <div class="col-sm-6 col-lg-2">
           <label class="form-label mb-1">Campus</label>
-          <select class="form-select" name="campus_id">
-            {% for campus in campus_options %}<option value="{{ campus.id }}" {% if selected_campus_id == campus.id %}selected{% endif %}>{{ campus.code }}{% if campus.name %} - {{ campus.name }}{% endif %}</option>{% endfor %}
-          </select>
+          <select class="form-select" name="campus_id">{% for campus in campus_options %}<option value="{{ campus.id }}" {% if selected_campus_id == campus.id %}selected{% endif %}>{{ campus.code }}{% if campus.name %} - {{ campus.name }}{% endif %}</option>{% endfor %}</select>
         </div>
         <div class="col-sm-6 col-lg-2">
           <label class="form-label mb-1">Academic Year</label>
-          <select class="form-select" name="academic_year_id">
-            {% for year in academic_year_options %}<option value="{{ year.id }}" {% if selected_year_id == year.id %}selected{% endif %}>{{ year.code }}</option>{% endfor %}
-          </select>
+          <select class="form-select" name="academic_year_id">{% for year in academic_year_options %}<option value="{{ year.id }}" {% if selected_year_id == year.id %}selected{% endif %}>{{ year.code }}</option>{% endfor %}</select>
         </div>
         <div class="col-sm-6 col-lg-2">
           <label class="form-label mb-1">Term</label>
-          <select class="form-select" name="term_id">
-            {% for term in term_options %}<option value="{{ term.id }}" {% if selected_term_id == term.id %}selected{% endif %}>{{ term.code }}{% if term.name %} - {{ term.name }}{% endif %}</option>{% endfor %}
-          </select>
+          <select class="form-select" name="term_id">{% for term in term_options %}<option value="{{ term.id }}" {% if selected_term_id == term.id %}selected{% endif %}>{{ term.code }}{% if term.name %} - {{ term.name }}{% endif %}</option>{% endfor %}</select>
         </div>
         <div class="col-sm-6 col-lg-2">
           <label class="form-label mb-1">Search</label>
           <input class="form-control" name="q" value="{{ search_query }}" maxlength="100" placeholder="Course, section, faculty">
         </div>
-        <div class="col-sm-6 col-lg-2 d-flex gap-2">
+        {% if category == 'offerings' %}
+        <div class="col-sm-6 col-lg-2">
+          <label class="form-label mb-1">Class Size</label>
+          <select class="form-select" name="class_size">
+            <option value="all" {% if class_size == 'all' %}selected{% endif %}>All class sizes</option>
+            <option value="0" {% if class_size == '0' %}selected{% endif %}>0 students</option>
+            <option value="1_10" {% if class_size == '1_10' %}selected{% endif %}>1–10</option>
+            <option value="11_20" {% if class_size == '11_20' %}selected{% endif %}>11–20</option>
+            <option value="21_30" {% if class_size == '21_30' %}selected{% endif %}>21–30</option>
+            <option value="31_40" {% if class_size == '31_40' %}selected{% endif %}>31–40</option>
+            <option value="41_50" {% if class_size == '41_50' %}selected{% endif %}>41–50</option>
+            <option value="51_plus" {% if class_size == '51_plus' %}selected{% endif %}>More than 50</option>
+          </select>
+        </div>
+        <fieldset class="col-12"><legend class="form-label mb-1">Faculty Assignment</legend><div class="btn-group btn-group-sm flex-wrap" role="group" aria-label="Faculty assignment status">
+          <input type="radio" class="btn-check" name="faculty_assignment" id="faculty-all" value="all" {% if faculty_assignment == 'all' %}checked{% endif %}><label class="btn btn-outline-secondary" for="faculty-all">All offerings</label>
+          <input type="radio" class="btn-check" name="faculty_assignment" id="faculty-none" value="none" {% if faculty_assignment == 'none' %}checked{% endif %}><label class="btn btn-outline-secondary" for="faculty-none">Without assigned faculty</label>
+          <input type="radio" class="btn-check" name="faculty_assignment" id="faculty-assigned" value="assigned" {% if faculty_assignment == 'assigned' %}checked{% endif %}><label class="btn btn-outline-secondary" for="faculty-assigned">With assigned faculty</label>
+          <input type="radio" class="btn-check" name="faculty_assignment" id="faculty-multiple" value="multiple" {% if faculty_assignment == 'multiple' %}checked{% endif %}><label class="btn btn-outline-secondary" for="faculty-multiple">Multiple faculty assigned</label>
+        </div></fieldset>
+        {% endif %}
+        <div class="col-sm-6 col-lg-3 d-flex gap-2">
           <button class="btn btn-success flex-fill" type="submit">Apply Filters</button>
-          <a class="btn btn-outline-secondary" href="{% url 'admin_portal:academic_data_reconciliation' %}">Reset</a>
+          <a class="btn btn-outline-secondary" href="?{{ reset_query }}">Reset</a>
         </div>
       </form>
       <div class="form-text mt-2">Change the tenant in the Admin Portal header. Campus and academic-period filters are validated against your authorized scope.</div>
@@ -65,18 +80,16 @@
 
   <div class="row g-3 mb-3">
     <div class="col-6 col-lg-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Total Active Course Offerings</div><div class="h3 mb-0">{{ summary.total_active_offerings }}</div></div></div></div>
-    <div class="col-6 col-lg-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Offerings Without Enrollment</div><div class="h4 mb-0 text-warning">{{ summary.offerings_without_enrollment }} <span class="fs-6 text-muted">of {{ summary.total_active_offerings }}</span></div><div class="small text-muted">{{ summary.offerings_without_enrollment_percent|floatformat:1 }}%</div></div></div></div>
+    <div class="col-6 col-lg-3"><a class="card h-100 border-0 shadow-sm text-decoration-none" href="?{{ no_enrollment_query }}"><div class="card-body"><div class="small text-muted">Offerings Without Enrollment</div><div class="h4 mb-0 text-warning">{{ summary.offerings_without_enrollment }} <span class="fs-6 text-muted">of {{ summary.total_active_offerings }}</span></div><div class="small text-muted">{{ summary.offerings_without_enrollment_percent|floatformat:1 }}%</div></div></a></div>
     <div class="col-6 col-lg-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Total Active Faculty</div><div class="h3 mb-0">{{ summary.total_active_faculty }}</div></div></div></div>
     <div class="col-6 col-lg-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Faculty Without Assignments</div><div class="h4 mb-0 text-warning">{{ summary.faculty_without_assignments }} <span class="fs-6 text-muted">of {{ summary.total_active_faculty }}</span></div><div class="small text-muted">{{ summary.faculty_without_assignments_percent|floatformat:1 }}%</div></div></div></div>
   </div>
 
-  {% for warning in high_exception_warnings %}
-    <div class="alert alert-warning small" role="status">{{ warning }}</div>
-  {% endfor %}
+  {% for warning in high_exception_warnings %}<div class="alert alert-warning small" role="status">{{ warning }}</div>{% endfor %}
 
   <ul class="nav nav-tabs mb-2">
-    <li class="nav-item"><a class="nav-link {% if category == 'offerings' %}active{% endif %}" href="?{{ tab_queries.offerings }}">No Enrollment <span class="badge text-bg-secondary ms-1">{{ summary.offerings_without_enrollment }}</span></a></li>
-    <li class="nav-item"><a class="nav-link {% if category == 'faculty' %}active{% endif %}" href="?{{ tab_queries.faculty }}">No Faculty Assignment <span class="badge text-bg-secondary ms-1">{{ summary.faculty_without_assignments }}</span></a></li>
+    <li class="nav-item"><a class="nav-link {% if category == 'offerings' %}active{% endif %}" href="?{{ tab_queries.offerings }}">Course Offerings <span class="badge text-bg-secondary ms-1">{{ summary.total_active_offerings }}</span></a></li>
+    <li class="nav-item"><a class="nav-link {% if category == 'faculty' %}active{% endif %}" href="?{{ tab_queries.faculty }}">Faculty Without Assignments <span class="badge text-bg-secondary ms-1">{{ summary.faculty_without_assignments }}</span></a></li>
   </ul>
   <p class="small text-muted mb-3">{{ active_tab_description }}</p>
 
@@ -89,93 +102,64 @@
     <div class="table-responsive">
       {% if category == 'offerings' %}
         <table class="table table-hover align-top mb-0">
-          <thead><tr><th><a class="link-dark text-decoration-none" href="?{{ sort_links.course_code }}">Course</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.section }}">Section</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.faculty }}">Faculty Assigned</a></th><th>Other Finding</th></tr></thead>
-          <tbody id="no-enrollment-results">
+          <thead><tr><th><a class="link-dark text-decoration-none" href="?{{ sort_links.course_code }}">Course</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.schedule }}">Schedule Text</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.room }}">Room</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.class_size }}">Class Size</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.section }}">Section</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.faculty }}">Faculty Assigned</a></th><th>Roster</th></tr></thead>
+          <tbody id="course-offering-results">
             {% include "admin_portal/academics/_academic_data_reconciliation_offering_rows.html" %}
-            {% if not offerings %}
-              <tr><td colspan="4" class="text-center text-muted py-4">No active course offerings without enrollment were found for the selected academic period.</td></tr>
-            {% endif %}
+            {% if not offerings %}<tr><td colspan="7" class="text-center text-muted py-4">No active, non-archived course offerings match the selected filters.</td></tr>{% endif %}
           </tbody>
         </table>
       {% else %}
-        <table class="table table-hover align-top mb-0">
-          <thead><tr><th><a class="link-dark text-decoration-none" href="?{{ sort_links.faculty_name }}">Faculty</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.faculty_id }}">Faculty ID</a></th><th>Email</th><th>Finding</th></tr></thead>
-          <tbody>
-            {% for user in faculty %}
-              <tr><td class="text-wrap">{{ user.full_name }}</td><td>{{ user.username }}</td><td class="text-wrap">{{ user.email }}</td><td><span class="badge text-bg-warning">No faculty assignment</span></td></tr>
-            {% empty %}
-              <tr><td colspan="4" class="text-center text-muted py-4">No active faculty members without assignments were found for the selected academic period.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
+        <table class="table table-hover align-top mb-0"><thead><tr><th><a class="link-dark text-decoration-none" href="?{{ sort_links.faculty_name }}">Faculty</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.faculty_id }}">Faculty ID</a></th><th>Email</th><th>Finding</th></tr></thead><tbody>
+          {% for user in faculty %}<tr><td class="text-wrap">{{ user.full_name }}</td><td>{{ user.username }}</td><td class="text-wrap">{{ user.email }}</td><td><span class="badge text-bg-warning">No faculty assignment</span></td></tr>{% empty %}<tr><td colspan="4" class="text-center text-muted py-4">No active faculty members without assignments were found for the selected academic period.</td></tr>{% endfor %}
+        </tbody></table>
       {% endif %}
     </div>
-    <div class="card-footer bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
-      <span class="small text-muted" id="reconciliation-result-range">{% if result_total %}Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ result_total }} records.{% else %}0 records.{% endif %}</span>
-      {% if category == 'offerings' %}
-        {% if next_page_url %}<a class="btn btn-sm btn-outline-secondary" id="no-enrollment-load-more" href="{{ next_page_url }}" data-lazy-url="{{ lazy_next_url }}" aria-label="Load the next page of no-enrollment offerings">Load more</a>{% endif %}
-      {% elif page_obj.paginator.num_pages > 1 %}
-        <div class="btn-group btn-group-sm">{% if page_obj.has_previous %}<a class="btn btn-outline-secondary" href="?{{ pagination_query }}&amp;page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}<span class="btn btn-outline-secondary disabled">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>{% if page_obj.has_next %}<a class="btn btn-outline-secondary" href="?{{ pagination_query }}&amp;page={{ page_obj.next_page_number }}">Next</a>{% endif %}</div>
-      {% endif %}
+    <div class="card-footer bg-white d-flex flex-wrap justify-content-between align-items-center gap-2"><span class="small text-muted" id="reconciliation-result-range">{% if result_total %}Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ result_total }} records.{% else %}0 records.{% endif %}</span>
+      {% if category == 'offerings' %}{% if next_page_url %}<a class="btn btn-sm btn-outline-secondary" id="course-offering-load-more" href="{{ next_page_url }}" data-lazy-url="{{ lazy_next_url }}" aria-label="Load the next page of course offerings">Load more</a>{% endif %}{% elif page_obj.paginator.num_pages > 1 %}<div class="btn-group btn-group-sm">{% if page_obj.has_previous %}<a class="btn btn-outline-secondary" href="?{{ pagination_query }}&amp;page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}<span class="btn btn-outline-secondary disabled">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>{% if page_obj.has_next %}<a class="btn btn-outline-secondary" href="?{{ pagination_query }}&amp;page={{ page_obj.next_page_number }}">Next</a>{% endif %}</div>{% endif %}
     </div>
   </div>
+
+  <div class="modal fade" id="reconciliationRosterModal" tabindex="-1" aria-labelledby="reconciliationRosterModalTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title fs-5" id="reconciliationRosterModalTitle">Class Roster</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body" data-roster-body><div class="text-muted">Loading class roster...</div></div></div></div></div>
 {% endif %}
 {% endblock %}
 
 {% block extra_js %}
 {{ block.super }}
-{% if category == 'offerings' and next_page_url %}
+{% if category == 'offerings' %}
 <script>
-  document.addEventListener("DOMContentLoaded", function () {
-    const link = document.getElementById("no-enrollment-load-more");
-    const results = document.getElementById("no-enrollment-results");
-    const range = document.getElementById("reconciliation-result-range");
-    if (!link || !results || !("fetch" in window)) return;
-
+document.addEventListener("DOMContentLoaded", function () {
+  const results = document.getElementById("course-offering-results");
+  const range = document.getElementById("reconciliation-result-range");
+  const link = document.getElementById("course-offering-load-more");
+  if (link && results && "fetch" in window) {
     let loading = false;
-    let enhancementFailed = false;
-    const startingIndex = {{ page_obj.start_index|default:1 }};
-    const loadMore = function (event) {
-      if (event) event.preventDefault();
+    link.addEventListener("click", function (event) {
       const nextUrl = link.dataset.lazyUrl;
       if (!nextUrl || loading) return;
-      loading = true;
-      link.setAttribute("aria-disabled", "true");
-      link.textContent = "Loading…";
-      fetch(nextUrl, {headers: {"X-Requested-With": "XMLHttpRequest"}})
-        .then((response) => {
-          if (!response.ok) throw new Error("Unable to load more rows.");
-          const followingLazyUrl = response.headers.get("X-Reconciliation-Next-Url") || "";
-          const followingPageUrl = response.headers.get("X-Reconciliation-Next-Page-Url") || "";
-          return response.text().then((html) => ({html, followingLazyUrl, followingPageUrl}));
-        })
-        .then(({html, followingLazyUrl, followingPageUrl}) => {
-          results.insertAdjacentHTML("beforeend", html);
-          const loadedRows = results.querySelectorAll("tr").length;
-          const total = {{ result_total|default:0 }};
-          if (range && total) range.textContent = `Showing ${startingIndex}–${startingIndex + loadedRows - 1} of ${total} records.`;
-          link.dataset.lazyUrl = followingLazyUrl;
-          link.href = followingPageUrl;
-          if (!followingLazyUrl || !followingPageUrl) link.remove();
-        })
-        .catch(() => {
-          enhancementFailed = true;
-          link.removeAttribute("aria-disabled");
-          link.textContent = "Load next page";
-        })
-        .finally(() => { loading = false; });
-    };
-    link.addEventListener("click", function (event) {
-      if (enhancementFailed) return;
-      loadMore(event);
+      event.preventDefault(); loading = true; link.setAttribute("aria-disabled", "true"); link.textContent = "Loading…";
+      fetch(nextUrl, {headers: {"X-Requested-With": "XMLHttpRequest"}}).then(function (response) {
+        if (!response.ok) throw new Error("Unable to load course offerings.");
+        return response.text().then(function (html) { return {html: html, lazy: response.headers.get("X-Reconciliation-Next-Url") || "", page: response.headers.get("X-Reconciliation-Next-Page-Url") || ""}; });
+      }).then(function (payload) {
+        results.insertAdjacentHTML("beforeend", payload.html); link.dataset.lazyUrl = payload.lazy; link.href = payload.page;
+        if (!payload.lazy || !payload.page) link.remove();
+        if (range) range.textContent = "Showing loaded course offerings of {{ result_total|default:0 }} records.";
+      }).catch(function () { link.removeAttribute("aria-disabled"); link.textContent = "Load next page"; }).finally(function () { loading = false; });
     });
-    if ("IntersectionObserver" in window) {
-      new IntersectionObserver((entries, observer) => {
-        if (entries[0].isIntersecting) loadMore();
-        if (!document.body.contains(link)) observer.disconnect();
-      }, {rootMargin: "240px"}).observe(link);
-    }
+  }
+  const modalElement = document.getElementById("reconciliationRosterModal");
+  if (!modalElement || !window.bootstrap || !("fetch" in window)) return;
+  const modal = new bootstrap.Modal(modalElement); const body = modalElement.querySelector("[data-roster-body]");
+  document.addEventListener("click", function (event) {
+    const rosterLink = event.target.closest("[data-roster-url]");
+    if (!rosterLink) return;
+    event.preventDefault(); body.innerHTML = '<div class="text-muted">Loading class roster...</div>'; modal.show();
+    const separator = rosterLink.href.indexOf("?") === -1 ? "?" : "&";
+    fetch(rosterLink.href + separator + "modal=1", {headers: {"X-Requested-With": "XMLHttpRequest"}}).then(function (response) {
+      if (!response.ok) throw new Error("Unable to load class roster."); return response.text();
+    }).then(function (html) { body.innerHTML = html; }).catch(function () { body.innerHTML = '<div class="alert alert-danger mb-0">Unable to load the class roster.</div>'; });
   });
+});
 </script>
 {% endif %}
 {% endblock %}
