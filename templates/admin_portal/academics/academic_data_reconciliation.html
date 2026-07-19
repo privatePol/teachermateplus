@@ -1,0 +1,181 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-2">
+  <ol class="breadcrumb small mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'admin_portal:dashboard' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Academic Data Reconciliation</li>
+  </ol>
+</nav>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h2 class="h4 mb-1">Academic Data Reconciliation</h2>
+    <p class="text-muted mb-0">Compare TeacherMate+ records with Pinnacle for the selected academic period.</p>
+  </div>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:dashboard' %}">Back to Dashboard</a>
+</div>
+
+{% if scope_unavailable %}
+  <div class="alert alert-warning mb-0">Select an authorized tenant and campus in the Admin Portal header before running a reconciliation report.</div>
+{% else %}
+  <div class="alert alert-info small" role="note">
+    Results are for verification against Pinnacle. TeacherMate+ does not modify records from this page; a finding may still be valid and should be confirmed before correction.
+  </div>
+
+  <div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+      <form method="get" class="row g-2 align-items-end">
+        <input type="hidden" name="category" value="{{ category }}">
+        <input type="hidden" name="sort" value="{{ selected_sort }}">
+        <div class="col-sm-6 col-lg-2">
+          <label class="form-label mb-1 small">Tenant</label>
+          <input class="form-control form-control-sm" value="{{ selected_campus.tenant.code }}" readonly aria-label="Selected tenant">
+        </div>
+        <div class="col-sm-6 col-lg-2">
+          <label class="form-label mb-1">Campus</label>
+          <select class="form-select" name="campus_id">
+            {% for campus in campus_options %}<option value="{{ campus.id }}" {% if selected_campus_id == campus.id %}selected{% endif %}>{{ campus.code }}{% if campus.name %} - {{ campus.name }}{% endif %}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-2">
+          <label class="form-label mb-1">Academic Year</label>
+          <select class="form-select" name="academic_year_id">
+            {% for year in academic_year_options %}<option value="{{ year.id }}" {% if selected_year_id == year.id %}selected{% endif %}>{{ year.code }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-2">
+          <label class="form-label mb-1">Term</label>
+          <select class="form-select" name="term_id">
+            {% for term in term_options %}<option value="{{ term.id }}" {% if selected_term_id == term.id %}selected{% endif %}>{{ term.code }}{% if term.name %} - {{ term.name }}{% endif %}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-2">
+          <label class="form-label mb-1">Search</label>
+          <input class="form-control" name="q" value="{{ search_query }}" maxlength="100" placeholder="Course, section, faculty">
+        </div>
+        <div class="col-sm-6 col-lg-2 d-flex gap-2">
+          <button class="btn btn-success flex-fill" type="submit">Apply Filters</button>
+          <a class="btn btn-outline-secondary" href="{% url 'admin_portal:academic_data_reconciliation' %}">Reset</a>
+        </div>
+      </form>
+      <div class="form-text mt-2">Change the tenant in the Admin Portal header. Campus and academic-period filters are validated against your authorized scope.</div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-lg-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Total Active Course Offerings</div><div class="h3 mb-0">{{ summary.total_active_offerings }}</div></div></div></div>
+    <div class="col-6 col-lg-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Offerings Without Enrollment</div><div class="h4 mb-0 text-warning">{{ summary.offerings_without_enrollment }} <span class="fs-6 text-muted">of {{ summary.total_active_offerings }}</span></div><div class="small text-muted">{{ summary.offerings_without_enrollment_percent|floatformat:1 }}%</div></div></div></div>
+    <div class="col-6 col-lg-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Total Active Faculty</div><div class="h3 mb-0">{{ summary.total_active_faculty }}</div></div></div></div>
+    <div class="col-6 col-lg-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="small text-muted">Faculty Without Assignments</div><div class="h4 mb-0 text-warning">{{ summary.faculty_without_assignments }} <span class="fs-6 text-muted">of {{ summary.total_active_faculty }}</span></div><div class="small text-muted">{{ summary.faculty_without_assignments_percent|floatformat:1 }}%</div></div></div></div>
+  </div>
+
+  {% for warning in high_exception_warnings %}
+    <div class="alert alert-warning small" role="status">{{ warning }}</div>
+  {% endfor %}
+
+  <ul class="nav nav-tabs mb-2">
+    <li class="nav-item"><a class="nav-link {% if category == 'offerings' %}active{% endif %}" href="?{{ tab_queries.offerings }}">No Enrollment <span class="badge text-bg-secondary ms-1">{{ summary.offerings_without_enrollment }}</span></a></li>
+    <li class="nav-item"><a class="nav-link {% if category == 'faculty' %}active{% endif %}" href="?{{ tab_queries.faculty }}">No Faculty Assignment <span class="badge text-bg-secondary ms-1">{{ summary.faculty_without_assignments }}</span></a></li>
+  </ul>
+  <p class="small text-muted mb-3">{{ active_tab_description }}</p>
+
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+    <div class="small text-muted">{{ selected_campus.code }} / {{ selected_year.code }} / {{ selected_term.code }}</div>
+    <a class="btn btn-sm btn-outline-success" href="?{{ pagination_query }}{% if pagination_query %}&amp;{% endif %}export=csv">{{ export_label }}</a>
+  </div>
+
+  <div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+      {% if category == 'offerings' %}
+        <table class="table table-hover align-top mb-0">
+          <thead><tr><th><a class="link-dark text-decoration-none" href="?{{ sort_links.course_code }}">Course</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.section }}">Section</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.faculty }}">Faculty Assigned</a></th><th>Other Finding</th></tr></thead>
+          <tbody id="no-enrollment-results">
+            {% include "admin_portal/academics/_academic_data_reconciliation_offering_rows.html" %}
+            {% if not offerings %}
+              <tr><td colspan="4" class="text-center text-muted py-4">No active course offerings without enrollment were found for the selected academic period.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      {% else %}
+        <table class="table table-hover align-top mb-0">
+          <thead><tr><th><a class="link-dark text-decoration-none" href="?{{ sort_links.faculty_name }}">Faculty</a></th><th><a class="link-dark text-decoration-none" href="?{{ sort_links.faculty_id }}">Faculty ID</a></th><th>Email</th><th>Finding</th></tr></thead>
+          <tbody>
+            {% for user in faculty %}
+              <tr><td class="text-wrap">{{ user.full_name }}</td><td>{{ user.username }}</td><td class="text-wrap">{{ user.email }}</td><td><span class="badge text-bg-warning">No faculty assignment</span></td></tr>
+            {% empty %}
+              <tr><td colspan="4" class="text-center text-muted py-4">No active faculty members without assignments were found for the selected academic period.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </div>
+    <div class="card-footer bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span class="small text-muted" id="reconciliation-result-range">{% if result_total %}Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ result_total }} records.{% else %}0 records.{% endif %}</span>
+      {% if category == 'offerings' %}
+        {% if next_page_url %}<a class="btn btn-sm btn-outline-secondary" id="no-enrollment-load-more" href="{{ next_page_url }}" data-lazy-url="{{ lazy_next_url }}" aria-label="Load the next page of no-enrollment offerings">Load more</a>{% endif %}
+      {% elif page_obj.paginator.num_pages > 1 %}
+        <div class="btn-group btn-group-sm">{% if page_obj.has_previous %}<a class="btn btn-outline-secondary" href="?{{ pagination_query }}&amp;page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}<span class="btn btn-outline-secondary disabled">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>{% if page_obj.has_next %}<a class="btn btn-outline-secondary" href="?{{ pagination_query }}&amp;page={{ page_obj.next_page_number }}">Next</a>{% endif %}</div>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+{% if category == 'offerings' and next_page_url %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const link = document.getElementById("no-enrollment-load-more");
+    const results = document.getElementById("no-enrollment-results");
+    const range = document.getElementById("reconciliation-result-range");
+    if (!link || !results || !("fetch" in window)) return;
+
+    let loading = false;
+    let enhancementFailed = false;
+    const startingIndex = {{ page_obj.start_index|default:1 }};
+    const loadMore = function (event) {
+      if (event) event.preventDefault();
+      const nextUrl = link.dataset.lazyUrl;
+      if (!nextUrl || loading) return;
+      loading = true;
+      link.setAttribute("aria-disabled", "true");
+      link.textContent = "Loading…";
+      fetch(nextUrl, {headers: {"X-Requested-With": "XMLHttpRequest"}})
+        .then((response) => {
+          if (!response.ok) throw new Error("Unable to load more rows.");
+          const followingLazyUrl = response.headers.get("X-Reconciliation-Next-Url") || "";
+          const followingPageUrl = response.headers.get("X-Reconciliation-Next-Page-Url") || "";
+          return response.text().then((html) => ({html, followingLazyUrl, followingPageUrl}));
+        })
+        .then(({html, followingLazyUrl, followingPageUrl}) => {
+          results.insertAdjacentHTML("beforeend", html);
+          const loadedRows = results.querySelectorAll("tr").length;
+          const total = {{ result_total|default:0 }};
+          if (range && total) range.textContent = `Showing ${startingIndex}–${startingIndex + loadedRows - 1} of ${total} records.`;
+          link.dataset.lazyUrl = followingLazyUrl;
+          link.href = followingPageUrl;
+          if (!followingLazyUrl || !followingPageUrl) link.remove();
+        })
+        .catch(() => {
+          enhancementFailed = true;
+          link.removeAttribute("aria-disabled");
+          link.textContent = "Load next page";
+        })
+        .finally(() => { loading = false; });
+    };
+    link.addEventListener("click", function (event) {
+      if (enhancementFailed) return;
+      loadMore(event);
+    });
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver((entries, observer) => {
+        if (entries[0].isIntersecting) loadMore();
+        if (!document.body.contains(link)) observer.disconnect();
+      }, {rootMargin: "240px"}).observe(link);
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}

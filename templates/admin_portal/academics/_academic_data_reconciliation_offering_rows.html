@@ -1,0 +1,8 @@
+{% for offering in offerings %}
+  <tr>
+    <td class="text-wrap"><span class="fw-semibold d-block">{{ offering.course.code }}</span><span>{{ offering.course.title }}</span></td>
+    <td class="text-wrap"><span class="fw-semibold d-block">{{ offering.section.code }}</span><span class="text-muted small">{{ offering.section.name }}</span></td>
+    <td class="text-wrap">{% for assignment in offering.reconciliation_assignments %}{% if not forloop.first %}, {% endif %}{{ assignment.faculty_user.full_name }}{% empty %}<span class="text-muted">No faculty assigned</span>{% endfor %}</td>
+    <td>{% if offering.active_assignment_count == 0 %}<span class="badge text-bg-warning">No faculty assigned</span>{% elif offering.active_assignment_count > 1 %}<span class="badge text-bg-info">Multiple faculty assigned</span>{% else %}<span class="text-muted small">No additional finding</span>{% endif %}</td>
+  </tr>
+{% endfor %}
