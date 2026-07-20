@@ -2905,7 +2905,86 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "data-summary-floating-scrollbar")
         self.assertContains(response, "data-summary-table-container")
         self.assertContains(response, "ResizeObserver")
-        self.assertContains(response, "--summary-header-row-1-top")
+        self.assertContains(response, ".class-record-table thead")
+        self.assertContains(response, "top: 0;")
+        self.assertNotContains(response, "--summary-header-top")
+        self.assertNotContains(response, "updateHeaderOffset")
+
+    def test_period_summary_renders_first_student_and_preserves_student_order(self):
+        self._accept_assignment()
+        alpha = self._create_active_student(
+            student_no="2025-SUMMARY-001",
+            last_name="Alpha",
+            first_name="Student",
+        )
+        bravo = self._create_active_student(
+            student_no="2025-SUMMARY-002",
+            last_name="Bravo",
+            first_name="Student",
+        )
+        charlie = self._create_active_student(
+            student_no="2025-SUMMARY-003",
+            last_name="Charlie",
+            first_name="Student",
+        )
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_summary",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["student"].id for row in response.context["rows"]],
+            [alpha.id, bravo.id, charlie.id],
+        )
+        table_html = response.content.decode().split('data-summary-table-container', 1)[1].split(
+            'data-mobile-period-grade-table', 1
+        )[0]
+        self.assertEqual(table_html.count('row-number-cell">'), 3)
+        self.assertIn('row-number-cell">1</td>', table_html)
+        self.assertLess(table_html.index(alpha.student_no), table_html.index(bravo.student_no))
+        self.assertLess(table_html.index(bravo.student_no), table_html.index(charlie.student_no))
+
+    def test_period_summary_renders_all_students_in_a_large_class(self):
+        self._accept_assignment()
+        students = [
+            self._create_active_student(
+                student_no=f"2025-LARGE-SUMMARY-{index:03d}",
+                last_name=f"Student{index:03d}",
+                first_name="Large",
+            )
+            for index in range(1, 102)
+        ]
+        StudentPeriodGrade.objects.bulk_create(
+            [
+                StudentPeriodGrade(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    offering=self.offering,
+                    template_period=self.prelim,
+                    student=student,
+                    computed_by_user=self.faculty_user,
+                )
+                for student in students
+            ]
+        )
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_summary",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["rows"]), 101)
+        self.assertEqual(response.context["rows"][0]["student"].id, students[0].id)
+        self.assertEqual(response.context["rows"][-1]["student"].id, students[-1].id)
 
     def test_period_summary_weighted_details_keeps_empty_detail_columns(self):
         self._accept_assignment()

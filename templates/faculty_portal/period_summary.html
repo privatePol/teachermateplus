@@ -113,10 +113,6 @@
   }
   .class-record-table {
     min-width: 1320px;
-    --summary-header-row-1-top: 64px;
-    --summary-header-row-2-top: 112px;
-    --summary-header-row-3-top: 160px;
-    --summary-header-row-4-top: 208px;
   }
   .summary-floating-scrollbar {
     position: fixed;
@@ -136,24 +132,9 @@
   .summary-floating-scrollbar-track {
     height: 1px;
   }
-  .class-record-table thead tr:nth-child(1) th {
+  .class-record-table thead {
     position: sticky;
-    top: var(--summary-header-row-1-top);
-    z-index: 6;
-  }
-  .class-record-table thead tr:nth-child(2) th {
-    position: sticky;
-    top: var(--summary-header-row-2-top);
-    z-index: 6;
-  }
-  .class-record-table thead tr:nth-child(3) th {
-    position: sticky;
-    top: var(--summary-header-row-3-top);
-    z-index: 6;
-  }
-  .class-record-table thead tr:nth-child(4) th {
-    position: sticky;
-    top: var(--summary-header-row-4-top);
+    top: 0;
     z-index: 6;
   }
   .mobile-period-grade-table-wrap {
@@ -1207,19 +1188,8 @@
       isSynchronizing = false;
     }
 
-    function updateHeaderOffsets() {
-      const headerRows = table.tHead ? Array.from(table.tHead.rows) : [];
-      const topbar = document.querySelector(".faculty-topbar");
-      let offset = topbar ? topbar.getBoundingClientRect().height : 0;
-      headerRows.forEach(function (row, index) {
-        table.style.setProperty(`--summary-header-row-${index + 1}-top`, `${offset}px`);
-        offset += row.getBoundingClientRect().height;
-      });
-    }
-
     function updateFloatingScrollbar() {
       updateQueued = false;
-      updateHeaderOffsets();
 
       const containerRect = container.getBoundingClientRect();
       const hasOverflow = container.scrollWidth > container.clientWidth + 1;
