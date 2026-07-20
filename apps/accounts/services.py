@@ -23,6 +23,7 @@ from django.utils import timezone
 from PIL import Image
 
 from apps.accounts.models import (
+    ActivePortalSession,
     LoginOtpChallenge,
     PortalLoginLockoutState,
     UserDeactivationSchedule,
@@ -33,25 +34,143 @@ from apps.core.services.audit import AuditService
 from apps.core.services.client_ip import resolve_client_ip
 from apps.core.services.email_assets import attach_logo_for_src, build_email_logo_context, format_email_subject
 from apps.core.services.features import FeatureSettingsService
+from apps.rbac.models import UserRole
+from apps.tenants.models import SystemSetting, Tenant
 
 User = get_user_model()
 logger = logging.getLogger("teachermateplus.system")
 
 
+class ActivePortalSessionService:
+    @staticmethod
+    def _enforcement_tenant_ids(user) -> list[int]:
+        tenant_ids = []
+        default_tenant_id = getattr(user, "default_tenant_id", None)
+        if default_tenant_id:
+            tenant_ids.append(default_tenant_id)
+
+        for tenant_id in (
+            UserRole.objects.filter(
+                user=user,
+                is_active=True,
+                role__is_active=True,
+                tenant_id__isnull=False,
+            )
+            .values_list("tenant_id", flat=True)
+            .distinct()
+        ):
+            if tenant_id not in tenant_ids:
+                tenant_ids.append(tenant_id)
+
+        if not tenant_ids:
+            active_tenant_ids = list(Tenant.objects.filter(is_active=True).values_list("id", flat=True)[:2])
+            if len(active_tenant_ids) == 1:
+                tenant_ids.append(active_tenant_ids[0])
+        return tenant_ids
+
+    @classmethod
+    def is_single_session_enforcement_enabled(cls, user) -> bool:
+        if not getattr(settings, "ENFORCE_SINGLE_DEVICE_SESSION", True):
+            return False
+
+        tenant_ids = cls._enforcement_tenant_ids(user)
+        if not tenant_ids:
+            explicit_settings = SystemSetting.objects.filter(
+                setting_key=FeatureSettingsService.SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY,
+                is_active=True,
+            )
+            for setting in explicit_settings:
+                if str(setting.setting_value).strip().lower() in {"0", "false", "no", "off", ""}:
+                    return False
+            return FeatureSettingsService.is_single_device_session_enforcement_enabled(
+                tenant_id=None,
+                default=True,
+            )
+        return all(
+            FeatureSettingsService.is_single_device_session_enforcement_enabled(
+                tenant_id=tenant_id,
+                default=True,
+            )
+            for tenant_id in tenant_ids
+        )
+
+    @staticmethod
+    def _ensure_session_key(request) -> str:
+        request.session.save()
+        return str(request.session.session_key or "")
+
+    @classmethod
+    def register(cls, *, request, user, enforce_single_session: bool) -> int:
+        current_key = cls._ensure_session_key(request)
+        if not current_key:
+            return 0
+
+        with transaction.atomic():
+            User.objects.select_for_update().only("id").get(id=user.id)
+            registered = list(
+                ActivePortalSession.objects.select_for_update()
+                .filter(user_id=user.id)
+                .only("id", "session_key")
+            )
+            previous_keys = [row.session_key for row in registered if row.session_key != current_key]
+            revoked_sessions = 0
+
+            if enforce_single_session:
+                if previous_keys:
+                    revoked_sessions, _ = Session.objects.filter(session_key__in=previous_keys).delete()
+                    ActivePortalSession.objects.filter(
+                        user_id=user.id,
+                        session_key__in=previous_keys,
+                    ).delete()
+            elif previous_keys:
+                live_keys = set(
+                    Session.objects.filter(
+                        session_key__in=previous_keys,
+                        expire_date__gte=timezone.now(),
+                    ).values_list("session_key", flat=True)
+                )
+                stale_keys = set(previous_keys) - live_keys
+                if stale_keys:
+                    ActivePortalSession.objects.filter(
+                        user_id=user.id,
+                        session_key__in=stale_keys,
+                    ).delete()
+
+            ActivePortalSession.objects.update_or_create(
+                session_key=current_key,
+                defaults={"user_id": user.id},
+            )
+            return revoked_sessions
+
+    @classmethod
+    def unregister(cls, *, user, session_key: str | None) -> int:
+        if not user or not session_key:
+            return 0
+        with transaction.atomic():
+            User.objects.select_for_update().only("id").get(id=user.id)
+            deleted, _ = ActivePortalSession.objects.filter(
+                user_id=user.id,
+                session_key=session_key,
+            ).delete()
+            return deleted
+
+    @classmethod
+    def revoke_all(cls, *, user) -> int:
+        with transaction.atomic():
+            User.objects.select_for_update().only("id").get(id=user.id)
+            registered = ActivePortalSession.objects.select_for_update().filter(user_id=user.id)
+            session_keys = list(registered.values_list("session_key", flat=True))
+            deleted_sessions = 0
+            if session_keys:
+                deleted_sessions, _ = Session.objects.filter(session_key__in=session_keys).delete()
+            registered.delete()
+            return deleted_sessions
+
+
 class UserDeactivationService:
     @staticmethod
     def _clear_user_sessions(*, user) -> int:
-        deleted = 0
-        for session in Session.objects.filter(expire_date__gte=timezone.now()):
-            try:
-                data = session.get_decoded()
-            except Exception:
-                continue
-            if str(data.get("_auth_user_id")) != str(user.id):
-                continue
-            session.delete()
-            deleted += 1
-        return deleted
+        return ActivePortalSessionService.revoke_all(user=user)
 
     @classmethod
     def schedule(

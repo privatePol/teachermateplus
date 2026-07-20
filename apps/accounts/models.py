@@ -90,6 +90,27 @@ class User(AbstractBaseUser, PermissionsMixin):
         return name.strip() or self.username
 
 
+class ActivePortalSession(models.Model):
+    user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="active_portal_sessions",
+    )
+    session_key = models.CharField(max_length=40, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "active_portal_sessions"
+        ordering = ["-updated_at", "-id"]
+        indexes = [
+            models.Index(fields=["user", "updated_at"], name="idx_act_sess_user_upd"),
+        ]
+
+    def __str__(self):
+        return f"active-session:{self.user_id}"
+
+
 class FacultyInvitation(models.Model):
     class Status(models.TextChoices):
         NOT_REQUESTED = "NOT_REQUESTED", "Not Requested"

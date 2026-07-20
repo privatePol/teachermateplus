@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login, logout, update_session_auth_hash
-from django.contrib.sessions.models import Session
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import ValidationError
@@ -36,15 +35,19 @@ from apps.accounts.forms import (
     UserSignatureDrawForm,
     UserSignatureUploadForm,
 )
-from apps.accounts.services import AdminPasswordResetOtpService, LoginLockoutService, LoginOtpService, UserSignatureService
+from apps.accounts.services import (
+    ActivePortalSessionService,
+    AdminPasswordResetOtpService,
+    LoginLockoutService,
+    LoginOtpService,
+    UserSignatureService,
+)
 from apps.accounts.faculty_provisioning import FacultyInvitationService
 from apps.core.decorators import permission_required, portal_required
 from apps.core.services.audit import AuditService
 from apps.core.services.email_assets import format_email_subject
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
-from apps.rbac.models import UserRole
-from apps.tenants.models import SystemSetting, Tenant
 
 User = get_user_model()
 
@@ -88,73 +91,13 @@ def _resolve_security_redirect(user, portal_code: str) -> str | None:
     return None
 
 
-def _single_device_session_enforcement_tenant_ids(user) -> list[int]:
-    tenant_ids = []
-    default_tenant_id = getattr(user, "default_tenant_id", None)
-    if default_tenant_id:
-        tenant_ids.append(default_tenant_id)
-
-    for tenant_id in (
-        UserRole.objects.filter(
-            user=user,
-            is_active=True,
-            role__is_active=True,
-            tenant_id__isnull=False,
-        )
-        .values_list("tenant_id", flat=True)
-        .distinct()
-    ):
-        if tenant_id not in tenant_ids:
-            tenant_ids.append(tenant_id)
-
-    if not tenant_ids:
-        active_tenant_ids = list(Tenant.objects.filter(is_active=True).values_list("id", flat=True)[:2])
-        if len(active_tenant_ids) == 1:
-            tenant_ids.append(active_tenant_ids[0])
-    return tenant_ids
-
-
-def _single_device_session_enforcement_enabled_for_user(user) -> bool:
-    tenant_ids = _single_device_session_enforcement_tenant_ids(user)
-    if not tenant_ids:
-        explicit_settings = SystemSetting.objects.filter(
-            setting_key=FeatureSettingsService.SINGLE_DEVICE_SESSION_ENFORCEMENT_ENABLED_KEY,
-            is_active=True,
-        )
-        for setting in explicit_settings:
-            if str(setting.setting_value).strip().lower() in {"0", "false", "no", "off", ""}:
-                return False
-        return FeatureSettingsService.is_single_device_session_enforcement_enabled(
-            tenant_id=None,
-            default=True,
-        )
-    return all(
-        FeatureSettingsService.is_single_device_session_enforcement_enabled(
-            tenant_id=tenant_id,
-            default=True,
-        )
-        for tenant_id in tenant_ids
-    )
-
-
 def _enforce_single_device_session(request, user, portal_code: str):
-    if not getattr(settings, "ENFORCE_SINGLE_DEVICE_SESSION", True):
-        return
-    if not _single_device_session_enforcement_enabled_for_user(user):
-        return
-    if not request.session.session_key:
-        request.session.save()
-    current_key = request.session.session_key
-    if not current_key:
-        return
-
-    revoked_sessions = 0
-    active_sessions = Session.objects.filter(expire_date__gte=timezone.now())
-    for session in active_sessions:
-        decoded = session.get_decoded()
-        if str(decoded.get("_auth_user_id")) == str(user.pk) and session.session_key != current_key:
-            session.delete()
-            revoked_sessions += 1
+    enforcement_enabled = ActivePortalSessionService.is_single_session_enforcement_enabled(user)
+    revoked_sessions = ActivePortalSessionService.register(
+        request=request,
+        user=user,
+        enforce_single_session=enforcement_enabled,
+    )
 
     if revoked_sessions:
         AuditService.log_event(
@@ -382,6 +325,8 @@ class PublicLoginView(RedirectView):
 
 def admin_logout_view(request):
     if request.user.is_authenticated:
+        authenticated_user = request.user
+        session_key = request.session.session_key
         AuditService.log_event(
             action="LOGOUT",
             portal="ADMIN",
@@ -390,6 +335,7 @@ def admin_logout_view(request):
             actor=request.user,
             request=request,
         )
+        ActivePortalSessionService.unregister(user=authenticated_user, session_key=session_key)
     logout(request)
     messages.success(request, "You have been logged out.")
     return redirect("accounts:admin_login")
@@ -397,6 +343,8 @@ def admin_logout_view(request):
 
 def faculty_logout_view(request):
     if request.user.is_authenticated:
+        authenticated_user = request.user
+        session_key = request.session.session_key
         AuditService.log_event(
             action="LOGOUT",
             portal="FACULTY",
@@ -405,6 +353,7 @@ def faculty_logout_view(request):
             actor=request.user,
             request=request,
         )
+        ActivePortalSessionService.unregister(user=authenticated_user, session_key=session_key)
     logout(request)
     messages.success(request, "You have been logged out.")
     return redirect("faculty_portal:public_index")
@@ -699,6 +648,7 @@ def faculty_change_password_view(request):
         updated_user.must_change_password = False
         updated_user.save(update_fields=["must_change_password"])
         update_session_auth_hash(request, updated_user)
+        _enforce_single_device_session(request, updated_user, "FACULTY")
         AuditService.log_event(
             action="CHANGE_PASSWORD",
             portal="FACULTY",
@@ -732,6 +682,7 @@ def admin_change_password_view(request):
         updated_user.must_change_password = False
         updated_user.save(update_fields=["must_change_password"])
         update_session_auth_hash(request, updated_user)
+        _enforce_single_device_session(request, updated_user, "ADMIN")
         AuditService.log_event(
             action="CHANGE_PASSWORD",
             portal="ADMIN",

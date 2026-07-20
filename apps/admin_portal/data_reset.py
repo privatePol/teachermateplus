@@ -13,6 +13,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from apps.accounts.models import (
+    ActivePortalSession,
     LoginOtpChallenge,
     PortalLoginLockoutState,
     User,
@@ -173,12 +174,14 @@ class ActualDataResetService:
             UserDeactivationSchedule,
             PortalLoginLockoutState,
             LoginOtpChallenge,
+            ActivePortalSession,
             Session,
             AuditLog,
         )),
     )
 
     DELETE_ORDER = (
+        ActivePortalSession,
         Session,
         LoginOtpChallenge,
         PortalLoginLockoutState,
@@ -424,6 +427,8 @@ class ActualDataResetService:
             for model in cls.DELETE_ORDER:
                 queryset = model.objects.all()
                 if model is Session and preserve_session_key:
+                    queryset = queryset.exclude(session_key=preserve_session_key)
+                elif model is ActivePortalSession and preserve_session_key:
                     queryset = queryset.exclude(session_key=preserve_session_key)
                 total = cls._delete_queryset(queryset)
                 if total:

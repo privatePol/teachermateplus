@@ -48,9 +48,10 @@ class MenuService:
             items = list(getattr(group, "active_items", []))
             item_map = {}
             for item in items:
-                required_codes = set(
-                    item.menuitempermission_set.values_list("permission__code", flat=True)
-                )
+                required_codes = {
+                    item_permission.permission.code
+                    for item_permission in item.menuitempermission_set.all()
+                }
                 is_visible = not required_codes or bool(required_codes & effective_codes)
                 item_map[item.id] = {
                     "item": item,
