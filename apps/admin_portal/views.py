@@ -18,7 +18,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Avg, Count, Max, Prefetch, Q, Sum, Value
+from django.db.models import Avg, Count, Exists, Max, OuterRef, Prefetch, Q, Sum, Value
 from django.db.models.functions import Coalesce, Concat
 from django.db.models.deletion import ProtectedError, RestrictedError
 from io import BytesIO
@@ -12949,6 +12949,7 @@ def course_template_assignment_list_view(request):
     offerings_qs = (
         AdminScopeService.scoped_course_offerings(request)
         .filter(is_active=True)
+        .exclude(status=CourseOffering.Status.ARCHIVED)
         .order_by(
             "course__title",
             "course__code",
@@ -13009,42 +13010,45 @@ def course_template_assignment_list_view(request):
         is_active=True,
         grading_template__is_active=True,
     ).count()
-    offering_rows_without_template = []
-    for offering in offerings_qs.select_related(
-        "tenant",
-        "campus",
-        "department",
-        "program",
-        "academic_year",
-        "term",
-        "course",
-        "section",
-    ):
-        has_course_template_assignment = CourseTemplateAssignment.objects.filter(
-            course_id=offering.course_id,
-            grading_template_id__in=visible_template_ids,
-            is_active=True,
-            grading_template__is_active=True,
-            grading_template__is_published=True,
-        ).filter(
-            Q(effective_from_term_id=offering.term_id) | Q(effective_from_term__isnull=True)
-        ).exists()
-        if has_course_template_assignment:
-            continue
-        faculty_names = [
-            assignment.faculty_user.full_name or assignment.faculty_user.username
-            for assignment in offering.faculty_assignments.filter(is_active=True)
-            .select_related("faculty_user")
-            .order_by("faculty_user__last_name", "faculty_user__first_name", "faculty_user__username")
-        ]
-        offering_rows_without_template.append(
-            SimpleNamespace(
-                offering=offering,
-                faculty_names=", ".join(faculty_names) if faculty_names else "-",
-                issue="No active published course-template assignment for this offering term.",
+    applicable_assignment_qs = CourseTemplateAssignment.objects.filter(
+        course_id=OuterRef("course_id"),
+        grading_template_id__in=visible_template_ids,
+        grading_template__tenant_id=OuterRef("tenant_id"),
+        is_active=True,
+        grading_template__is_active=True,
+        grading_template__is_published=True,
+    ).filter(
+        Q(effective_from_term_id=OuterRef("term_id")) | Q(effective_from_term__isnull=True)
+    )
+    offerings_without_template_qs = offerings_qs.filter(~Exists(applicable_assignment_qs))
+
+    offering_page_obj = None
+    if offerings_without_template:
+        offerings_without_template_qs = offerings_without_template_qs.prefetch_related(
+            Prefetch(
+                "faculty_assignments",
+                queryset=FacultyAssignment.objects.filter(is_active=True)
+                .select_related("faculty_user")
+                .order_by("faculty_user__last_name", "faculty_user__first_name", "faculty_user__username"),
+                to_attr="active_faculty_assignments",
             )
         )
-    offerings_without_template_count = len(offering_rows_without_template)
+        offering_page_obj = _get_page(request, offerings_without_template_qs)
+        offering_page_obj.object_list = [
+            SimpleNamespace(
+                offering=offering,
+                faculty_names=", ".join(
+                    assignment.faculty_user.full_name or assignment.faculty_user.username
+                    for assignment in offering.active_faculty_assignments
+                )
+                or "-",
+                issue="No active published course-template assignment for this offering term.",
+            )
+            for offering in offering_page_obj.object_list
+        ]
+        offerings_without_template_count = offering_page_obj.paginator.count
+    else:
+        offerings_without_template_count = offerings_without_template_qs.count()
 
     if without_template:
         rows = [
@@ -13072,9 +13076,9 @@ def course_template_assignment_list_view(request):
                 "meta": "Courses in the current scope with no active template assignment yet.",
             },
             {
-                "label": "Offerings Without Course Template",
+                "label": "Offerings Without Course-Template Assignment",
                 "value": offerings_without_template_count,
-                "meta": "Current course offerings whose course has no active published template assignment.",
+                "meta": "Current course offerings with no active published exact-term or default assignment.",
             },
             {
                 "label": "Courses With Template",
@@ -13091,7 +13095,7 @@ def course_template_assignment_list_view(request):
         "offerings_without_template_count": offerings_without_template_count,
     }
     if offerings_without_template:
-        context["offering_page_obj"] = _get_page(request, offering_rows_without_template)
+        context["offering_page_obj"] = offering_page_obj
     elif without_template:
         context["page_obj"] = _get_page(request, rows)
     else:

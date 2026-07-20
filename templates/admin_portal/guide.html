@@ -589,7 +589,7 @@
               <tr>
                 <td>Template Coverage Check</td>
                 <td><strong>Admin Portal -> Grading -> Course Template Assignments</strong></td>
-                <td>Find courses or offerings that still have no grading template.</td>
+                <td>Find courses or current offerings that still have no active course-template assignment. This check intentionally reports missing explicit assignments even when a broader tenant fallback can resolve internally.</td>
               </tr>
               <tr>
                 <td>Enrollment and Grading Readiness</td>
@@ -605,7 +605,7 @@
             <li>Assign faculty only after the offering is already complete and properly scoped.</li>
             <li>Assign grading templates before enrollment and live grading begin.</li>
             <li>Use bulk assignment when many courses use the same template.</li>
-            <li>Before enrollment, check that all needed records are active and every current offering has a grading template.</li>
+            <li>Before enrollment, use the offering coverage filter to confirm that every current offering has an active published exact-term or default course-template assignment.</li>
           </ol>
           <div class="guide-note">
             Recommended build order:

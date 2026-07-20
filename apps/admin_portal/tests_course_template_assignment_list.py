@@ -1,12 +1,14 @@
 from datetime import date
 
 from django.conf import settings
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.academics.models import AcademicYear, Course, CourseOffering, Section, Term
+from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
 from apps.grading.models import CourseTemplateAssignment, GradingTemplate
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.tenants.models import Campus, Department, Program, Tenant
@@ -159,6 +161,46 @@ class CourseTemplateAssignmentListTests(TestCase):
             section=self.section,
             status=CourseOffering.Status.OPEN,
         )
+        covered_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.course_with_template,
+            section=self.section,
+            status=CourseOffering.Status.OPEN,
+        )
+        inactive_assignment_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=self.inactive_course,
+            section=self.section,
+            status=CourseOffering.Status.OPEN,
+        )
+        archived_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="A104",
+            title="Archived Offering Course",
+        )
+        archived_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=archived_course,
+            section=self.section,
+            status=CourseOffering.Status.ARCHIVED,
+        )
         self.client.force_login(self.user)
 
         response = self.client.get(
@@ -167,11 +209,65 @@ class CourseTemplateAssignmentListTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Offerings Without Course Template")
+        self.assertContains(response, "Offerings Without Course-Template Assignment")
         self.assertContains(response, "Course Without Template")
         self.assertContains(response, "BSIT-1A")
         rows = list(response.context["offering_page_obj"].object_list)
-        self.assertEqual([row.offering.id for row in rows], [offering.id])
+        self.assertEqual(
+            {row.offering.id for row in rows},
+            {offering.id, inactive_assignment_offering.id},
+        )
+        self.assertNotIn(covered_offering.id, [row.offering.id for row in rows])
+        self.assertNotIn(archived_offering.id, [row.offering.id for row in rows])
+
+    def test_offerings_without_template_query_growth_is_bounded(self):
+        def create_missing_offering(number):
+            course = Course.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                code=f"M{number:03d}",
+                title=f"Missing Template {number:03d}",
+            )
+            offering = CourseOffering.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                program=self.program,
+                academic_year=self.academic_year,
+                term=self.term,
+                course=course,
+                section=self.section,
+                status=CourseOffering.Status.OPEN,
+            )
+            FacultyAssignment.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=offering,
+                faculty_user=self.user,
+                is_active=True,
+            )
+
+        create_missing_offering(1)
+        self.client.force_login(self.user)
+        url = reverse("admin_portal:course_template_assignment_list")
+        params = {"offerings_without_template": "1"}
+
+        # Warm permission and feature caches before comparing query growth.
+        self.client.get(url, params)
+        with CaptureQueriesContext(connection) as small_capture:
+            small_response = self.client.get(url, params)
+        self.assertEqual(small_response.status_code, 200)
+
+        for number in range(2, 12):
+            create_missing_offering(number)
+
+        with CaptureQueriesContext(connection) as large_capture:
+            large_response = self.client.get(url, params)
+
+        self.assertEqual(large_response.status_code, 200)
+        self.assertEqual(large_response.context["offerings_without_template_count"], 11)
+        self.assertLessEqual(len(large_capture), len(small_capture) + 2)
 
     def test_assignment_list_separates_active_and_inactive_records(self):
         self.client.force_login(self.user)
