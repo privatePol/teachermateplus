@@ -10,6 +10,8 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.core.services.features import FeatureSettingsService
+from apps.core.services.settings import SystemSettingService
 from apps.enrollment.models import Enrollment
 from apps.faculty_portal.services import FacultyPerformanceService
 from apps.grading.models import (
@@ -373,6 +375,35 @@ class FacultyPerformanceTests(TestCase):
         self.assertContains(response, f'data-grade-explain-url="{explain_url}"')
         self.assertContains(response, 'id="gradeExplanationPrivacyShield"')
         self.assertContains(response, 'id="gradeExplanationModal"')
+
+    def test_class_performance_and_consultation_mask_selected_period_grade_when_release_is_restricted(self):
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+        self.client.force_login(self.faculty)
+
+        performance_response = self.client.get(
+            reverse("faculty_portal:class_performance", args=[self.offering.id, self.midterm.id])
+        )
+        explain_url = reverse(
+            "faculty_portal:grade_explanation",
+            args=[self.offering.id, self.midterm.id, self.students[1].id, "PERIOD"],
+        )
+        consultation_response = self.client.get(
+            reverse(
+                "faculty_portal:student_performance_consultation",
+                args=[self.offering.id, self.midterm.id, self.students[1].id],
+            )
+        )
+
+        self.assertContains(performance_response, "Hidden until submission")
+        self.assertNotContains(performance_response, f'data-grade-explain-url="{explain_url}"')
+        self.assertContains(consultation_response, "Official period-grade values and their trend are hidden until submission.")
+        self.assertNotContains(consultation_response, "Period grade values")
 
     def test_student_trend_services_use_official_builder_for_selected_student_only(self):
         self._create_period("PREFINAL", "Pre-Final", 3)

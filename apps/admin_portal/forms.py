@@ -3688,8 +3688,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
     )
     faculty_official_period_grades_after_submission = forms.BooleanField(
         required=False,
-        label="Restrict periodic grade visibility until submission",
-        help_text="When turned on, official computed periodic grades such as PG, MG, PFG, and FX stay hidden from faculty until that period gradebook is submitted. When turned off, periodic grades may be visible during review before submission, subject to the deadline release setting.",
+        label="Mask official periodic grade until submission",
+        help_text="When turned on, faculty may continue viewing the complete gradebook and supporting scores, but the official computed grade for the selected period, such as PG, MG, PFG, or FX, remains hidden until that period gradebook is submitted.",
     )
     faculty_official_final_grades_after_deadline = forms.BooleanField(
         required=False,

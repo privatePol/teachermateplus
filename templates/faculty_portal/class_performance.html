@@ -45,6 +45,9 @@
 {% if snapshot.message %}
 <div class="alert alert-info">{{ snapshot.message }}</div>
 {% endif %}
+{% if official_period_grade_masked %}
+<div class="alert alert-light border">Official period grades are {{ official_period_grade_masked_label|lower }}. Performance signals and supporting score information remain available.</div>
+{% endif %}
 {% if snapshot.has_performance_data and not snapshot.previous_period %}
 <div class="alert alert-light border">
   No previous grading period is available. Trend labels will appear after another grading period has data.
@@ -100,9 +103,13 @@
           </td>
           <td>
             <div class="performance-grade-cell">
+              {% if official_period_grade_masked %}
+              <span class="text-muted small">&#128274; {{ official_period_grade_masked_label }}</span>
+              {% else %}
               <span>{% if row.current_grade is not None %}{{ row.current_grade|floatformat:2 }}{% else %}-{% endif %}</span>
               {% if row.current_grade is not None and row.explain_url %}
               <button type="button" class="btn btn-sm grade-explain-btn" data-grade-explain-url="{{ row.explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
+              {% endif %}
               {% endif %}
             </div>
           </td>

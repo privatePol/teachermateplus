@@ -2485,6 +2485,13 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             value_type="BOOL",
             is_active=True,
         )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
         GradingPeriodLock.objects.create(
             tenant=self.tenant,
             campus=self.campus,
@@ -2528,7 +2535,8 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "Official Prelim grade is hidden until the Prelim deadline has passed.")
         self.assertNotContains(response, "Official final grade is hidden until the Final deadline has passed.")
         self.assertNotContains(response, "FINAL GRADE")
-        self.assertNotContains(response, "<th rowspan=\"4\" class=\"metric-col metric-final\">PRELIM Grade</th>", html=False)
+        self.assertContains(response, "<th rowspan=\"4\" class=\"metric-col metric-final\">PRELIM GRADE</th>", html=False)
+        self.assertContains(response, "Hidden until deadline")
 
     def test_period_summary_shows_official_period_grade_by_default_without_release_restriction(self):
         student = Student.objects.create(
@@ -3715,18 +3723,47 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<th rowspan="4" class="metric-col metric-final">PRELIM GRADE</th>', html=True)
-        self.assertContains(response, "Periodic grades are visible for review")
+        self.assertContains(response, "The working gradebook is available for review")
         self.assertContains(response, "93")
         self.assertNotContains(response, "Print Periodic Grades")
         self.assertNotContains(response, "Summary of Periodic Grades")
 
-    def test_period_summary_hides_gradebook_table_until_submitted_when_configured(self):
+    def test_period_summary_masks_only_official_period_grade_until_submitted_when_configured(self):
         self._accept_assignment()
-        self._create_active_student(
+        student = self._create_active_student(
             student_no="2025-HIDE-001",
             last_name="Hidden",
             first_name="Summary",
         )
+        class_standing_component = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        activity = FacultyGradingService.create_activity(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing_component,
+            template_subcomponent=None,
+            template_detail=None,
+            title="Masked Gradebook Quiz",
+            total_score=Decimal("20"),
+            activity_date=date(2025, 6, 10),
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("18"), "remarks": ""}],
+        )
+        period_grade, _ = StudentPeriodGrade.objects.get_or_create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            student=student,
+            defaults={"computed_by_user": self.faculty_user},
+        )
+        period_grade.class_standing_grade = Decimal("90")
+        period_grade.period_grade = Decimal("91.37")
+        period_grade.computed_by_user = self.faculty_user
+        period_grade.save(update_fields=["class_standing_grade", "period_grade", "computed_by_user", "updated_at"])
         SystemSettingService.set(
             FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
             True,
@@ -3741,10 +3778,131 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Submit this gradebook to view or print the official Summary of Grades")
-        self.assertContains(response, "Official Prelim grade is hidden until this gradebook is submitted.")
+        self.assertContains(response, '<th rowspan="4" class="metric-col metric-final">PRELIM GRADE</th>', html=True)
+        self.assertContains(response, "Masked Gradebook Quiz")
+        self.assertContains(response, "Hidden until submission")
+        self.assertContains(response, "The working gradebook is available for review")
+        self.assertNotContains(response, "91.37")
+        period_explain_url = reverse(
+            "faculty_portal:grade_explanation",
+            kwargs={
+                "offering_id": self.offering.id,
+                "period_id": self.prelim.id,
+                "student_id": student.id,
+                "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+            },
+        )
+        self.assertNotContains(response, f'data-grade-explain-url="{period_explain_url}"')
         self.assertNotContains(response, "Print Periodic Grades")
-        self.assertNotContains(response, "<th>Student Name</th>", html=False)
+        self.assertContains(response, "Student Name")
+
+        explanation_response = self.client.get(period_explain_url)
+        self.assertContains(explanation_response, "Period-grade explanation is hidden")
+        self.assertNotContains(explanation_response, "91.37")
+
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        submitted_response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id})
+        )
+        self.assertEqual(submitted_response.context["rows"][0]["period_grade"], "91")
+        self.assertContains(submitted_response, f'data-grade-explain-url="{period_explain_url}"')
+        self.assertContains(submitted_response, "Print Periodic Grades")
+
+    def test_submission_release_is_scoped_to_the_exact_unsubmitted_period(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-PERIOD-ISOLATION-001",
+            last_name="Period",
+            first_name="Isolation",
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            student=student,
+            period_grade=Decimal("81.00"),
+            computed_by_user=self.faculty_user,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.midterm,
+            student=student,
+            period_grade=Decimal("91.37"),
+            computed_by_user=self.faculty_user,
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+
+        self.client.force_login(self.faculty_user)
+        response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.midterm.id})
+        )
+
+        self.assertContains(response, "MIDTERM GRADE")
+        self.assertContains(response, "Hidden until submission")
+        self.assertNotContains(response, "91.37")
+
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.midterm,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        submitted_response = self.client.get(
+            reverse("faculty_portal:period_summary", kwargs={"offering_id": self.offering.id, "period_id": self.midterm.id})
+        )
+        self.assertEqual(submitted_response.context["rows"][0]["period_grade"], "91")
+
+    def test_submission_release_setting_is_tenant_scoped(self):
+        other_tenant = Tenant.objects.create(code="OTHER-RELEASE", name="Other Release Tenant")
+        SystemSettingService.set(
+            FeatureSettingsService.FACULTY_OFFICIAL_PERIOD_GRADES_AFTER_SUBMISSION_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+            is_active=True,
+        )
+
+        self.assertTrue(
+            FeatureSettingsService.show_faculty_official_period_grades_after_submission(
+                tenant_id=self.tenant.id,
+                default=False,
+            )
+        )
+        self.assertFalse(
+            FeatureSettingsService.show_faculty_official_period_grades_after_submission(
+                tenant_id=other_tenant.id,
+                default=False,
+            )
+        )
 
     def test_faculty_can_self_reopen_submitted_gradebook_before_deadline(self):
         self._accept_assignment()
@@ -3795,7 +3953,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         submission.refresh_from_db()
         self.assertEqual(submission.status, GradeSubmission.Status.REOPENED)
         self.assertContains(response, "gradebook reopened")
-        self.assertContains(response, "Submit this gradebook to view or print the official Summary of Grades")
+        self.assertContains(response, "The working gradebook is available for review")
         self.assertNotContains(response, "Print Periodic Grades")
 
         response = self.client.get(

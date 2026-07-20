@@ -1180,8 +1180,7 @@ def _official_grade_release_state(
         tenant_id=offering.tenant_id,
         default=False,
     )
-    allow_pre_submission_summary = (not submission_restricted) and submission_status is None
-    period_visibility_allowed = is_period_submitted or allow_pre_submission_summary
+    period_visibility_allowed = is_period_submitted or not submission_restricted
     period_deadline_passed = _has_passed_period_deadline(
         offering=offering,
         template_period=template_period,
@@ -1210,7 +1209,8 @@ def _official_grade_release_state(
     notes = []
     if submission_restricted and not is_period_submitted:
         notes.append(
-            f"Official {template_period.name} grade is hidden until this gradebook is submitted."
+            f"The official {template_period.name} grade is hidden until this gradebook is submitted. "
+            "Activity scores and supporting computations remain available for review."
         )
     if period_restricted and not period_deadline_passed:
         notes.append(
@@ -1229,8 +1229,14 @@ def _official_grade_release_state(
         "notes": notes,
         "final_period": final_period,
         "is_final_period_view": is_final_period_view,
-        "allow_pre_submission_summary": allow_pre_submission_summary,
         "submission_restricted": submission_restricted,
+        "period_grade_masked_label": (
+            "Hidden until submission"
+            if submission_restricted and not is_period_submitted
+            else "Hidden until deadline"
+            if period_restricted and not period_deadline_passed
+            else "Not available"
+        ),
     }
 
 
@@ -4085,6 +4091,15 @@ def class_performance_view(request, offering_id: int, period_id: int):
     if not template or not period:
         return redirect("faculty_portal:offering_periods", offering_id=offering.id)
 
+    state = _period_edit_state(offering, period)
+    official_grade_release = _official_grade_release_state(
+        offering=offering,
+        template=template,
+        template_period=period,
+        is_period_submitted=state["is_submitted"],
+        submission_status=state["submission_status"],
+        now=timezone.now(),
+    )
     snapshot = FacultyPerformanceService.get_class_performance_snapshot(offering, period)
     attention_rows = [
         row
@@ -4097,16 +4112,17 @@ def class_performance_view(request, offering_id: int, period_id: int):
             FacultyPerformanceService.TREND_DECLINING,
         }
     ]
-    for row in attention_rows:
-        row["explain_url"] = reverse(
-            "faculty_portal:grade_explanation",
-            kwargs={
-                "offering_id": offering.id,
-                "period_id": period.id,
-                "student_id": row["student_id"],
-                "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
-            },
-        )
+    if official_grade_release["show_period_grade"]:
+        for row in attention_rows:
+            row["explain_url"] = reverse(
+                "faculty_portal:grade_explanation",
+                kwargs={
+                    "offering_id": offering.id,
+                    "period_id": period.id,
+                    "student_id": row["student_id"],
+                    "grade_type": GradeExplanationService.GRADE_TYPE_PERIOD,
+                },
+            )
     return render(
         request,
         "faculty_portal/class_performance.html",
@@ -4115,6 +4131,8 @@ def class_performance_view(request, offering_id: int, period_id: int):
             "period": period,
             "snapshot": snapshot,
             "attention_rows": attention_rows,
+            "official_period_grade_masked": not official_grade_release["show_period_grade"],
+            "official_period_grade_masked_label": official_grade_release["period_grade_masked_label"],
         },
     )
 
@@ -4131,6 +4149,15 @@ def student_performance_consultation_view(request, offering_id: int, period_id: 
     if not template or not period:
         return redirect("faculty_portal:offering_periods", offering_id=offering.id)
 
+    state = _period_edit_state(offering, period)
+    official_grade_release = _official_grade_release_state(
+        offering=offering,
+        template=template,
+        template_period=period,
+        is_period_submitted=state["is_submitted"],
+        submission_status=state["submission_status"],
+        now=timezone.now(),
+    )
     enrollment = get_object_or_404(
         Enrollment.objects.select_related("student")
         .filter(
@@ -4161,6 +4188,8 @@ def student_performance_consultation_view(request, offering_id: int, period_id: 
             "period": period,
             "trend": trend,
             "trend_visualization": trend_visualization,
+            "official_period_grade_masked": not official_grade_release["show_period_grade"],
+            "official_period_grade_masked_label": official_grade_release["period_grade_masked_label"],
         },
     )
 
@@ -5879,18 +5908,15 @@ def period_summary_view(request, offering_id: int, period_id: int):
         summary_table_colspan += 1
     summary_table_colspan += len(prior_period_headers)
     summary_table_colspan += len(visible_exam_components)
-    if official_grade_release["show_period_grade"]:
-        summary_table_colspan += 1
+    summary_table_colspan += 1
     if official_grade_release["show_final_grade"]:
         summary_table_colspan += 1
     print_sheet_colspan = 3 + len(prior_period_headers)
-    if official_grade_release["show_period_grade"]:
-        print_sheet_colspan += 1
-        print_sheet_colspan += 1
+    print_sheet_colspan += 1
+    print_sheet_colspan += 1
     if official_grade_release["show_final_grade"]:
         print_sheet_colspan += 1
 
-    can_view_gradebook_summary = state["is_submitted"] or official_grade_release["allow_pre_submission_summary"]
     can_print_gradebook_summary = state["is_submitted"]
 
     context = {
@@ -5910,7 +5936,6 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "is_locked": state["is_locked"],
         "is_submitted": state["is_submitted"],
         "can_self_reopen": state["can_self_reopen"],
-        "can_view_gradebook_summary": can_view_gradebook_summary,
         "can_print_gradebook_summary": can_print_gradebook_summary,
         "can_submit_period": state["can_submit_period"],
         "is_auto_locked_reopened_after_deadline": state["is_auto_locked_reopened_after_deadline"],
@@ -5928,6 +5953,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "q": q,
         "passing_threshold": passing_threshold,
         "show_official_period_grade": official_grade_release["show_period_grade"],
+        "official_period_grade_masked": not official_grade_release["show_period_grade"],
+        "official_period_grade_masked_label": official_grade_release["period_grade_masked_label"],
         "show_official_final_grade": official_grade_release["show_final_grade"],
         "official_grade_release_notes": official_grade_release["notes"],
         "summary_table_colspan": summary_table_colspan,

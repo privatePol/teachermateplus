@@ -625,7 +625,7 @@
 <div class="alert alert-info no-print">
   This period has been submitted. Summary is view-only.
   {% if can_self_reopen %}
-    You may reopen it before the deadline if you need to revise, but the summary and printout will be hidden again until you resubmit.
+    You may reopen it before the deadline if you need to revise. The working Summary remains available, while the official selected-period grade and printout stay unavailable until you resubmit.
   {% endif %}
 </div>
 {% endif %}
@@ -759,7 +759,7 @@
       </div>
       <div class="modal-body">
         <p class="mb-2">
-          Reopening hides the official Summary/Print until you resubmit before the deadline.
+          Reopening keeps the working Summary available, but masks the official selected-period grade and keeps Print unavailable until you resubmit before the deadline.
         </p>
         <label class="form-label" for="self-reopen-remarks">Justification</label>
         <textarea id="self-reopen-remarks" class="form-control" name="remarks" rows="3" required maxlength="255" placeholder="Briefly explain why this submitted gradebook needs to be reopened."></textarea>
@@ -842,24 +842,17 @@
 </div>
 {% endif %}
 
-{% if not can_view_gradebook_summary %}
 {% if is_auto_locked_reopened_after_deadline %}
 <div class="alert alert-warning border no-print">
-  This gradebook was reopened and missed the resubmission deadline. Editing is disabled; expand the Period Snapshot above and use the Finalize and Submit button to resubmit the existing records.
-</div>
-{% else %}
-<div class="alert alert-warning border no-print">
-  Submit this gradebook to view or print the official Summary of Grades for AIMS encoding.
-  Until submission, expand the Period Snapshot above to check readiness, missing records, and template requirements.
+  This gradebook was reopened and missed the resubmission deadline. Editing is disabled; use the Finalize and Submit button to resubmit the existing records.
 </div>
 {% endif %}
-{% elif not can_print_gradebook_summary %}
+{% if not can_print_gradebook_summary %}
 <div class="alert alert-info border no-print">
-  Periodic grades are visible for review, but the official Summary of Grades printout becomes available only after submission.
+  The working gradebook is available for review, but the official Summary of Grades printout becomes available only after submission.
 </div>
 {% endif %}
 
-{% if can_view_gradebook_summary %}
 {% if can_print_gradebook_summary %}
 <div class="gradebook-print-header">
   <div class="print-brand-row">
@@ -960,9 +953,7 @@
           {% for prior in prior_period_headers %}
             <th rowspan="4" class="metric-col metric-final">{{ prior.label }}</th>
           {% endfor %}
-          {% if show_official_period_grade %}
           <th rowspan="4" class="metric-col metric-final">{{ period_grade_header_label }}</th>
-          {% endif %}
           {% if show_official_final_grade %}
           <th rowspan="4" class="metric-col metric-final">FINAL GRADE</th>
           {% endif %}
@@ -1031,9 +1022,7 @@
         {% for prior in prior_period_headers %}
         <td class="metric-col metric-final"></td>
         {% endfor %}
-        {% if show_official_period_grade %}
         <td class="metric-col metric-final"></td>
-        {% endif %}
         {% if show_official_final_grade %}
         <td class="metric-col metric-final"></td>
         {% endif %}
@@ -1077,14 +1066,16 @@
           {% for value in row.prior_period_grades %}
           <td class="metric-col metric-final"><strong>{{ value|default:"" }}</strong></td>
           {% endfor %}
-          {% if show_official_period_grade %}
           <td class="metric-col metric-final">
+            {% if show_official_period_grade %}
             <strong>{{ row.period_grade|default:"" }}</strong>
             {% if row.period_explain_url %}
             <button type="button" class="btn btn-sm grade-explain-btn ms-1" data-grade-explain-url="{{ row.period_explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
             {% endif %}
+            {% else %}
+            <span class="text-muted small" aria-label="Official {{ period_grade_header_label }} grade {{ official_period_grade_masked_label|lower }}">&#128274; {{ official_period_grade_masked_label }}</span>
+            {% endif %}
           </td>
-          {% endif %}
           {% if show_official_final_grade %}
           <td class="metric-col metric-final">
             <strong>{{ row.final_grade|default:"" }}</strong>
@@ -1142,7 +1133,7 @@
               <button type="button" class="btn btn-sm grade-explain-btn" data-grade-explain-url="{{ row.period_explain_url }}" aria-label="Explain period grade">&#128269; Explain</button>
               {% endif %}
             {% else %}
-              <span class="text-muted small">Not available</span>
+              <span class="text-muted small" aria-label="Official {{ period_grade_header_label }} grade {{ official_period_grade_masked_label|lower }}">&#128274; {{ official_period_grade_masked_label }}</span>
             {% endif %}
           </td>
         </tr>
@@ -1162,7 +1153,6 @@
     <div class="submitted-by-name">{{ request.user.full_name|default:request.user.username }}</div>
   </div>
 </div>
-{% endif %}
 {% endif %}
 
 {% include "faculty_portal/partials/grade_explanation_modal.html" %}

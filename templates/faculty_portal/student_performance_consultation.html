@@ -53,7 +53,7 @@
   <section class="consultation-grid mb-3">
     <div class="consultation-metric">
       <div class="consultation-label">Current Grade</div>
-      <div class="consultation-value">{% if trend.current_grade is not None %}{{ trend.current_grade|floatformat:2 }}{% else %}-{% endif %}</div>
+      <div class="consultation-value">{% if official_period_grade_masked %}&#128274; {{ official_period_grade_masked_label }}{% elif trend.current_grade is not None %}{{ trend.current_grade|floatformat:2 }}{% else %}-{% endif %}</div>
     </div>
     <div class="consultation-metric">
       <div class="consultation-label">Trend</div>
@@ -76,6 +76,9 @@
     </div>
     <div class="trend-panel-body">
       <h3 class="h6">Period Grade Trend</h3>
+      {% if official_period_grade_masked %}
+      <div class="alert alert-light border mb-3">Official period-grade values and their trend are {{ official_period_grade_masked_label|lower }}.</div>
+      {% else %}
       {% if trend_visualization.period_chart.period_count <= 1 %}
       <div class="alert alert-light border mb-3">Trend graph will appear after another grading period is available.</div>
       {% elif trend_visualization.period_chart.grade_point_count == 0 %}
@@ -139,6 +142,7 @@
       {% endif %}
 
       <div class="trend-interpretation mb-4">{{ trend_visualization.interpretation }}</div>
+      {% endif %}
 
       <h3 class="h6">Component Average Trend</h3>
       {% if trend_visualization.has_component_data %}
