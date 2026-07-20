@@ -26,6 +26,7 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 
 ### Student Academic Intervention Tracking
 - `FEATURE_STUDENT_ACADEMIC_INTERVENTION_TRACKING_ENABLED` defaults off and is configurable only through the explicit `academic_interventions.configure` permission on the existing Configurable Features page.
+- Configuration Management feature cards use a shared collapsed header/summary/body structure. Its deterministic 19-color header palette repeats for later cards, so newly added configuration sections retain the standard colored header and layout without requiring card-name-specific CSS.
 - A case has one immutable faculty owner. Co-faculty assignment alone grants no access; only the owner may make/supersede a decision, record actions and follow-ups, close, or void an eligible pre-conduct record.
 - Analytics creates only a faculty-review recommendation. Active analytics duplication is limited to the same owner, offering, student, grading period, and fingerprint; no cross-owner lookup/deduplication occurs.
 - `academic_interventions.monitor` is read-only and scope-filtered. It is seeded only for existing academic-monitor roles, not Campus Admin, Tenant Admin, or Guidance. Disabled-feature archive access additionally requires `academic_interventions.view_disabled_archive`.

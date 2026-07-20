@@ -933,14 +933,57 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         self.assertContains(response, "Allow only one active login session per user")
         self.assertContains(response, "a new login signs out the same user from any other browser or device")
 
-    def test_configurable_features_renders_card_headings_for_targeted_sections(self):
+    def test_configurable_features_renders_standard_cards_for_targeted_sections(self):
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse("admin_portal:configurable_features_settings"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Campus / Branch Recipient Emails")
-        self.assertContains(response, "Official Grade Release to Faculty")
-        self.assertContains(response, "Role-Based Help Guide")
+        content = response.content.decode()
+        expected_cards = (
+            (
+                "feature-card-academic-interventions",
+                "Student Academic Intervention Tracking",
+                "Allow authorized faculty to record academic-intervention decisions",
+                "student_academic_intervention_tracking_enabled",
+            ),
+            (
+                "feature-card-grade-prediction",
+                "Grade Prediction",
+                "Enable unofficial prediction, what-if simulation, at-risk flags",
+                "grade_prediction_enabled",
+            ),
+            (
+                "feature-card-campus-recipients",
+                "Campus / Branch Recipient Emails",
+                "Maintain branch-specific registrar recipient lists",
+                f"campus_recipient_{self.campus.id}",
+            ),
+            (
+                "feature-card-grade-release",
+                "Official Grade Release to Faculty",
+                "Control when official periodic grades and final grades",
+                "faculty_official_period_grades_after_deadline",
+            ),
+            (
+                "feature-card-help-guide",
+                "Role-Based Help Guide",
+                "Use the revised practical guide or restore the previous guide pages",
+                "role_based_help_guide_enabled",
+            ),
+        )
+        for card_id, title, description, field_name in expected_cards:
+            target = f'data-bs-target="#{card_id}"'
+            target_index = content.index(target)
+            self.assertIn("card-header settings-card-toggle", content[max(0, target_index - 180):target_index])
+            self.assertIn(f'<span class="settings-card-summary-title">{title}</span>', content)
+            self.assertIn(description, content)
+            self.assertIn(f'name="{field_name}"', content)
+
+        for palette_position in range(1, 5):
+            self.assertContains(
+                response,
+                f".settings-card:nth-of-type(19n + {palette_position}) .card-header",
+            )
         self.assertContains(response, "Enable Exit Pulse")
         self.assertContains(response, "Enable Orientation Feedback Surveys")
         self.assertContains(response, "Submission Readiness Email Alerts", count=2)
