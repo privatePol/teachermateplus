@@ -5688,20 +5688,18 @@ def period_summary_view(request, offering_id: int, period_id: int):
     )
     summary_layout = _build_summary_layout(period, activities)
     visible_exam_components = [] if official_grade_release["is_final_period_view"] else summary_layout["exam_components"]
+    activity_ids = [activity.id for activity in activities]
+    summary_score_rows = list(
+        StudentActivityScore.objects.filter(
+            activity_id__in=activity_ids,
+            is_active=True,
+        ).only("student_id", "activity_id", "computed_score", "raw_score")
+    )
     score_by_activity = {
         (score.student_id, score.activity_id): Decimal(score.computed_score)
-        for score in StudentActivityScore.objects.filter(
-            activity_id__in=[activity.id for activity in activities],
-            is_active=True,
-            activity__is_active=True,
-        )
+        for score in summary_score_rows
     }
-    encoded_zero_score_count = StudentActivityScore.objects.filter(
-        activity_id__in=[activity.id for activity in activities],
-        is_active=True,
-        activity__is_active=True,
-        raw_score=0,
-    ).count()
+    encoded_zero_score_count = sum(1 for score in summary_score_rows if Decimal(score.raw_score or 0) == 0)
 
     q = request.GET.get("q", "").strip()
     rows = summary["rows"]

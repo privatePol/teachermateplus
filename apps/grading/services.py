@@ -5231,9 +5231,16 @@ class FacultyGradingService:
         }
 
     @classmethod
-    def compute_final_grade_detail_from_period_values(cls, *, offering, template=None, period_values_by_period_id: dict):
+    def compute_final_grade_detail_from_period_values(
+        cls,
+        *,
+        offering,
+        template=None,
+        period_values_by_period_id: dict,
+        final_grade_strategy=None,
+    ):
         template = template or cls.resolve_template_for_offering(offering)
-        final_grade_strategy = cls.resolve_final_grade_strategy(offering, template=template)
+        final_grade_strategy = final_grade_strategy or cls.resolve_final_grade_strategy(offering, template=template)
         strategy_entries = final_grade_strategy["entries"]
         if not strategy_entries:
             return {
@@ -5325,11 +5332,19 @@ class FacultyGradingService:
         }
 
     @classmethod
-    def compute_final_grade_from_period_values(cls, *, offering, template=None, period_values_by_period_id: dict):
+    def compute_final_grade_from_period_values(
+        cls,
+        *,
+        offering,
+        template=None,
+        period_values_by_period_id: dict,
+        final_grade_strategy=None,
+    ):
         return cls.compute_final_grade_detail_from_period_values(
             offering=offering,
             template=template,
             period_values_by_period_id=period_values_by_period_id,
+            final_grade_strategy=final_grade_strategy,
         )["official_value"]
 
     @staticmethod
@@ -5363,11 +5378,12 @@ class FacultyGradingService:
         components=None,
         score_lookup=None,
         raw_score_lookup=None,
+        period_grade_strategy=None,
         include_details: bool = False,
     ):
         template = template or cls.resolve_template_for_offering(offering)
         base_value = base_value if base_value is not None else cls.resolve_base_value(offering, template)
-        period_grade_strategy = cls.resolve_period_grade_strategy(offering, template=template)
+        period_grade_strategy = period_grade_strategy or cls.resolve_period_grade_strategy(offering, template=template)
         uses_deped_transmutation = (
             period_grade_strategy["mode"] == TenantGradingProfile.PeriodGradeFormulaMode.DEPED_TRANSMUTATION
         )
@@ -5528,7 +5544,10 @@ class FacultyGradingService:
         warnings = []
 
         for component in components:
-            subcomponents = list(component.subcomponents.filter(is_active=True).order_by("sort_order", "id"))
+            subcomponents = sorted(
+                (subcomponent for subcomponent in component.subcomponents.all() if subcomponent.is_active),
+                key=lambda subcomponent: (subcomponent.sort_order, subcomponent.id),
+            )
             component_has_data = False
             subcomponent_breakdown = []
             if uses_deped_transmutation:
@@ -5540,7 +5559,10 @@ class FacultyGradingService:
                 sub_denominator = sub_total if sub_total > 0 else Decimal("100")
                 component_raw = Decimal("0")
                 for sub in subcomponents:
-                    detail_rows = list(sub.details.filter(is_active=True).order_by("sort_order", "id"))
+                    detail_rows = sorted(
+                        (detail for detail in sub.details.all() if detail.is_active),
+                        key=lambda detail: (detail.sort_order, detail.id),
+                    )
                     detail_breakdown = []
                     sub_activity_rows = []
                     sub_attendance_rows = []
@@ -6151,8 +6173,8 @@ class FacultyGradingService:
             if row.period_grade is not None:
                 period_grade_map[row.student_id][row.template_period_id] = Decimal(row.period_grade)
 
-        before_map = {
-            row.student_id: cls._final_grade_audit_snapshot(row)
+        existing_final_grade_map = {
+            row.student_id: row
             for row in StudentFinalGrade.objects.filter(
                 offering=offering,
                 student_id__in=target_student_ids,
@@ -6170,20 +6192,28 @@ class FacultyGradingService:
                     offering=offering,
                     template=template,
                     period_values_by_period_id=student_period_values,
+                    final_grade_strategy=final_grade_strategy,
                 )
-            final_row, _created = StudentFinalGrade.objects.update_or_create(
-                offering=offering,
-                student_id=student_id,
-                defaults={
-                    "tenant_id": offering.tenant_id,
-                    "campus_id": offering.campus_id,
-                    "final_grade": final_value,
-                    "computed_by_user": user,
-                    "is_submitted": is_submitted,
-                },
+            final_row = existing_final_grade_map.get(student_id)
+            before_snapshot = cls._final_grade_audit_snapshot(final_row)
+            has_changed = final_row is None or (
+                final_row.final_grade != final_value
+                or final_row.is_submitted != is_submitted
             )
+            if has_changed:
+                final_row, _created = StudentFinalGrade.objects.update_or_create(
+                    offering=offering,
+                    student_id=student_id,
+                    defaults={
+                        "tenant_id": offering.tenant_id,
+                        "campus_id": offering.campus_id,
+                        "final_grade": final_value,
+                        "computed_by_user": user,
+                        "is_submitted": is_submitted,
+                    },
+                )
+                existing_final_grade_map[student_id] = final_row
             after_snapshot = cls._final_grade_audit_snapshot(final_row)
-            before_snapshot = before_map.get(student_id)
             if before_snapshot != after_snapshot:
                 changed_rows.append(final_row)
                 if audit_reason:
@@ -6271,6 +6301,7 @@ class FacultyGradingService:
         template = cls.resolve_template_for_offering(offering)
         base_value = cls.resolve_base_value(offering, template)
         passing_threshold = cls.resolve_passing_threshold(offering)
+        period_grade_strategy = cls.resolve_period_grade_strategy(offering, template=template)
 
         normalized_student_ids = None
         if student_ids is not None:
@@ -6298,6 +6329,8 @@ class FacultyGradingService:
             activity__is_active=True,
             is_active=True,
         ).select_related("activity")
+        if normalized_student_ids is not None:
+            activity_scores = activity_scores.filter(student_id__in=target_student_ids)
 
         score_lookup = defaultdict(list)
         raw_score_lookup = defaultdict(list)
@@ -6314,8 +6347,8 @@ class FacultyGradingService:
             )
 
         rows = []
-        before_period_map = {
-            row.student_id: cls._period_grade_audit_snapshot(row)
+        existing_period_grade_map = {
+            row.student_id: row
             for row in StudentPeriodGrade.objects.filter(
                 offering=offering,
                 template_period=template_period,
@@ -6329,22 +6362,31 @@ class FacultyGradingService:
             student_id = student.id
 
             if enrollment.enrollment_status in Enrollment.NON_ACTIVE_GRADING_STATUSES:
-                period_row, _created = StudentPeriodGrade.objects.update_or_create(
-                    offering=offering,
-                    template_period=template_period,
-                    student=student,
-                    defaults={
-                        "tenant_id": offering.tenant_id,
-                        "campus_id": offering.campus_id,
-                        "class_standing_grade": None,
-                        "exam_grade": None,
-                        "period_grade": None,
-                        "computed_by_user": user,
-                        "is_finalized": period_is_finalized,
-                    },
+                period_row = existing_period_grade_map.get(student_id)
+                before_snapshot = cls._period_grade_audit_snapshot(period_row)
+                has_changed = period_row is None or (
+                    period_row.class_standing_grade is not None
+                    or period_row.exam_grade is not None
+                    or period_row.period_grade is not None
+                    or period_row.is_finalized != period_is_finalized
                 )
+                if has_changed:
+                    period_row, _created = StudentPeriodGrade.objects.update_or_create(
+                        offering=offering,
+                        template_period=template_period,
+                        student=student,
+                        defaults={
+                            "tenant_id": offering.tenant_id,
+                            "campus_id": offering.campus_id,
+                            "class_standing_grade": None,
+                            "exam_grade": None,
+                            "period_grade": None,
+                            "computed_by_user": user,
+                            "is_finalized": period_is_finalized,
+                        },
+                    )
+                    existing_period_grade_map[student_id] = period_row
                 after_snapshot = cls._period_grade_audit_snapshot(period_row)
-                before_snapshot = before_period_map.get(student_id)
                 if before_snapshot != after_snapshot and audit_reason:
                     AuditService.log_event(
                         action="RECOMPUTE",
@@ -6386,28 +6428,38 @@ class FacultyGradingService:
                 components=components,
                 score_lookup=score_lookup,
                 raw_score_lookup=raw_score_lookup,
+                period_grade_strategy=period_grade_strategy,
             )
             component_scores = detail["component_scores"]
             class_standing = detail["class_standing"]
             exam_grade = detail["exam_grade"]
             period_grade = detail["period_grade"]
 
-            period_row, _created = StudentPeriodGrade.objects.update_or_create(
-                offering=offering,
-                template_period=template_period,
-                student=student,
-                defaults={
-                    "tenant_id": offering.tenant_id,
-                    "campus_id": offering.campus_id,
-                    "class_standing_grade": class_standing,
-                    "exam_grade": exam_grade,
-                    "period_grade": period_grade,
-                    "computed_by_user": user,
-                    "is_finalized": period_is_finalized,
-                },
+            period_row = existing_period_grade_map.get(student_id)
+            before_snapshot = cls._period_grade_audit_snapshot(period_row)
+            has_changed = period_row is None or (
+                period_row.class_standing_grade != class_standing
+                or period_row.exam_grade != exam_grade
+                or period_row.period_grade != period_grade
+                or period_row.is_finalized != period_is_finalized
             )
+            if has_changed:
+                period_row, _created = StudentPeriodGrade.objects.update_or_create(
+                    offering=offering,
+                    template_period=template_period,
+                    student=student,
+                    defaults={
+                        "tenant_id": offering.tenant_id,
+                        "campus_id": offering.campus_id,
+                        "class_standing_grade": class_standing,
+                        "exam_grade": exam_grade,
+                        "period_grade": period_grade,
+                        "computed_by_user": user,
+                        "is_finalized": period_is_finalized,
+                    },
+                )
+                existing_period_grade_map[student_id] = period_row
             after_snapshot = cls._period_grade_audit_snapshot(period_row)
-            before_snapshot = before_period_map.get(student_id)
             if before_snapshot != after_snapshot and audit_reason:
                 AuditService.log_event(
                     action="RECOMPUTE",

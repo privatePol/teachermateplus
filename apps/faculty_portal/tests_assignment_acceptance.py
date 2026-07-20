@@ -4,7 +4,9 @@ from io import BytesIO
 
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from pypdf import PdfReader
@@ -2797,7 +2799,6 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, "summary-group-class-standing-total")
         refreshed = StudentPeriodGrade.objects.get(offering=self.offering, template_period=self.prelim, student=student)
         self.assertEqual(refreshed.class_standing_grade, Decimal("88"))
-
         explanation_response = self.client.get(
             reverse(
                 "faculty_portal:grade_explanation",
@@ -2812,6 +2813,99 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertEqual(explanation_response.status_code, 200)
         self.assertContains(explanation_response, "Configured Detail Weight: 20.00%")
         self.assertContains(explanation_response, "reference only; not used in the average")
+
+    def test_period_summary_query_growth_is_bounded_for_average_activity_classes(self):
+        self._accept_assignment()
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        participation = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="PERF_PARTICIPATION",
+            name="Participation/Output",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+            detail_computation_mode=DetailComputationMode.AVERAGE_ACTIVITIES,
+        )
+        detail = GradingTemplateDetail.objects.create(
+            template_subcomponent=participation,
+            code="PERF_RECITATION",
+            name="Recitation",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
+        activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            template_subcomponent=participation,
+            template_detail=detail,
+            title="Performance Recitation",
+            total_score=Decimal("100.00"),
+            created_by_user=self.faculty_user,
+        )
+        first_student = self._create_active_student(
+            student_no="2025-PERF-001",
+            last_name="Performance",
+            first_name="One",
+        )
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": first_student.id, "raw_score": Decimal("90.00")}],
+        )
+        self.client.force_login(self.faculty_user)
+        summary_url = reverse(
+            "faculty_portal:period_summary",
+            kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+        )
+
+        self.client.get(summary_url)  # Warm request-level setting and permission lookups.
+        with CaptureQueriesContext(connection) as small_context:
+            small_response = self.client.get(summary_url)
+        self.assertEqual(small_response.status_code, 200)
+        self.assertEqual(len(small_response.context["rows"]), 1)
+
+        extra_students = [
+            self._create_active_student(
+                student_no=f"2025-PERF-{index:03d}",
+                last_name=f"Performance{index:03d}",
+                first_name="Student",
+            )
+            for index in range(2, 31)
+        ]
+        FacultyGradingService.upsert_activity_scores(
+            user=self.faculty_user,
+            activity=activity,
+            score_payload=[{"student_id": student.id, "raw_score": Decimal("90.00")} for student in extra_students],
+        )
+
+        with CaptureQueriesContext(connection) as large_context:
+            large_response = self.client.get(summary_url)
+        self.assertEqual(large_response.status_code, 200)
+        self.assertEqual(len(large_response.context["rows"]), 30)
+        self.assertLessEqual(
+            len(large_context),
+            len(small_context) + 3,
+            "Grade Summary queries must not grow once per enrolled student.",
+        )
+
+    def test_period_summary_includes_accessible_floating_horizontal_navigation(self):
+        self._accept_assignment()
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(
+            reverse(
+                "faculty_portal:period_summary",
+                kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-summary-floating-scrollbar")
+        self.assertContains(response, "data-summary-table-container")
+        self.assertContains(response, "ResizeObserver")
+        self.assertContains(response, "--summary-header-row-1-top")
 
     def test_period_summary_weighted_details_keeps_empty_detail_columns(self):
         self._accept_assignment()
