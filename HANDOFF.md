@@ -6,6 +6,14 @@ Last updated by Codex: 2026-07-20
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+### Admin Portal Course Offerings enrollment and faculty columns
+- Date: 2026-07-24
+- Completed: added `Enrolled` and `Faculty Assigned` to `/admin-portal/academics/offerings/`. The view retains the scoped offering queryset, then annotates each exact offering with a distinct count of `is_active=True` / `Enrollment.Status.ACTIVE` rows and prefetches active faculty assignments with their faculty users. Primary faculty sorts first; pending/non-accepted assignments show their existing status label; no active assignment displays `Unassigned`.
+- Changed files: `apps/admin_portal/views.py`, `templates/admin_portal/academics/offering_table.html`, `apps/admin_portal/tests_offering_list.py`, `CHANGE_LOG.md`, `TEACHERMATEPLUS_CONTEXT.md`, and this handoff. No model, migration, permission, navigation, or assignment-workflow change.
+- Test hardening: the focused suite now constructs active-enrollment comparison offerings across another tenant, campus, academic year, and term, including identical course/section codes in different valid scopes. The query-growth test populates every generated offering with an enrollment and two active faculty/users, then compares enrollment, assignment, and user table-query patterns. Separate 21-row active and inactive lists verify second-page counts, prefetched faculty, and independent `active_page` / `inactive_page` handling.
+- Validation: `python manage.py test apps.admin_portal.tests_offering_list` passed 7/7; `python manage.py test apps.admin_portal.tests_area_chair_offering_visibility` passed 2/2; `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `python manage.py migrate --plan` was inspection-only and applied nothing. `git diff --check` passed.
+- Remaining manual smoke: as an authorized Admin user, check active and inactive offering tables at desktop and narrow widths; verify exact counts, multiple names/status labels, Unassigned, filters/search/paging, and Area Chair college-sibling visibility.
+
 ### Official Grade Release to Faculty display-policy correction
 - Date: 2026-07-20
 - Root cause: the submission-release setting was implemented as a full Grade Summary access gate. When the selected gradebook was unsubmitted, the template hid the normal student table and selected-period header instead of only protecting the official computed period value. Class Performance and Student Performance Consultation could also render the selected-period value or period trend outside the Summary page.

@@ -1,6 +1,6 @@
 <div class="table-responsive">
   <table class="table table-hover mb-0">
-    <thead><tr>{% if show_inactive_tools %}<th>Campus</th><th>Term</th><th>Section</th><th>Course</th>{% else %}<th>Course</th><th>Section</th><th>Schedule Text</th>{% endif %}<th>Room/Office/Lab</th><th>Status</th><th>Record State</th>{% if show_inactive_tools %}<th>Used In</th>{% endif %}<th></th></tr></thead>
+    <thead><tr>{% if show_inactive_tools %}<th>Campus</th><th>Term</th><th>Section</th><th>Course</th>{% else %}<th>Course</th><th>Section</th><th>Schedule Text</th>{% endif %}<th>Enrolled</th><th>Faculty Assigned</th><th>Room/Office/Lab</th><th>Status</th><th>Record State</th>{% if show_inactive_tools %}<th>Used In</th>{% endif %}<th></th></tr></thead>
     <tbody>
     {% for row in page_obj %}
       <tr>
@@ -14,6 +14,14 @@
         <td>{{ row.section.name|default:row.section.code }}</td>
         <td>{{ row.schedule_text|default:"-" }}</td>
         {% endif %}
+        <td>{{ row.enrolled_count }}</td>
+        <td>
+          {% for assignment in row.offering_faculty_assignments %}
+            {{ assignment.faculty_user.full_name }}{% if not assignment.is_accepted %} ({{ assignment.get_response_status_display }}){% endif %}{% if not forloop.last %}, {% endif %}
+          {% empty %}
+            <span class="text-muted">Unassigned</span>
+          {% endfor %}
+        </td>
         <td>{{ row.room|default:"-" }}</td>
         <td><span class="badge text-bg-info">{{ row.status }}</span></td>
         <td>{% if row.is_active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-warning text-dark">Inactive</span>{% endif %}</td>
@@ -27,7 +35,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="{% if show_inactive_tools %}9{% else %}7{% endif %}" class="text-center text-muted py-4">{{ empty_message|default:"No offerings found." }}</td></tr>
+      <tr><td colspan="{% if show_inactive_tools %}11{% else %}9{% endif %}" class="text-center text-muted py-4">{{ empty_message|default:"No offerings found." }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

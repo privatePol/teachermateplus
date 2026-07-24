@@ -5,6 +5,11 @@ TeacherMate+ V1 is a multi-tenant, multi-campus academic grading and governance 
 
 ## 2. Current Operating Modules
 
+### Admin Portal Course Offerings list
+- `/admin-portal/academics/offerings/` shows `Enrolled` from a filtered aggregate of only `Enrollment.is_active=True` and `Enrollment.Status.ACTIVE` rows directly attached to the exact `CourseOffering`.
+- `Faculty Assigned` is loaded through one active-assignment prefetch for the displayed offerings. It orders primary faculty first, then surname/given name/assignment ID; active accepted faculty display by name, while other active workflow states display their existing status label. No active assignment displays `Unassigned`.
+- The existing `AdminScopeService.scoped_course_offerings_for_list()` boundaries, Area Chair list visibility, filters, pagination, and `offerings.read` access requirement remain the source of truth. No schema or migration change is required.
+
 ### Grading Analytics and Academic Performance Insights
 - Existing Admin routes remain `/admin-portal/grading/analytics/`, `/admin-portal/grading/performance-insights/`, `/admin-portal/grading/performance-insights/activity-consistency/`, and `/admin-portal/grading/grade-distribution-monitor/`. Existing scoped permissions and the tenant-level Academic Performance Insights switch are reused; no migration, new permission, navigation seed, or new setting was introduced.
 - `AcademicPerformanceInsightService` is the read-only composition layer. It reuses the official faculty performance calculation and submission-readiness result to show active enrollment, usable computed grades, no-usable-grade count, coverage rate, passing/below-threshold counts and rates, average, median, high/low, readiness state, and grading configuration context. Pass/below-threshold denominators are usable computed grades; coverage is usable grades divided by active enrollment. Missing required records remain separate and are not classified as failing.

@@ -8553,6 +8553,28 @@ def offering_list_view(request):
         "course__title",
         "course__code",
         "id",
+    ).annotate(
+        enrolled_count=Count(
+            "enrollments",
+            filter=Q(
+                enrollments__is_active=True,
+                enrollments__enrollment_status=Enrollment.Status.ACTIVE,
+            ),
+            distinct=True,
+        )
+    ).prefetch_related(
+        Prefetch(
+            "faculty_assignments",
+            queryset=FacultyAssignment.objects.filter(is_active=True)
+            .select_related("faculty_user")
+            .order_by(
+                "-is_primary",
+                "faculty_user__last_name",
+                "faculty_user__first_name",
+                "id",
+            ),
+            to_attr="offering_faculty_assignments",
+        )
     )
     context = {"q": q}
     context.update(_active_inactive_pages(request, queryset))
