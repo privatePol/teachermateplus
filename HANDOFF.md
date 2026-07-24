@@ -1,11 +1,19 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-07-20
+Last updated by Codex: 2026-07-24
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+### Admin Portal unassigned course-offering filter
+- Date: 2026-07-24
+- Completed: added the GET filter `unassigned=1` to `/admin-portal/academics/offerings/`. It uses a correlated `Exists` check for active `FacultyAssignment` rows after the existing scoped queryset, so pending/accepted/declined/clarification-requested/expired active rows count as assigned while inactive rows do not. Active and inactive lists, current scope/search filters, and independent pagination remain intact.
+- UI: added the `View all unassigned course offerings` checkbox. The current query-string pagination helper retains the checkbox and other selected filters. The Faculty Assigned cell uses the existing `enrolled_count` annotation: no active assignment with zero enrolled renders the requested danger `Unassigned` badge; an enrolled unassigned offering remains muted. No template query was added.
+- Changed files: `apps/admin_portal/views.py`, `templates/admin_portal/academics/offering_list.html`, `templates/admin_portal/academics/offering_table.html`, `apps/admin_portal/tests_offering_list.py`, and this handoff. No model, migration, permission, navigation, deployment, environment, or Departmental Exam Builder change.
+- Validation: offerings tests passed 11/11; Area Chair visibility tests passed 2/2; `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `python manage.py migrate --plan` was inspection-only and applied nothing; `git diff --check` passed (line-ending notices only).
+- Remaining manual smoke: as an authorized Admin user, submit/clear the checkbox with active and inactive offerings, verify filter and search/scope pagination in a browser, and confirm zero-enrollment versus enrolled Unassigned styling at narrow widths.
+
 ### Admin Portal Course Offerings enrollment and faculty columns
 - Date: 2026-07-24
 - Completed: added `Enrolled` and `Faculty Assigned` to `/admin-portal/academics/offerings/`. The view retains the scoped offering queryset, then annotates each exact offering with a distinct count of `is_active=True` / `Enrollment.Status.ACTIVE` rows and prefetches active faculty assignments with their faculty users. Primary faculty sorts first; pending/non-accepted assignments show their existing status label; no active assignment displays `Unassigned`.

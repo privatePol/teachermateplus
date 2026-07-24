@@ -8543,6 +8543,15 @@ def offering_list_view(request):
         queryset = queryset.filter(
             Q(course__code__icontains=q) | Q(section__code__icontains=q) | Q(schedule_text__icontains=q)
         )
+    unassigned = request.GET.get("unassigned") == "1"
+    if unassigned:
+        active_assignment_exists = FacultyAssignment.objects.filter(
+            offering_id=OuterRef("pk"),
+            is_active=True,
+        )
+        queryset = queryset.annotate(
+            has_active_faculty=Exists(active_assignment_exists)
+        ).filter(has_active_faculty=False)
     queryset = queryset.order_by(
         "campus__name",
         "campus__code",
@@ -8576,7 +8585,7 @@ def offering_list_view(request):
             to_attr="offering_faculty_assignments",
         )
     )
-    context = {"q": q}
+    context = {"q": q, "unassigned": unassigned}
     context.update(_active_inactive_pages(request, queryset))
     _with_inactive_record_metadata(request, context, model_key="offering")
     context.update(_scope_context(request))

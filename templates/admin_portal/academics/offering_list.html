@@ -48,6 +48,12 @@
   </div>
   <div class="col-md-3"><input class="form-control" name="q" value="{{ q }}" placeholder="Course/section/schedule"></div>
   <div class="col-md-2"><button class="btn btn-outline-secondary w-100">Filter</button></div>
+  <div class="col-12">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" name="unassigned" value="1" id="unassigned" {% if unassigned %}checked{% endif %}>
+      <label class="form-check-label" for="unassigned">View all unassigned course offerings</label>
+    </div>
+  </div>
 </form>
 {% include "admin_portal/shared/active_inactive_sections.html" with section_label="Course Offerings" table_template="admin_portal/academics/offering_table.html" active_empty_message="No active offerings found." inactive_empty_message="No inactive offerings found." %}
 {% endblock %}

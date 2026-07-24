@@ -19,7 +19,11 @@
           {% for assignment in row.offering_faculty_assignments %}
             {{ assignment.faculty_user.full_name }}{% if not assignment.is_accepted %} ({{ assignment.get_response_status_display }}){% endif %}{% if not forloop.last %}, {% endif %}
           {% empty %}
-            <span class="text-muted">Unassigned</span>
+            {% if row.enrolled_count == 0 %}
+              <span class="badge bg-danger">Unassigned</span>
+            {% else %}
+              <span class="text-muted">Unassigned</span>
+            {% endif %}
           {% endfor %}
         </td>
         <td>{{ row.room|default:"-" }}</td>

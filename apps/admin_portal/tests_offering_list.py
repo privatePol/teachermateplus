@@ -1,4 +1,5 @@
 from datetime import date
+import re
 
 from django.conf import settings
 from django.test import TestCase
@@ -137,6 +138,17 @@ class OfferingListEnhancementTests(TestCase):
     def offering_row(self, response, offering):
         return next(row for row in response.context["page_obj"].object_list if row.id == offering.id)
 
+    def offering_html(self, response, offering):
+        row_match = re.search(
+            r"<tr>(?:(?!</tr>).)*<td>"
+            + re.escape(offering.section.code)
+            + r"</td>(?:(?!</tr>).)*</tr>",
+            response.content.decode(),
+            re.DOTALL,
+        )
+        self.assertIsNotNone(row_match)
+        return row_match.group(0)
+
     def test_enrolled_count_uses_only_active_enrollments_for_the_exact_offering(self):
         Enrollment.objects.create(
             tenant=self.tenant, campus=self.campus, academic_year=self.academic_year, term=self.term,
@@ -202,6 +214,86 @@ class OfferingListEnhancementTests(TestCase):
         self.assertEqual(assignment_names, ["Bert Alpha", "Ana Zulu"])
         self.assertEqual(self.offering_row(response, unassigned_offering).offering_faculty_assignments, [])
 
+    def test_unassigned_filter_uses_only_active_faculty_assignments(self):
+        self.user.is_superuser = True
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_superuser", "is_staff"])
+        accepted_faculty = self.make_user("accepted_faculty", "Accepted", "Faculty")
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            faculty_user=accepted_faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_by=accepted_faculty,
+            accepted_at=timezone.now(),
+        )
+        self.add_active_faculty_assignment(self.other_offering, "PENDING")
+        active_unassigned = self.make_offering("ACTIVE-UNASSIGNED")
+        only_inactive_assignment = self.make_offering("INACTIVE-ASSIGNMENT")
+        inactive_faculty = self.make_user("inactive_filter_faculty", "Inactive", "Faculty")
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=only_inactive_assignment,
+            faculty_user=inactive_faculty,
+            is_active=False,
+        )
+        inactive_unassigned = self.make_offering("INACTIVE-UNASSIGNED")
+        inactive_unassigned.is_active = False
+        inactive_unassigned.save(update_fields=["is_active", "updated_at"])
+        inactive_assigned = self.make_offering("INACTIVE-ASSIGNED")
+        inactive_assigned.is_active = False
+        inactive_assigned.save(update_fields=["is_active", "updated_at"])
+        self.add_active_faculty_assignment(inactive_assigned, "INACTIVE-LIST")
+        url = reverse("admin_portal:offering_list")
+
+        unfiltered_response = self.client.get(url)
+        self.assertEqual(unfiltered_response.status_code, 200)
+        self.assertSetEqual(
+            {row.id for row in unfiltered_response.context["active_page_obj"].object_list},
+            {
+                self.offering.id,
+                self.other_offering.id,
+                active_unassigned.id,
+                only_inactive_assignment.id,
+            },
+        )
+        self.assertSetEqual(
+            {row.id for row in unfiltered_response.context["inactive_page_obj"].object_list},
+            {inactive_unassigned.id, inactive_assigned.id},
+        )
+
+        response = self.client.get(url, {"unassigned": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertSetEqual(
+            {row.id for row in response.context["active_page_obj"].object_list},
+            {active_unassigned.id, only_inactive_assignment.id},
+        )
+        self.assertSetEqual(
+            {row.id for row in response.context["inactive_page_obj"].object_list},
+            {inactive_unassigned.id},
+        )
+        self.assertTrue(response.context["unassigned"])
+        self.assertIn('name="unassigned" value="1" id="unassigned" checked', response.content.decode())
+        self.assertContains(response, "View all unassigned course offerings")
+
+    def test_unassigned_display_uses_the_existing_enrolled_count_annotation(self):
+        assigned_offering = self.make_offering("ASSIGNED-DISPLAY")
+        self.add_active_faculty_assignment(assigned_offering, "DISPLAY")
+        self.add_active_enrollments(self.other_offering, 1, "ENROLLED-UNASSIGNED")
+
+        response = self.client.get(reverse("admin_portal:offering_list"))
+
+        zero_enrollment_html = self.offering_html(response, self.offering)
+        enrolled_html = self.offering_html(response, self.other_offering)
+        assigned_html = self.offering_html(response, assigned_offering)
+        self.assertIn('<span class="badge bg-danger">Unassigned</span>', zero_enrollment_html)
+        self.assertNotIn('<span class="badge bg-danger">Unassigned</span>', enrolled_html)
+        self.assertIn('<span class="text-muted">Unassigned</span>', enrolled_html)
+        self.assertNotIn("Unassigned", assigned_html)
+
     def test_user_without_offerings_read_permission_is_denied(self):
         denied_user = self.make_user("denied", "Denied", "User")
         role = Role.objects.create(code="PORTAL_ONLY", name="Portal Only")
@@ -224,6 +316,7 @@ class OfferingListEnhancementTests(TestCase):
                 "campus_id": self.campus.id,
                 "academic_year_id": self.academic_year.id,
                 "term_id": self.term.id,
+                "unassigned": "1",
             },
         )
 
@@ -231,8 +324,9 @@ class OfferingListEnhancementTests(TestCase):
         self.assertEqual([row.id for row in response.context["active_page_obj"].object_list], [self.offering.id])
         self.assertEqual(response.context["inactive_page_obj"].paginator.count, 0)
         self.assertEqual(self.offering_row(response, self.offering).enrolled_count, 0)
+        self.assertTrue(response.context["unassigned"])
 
-    def test_enrolled_count_isolated_across_tenant_campus_year_term_and_identical_codes(self):
+    def test_enrolled_count_and_unassigned_filter_are_isolated_across_scopes(self):
         self.add_active_enrollments(self.offering, 2, "TARGET")
 
         other_campus = Campus.objects.create(tenant=self.tenant, code="C2", name="Campus Two")
@@ -379,6 +473,16 @@ class OfferingListEnhancementTests(TestCase):
         self.assertNotEqual(self.offering.id, other_year_offering.id)
         self.assertNotEqual(self.offering.id, other_term_offering.id)
 
+        unassigned_response = self.client.get(reverse("admin_portal:offering_list"), {"unassigned": "1"})
+        unassigned_row_ids = {
+            row.id for row in unassigned_response.context["active_page_obj"].object_list
+        }
+        self.assertIn(self.offering.id, unassigned_row_ids)
+        self.assertIn(other_year_offering.id, unassigned_row_ids)
+        self.assertIn(other_term_offering.id, unassigned_row_ids)
+        self.assertNotIn(other_campus_offering.id, unassigned_row_ids)
+        self.assertNotIn(other_tenant_offering.id, unassigned_row_ids)
+
     def test_render_query_count_is_bounded_when_more_offerings_are_added(self):
         for index in range(3):
             offering = self.make_offering(f"BASE-{index}")
@@ -426,6 +530,85 @@ class OfferingListEnhancementTests(TestCase):
         self.assertGreater(base_counts["user"], 0)
         for table_label in ("enrollment", "assignment", "user"):
             self.assertLessEqual(expanded_counts[table_label], base_counts[table_label] + 1)
+
+    def test_unassigned_filter_query_count_is_bounded_when_more_offerings_are_added(self):
+        for index in range(3):
+            offering = self.make_offering(f"UNASSIGNED-BASE-{index}")
+            self.add_active_enrollments(offering, 1, f"UNASSIGNED-BASE-{index}")
+        url = reverse("admin_portal:offering_list")
+        params = {"unassigned": "1"}
+        self.client.get(url, params)
+        with CaptureQueriesContext(connection) as base_queries:
+            response = self.client.get(url, params)
+        self.assertEqual(response.status_code, 200)
+
+        for index in range(3):
+            offering = self.make_offering(f"UNASSIGNED-MORE-{index}")
+            self.add_active_enrollments(offering, 1, f"UNASSIGNED-MORE-{index}")
+        with CaptureQueriesContext(connection) as expanded_queries:
+            response = self.client.get(url, params)
+        self.assertEqual(response.status_code, 200)
+
+        def relevant_query_counts(captured_queries):
+            table_names = {
+                "enrollment": '"enrollments"',
+                "assignment": '"faculty_assignments"',
+            }
+            return {
+                label: sum(table_name in query["sql"] for query in captured_queries)
+                for label, table_name in table_names.items()
+            }
+
+        base_counts = relevant_query_counts(base_queries.captured_queries)
+        expanded_counts = relevant_query_counts(expanded_queries.captured_queries)
+        self.assertGreater(base_counts["enrollment"], 0)
+        self.assertGreater(base_counts["assignment"], 0)
+        for table_label in ("enrollment", "assignment"):
+            self.assertLessEqual(expanded_counts[table_label], base_counts[table_label] + 1)
+
+    def test_unassigned_filter_pagination_preserves_checkbox_and_current_filters(self):
+        self.user.is_superuser = True
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_superuser", "is_staff"])
+
+        for index in range(21):
+            self.make_offering(f"A-UNASSIGNED-PAGE-{index:02d}")
+        for index in range(21):
+            offering = self.make_offering(f"I-UNASSIGNED-PAGE-{index:02d}")
+            offering.is_active = False
+            offering.save(update_fields=["is_active", "updated_at"])
+        url = reverse("admin_portal:offering_list")
+        params = {
+            "unassigned": "1",
+            "q": "UNASSIGNED-PAGE",
+            "campus_id": self.campus.id,
+            "academic_year_id": self.academic_year.id,
+            "term_id": self.term.id,
+        }
+
+        active_page_response = self.client.get(url, {**params, "active_page": 2})
+
+        self.assertEqual(active_page_response.status_code, 200)
+        self.assertEqual(active_page_response.context["active_page_obj"].number, 2)
+        self.assertEqual(active_page_response.context["inactive_page_obj"].number, 1)
+        active_querystring = active_page_response.context["active_page_obj"].querystring
+        self.assertIn("unassigned=1", active_querystring)
+        self.assertIn("q=UNASSIGNED-PAGE", active_querystring)
+        self.assertIn(f"campus_id={self.campus.id}", active_querystring)
+        self.assertIn(f"academic_year_id={self.academic_year.id}", active_querystring)
+        self.assertIn(f"term_id={self.term.id}", active_querystring)
+
+        inactive_page_response = self.client.get(url, {**params, "inactive_page": 2})
+
+        self.assertEqual(inactive_page_response.status_code, 200)
+        self.assertEqual(inactive_page_response.context["active_page_obj"].number, 1)
+        self.assertEqual(inactive_page_response.context["inactive_page_obj"].number, 2)
+        inactive_querystring = inactive_page_response.context["inactive_page_obj"].querystring
+        self.assertIn("unassigned=1", inactive_querystring)
+        self.assertIn("q=UNASSIGNED-PAGE", inactive_querystring)
+        self.assertIn(f"campus_id={self.campus.id}", inactive_querystring)
+        self.assertIn(f"academic_year_id={self.academic_year.id}", inactive_querystring)
+        self.assertIn(f"term_id={self.term.id}", inactive_querystring)
 
     def test_active_and_inactive_pagination_keep_counts_assignments_and_independent_parameters(self):
         self.user.is_superuser = True
