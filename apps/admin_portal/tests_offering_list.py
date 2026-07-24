@@ -210,7 +210,7 @@ class OfferingListEnhancementTests(TestCase):
         self.assertIn("Ana Zulu (Pending)", content)
         self.assertNotIn("Bert Alpha (Accepted)", content)
         self.assertNotIn("Cara Ignored", content)
-        self.assertIn("Unassigned", content)
+        self.assertIn('<span class="text-muted">---</span>', content)
         self.assertEqual(assignment_names, ["Bert Alpha", "Ana Zulu"])
         self.assertEqual(self.offering_row(response, unassigned_offering).offering_faculty_assignments, [])
 
@@ -289,10 +289,17 @@ class OfferingListEnhancementTests(TestCase):
         zero_enrollment_html = self.offering_html(response, self.offering)
         enrolled_html = self.offering_html(response, self.other_offering)
         assigned_html = self.offering_html(response, assigned_offering)
-        self.assertIn('<span class="badge bg-danger">Unassigned</span>', zero_enrollment_html)
-        self.assertNotIn('<span class="badge bg-danger">Unassigned</span>', enrolled_html)
-        self.assertIn('<span class="text-muted">Unassigned</span>', enrolled_html)
+        self.assertIn('<span class="text-muted">---</span>', zero_enrollment_html)
+        self.assertNotIn("Unassigned", zero_enrollment_html)
+        self.assertIn('<span class="badge bg-danger">Unassigned</span>', enrolled_html)
+        self.assertNotIn('<span class="text-muted">---</span>', enrolled_html)
+        self.assertIn("Faculty DISPLAY", assigned_html)
         self.assertNotIn("Unassigned", assigned_html)
+        self.assertNotIn('<span class="text-muted">---</span>', assigned_html)
+
+        unassigned_response = self.client.get(reverse("admin_portal:offering_list"), {"unassigned": "1"})
+        unassigned_ids = {row.id for row in unassigned_response.context["page_obj"].object_list}
+        self.assertSetEqual(unassigned_ids, {self.offering.id, self.other_offering.id})
 
     def test_user_without_offerings_read_permission_is_denied(self):
         denied_user = self.make_user("denied", "Denied", "User")

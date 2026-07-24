@@ -2,7 +2,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -289,6 +291,143 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
             role=self.admin_role,
             permission=self.faculty_final_clearance_read,
         )
+
+    def _create_scoped_faculty(
+        self,
+        *,
+        username,
+        email,
+        first_name,
+        last_name,
+        middle_name="",
+        campus=None,
+        department=None,
+        is_active=True,
+    ):
+        campus = campus or self.campus
+        department = department or self.department
+        faculty = User.objects.create_user(
+            username=username,
+            email=email,
+            password="testpass123",
+            first_name=first_name,
+            middle_name=middle_name,
+            last_name=last_name,
+            default_tenant=self.tenant,
+            default_campus=campus,
+            default_department=department,
+            is_active=is_active,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(
+            user=faculty,
+            role=Role.objects.get(code="FACULTY"),
+            tenant=self.tenant,
+            campus=campus,
+            department=department,
+        )
+        return faculty
+
+    def test_faculty_dropdown_uses_sorted_page_specific_identity_labels_and_scope(self):
+        self.faculty_user.first_name = "Maria"
+        self.faculty_user.middle_name = "Lourdes"
+        self.faculty_user.last_name = "Reyes"
+        self.faculty_user.email = "maria.lourdes@example.com"
+        self.faculty_user.save(update_fields=["first_name", "middle_name", "last_name", "email", "updated_at"])
+        self.faculty_user_two.first_name = "Maria"
+        self.faculty_user_two.middle_name = "Anne"
+        self.faculty_user_two.last_name = "Reyes"
+        self.faculty_user_two.email = "maria.anne@example.com"
+        self.faculty_user_two.save(update_fields=["first_name", "middle_name", "last_name", "email", "updated_at"])
+        same_name_faculty = self._create_scoped_faculty(
+            username="faculty_reyes_second",
+            email="maria.lourdes2@example.com",
+            first_name="Maria",
+            middle_name="Lourdes",
+            last_name="Reyes",
+        )
+        no_email_faculty = self._create_scoped_faculty(
+            username="faculty_santos",
+            email="",
+            first_name="Pedro",
+            last_name="Santos",
+        )
+        other_campus = Campus.objects.create(tenant=self.tenant, code="NCBA-OTHER", name="Other Campus")
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="OTHER_IS",
+            name="Other Information Systems",
+        )
+        out_of_scope_faculty = self._create_scoped_faculty(
+            username="faculty_other_campus",
+            email="other.campus@example.com",
+            first_name="Other",
+            last_name="Campus",
+            campus=other_campus,
+            department=other_department,
+        )
+        inactive_faculty = self._create_scoped_faculty(
+            username="faculty_inactive",
+            email="inactive@example.com",
+            first_name="Inactive",
+            last_name="Faculty",
+            is_active=False,
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            reverse("admin_portal:faculty_assignment_list"),
+            {"faculty_user_id": self.faculty_user.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        expected_labels = [
+            "Reyes, Maria A. — maria.anne@example.com",
+            "Reyes, Maria L. — maria.lourdes2@example.com",
+            "Reyes, Maria L. — maria.lourdes@example.com",
+            "Santos, Pedro",
+        ]
+        for label in expected_labels:
+            self.assertIn(label, content)
+        self.assertLess(content.index(expected_labels[0]), content.index(expected_labels[1]))
+        self.assertLess(content.index(expected_labels[1]), content.index(expected_labels[2]))
+        self.assertNotIn("Santos, Pedro .", content)
+        self.assertNotIn("Santos, Pedro —", content)
+        self.assertIn(f'<option value="{self.faculty_user.id}" selected>', content)
+        self.assertEqual(response.context["selected_faculty"].id, self.faculty_user.id)
+        candidate_ids = {faculty.id for faculty in response.context["faculty_candidates"]}
+        self.assertSetEqual(
+            {self.faculty_user.id, self.faculty_user_two.id, same_name_faculty.id, no_email_faculty.id}
+            .difference(candidate_ids),
+            set(),
+        )
+        self.assertNotIn(out_of_scope_faculty.id, candidate_ids)
+        self.assertNotIn(inactive_faculty.id, candidate_ids)
+
+    def test_faculty_dropdown_query_count_is_bounded_when_more_faculty_are_added(self):
+        self.client.force_login(self.admin_user)
+        url = reverse("admin_portal:faculty_assignment_list")
+        self.client.get(url)
+        with CaptureQueriesContext(connection) as baseline_queries:
+            baseline_response = self.client.get(url)
+        self.assertEqual(baseline_response.status_code, 200)
+
+        for index in range(5):
+            self._create_scoped_faculty(
+                username=f"faculty_dropdown_{index}",
+                email=f"faculty_dropdown_{index}@example.com",
+                first_name="Dropdown",
+                middle_name="Faculty",
+                last_name=f"{index:02d}",
+            )
+        with CaptureQueriesContext(connection) as expanded_queries:
+            expanded_response = self.client.get(url)
+
+        self.assertEqual(expanded_response.status_code, 200)
+        self.assertEqual(len(expanded_queries), len(baseline_queries))
 
     def test_admin_assignment_view_reports_pending_acceptance_metrics(self):
         self.client.force_login(self.admin_user)

@@ -8713,6 +8713,22 @@ def offering_update_view(request, offering_id: int):
     return render(request, "admin_portal/shared/form_page.html", context)
 
 
+def _faculty_assignment_dropdown_label(user):
+    last_name = (getattr(user, "last_name", "") or "").strip()
+    first_name = (getattr(user, "first_name", "") or "").strip()
+    middle_name = (getattr(user, "middle_name", "") or "").strip()
+    email = (getattr(user, "email", "") or "").strip()
+    username = (getattr(user, "username", "") or "").strip()
+
+    if last_name and first_name:
+        label = f"{last_name}, {first_name}"
+    else:
+        label = last_name or first_name or username
+    if middle_name:
+        label = f"{label} {middle_name[0]}."
+    return f"{label} — {email}" if email else label
+
+
 @portal_required("ADMIN")
 @permission_required("faculty_assignments.read")
 def faculty_assignment_list_view(request):
@@ -8720,7 +8736,7 @@ def faculty_assignment_list_view(request):
     faculty_ids = AdminScopeService.scoped_faculty_users(request)
     all_faculty = (
         User.objects.filter(id__in=faculty_ids, is_active=True)
-        .order_by("last_name", "first_name", "username")
+        .order_by("last_name", "first_name", "middle_name", "email", "id")
     )
 
     faculty_q = request.GET.get("faculty_q", "").strip()
@@ -8732,6 +8748,9 @@ def faculty_assignment_list_view(request):
             | Q(first_name__icontains=faculty_q)
             | Q(last_name__icontains=faculty_q)
         )
+    faculty_candidates = list(faculty_candidates)
+    for faculty in faculty_candidates:
+        faculty.assignment_dropdown_label = _faculty_assignment_dropdown_label(faculty)
 
     selected_faculty_id = _safe_int(request.GET.get("faculty_user_id"))
     selected_faculty = all_faculty.filter(id=selected_faculty_id).first() if selected_faculty_id else None
