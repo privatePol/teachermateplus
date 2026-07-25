@@ -140,3 +140,14 @@ class AreaChairCourseOfferingVisibilityTests(TestCase):
 
         self.assertEqual(standard_ids, {self.ba_offering.id})
         self.assertEqual(list_ids, {self.ba_offering.id, self.is_offering.id})
+
+    def test_area_chair_unassigned_print_uses_same_college_list_scope(self):
+        response = self.client.get(reverse("admin_portal:offering_unassigned_print"))
+
+        self.assertEqual(response.status_code, 200)
+        row_ids = {row.id for row in response.context["report_rows"]}
+        self.assertSetEqual(row_ids, {self.ba_offering.id, self.is_offering.id})
+        self.assertContains(response, "BA-1A")
+        self.assertContains(response, "IS-1A")
+        self.assertNotContains(response, "JHS-1")
+        self.assertNotContains(response, "IS-C-1A")

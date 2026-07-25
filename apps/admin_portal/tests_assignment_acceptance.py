@@ -2051,3 +2051,425 @@ class AdminNonComplianceMonitorTests(TestCase):
         self.assertContains(response, "Faculty")
         self.assertContains(response, self.faculty_user.full_name or self.faculty_user.username)
         self.assertContains(response, "A132-ITAPPS")
+
+class AdminFacultyAssignmentPrintReportTests(TestCase):
+    """Rendered faculty-assignment print report coverage using the assignment fixtures."""
+
+    setUp = AdminFacultyAssignmentAcceptanceViewTests.setUp
+    _create_scoped_faculty = AdminFacultyAssignmentAcceptanceViewTests._create_scoped_faculty
+
+    def test_faculty_assignment_print_button_and_report_use_active_scope(self):
+        AcademicGovernanceService.set_active_scope(
+            tenant_id=self.tenant.id,
+            academic_year=self.academic_year,
+            term=self.term,
+        )
+        self.faculty_user.first_name = "Apolo"
+        self.faculty_user.middle_name = "Gabriel"
+        self.faculty_user.last_name = "Bejer"
+        self.faculty_user.email = "apolo.bejer@ncba.edu.ph"
+        self.faculty_user.save(update_fields=["first_name", "middle_name", "last_name", "email", "updated_at"])
+        self.course.title = "Zulu Applications"
+        self.course.save(update_fields=["title", "updated_at"])
+        self.offering.schedule_text = "MW 08:00-09:30"
+        self.offering.room = "Room 101"
+        self.offering.save(update_fields=["schedule_text", "room", "updated_at"])
+
+        alpha_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            code="A001-ALPHA",
+            title="Alpha Applications",
+        )
+        alpha_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="BSIT-1C",
+            name="BSIT 1C",
+        )
+        alpha_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=alpha_course,
+            section=alpha_section,
+            schedule_text="TTH 10:00-11:30",
+            room="Lab 2",
+        )
+        alpha_assignment = FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=alpha_offering,
+            faculty_user=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.PENDING,
+        )
+        inactive_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=Course.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                code="A999-INACTIVE",
+                title="Inactive Assignment",
+            ),
+            section=Section.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                program=self.program,
+                code="BSIT-1D",
+                name="BSIT 1D",
+            ),
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=inactive_offering,
+            faculty_user=self.faculty_user,
+            is_active=False,
+        )
+        old_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2024-2025",
+            name="AY 2024-2025",
+            start_date=date(2024, 6, 1),
+            end_date=date(2025, 5, 31),
+        )
+        old_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=old_year,
+            code="OLD",
+            name="Old Term",
+            sequence_no=1,
+        )
+        old_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=old_year,
+            term=old_term,
+            course=Course.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                code="OLD101",
+                title="Old Assignment",
+            ),
+            section=Section.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                program=self.program,
+                code="BSIT-OLD",
+                name="BSIT OLD",
+            ),
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=old_offering,
+            faculty_user=self.faculty_user,
+        )
+        other_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=self.academic_year,
+            code="2ND",
+            name="Second Term",
+            sequence_no=2,
+        )
+        other_term_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=other_term,
+            course=alpha_course,
+            section=alpha_section,
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=other_term_offering,
+            faculty_user=self.faculty_user,
+        )
+        other_campus = Campus.objects.create(tenant=self.tenant, code="NCBA-OTHER", name="Other Campus")
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="OTHER_IS",
+            name="Other Information Systems",
+        )
+        other_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+            code="BSIT-OTHER",
+            name="Other BSIT",
+        )
+        other_campus_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+            program=other_program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=Course.objects.create(
+                tenant=self.tenant,
+                campus=other_campus,
+                department=other_department,
+                code="OTHER101",
+                title="Other Campus Assignment",
+            ),
+            section=Section.objects.create(
+                tenant=self.tenant,
+                campus=other_campus,
+                department=other_department,
+                program=other_program,
+                code="OTHER-1A",
+                name="Other 1A",
+            ),
+        )
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            offering=other_campus_offering,
+            faculty_user=self.faculty_user,
+        )
+
+        active_student = Student.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            student_no="PRINT-ACTIVE",
+            first_name="Print",
+            last_name="Active",
+        )
+        Enrollment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            student=active_student,
+            course_offering=self.offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+        )
+        for suffix, status, is_active in [
+            ("PRINT-DROPPED", Enrollment.Status.DRP, True),
+            ("PRINT-INACTIVE", Enrollment.Status.ACTIVE, False),
+        ]:
+            student = Student.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                program=self.program,
+                student_no=suffix,
+                first_name="Print",
+                last_name=suffix,
+            )
+            Enrollment.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                academic_year=self.academic_year,
+                term=self.term,
+                student=student,
+                course_offering=self.offering,
+                enrollment_status=status,
+                is_active=is_active,
+            )
+
+        self.client.force_login(self.admin_user)
+        no_selection_response = self.client.get(reverse("admin_portal:faculty_assignment_list"))
+        selected_response = self.client.get(
+            reverse("admin_portal:faculty_assignment_list"),
+            {"faculty_user_id": self.faculty_user.id},
+        )
+        print_response = self.client.get(
+            reverse("admin_portal:faculty_assignment_print"),
+            {"faculty_user_id": self.faculty_user.id},
+        )
+
+        self.assertEqual(no_selection_response.status_code, 200)
+        self.assertContains(no_selection_response, "Print Faculty Assignments")
+        self.assertContains(no_selection_response, 'disabled aria-disabled="true"')
+        self.assertEqual(selected_response.status_code, 200)
+        self.assertEqual(
+            selected_response.context["faculty_assignment_print_url"],
+            f"{reverse('admin_portal:faculty_assignment_print')}?faculty_user_id={self.faculty_user.id}",
+        )
+        self.assertContains(selected_response, 'target="_blank" rel="noopener"')
+        self.assertEqual(print_response.status_code, 200)
+        for heading in ["Course Code", "Course Title", "Section", "Schedule", "Room", "Enrolled"]:
+            self.assertContains(print_response, heading)
+        self.assertContains(print_response, "Bejer, Apolo G. (apolo.bejer@ncba.edu.ph)")
+        self.assertContains(print_response, "2025-2026 - AY 2025-2026")
+        self.assertContains(print_response, "1ST - First Term")
+        row_ids = [row.id for row in print_response.context["report_rows"]]
+        self.assertEqual(row_ids, [alpha_assignment.id, self.assignment.id])
+        self.assertNotIn(self.second_assignment.id, row_ids)
+        self.assertNotIn(old_offering.id, [row.offering_id for row in print_response.context["report_rows"]])
+        self.assertNotIn(other_term_offering.id, [row.offering_id for row in print_response.context["report_rows"]])
+        self.assertNotIn(other_campus_offering.id, [row.offering_id for row in print_response.context["report_rows"]])
+        self.assertNotIn(inactive_offering.id, [row.offering_id for row in print_response.context["report_rows"]])
+        self.assertEqual(
+            next(row.enrolled_count for row in print_response.context["report_rows"] if row.id == self.assignment.id),
+            1,
+        )
+        self.assertContains(print_response, "MW 08:00-09:30")
+        self.assertContains(print_response, "Room 101")
+        self.assertEqual(print_response.context["report_total"], 2)
+
+    def test_faculty_assignment_print_rejects_invalid_faculty_and_fails_closed_without_scope(self):
+        self.client.force_login(self.admin_user)
+        print_url = reverse("admin_portal:faculty_assignment_print")
+
+        no_selection_response = self.client.get(print_url, follow=True)
+        self.assertEqual(no_selection_response.status_code, 200)
+        self.assertContains(no_selection_response, "Select a faculty member before printing assignments.")
+        self.assertEqual(self.client.get(print_url, {"faculty_user_id": "not-an-id"}).status_code, 404)
+
+        other_campus = Campus.objects.create(tenant=self.tenant, code="NCBA-OUT", name="Out of Scope")
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="OUT_IS",
+            name="Out of Scope Information Systems",
+        )
+        out_of_scope_faculty = self._create_scoped_faculty(
+            username="print_out_of_scope",
+            email="print_out_of_scope@example.com",
+            first_name="Out",
+            last_name="Scope",
+            campus=other_campus,
+            department=other_department,
+        )
+        self.assertEqual(
+            self.client.get(print_url, {"faculty_user_id": out_of_scope_faculty.id}).status_code,
+            404,
+        )
+
+        self.faculty_user.is_active = False
+        self.faculty_user.save(update_fields=["is_active", "updated_at"])
+        self.assertEqual(
+            self.client.get(print_url, {"faculty_user_id": self.faculty_user.id}).status_code,
+            404,
+        )
+
+    def test_faculty_assignment_print_redirects_when_active_scope_is_missing_and_is_access_controlled(self):
+        self.client.force_login(self.admin_user)
+        print_url = reverse("admin_portal:faculty_assignment_print")
+        AcademicGovernanceService.set_active_scope(
+            tenant_id=self.tenant.id,
+            academic_year=None,
+            term=None,
+        )
+
+        missing_scope_response = self.client.get(
+            print_url,
+            {"faculty_user_id": self.faculty_user.id},
+            follow=True,
+        )
+        self.assertEqual(missing_scope_response.status_code, 200)
+        self.assertContains(
+            missing_scope_response,
+            "Configure the active academic year and term before printing faculty assignments.",
+        )
+
+        self.client.logout()
+        self.assertEqual(
+            self.client.get(print_url, {"faculty_user_id": self.faculty_user.id}).status_code,
+            302,
+        )
+
+        denied_user = User.objects.create_user(
+            username="print_assignment_denied",
+            email="print_assignment_denied@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        denied_role = Role.objects.create(code="PRINT_ASSIGN_DENIED", name="Print Assignment Denied")
+        RolePermission.objects.create(
+            role=denied_role,
+            permission=Permission.objects.get(code="admin_portal.access"),
+        )
+        UserRole.objects.create(
+            user=denied_user,
+            role=denied_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        self.client.force_login(denied_user)
+        self.assertEqual(
+            self.client.get(print_url, {"faculty_user_id": self.faculty_user.id}).status_code,
+            403,
+        )
+
+    def test_faculty_assignment_print_query_count_is_bounded(self):
+        AcademicGovernanceService.set_active_scope(
+            tenant_id=self.tenant.id,
+            academic_year=self.academic_year,
+            term=self.term,
+        )
+        self.client.force_login(self.admin_user)
+        url = reverse("admin_portal:faculty_assignment_print")
+        params = {"faculty_user_id": self.faculty_user.id}
+        self.client.get(url, params)
+        with CaptureQueriesContext(connection) as base_queries:
+            response = self.client.get(url, params)
+        self.assertEqual(response.status_code, 200)
+
+        for index in range(4):
+            course = Course.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                code=f"PRINT{index:03d}",
+                title=f"Print Query {index}",
+            )
+            section = Section.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                program=self.program,
+                code=f"BSIT-PQ{index}",
+                name=f"BSIT Print Query {index}",
+            )
+            offering = CourseOffering.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                department=self.department,
+                program=self.program,
+                academic_year=self.academic_year,
+                term=self.term,
+                course=course,
+                section=section,
+            )
+            FacultyAssignment.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=offering,
+                faculty_user=self.faculty_user,
+            )
+
+        with CaptureQueriesContext(connection) as expanded_queries:
+            response = self.client.get(url, params)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(expanded_queries), len(base_queries))

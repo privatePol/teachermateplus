@@ -1,0 +1,131 @@
+{% extends "admin_portal/base.html" %}
+
+{% block title %}Unassigned Course Offerings | TeacherMate+{% endblock %}
+
+{% block admin_content %}
+<style>
+  .print-report-shell {
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+  .print-report-header {
+    border-bottom: 2px solid #173b24;
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.9rem;
+  }
+  .print-report-school {
+    color: #173b24;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+  .print-report-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-top: 0.25rem;
+  }
+  .print-report-meta {
+    color: #4f5f53;
+    font-size: 0.9rem;
+    line-height: 1.55;
+  }
+  .print-report-table {
+    font-size: 0.88rem;
+    table-layout: fixed;
+    width: 100%;
+  }
+  .print-report-table th,
+  .print-report-table td {
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
+  .print-report-table th:nth-child(1) { width: 12%; }
+  .print-report-table th:nth-child(2) { width: 28%; }
+  .print-report-table th:nth-child(3) { width: 15%; }
+  .print-report-table th:nth-child(4) { width: 22%; }
+  .print-report-table th:nth-child(5) { width: 13%; }
+  .print-report-table th:nth-child(6) { width: 10%; }
+  @page {
+    size: portrait;
+    margin: 12mm;
+  }
+  @media print {
+    .admin-sidebar,
+    .admin-topbar,
+    .admin-utility-footer,
+    .print-report-actions,
+    .alert {
+      display: none !important;
+    }
+    .admin-main,
+    .container-fluid,
+    .row,
+    .col-12,
+    .col-md-9,
+    .col-lg-10,
+    section.p-4,
+    .print-report-shell {
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    .print-report-table {
+      font-size: 8.5pt;
+    }
+    .print-report-table thead {
+      display: table-header-group;
+    }
+    .print-report-table tr {
+      break-inside: avoid;
+    }
+  }
+</style>
+
+<div class="print-report-shell">
+  <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3 print-report-actions">
+    <a class="btn btn-outline-secondary" href="{{ source_url }}">Back to Course Offerings</a>
+    <button class="btn btn-primary" type="button" onclick="window.print();">Print</button>
+  </div>
+
+  <header class="print-report-header">
+    <div class="print-report-school">{{ print_header_name }}</div>
+    <div class="print-report-title">Unassigned Course Offerings</div>
+    <div class="print-report-meta">Academic Year: {{ selected_academic_year_label }}</div>
+    <div class="print-report-meta">Term: {{ selected_term_label }}</div>
+    <div class="print-report-meta">Campus: {{ selected_campus_label }}</div>
+    <div class="print-report-meta">Active course offerings only &middot; Total rows: {{ report_total }}</div>
+    <div class="print-report-meta">Generated: {{ generated_at|date:"M d, Y h:i A" }} Asia/Manila</div>
+  </header>
+
+  <div class="table-responsive">
+    <table class="table table-bordered print-report-table">
+      <thead class="table-light">
+        <tr>
+          <th>Course Code</th>
+          <th>Course Title</th>
+          <th>Section</th>
+          <th>Schedule</th>
+          <th>Room</th>
+          <th class="text-end">Enrolled</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in report_rows %}
+        <tr>
+          <td>{{ row.course.code }}</td>
+          <td>{{ row.course.title }}</td>
+          <td>{{ row.section.name|default:row.section.code }}</td>
+          <td>{% if row.schedule_text %}{{ row.schedule_text }}{% else %}&mdash;{% endif %}</td>
+          <td>{% if row.room %}{{ row.room }}{% else %}&mdash;{% endif %}</td>
+          <td class="text-end">{{ row.enrolled_count }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6" class="text-center text-muted py-4">No unassigned active course offerings match the current authorized filters.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

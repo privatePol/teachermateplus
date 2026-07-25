@@ -76,6 +76,7 @@ from .views import (
     faculty_gradebook_explanation_view,
     faculty_gradebook_monitor_view,
     faculty_assignment_list_view,
+    faculty_assignment_print_view,
     faculty_assignment_replace_view,
     faculty_assignment_renew_window_view,
     faculty_assignment_toggle_primary_view,
@@ -122,6 +123,7 @@ from .views import (
     offering_create_view,
     offering_complete_tabulation_sheet_view,
     offering_list_view,
+    offering_unassigned_print_view,
     offering_update_view,
     overdue_unsubmitted_report_view,
     program_create_view,
@@ -335,6 +337,11 @@ urlpatterns = [
     path("admin-portal/academics/sections/<int:section_id>/edit/", section_update_view, name="section_update"),
     path("admin-portal/academics/offerings/", offering_list_view, name="offering_list"),
     path(
+        "admin-portal/academics/offerings/print-unassigned/",
+        offering_unassigned_print_view,
+        name="offering_unassigned_print",
+    ),
+    path(
         "admin-portal/academics/offerings/<int:offering_id>/complete-tabulation/",
         offering_complete_tabulation_sheet_view,
         name="offering_complete_tabulation_sheet",
@@ -345,6 +352,11 @@ urlpatterns = [
         "admin-portal/academics/faculty-assignments/",
         faculty_assignment_list_view,
         name="faculty_assignment_list",
+    ),
+    path(
+        "admin-portal/academics/faculty-assignments/print/",
+        faculty_assignment_print_view,
+        name="faculty_assignment_print",
     ),
     path(
         "admin-portal/academics/faculty-assignments/dashboard/",

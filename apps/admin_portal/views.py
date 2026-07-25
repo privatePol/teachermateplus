@@ -8521,21 +8521,54 @@ def section_update_view(request, section_id: int):
     return render(request, "admin_portal/shared/form_page.html", context)
 
 
-@portal_required("ADMIN")
-@permission_required("offerings.read")
-def offering_list_view(request):
-    queryset = AdminScopeService.scoped_course_offerings_for_list(request)
-    if request.GET.get("campus_id"):
-        queryset = queryset.filter(campus_id=request.GET.get("campus_id"))
-    if request.GET.get("academic_year_id"):
-        queryset = queryset.filter(academic_year_id=request.GET.get("academic_year_id"))
-    if request.GET.get("term_id"):
-        queryset = queryset.filter(term_id=request.GET.get("term_id"))
-    if request.GET.get("department_id"):
+_OFFERING_REPORT_FILTER_NAMES = (
+    "campus_id",
+    "academic_year_id",
+    "term_id",
+    "department_id",
+    "q",
+)
+
+
+def _offering_list_filter_params(request):
+    return {
+        name: value
+        for name in _OFFERING_REPORT_FILTER_NAMES
+        if (value := (request.GET.get(name) or "").strip())
+    }
+
+
+def _url_with_query_params(url, params):
+    return f"{url}?{urlencode(params)}" if params else url
+
+
+def _offering_list_filter_id(request, parameter_name):
+    raw_value = (request.GET.get(parameter_name) or "").strip()
+    if not raw_value:
+        return None, False
+    parsed_value = _safe_int(raw_value)
+    return parsed_value, parsed_value is None
+
+
+def _filter_offering_list_queryset(request, queryset):
+    campus_id, invalid_campus_id = _offering_list_filter_id(request, "campus_id")
+    academic_year_id, invalid_academic_year_id = _offering_list_filter_id(request, "academic_year_id")
+    term_id, invalid_term_id = _offering_list_filter_id(request, "term_id")
+    department_id, invalid_department_id = _offering_list_filter_id(request, "department_id")
+    if any((invalid_campus_id, invalid_academic_year_id, invalid_term_id, invalid_department_id)):
+        return queryset.none()
+
+    if campus_id is not None:
+        queryset = queryset.filter(campus_id=campus_id)
+    if academic_year_id is not None:
+        queryset = queryset.filter(academic_year_id=academic_year_id)
+    if term_id is not None:
+        queryset = queryset.filter(term_id=term_id)
+    if department_id is not None:
         queryset = queryset.filter(
             department_id__in=AdminScopeService.expand_department_filter_ids(
-                request.GET.get("department_id"),
-                campus_id=_safe_int(request.GET.get("campus_id")),
+                department_id,
+                campus_id=campus_id,
             )
         )
     q = request.GET.get("q", "").strip()
@@ -8543,6 +8576,59 @@ def offering_list_view(request):
         queryset = queryset.filter(
             Q(course__code__icontains=q) | Q(section__code__icontains=q) | Q(schedule_text__icontains=q)
         )
+    return queryset
+
+
+def _report_scope_label(row):
+    code = (getattr(row, "code", "") or "").strip()
+    name = (getattr(row, "name", "") or "").strip()
+    if code and name and code != name:
+        return f"{code} - {name}"
+    return code or name or "-"
+
+
+def _report_print_header_name(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    tenant = AdminScopeService.scoped_tenants(request).filter(id=tenant_id).first() if tenant_id else None
+    return SystemSettingService.get(
+        "PRINT_HEADER_SCHOOL_NAME",
+        tenant_id=tenant_id,
+        default=getattr(tenant, "name", "") or "TeacherMate+",
+    )
+
+
+def _offering_report_scope_context(request):
+    campus_id = _safe_int(request.GET.get("campus_id"))
+    academic_year_id = _safe_int(request.GET.get("academic_year_id"))
+    term_id = _safe_int(request.GET.get("term_id"))
+    selected_campus = (
+        AdminScopeService.active_scoped_campuses(request).filter(id=campus_id).first() if campus_id else None
+    )
+    selected_academic_year = (
+        AdminScopeService.active_scoped_academic_years(request).filter(id=academic_year_id).first()
+        if academic_year_id
+        else None
+    )
+    selected_term = AdminScopeService.active_scoped_terms(request).filter(id=term_id).first() if term_id else None
+    return {
+        "selected_campus_label": _report_scope_label(selected_campus)
+        if selected_campus
+        else "All authorized campuses",
+        "selected_academic_year_label": _report_scope_label(selected_academic_year)
+        if selected_academic_year
+        else "All scoped academic years",
+        "selected_term_label": _report_scope_label(selected_term) if selected_term else "All scoped terms",
+    }
+
+
+@portal_required("ADMIN")
+@permission_required("offerings.read")
+def offering_list_view(request):
+    queryset = _filter_offering_list_queryset(
+        request,
+        AdminScopeService.scoped_course_offerings_for_list(request),
+    )
+    q = request.GET.get("q", "").strip()
     unassigned = request.GET.get("unassigned") == "1"
     if unassigned:
         active_assignment_exists = FacultyAssignment.objects.filter(
@@ -8585,7 +8671,14 @@ def offering_list_view(request):
             to_attr="offering_faculty_assignments",
         )
     )
-    context = {"q": q, "unassigned": unassigned}
+    context = {
+        "q": q,
+        "unassigned": unassigned,
+        "unassigned_print_url": _url_with_query_params(
+            reverse("admin_portal:offering_unassigned_print"),
+            _offering_list_filter_params(request),
+        ),
+    }
     context.update(_active_inactive_pages(request, queryset))
     _with_inactive_record_metadata(request, context, model_key="offering")
     context.update(_scope_context(request))
@@ -8593,6 +8686,47 @@ def offering_list_view(request):
     context["terms"] = AdminScopeService.active_scoped_terms(request)
     context["departments"] = AdminScopeService.course_offering_list_departments(request)
     return render(request, "admin_portal/academics/offering_list.html", context)
+
+
+@require_GET
+@portal_required("ADMIN")
+@permission_required("offerings.read")
+def offering_unassigned_print_view(request):
+    active_assignment_exists = FacultyAssignment.objects.filter(
+        offering_id=OuterRef("pk"),
+        is_active=True,
+    )
+    report_rows = list(
+        _filter_offering_list_queryset(
+            request,
+            AdminScopeService.scoped_course_offerings_for_list(request).filter(is_active=True),
+        )
+        .annotate(
+            has_active_faculty=Exists(active_assignment_exists),
+            enrolled_count=Count(
+                "enrollments",
+                filter=Q(
+                    enrollments__is_active=True,
+                    enrollments__enrollment_status=Enrollment.Status.ACTIVE,
+                ),
+                distinct=True,
+            ),
+        )
+        .filter(has_active_faculty=False)
+        .select_related("tenant", "campus", "academic_year", "term", "course", "section")
+        .order_by("course__title", "course__code", "section__code", "id")
+    )
+    filter_params = _offering_list_filter_params(request)
+    context = {
+        "title": "Unassigned Course Offerings",
+        "print_header_name": _report_print_header_name(request),
+        "report_rows": report_rows,
+        "report_total": len(report_rows),
+        "generated_at": timezone.localtime(),
+        "source_url": _url_with_query_params(reverse("admin_portal:offering_list"), filter_params),
+    }
+    context.update(_offering_report_scope_context(request))
+    return render(request, "admin_portal/academics/unassigned_offering_print.html", context)
 
 
 @portal_required("ADMIN")
@@ -8863,6 +8997,14 @@ def faculty_assignment_list_view(request):
         "faculty_q": faculty_q,
         "faculty_candidates": faculty_candidates,
         "selected_faculty": selected_faculty,
+        "faculty_assignment_print_url": (
+            _url_with_query_params(
+                reverse("admin_portal:faculty_assignment_print"),
+                {"faculty_user_id": selected_faculty.id},
+            )
+            if selected_faculty
+            else None
+        ),
         "show_assign_box": show_assign_box,
         "offering_q": offering_q,
         "selected_academic_year_id": selected_academic_year_id,
@@ -8888,6 +9030,96 @@ def faculty_assignment_list_view(request):
     }
     context.update(_scope_context(request))
     return render(request, "admin_portal/academics/faculty_assignment_list.html", context)
+
+
+@require_GET
+@portal_required("ADMIN")
+@permission_required("faculty_assignments.read")
+def faculty_assignment_print_view(request):
+    raw_faculty_user_id = (request.GET.get("faculty_user_id") or "").strip()
+    if not raw_faculty_user_id:
+        messages.warning(request, "Select a faculty member before printing assignments.")
+        return redirect("admin_portal:faculty_assignment_list")
+
+    faculty_user_id = _safe_int(raw_faculty_user_id)
+    if faculty_user_id is None:
+        raise Http404("Faculty member not found in your authorized scope.")
+
+    selected_faculty = get_object_or_404(
+        User.objects.filter(
+            id__in=AdminScopeService.scoped_faculty_users(request),
+            is_active=True,
+        ),
+        id=faculty_user_id,
+    )
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    active_academic_year, active_term = (
+        AcademicGovernanceService.resolve_active_scope(tenant_id=tenant_id) if tenant_id else (None, None)
+    )
+    if not active_academic_year or not active_term:
+        messages.warning(request, "Configure the active academic year and term before printing faculty assignments.")
+        return redirect("admin_portal:faculty_assignment_list")
+
+    report_rows = list(
+        AdminScopeService.scoped_faculty_assignments(request)
+        .filter(
+            faculty_user_id=selected_faculty.id,
+            is_active=True,
+            offering__academic_year_id=active_academic_year.id,
+            offering__term_id=active_term.id,
+        )
+        .annotate(
+            enrolled_count=Count(
+                "offering__enrollments",
+                filter=Q(
+                    offering__enrollments__is_active=True,
+                    offering__enrollments__enrollment_status=Enrollment.Status.ACTIVE,
+                ),
+                distinct=True,
+            )
+        )
+        .select_related(
+            "faculty_user",
+            "offering",
+            "offering__course",
+            "offering__section",
+            "offering__campus",
+            "offering__academic_year",
+            "offering__term",
+        )
+        .order_by(
+            "offering__course__title",
+            "offering__course__code",
+            "offering__section__code",
+            "offering_id",
+            "id",
+        )
+    )
+    current_campus_id = getattr(request, "scope", {}).get("campus_id")
+    current_campus = (
+        AdminScopeService.active_scoped_campuses(request).filter(id=current_campus_id).first()
+        if current_campus_id
+        else None
+    )
+    context = {
+        "title": "Faculty Assignments",
+        "print_header_name": _report_print_header_name(request),
+        "selected_faculty": selected_faculty,
+        "selected_faculty_label": _faculty_assignment_dropdown_label(selected_faculty),
+        "selected_academic_year_label": _report_scope_label(active_academic_year),
+        "selected_term_label": _report_scope_label(active_term),
+        "selected_campus_label": _report_scope_label(current_campus)
+        if current_campus
+        else "All authorized campuses",
+        "report_rows": report_rows,
+        "report_total": len(report_rows),
+        "generated_at": timezone.localtime(),
+        "source_url": _url_with_query_params(
+            reverse("admin_portal:faculty_assignment_list"),
+            {"faculty_user_id": selected_faculty.id},
+        ),
+    }
+    return render(request, "admin_portal/academics/faculty_assignment_print.html", context)
 
 
 @portal_required("ADMIN")

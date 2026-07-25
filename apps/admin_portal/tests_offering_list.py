@@ -670,3 +670,214 @@ class OfferingListEnhancementTests(TestCase):
             [assignment.id for assignment in inactive_page_rows[0].offering_faculty_assignments],
             [inactive_assignment.id],
         )
+
+    def test_unassigned_print_button_preserves_supported_filters_only(self):
+        params = {
+            "campus_id": self.campus.id,
+            "academic_year_id": self.academic_year.id,
+            "term_id": self.term.id,
+            "department_id": self.department.id,
+            "q": "SEC-1",
+            "unassigned": "1",
+            "active_page": "2",
+            "inactive_page": "3",
+        }
+
+        response = self.client.get(reverse("admin_portal:offering_list"), params)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Print Unassigned Course Offerings")
+        self.assertContains(response, 'target="_blank" rel="noopener"')
+        print_url = response.context["unassigned_print_url"]
+        self.assertEqual(
+            print_url,
+            (
+                f"{reverse('admin_portal:offering_unassigned_print')}?campus_id={self.campus.id}"
+                f"&academic_year_id={self.academic_year.id}&term_id={self.term.id}"
+                f"&department_id={self.department.id}&q=SEC-1"
+            ),
+        )
+        self.assertNotIn("unassigned=", print_url)
+        self.assertNotIn("active_page=", print_url)
+        self.assertNotIn("inactive_page=", print_url)
+
+    def test_unassigned_print_report_uses_exact_active_rows_counts_and_sorting(self):
+        self.course.title = "Zulu Course"
+        self.course.save(update_fields=["title", "updated_at"])
+        self.offering.schedule_text = ""
+        self.offering.room = ""
+        self.offering.save(update_fields=["schedule_text", "room", "updated_at"])
+
+        alpha_course = Course.objects.create(tenant=self.tenant, code="ALPHA101", title="Alpha Course")
+        alpha_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            code="ALPHA-1A",
+            name="Alpha 1A",
+        )
+        alpha_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=self.program,
+            academic_year=self.academic_year,
+            term=self.term,
+            course=alpha_course,
+            section=alpha_section,
+            schedule_text="MW 08:00-09:30",
+            room="Room 101",
+        )
+        accepted_assignment = self.add_active_faculty_assignment(self.other_offering, "ACCEPTED")
+        accepted_assignment.response_status = FacultyAssignment.ResponseStatus.ACCEPTED
+        accepted_assignment.accepted_at = timezone.now()
+        accepted_assignment.accepted_by = accepted_assignment.faculty_user
+        accepted_assignment.save(
+            update_fields=["response_status", "accepted_at", "accepted_by", "updated_at"]
+        )
+        pending_offering = self.make_offering("PENDING-ASSIGNMENT")
+        self.add_active_faculty_assignment(pending_offering, "PENDING")
+        declined_offering = self.make_offering("DECLINED-ASSIGNMENT")
+        declined_assignment = self.add_active_faculty_assignment(declined_offering, "DECLINED")
+        declined_assignment.response_status = FacultyAssignment.ResponseStatus.DECLINED
+        declined_assignment.save(update_fields=["response_status", "updated_at"])
+        inactive_only_offering = self.make_offering("INACTIVE-ONLY")
+        FacultyAssignment.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=inactive_only_offering,
+            faculty_user=self.make_user("inactive_only_faculty", "Inactive", "Only"),
+            is_active=False,
+        )
+        inactive_offering = self.make_offering("INACTIVE-OFFERING")
+        inactive_offering.is_active = False
+        inactive_offering.save(update_fields=["is_active", "updated_at"])
+
+        self.add_active_enrollments(self.offering, 1, "PRINT-ACTIVE")
+        for suffix, status, is_active in [
+            ("PRINT-DROPPED", Enrollment.Status.DRP, True),
+            ("PRINT-WITHDRAWN", Enrollment.Status.W, True),
+            ("PRINT-INACTIVE", Enrollment.Status.ACTIVE, False),
+        ]:
+            Enrollment.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                academic_year=self.academic_year,
+                term=self.term,
+                student=self.make_student(suffix),
+                course_offering=self.offering,
+                enrollment_status=status,
+                is_active=is_active,
+            )
+        self.add_active_enrollments(self.other_offering, 3, "OTHER-OFFERING")
+
+        response = self.client.get(reverse("admin_portal:offering_unassigned_print"))
+
+        self.assertEqual(response.status_code, 200)
+        for heading in ["Course Code", "Course Title", "Section", "Schedule", "Room", "Enrolled"]:
+            self.assertContains(response, heading)
+        row_ids = [row.id for row in response.context["report_rows"]]
+        self.assertEqual(row_ids, [alpha_offering.id, inactive_only_offering.id, self.offering.id])
+        self.assertNotIn(self.other_offering.id, row_ids)
+        self.assertNotIn(pending_offering.id, row_ids)
+        self.assertNotIn(declined_offering.id, row_ids)
+        self.assertNotIn(inactive_offering.id, row_ids)
+        self.assertEqual(
+            next(row.enrolled_count for row in response.context["report_rows"] if row.id == self.offering.id),
+            1,
+        )
+        self.assertEqual(response.context["report_total"], 3)
+        self.assertContains(response, "Active course offerings only")
+        self.assertContains(response, "MW 08:00-09:30")
+        self.assertContains(response, "Room 101")
+        self.assertIn("&mdash;", response.content.decode())
+
+    def test_unassigned_print_is_scope_safe_and_not_limited_by_pagination(self):
+        for index in range(24):
+            self.make_offering(f"PRINT-PAGE-{index:02d}")
+        other_campus = Campus.objects.create(tenant=self.tenant, code="C2", name="Hidden Campus")
+
+        source_response = self.client.get(reverse("admin_portal:offering_list"), {"active_page": 2})
+        print_response = self.client.get(reverse("admin_portal:offering_unassigned_print"))
+        forged_filter_response = self.client.get(
+            reverse("admin_portal:offering_unassigned_print"),
+            {"campus_id": other_campus.id},
+        )
+
+        self.assertEqual(source_response.status_code, 200)
+        self.assertEqual(print_response.status_code, 200)
+        self.assertGreater(len(print_response.context["report_rows"]), 20)
+        self.assertEqual(forged_filter_response.status_code, 200)
+        self.assertEqual(forged_filter_response.context["report_total"], 0)
+        self.assertNotContains(forged_filter_response, "Hidden Campus")
+
+    def test_malformed_numeric_filters_fail_closed_for_list_and_unassigned_print(self):
+        list_url = reverse("admin_portal:offering_list")
+        print_url = reverse("admin_portal:offering_unassigned_print")
+        malformed_filters = {
+            "campus_id": "not-an-id",
+            "academic_year_id": "abc",
+            "term_id": "1.5",
+            "department_id": "invalid",
+        }
+
+        for parameter_name, malformed_value in malformed_filters.items():
+            with self.subTest(parameter_name=parameter_name):
+                list_response = self.client.get(list_url, {parameter_name: malformed_value})
+                print_response = self.client.get(print_url, {parameter_name: malformed_value})
+
+                self.assertEqual(list_response.status_code, 200)
+                self.assertEqual(list_response.context["active_page_obj"].paginator.count, 0)
+                self.assertEqual(list_response.context["inactive_page_obj"].paginator.count, 0)
+                self.assertEqual(print_response.status_code, 200)
+                self.assertEqual(print_response.context["report_total"], 0)
+                self.assertNotContains(print_response, self.offering.section.code)
+
+        valid_filters = {
+            "campus_id": self.campus.id,
+            "academic_year_id": self.academic_year.id,
+            "term_id": self.term.id,
+            "department_id": self.department.id,
+        }
+        valid_list_response = self.client.get(list_url, valid_filters)
+        valid_print_response = self.client.get(print_url, valid_filters)
+
+        self.assertEqual(valid_list_response.status_code, 200)
+        self.assertIn(self.offering.id, [row.id for row in valid_list_response.context["active_page_obj"].object_list])
+        self.assertEqual(valid_print_response.status_code, 200)
+        self.assertIn(self.offering.id, [row.id for row in valid_print_response.context["report_rows"]])
+
+    def test_unassigned_print_access_and_query_count_are_bounded(self):
+        url = reverse("admin_portal:offering_unassigned_print")
+        self.client.get(url)
+        with CaptureQueriesContext(connection) as base_queries:
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        for index in range(4):
+            offering = self.make_offering(f"PRINT-QUERY-{index}")
+            self.add_active_enrollments(offering, 1, f"PRINT-QUERY-{index}")
+        with CaptureQueriesContext(connection) as expanded_queries:
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(len(expanded_queries), len(base_queries) + 1)
+
+        self.client.logout()
+        self.assertEqual(self.client.get(url).status_code, 302)
+
+        denied_user = self.make_user("print_denied", "Denied", "User")
+        denied_role = Role.objects.create(code="PRINT_DENIED", name="Print Denied")
+        RolePermission.objects.create(
+            role=denied_role,
+            permission=Permission.objects.get(code="admin_portal.access"),
+        )
+        UserRole.objects.create(
+            user=denied_user,
+            role=denied_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        self.client.force_login(denied_user)
+        self.assertEqual(self.client.get(url).status_code, 403)

@@ -74,6 +74,11 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="h5 mb-0">Faculty Assignments</h2>
   <div class="d-flex gap-2">
+    {% if selected_faculty %}
+    <a class="btn btn-sm btn-outline-primary" href="{{ faculty_assignment_print_url }}" target="_blank" rel="noopener">Print Faculty Assignments</a>
+    {% else %}
+    <button class="btn btn-sm btn-outline-primary" type="button" disabled aria-disabled="true" title="Select a faculty member first">Print Faculty Assignments</button>
+    {% endif %}
     <a class="btn btn-sm btn-outline-success" href="{% url 'admin_portal:faculty_assignment_dashboard' %}">Assignment Dashboard</a>
     {% if "faculty_assignments.import" in effective_permissions %}
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:import_template_download' 'faculty-assignments' %}">Download Template</a>
