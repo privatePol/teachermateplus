@@ -1,11 +1,18 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-07-24
+Last updated by Codex: 2026-07-25
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+### Admin Portal Faculty Assignment dropdown label format
+- Date: 2026-07-25
+- Completed: corrected the page-local Faculty Assignment select label at `/admin-portal/academics/faculty-assignments/` from an em-dash email suffix to `Lastname, Firstname M. (email@example.com)`. The formatter reads `accounts.User.last_name`, `first_name`, `middle_name`, and `email` directly; it uses only the first middle-name character, omits the middle punctuation and email parentheses when those values are blank, and does not fall back to `username`. Existing scope, active-user, RBAC, selected-faculty, option-value, assignment, ordering, and one-query candidate-list behavior remain unchanged.
+- Changed files: `apps/admin_portal/views.py`, `apps/admin_portal/tests_assignment_acceptance.py`, and this handoff. The existing `faculty_assignment_list.html` option loop already consumes the page-local prepared label and was intentionally not changed. No model, migration, permission, navigation, deployment, environment, or Departmental Exam Builder change.
+- Validation: rendered-option label/scope/selection test passed 1/1, including same-name email tie-break ordering with fixtures created in reverse email order; the final ID tie-break remains in the queryset ordering but cannot be represented with otherwise identical fixtures because `accounts.User.email` is unique. Full faculty-assignment acceptance tests passed 34/34; offerings tests passed 11/11; Area Chair offering-visibility tests passed 2/2. `python manage.py check` passed; `python manage.py makemigrations --check --dry-run` reported no changes; `python manage.py migrate --plan` was inspection-only and applied nothing.
+- Remaining manual smoke: as an authorized Admin user, verify selected and unselected dropdown entries with middle name, multiword first name, and blank email at desktop and narrow widths.
+
 ### Admin Portal offering faculty display and faculty-dropdown identity labels
 - Date: 2026-07-24
 - Completed: updated `/admin-portal/academics/offerings/` so an offering with no active faculty assignment renders muted `---` when its existing `enrolled_count` annotation is zero, and the danger `Unassigned` badge when the annotation is positive. Active assignments continue to show faculty names regardless of enrollment. The existing `View all unassigned course offerings` filter is unchanged and still returns every offering without an active assignment.

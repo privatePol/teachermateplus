@@ -1,3 +1,4 @@
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -330,19 +331,26 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
         return faculty
 
     def test_faculty_dropdown_uses_sorted_page_specific_identity_labels_and_scope(self):
-        self.faculty_user.first_name = "Maria"
-        self.faculty_user.middle_name = "Lourdes"
-        self.faculty_user.last_name = "Reyes"
-        self.faculty_user.email = "maria.lourdes@example.com"
+        self.faculty_user.first_name = "Apolo"
+        self.faculty_user.middle_name = "Gabriel"
+        self.faculty_user.last_name = "Bejer"
+        self.faculty_user.email = "apolo.bejer@ncba.edu.ph"
         self.faculty_user.save(update_fields=["first_name", "middle_name", "last_name", "email", "updated_at"])
-        self.faculty_user_two.first_name = "Maria"
-        self.faculty_user_two.middle_name = "Anne"
-        self.faculty_user_two.last_name = "Reyes"
-        self.faculty_user_two.email = "maria.anne@example.com"
+        self.faculty_user_two.first_name = "Cyrille Anne"
+        self.faculty_user_two.middle_name = ""
+        self.faculty_user_two.last_name = "Nery"
+        self.faculty_user_two.email = "nery.cyrilleanne@ncba.edu.ph"
         self.faculty_user_two.save(update_fields=["first_name", "middle_name", "last_name", "email", "updated_at"])
-        same_name_faculty = self._create_scoped_faculty(
-            username="faculty_reyes_second",
-            email="maria.lourdes2@example.com",
+        same_name_faculty_email_b = self._create_scoped_faculty(
+            username="faculty_reyes_email_b",
+            email="maria.lourdes.b@example.com",
+            first_name="Maria",
+            middle_name="Lourdes",
+            last_name="Reyes",
+        )
+        same_name_faculty_email_a = self._create_scoped_faculty(
+            username="faculty_reyes_email_a",
+            email="maria.lourdes.a@example.com",
             first_name="Maria",
             middle_name="Lourdes",
             last_name="Reyes",
@@ -384,23 +392,58 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
+        faculty_select_match = re.search(
+            r'<select class="form-select" id="faculty-select-input" name="faculty_user_id">(.*?)</select>',
+            content,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(faculty_select_match)
+        faculty_select_html = faculty_select_match.group(1)
         expected_labels = [
-            "Reyes, Maria A. — maria.anne@example.com",
-            "Reyes, Maria L. — maria.lourdes2@example.com",
-            "Reyes, Maria L. — maria.lourdes@example.com",
+            "Bejer, Apolo G. (apolo.bejer@ncba.edu.ph)",
+            "Nery, Cyrille Anne (nery.cyrilleanne@ncba.edu.ph)",
+            "Reyes, Maria L. (maria.lourdes.a@example.com)",
+            "Reyes, Maria L. (maria.lourdes.b@example.com)",
             "Santos, Pedro",
         ]
-        for label in expected_labels:
-            self.assertIn(label, content)
-        self.assertLess(content.index(expected_labels[0]), content.index(expected_labels[1]))
-        self.assertLess(content.index(expected_labels[1]), content.index(expected_labels[2]))
-        self.assertNotIn("Santos, Pedro .", content)
-        self.assertNotIn("Santos, Pedro —", content)
-        self.assertIn(f'<option value="{self.faculty_user.id}" selected>', content)
+        candidate_labels = {
+            self.faculty_user.id: expected_labels[0],
+            self.faculty_user_two.id: expected_labels[1],
+            same_name_faculty_email_a.id: expected_labels[2],
+            same_name_faculty_email_b.id: expected_labels[3],
+            no_email_faculty.id: expected_labels[4],
+        }
+
+        def option_text(faculty_id):
+            match = re.search(
+                rf'<option value="{faculty_id}"[^>]*>\s*(.*?)\s*</option>',
+                faculty_select_html,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(match)
+            return match.group(1).strip()
+
+        for faculty_id, label in candidate_labels.items():
+            self.assertEqual(option_text(faculty_id), label)
+        self.assertLess(same_name_faculty_email_b.id, same_name_faculty_email_a.id)
+        self.assertLess(faculty_select_html.index(expected_labels[0]), faculty_select_html.index(expected_labels[1]))
+        self.assertLess(faculty_select_html.index(expected_labels[1]), faculty_select_html.index(expected_labels[2]))
+        self.assertLess(faculty_select_html.index(expected_labels[2]), faculty_select_html.index(expected_labels[3]))
+        self.assertLess(faculty_select_html.index(expected_labels[3]), faculty_select_html.index(expected_labels[4]))
+        self.assertNotIn("—", option_text(self.faculty_user.id))
+        self.assertNotIn("()", option_text(no_email_faculty.id))
+        self.assertNotIn(no_email_faculty.username, option_text(no_email_faculty.id))
+        self.assertIn(f'<option value="{self.faculty_user.id}" selected>', faculty_select_html)
         self.assertEqual(response.context["selected_faculty"].id, self.faculty_user.id)
         candidate_ids = {faculty.id for faculty in response.context["faculty_candidates"]}
         self.assertSetEqual(
-            {self.faculty_user.id, self.faculty_user_two.id, same_name_faculty.id, no_email_faculty.id}
+            {
+                self.faculty_user.id,
+                self.faculty_user_two.id,
+                same_name_faculty_email_a.id,
+                same_name_faculty_email_b.id,
+                no_email_faculty.id,
+            }
             .difference(candidate_ids),
             set(),
         )

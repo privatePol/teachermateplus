@@ -8718,15 +8718,16 @@ def _faculty_assignment_dropdown_label(user):
     first_name = (getattr(user, "first_name", "") or "").strip()
     middle_name = (getattr(user, "middle_name", "") or "").strip()
     email = (getattr(user, "email", "") or "").strip()
-    username = (getattr(user, "username", "") or "").strip()
 
     if last_name and first_name:
         label = f"{last_name}, {first_name}"
     else:
-        label = last_name or first_name or username
-    if middle_name:
+        label = last_name or first_name
+    if middle_name and label:
         label = f"{label} {middle_name[0]}."
-    return f"{label} — {email}" if email else label
+    if email:
+        return f"{label} ({email})" if label else f"({email})"
+    return label
 
 
 @portal_required("ADMIN")
