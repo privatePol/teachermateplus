@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "apps.interventions.apps.InterventionsConfig",
     "apps.exit_pulse.apps.ExitPulseConfig",
     "apps.orientation_feedback.apps.OrientationFeedbackConfig",
+    "apps.departmental_exams.apps.DepartmentalExamsConfig",
     "apps.student_portal.apps.StudentPortalConfig",
     "apps.admin_portal.apps.AdminPortalConfig",
     "apps.faculty_portal.apps.FacultyPortalConfig",

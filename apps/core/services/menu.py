@@ -6,6 +6,7 @@ from apps.core.services.permissions import PermissionService
 from django.db.models import Prefetch
 
 from apps.navigation.models import MenuGroup, MenuItem
+from apps.core.services.features import FeatureSettingsService
 
 
 class MenuService:
@@ -45,6 +46,8 @@ class MenuService:
 
         output = []
         for group in groups:
+            if group.code == "DEPARTMENTAL_EXAMS" and not FeatureSettingsService.is_departmental_exam_builder_enabled(tenant_id=tenant_id):
+                continue
             items = list(getattr(group, "active_items", []))
             item_map = {}
             for item in items:

@@ -1,0 +1,28 @@
+{% extends "admin_portal/base.html" %}
+{% block content %}
+<div class="container-fluid">
+  <h1>Assigned Course Examinations</h1>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Examination cycle</th><th>Course</th><th>Campuses</th><th>Offerings</th>
+        <th>Exam department</th><th>Reviewer</th><th>Status</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in courses %}
+      <tr>
+        <td>{{ item.cycle.academic_year }} &mdash; {{ item.cycle.term }} ({{ item.cycle.get_exam_period_display }})</td>
+        <td>{{ item.course.code }} &mdash; {{ item.course.title }}</td>
+        <td>{{ item.included_campuses|join:', ' }}</td>
+        <td>{{ item.offering_count }}</td>
+        <td>{{ item.responsible_department }}</td>
+        <td>{{ item.reviewer|default:'Unassigned' }}</td>
+        <td>{{ item.get_inclusion_status_display }}</td>
+        <td>{% if item.can_administer %}<a href="{% url 'departmental_exams:cycle_course_administration' item.id %}">Administer</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,3 +1,6 @@
+from importlib import import_module
+
+from django.apps import apps as django_apps
 from django.test import TestCase
 from django.urls import reverse
 from django.conf import settings
@@ -163,6 +166,42 @@ class RoleManagementTests(TestCase):
             'id="critical-access-safeguard" class="alert alert-warning border small mb-0 mt-3 d-none"',
             html=False,
         )
+
+    def test_role_permissions_page_lists_only_current_departmental_exam_permissions(self):
+        role = Role.objects.create(code="DE_FOUNDATION_ROLE", name="Departmental Exam Foundation")
+        migration = import_module("apps.rbac.migrations.0032_seed_departmental_exam_permissions")
+        migration.seed_permissions(django_apps, None)
+
+        response = self.client.get(reverse("admin_portal:role_permissions", args=[role.id]))
+
+        self.assertEqual(response.status_code, 200)
+        departmental_exams = next(
+            module
+            for module in response.context["permissions_by_module"]
+            if module["key"] == "departmental_exams"
+        )
+        self.assertEqual(
+            {row["code"] for row in departmental_exams["permissions"]},
+            {
+                "departmental_exams.manage_cycles",
+                "departmental_exams.configure",
+                "departmental_exams.review_generate",
+            },
+        )
+        self.assertContains(response, "Manage examination cycles.")
+        self.assertContains(
+            response, "Configure authorized grouped course examinations."
+        )
+        self.assertContains(response, "Review assigned grouped course examinations.")
+        self.assertNotContains(response, "Contribute departmental examination questions.")
+        self.assertNotContains(response, "Encode departmental examination questions.")
+        self.assertNotContains(response, "Generate departmental examination questionnaires.")
+        self.assertNotContains(response, "Approve and lock departmental examinations.")
+        self.assertNotContains(response, "Print approved departmental questionnaires.")
+        self.assertNotContains(response, "View departmental examination answer keys.")
+        self.assertNotContains(response, "Download departmental examination PDFs.")
+        self.assertNotContains(response, "Pair Code")
+        self.assertNotContains(response, "QR")
 
     def test_role_permissions_page_shows_comparison_summary_index_and_numbering(self):
         role = Role.objects.create(code="COMPARE_ROLE", name="Compare Role", is_active=True)

@@ -1,0 +1,23 @@
+{% extends "admin_portal/base.html" %}
+{% block content %}
+<div class="container">
+  <h1>{{ cycle_course.course.code }} Administration</h1>
+  <p>Included campuses: {% for row in cycle_course.offering_snapshots.all %}{{ row.campus.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+  {% if not cycle_course.responsible_department %}
+  <p class="text-warning">Needs Exam Department. Reviewer assignment remains unavailable until an exam department is selected.</p>
+  {% endif %}
+  <form method="post">
+    {% csrf_token %}
+    {{ form.responsible_department.label_tag }}{{ form.responsible_department }}{{ form.responsible_department.errors }}
+    <label for="reviewer_id">Reviewer</label>
+    <select name="reviewer_id" id="reviewer_id">
+      <option value="">Unassigned</option>
+      {% for candidate in form.reviewer.field.queryset %}
+      <option value="{{ candidate.id }}"{% if candidate.id == cycle_course.reviewer_id %} selected{% endif %}>{{ candidate.full_name }}</option>
+      {% endfor %}
+    </select>
+    {{ form.reviewer.errors }}
+    <button class="btn btn-primary">Save</button>
+  </form>
+</div>
+{% endblock %}

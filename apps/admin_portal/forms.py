@@ -1021,6 +1021,7 @@ class CourseForm(forms.ModelForm):
             "tenant",
             "campus",
             "department",
+            "exam_department",
             "code",
             "title",
             "units",
@@ -1030,7 +1031,15 @@ class CourseForm(forms.ModelForm):
             "is_active",
         ]
 
-    def __init__(self, *args, tenant_queryset=None, campus_queryset=None, department_queryset=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        tenant_queryset=None,
+        campus_queryset=None,
+        department_queryset=None,
+        exam_department_queryset=None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         if tenant_queryset is not None:
             self.fields["tenant"].queryset = tenant_queryset
@@ -1038,8 +1047,16 @@ class CourseForm(forms.ModelForm):
             self.fields["campus"].queryset = campus_queryset
         if department_queryset is not None:
             self.fields["department"].queryset = department_queryset
+        if exam_department_queryset is not None:
+            self.fields["exam_department"].queryset = exam_department_queryset
+        elif department_queryset is not None:
+            self.fields["exam_department"].queryset = department_queryset
         department_field = self.fields["department"]
         department_field.queryset = _active_only_queryset(department_field.queryset)
+        exam_department_field = self.fields["exam_department"]
+        exam_department_field.queryset = _active_only_queryset(
+            exam_department_field.queryset
+        ).select_related("campus").order_by("campus__name", "name", "code")
         selected_campus_id = None
         raw_campus_id = (
             self.data.get(self.add_prefix("campus"))
@@ -1075,6 +1092,11 @@ class CourseForm(forms.ModelForm):
             "Optional. Select the campus first to load only that campus' departments. "
             "Leave both campus and department blank for tenant-wide shared course definitions."
         )
+        exam_department_field.label = "Exam Department"
+        exam_department_field.help_text = (
+            "Optional Departmental Exam Builder ownership. This does not change ordinary "
+            "course or offering visibility."
+        )
         department_field.widget.attrs["data-campus-dependent"] = "true"
         department_field.widget.attrs["data-department-options"] = json.dumps(department_options)
         department_field.widget.attrs["data-placeholder"] = "---------"
@@ -1085,6 +1107,7 @@ class CourseForm(forms.ModelForm):
         tenant = cleaned.get("tenant")
         campus = cleaned.get("campus")
         department = cleaned.get("department")
+        exam_department = cleaned.get("exam_department")
         if department and not campus:
             raise forms.ValidationError("Department requires a campus. Leave both blank for tenant-wide shared course.")
         if campus and tenant and campus.tenant_id != tenant.id:
@@ -1095,6 +1118,16 @@ class CourseForm(forms.ModelForm):
             raise forms.ValidationError("Department does not belong to selected campus.")
         if department and not department.is_active:
             raise forms.ValidationError("Department is inactive and cannot be used for courses.")
+        if exam_department and tenant and exam_department.tenant_id != tenant.id:
+            self.add_error(
+                "exam_department",
+                "Exam department does not belong to selected tenant.",
+            )
+        if exam_department and not exam_department.is_active:
+            self.add_error(
+                "exam_department",
+                "Exam department is inactive and cannot own departmental examinations.",
+            )
         return cleaned
 
 
@@ -3229,6 +3262,14 @@ class DocumentPrintSettingForm(forms.Form):
 
 
 class ConfigurableFeatureSettingForm(forms.Form):
+    departmental_exam_builder_enabled = forms.BooleanField(
+        required=False,
+        label="Enable Departmental Exam Builder",
+        help_text=(
+            "Enables authorized examination-cycle management and grouped course administration "
+            "for this tenant."
+        ),
+    )
     student_academic_intervention_tracking_enabled = forms.BooleanField(
         required=False,
         label="Enable Student Academic Intervention Tracking",
