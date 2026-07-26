@@ -14,4 +14,6 @@ urlpatterns = [
     ),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/courses/", views.cycle_course_list_view, name="cycle_course_list"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/administration/", views.cycle_course_administration_view, name="cycle_course_administration"),
+    path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/exempt/", views.cycle_course_exempt_view, name="cycle_course_exempt"),
+    path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/restore/", views.cycle_course_restore_view, name="cycle_course_restore"),
 ]

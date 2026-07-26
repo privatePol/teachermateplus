@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import ExaminationCycle
+from .models import CycleCourse, ExaminationCycle
 from apps.tenants.models import Department
 from apps.accounts.models import User
 
@@ -29,6 +29,33 @@ class CycleCourseAdministrationForm(forms.Form):
                 reviewer_queryset if reviewer_queryset is not None else User.objects.none()
             )
             self.fields["reviewer"].initial = cycle_course.reviewer_id
+
+
+class CycleCourseExemptionForm(forms.Form):
+    exemption_category = forms.ChoiceField(
+        choices=CycleCourse.ExemptionCategory.choices,
+        label="Exemption category",
+    )
+    reason = forms.CharField(
+        min_length=10,
+        max_length=500,
+        strip=True,
+        widget=forms.Textarea(attrs={"rows": 4}),
+        help_text="Enter a specific reason from 10 to 500 characters.",
+    )
+    expected_updated_at = forms.CharField(widget=forms.HiddenInput())
+
+
+class CycleCourseRestoreForm(forms.Form):
+    reason = forms.CharField(
+        min_length=10,
+        max_length=500,
+        strip=True,
+        widget=forms.Textarea(attrs={"rows": 4}),
+        label="Restoration reason",
+        help_text="Enter a specific reason from 10 to 500 characters.",
+    )
+    expected_updated_at = forms.CharField(widget=forms.HiddenInput())
 
 
 class ExaminationCycleForm(forms.ModelForm):

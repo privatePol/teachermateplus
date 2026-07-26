@@ -166,6 +166,58 @@ ADMIN_HELP_SECTIONS = [
         ],
     },
     {
+        "code": "departmental-exam-builder",
+        "title": "Departmental Exam Builder",
+        "summary": "Create examination cycles, assign exact course responsibility, and control which courses participate.",
+        "topics": [
+            {
+                "code": "departmental-exam-course-control",
+                "title": "Exam Cycles and Included or Exempt Courses",
+                "audience": "Authorized exam-cycle managers, course configurators, and assigned reviewers",
+                "permissions": [
+                    "departmental_exams.manage_cycles",
+                    "departmental_exams.configure",
+                    "departmental_exams.review_generate",
+                ],
+                "purpose": "Creates a tenant examination-cycle snapshot and lets the responsible exam department include or exempt each grouped course before later exam work begins.",
+                "menu_path": "Admin Portal -> Departmental Exam Builder",
+                "steps": [
+                    "Use Overview / Exam Cycles to create the Midterm or Final examination cycle. The cycle snapshots active offerings and groups them by course.",
+                    "Use Assigned Course Examinations to open only courses within your exact current exam responsibility.",
+                    "Open Administer to confirm the exam department and reviewer. A null or inactive exam department remains fail-closed for ordinary users.",
+                    "Leave a course Included when it will use the departmental examination workflow.",
+                    "Choose Exempt only while the cycle is Draft, select the approved category, and enter a specific reason. A saved exam configuration is preserved but dormant; configuration alone does not block Exempt.",
+                    "Use Restore to Included only while the cycle is Draft when an exemption must be reversed. Restore preserves the saved configuration, does not use the Exempt-only faculty contribution or question blocker, and revalidates the reviewer assignment.",
+                ],
+                "check_first": [
+                    "Confirm the selected tenant and the responsible department campus.",
+                    "Before choosing Exempt, confirm the course has no faculty contribution or question work. That downstream activity blocks Exempt only; a saved exam configuration is preserved and becomes dormant while Exempt.",
+                    "Confirm the assigned reviewer still has an active exact-department role and review/generate permission.",
+                ],
+                "actions": [
+                    {
+                        "name": "Exempt",
+                        "does": "Changes an Included course to Exempt and records the category, reason, actor, time, reviewer, and scope in the audit trail.",
+                        "when": "Use it for an approved course that should not enter the departmental written-exam workflow.",
+                        "avoid": "Do not use it after faculty contribution or question work has begun.",
+                        "result": "Any saved exam configuration is preserved but dormant. The assigned reviewer may still see the course as read-only, but no later exam action is permitted.",
+                        "editable": "The course may be restored while the cycle remains Draft. No downstream data is deleted.",
+                    },
+                    {
+                        "name": "Restore to Included",
+                        "does": "Reverses an exemption while preserving the original course, offering, responsible-department snapshots, and saved exam configuration.",
+                        "when": "Use it when the course must participate again before later exam work starts.",
+                        "avoid": "Do not treat Restore as a way to bypass an inactive department. Faculty contribution or question activity is an Exempt-only blocker, not a Restore blocker.",
+                        "result": "An eligible reviewer is retained; an ineligible reviewer is cleared and must be reassigned.",
+                        "editable": "Restore is allowed while the cycle remains Draft. No downstream data is deleted, and the Included course can proceed to later stages only after their separate controls are implemented.",
+                    },
+                ],
+                "avoid": "Do not confuse Included with a separate action. New cycle courses start Included; Restore is the only reverse of Exempt.",
+                "next_step": "Review the audit entry and confirm the course status before beginning any later configuration stage.",
+            },
+        ],
+    },
+    {
         "code": "grading-setup",
         "title": "Grading Setup",
         "summary": "Define how activities become component, period, and final grades.",

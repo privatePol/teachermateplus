@@ -3266,8 +3266,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
         required=False,
         label="Enable Departmental Exam Builder",
         help_text=(
-            "Enables authorized examination-cycle management and grouped course administration "
-            "for this tenant."
+            "Enables authorized examination-cycle management, grouped course administration, "
+            "and Included/Exempt course control for this tenant."
         ),
     )
     student_academic_intervention_tracking_enabled = forms.BooleanField(

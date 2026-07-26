@@ -50,6 +50,10 @@ class AdminHelpGuideTests(TestCase):
             module="template_hotfixes",
             action="read",
         )
+        self.departmental_exam_configure_permission, _ = Permission.objects.get_or_create(
+            code="departmental_exams.configure",
+            defaults={"module": "departmental_exams", "action": "configure"},
+        )
 
     def _make_user(self, *, username, role_code, permissions):
         user = User.objects.create_user(
@@ -135,6 +139,49 @@ class AdminHelpGuideTests(TestCase):
         )
 
         self.assertIn("superadmin", {section["code"] for section in sections})
+
+    def test_departmental_exam_configurer_receives_stage3_help(self):
+        user = self._make_user(
+            username="departmental_exam_guide",
+            role_code="DEPARTMENTAL_EXAM_CONFIGURER",
+            permissions=[
+                self.portal_permission,
+                self.departmental_exam_configure_permission,
+            ],
+        )
+
+        sections = build_admin_help_sections(
+            user=user,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        section = next(
+            row for row in sections if row["code"] == "departmental-exam-builder"
+        )
+        self.assertEqual(
+            section["topics"][0]["code"],
+            "departmental-exam-course-control",
+        )
+        topic = section["topics"][0]
+        self.assertIn("configuration alone does not block Exempt", topic["steps"][4])
+        self.assertIn("Exempt-only faculty contribution or question blocker", topic["steps"][5])
+        self.assertIn("blocks Exempt only", topic["check_first"][1])
+        self.assertIn("not a Restore blocker", topic["actions"][1]["avoid"])
+        self.assertIn("No downstream data is deleted", topic["actions"][1]["editable"])
+        self.client.force_login(user)
+        role_response = self.client.get(reverse("admin_portal:guide"))
+        self.assertEqual(role_response.status_code, 200)
+        self.assertTemplateUsed(role_response, "admin_portal/guide_role_based.html")
+        self.assertContains(role_response, "New cycle courses start Included")
+        response = self.client.get(reverse("admin_portal:guide"), {"view": "full"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "admin_portal/guide.html")
+        self.assertContains(response, "Restore to Included")
+        self.assertContains(response, "saved exam configuration is preserved")
+        self.assertContains(response, "configuration alone does not block Exempt")
+        self.assertContains(response, "blocks choosing Exempt")
+        self.assertContains(response, "does not use the Exempt-only contribution/question blocker")
+        self.assertContains(response, "No downstream data is deleted")
 
     def test_admin_guide_can_restore_legacy_template(self):
         user = User.objects.create_superuser(

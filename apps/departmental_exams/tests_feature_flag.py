@@ -90,6 +90,7 @@ class DepartmentalExamFeatureFlagTests(TestCase):
         )
         self.assertContains(response, "examination-cycle management")
         self.assertContains(response, "grouped course administration")
+        self.assertContains(response, "Included/Exempt course control")
         self.assertNotContains(response, "Course Setup")
         self.assertNotContains(response, "Faculty Contribution")
 

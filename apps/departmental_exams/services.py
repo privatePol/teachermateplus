@@ -1,6 +1,7 @@
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
+from django.utils import timezone
 
 from apps.academics.models import CourseOffering
 from apps.accounts.models import User
@@ -10,7 +11,13 @@ from apps.core.services.permissions import PermissionService
 from apps.rbac.models import Permission, UserPermission, UserRole
 from apps.tenants.models import Department
 
-from .models import CycleCourse, CycleCourseOffering, ExaminationCycle
+from .models import (
+    CycleCourse,
+    CycleCourseOffering,
+    ExaminationCycle,
+    FacultyContribution,
+    Question,
+)
 
 
 class DepartmentalExamAuthorizationService:
@@ -156,6 +163,8 @@ class DepartmentalExamAuthorizationService:
         """Authorize grouped-course administration, not cycle management."""
         tenant_id = cycle_course.cycle.tenant_id
         cls.require_enabled(tenant_id=tenant_id)
+        if not user or not user.is_authenticated or not user.is_active:
+            raise PermissionDenied("An active user is required for course administration.")
         if user.is_superuser:
             return
         if not cycle_course.responsible_department_id:
@@ -362,6 +371,8 @@ class DepartmentalExamAuthorizationService:
     def require_course_responsibility(cls, *, user, cycle_course, permission=None):
         tenant_id = cycle_course.cycle.tenant_id
         cls.require_enabled(tenant_id=tenant_id)
+        if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
+            raise PermissionDenied("Exempt course examinations are read-only.")
         if cycle_course.reviewer_id != user.id:
             raise PermissionDenied("You are not the assigned reviewer for this course examination.")
         if not cls.is_eligible_reviewer(
@@ -378,6 +389,300 @@ class DepartmentalExamAuthorizationService:
                 tenant_id=tenant_id,
                 campus_id=cycle_course.responsible_department.campus_id,
             )
+
+
+class CycleCourseTransitionConflict(ValidationError):
+    """Raised when a confirmation page no longer represents the current row."""
+
+
+class CycleCourseInclusionService:
+    REASON_MIN_LENGTH = 10
+    REASON_MAX_LENGTH = 500
+
+    @staticmethod
+    def transition_token(cycle_course):
+        return cycle_course.updated_at.isoformat()
+
+    @classmethod
+    def require_included(cls, *, cycle_course):
+        """Instance-only assertion; callers must already own any required lock."""
+        if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
+            raise PermissionDenied("Exempt course examinations cannot enter this workflow.")
+
+    @classmethod
+    def lock_included_cycle_course(cls, *, cycle_course_id, tenant_id):
+        """Lock and return an Included parent for a downstream write transaction.
+
+        Future downstream writers must call this inside ``transaction.atomic()``
+        before creating children, preserving the parent-first lock order used by
+        inclusion transitions.
+        """
+        if not transaction.get_connection().in_atomic_block:
+            raise RuntimeError(
+                "lock_included_cycle_course() must be called inside transaction.atomic()."
+            )
+        cycle_course = cls._locked_cycle_course(
+            cycle_course_id=cycle_course_id,
+            tenant_id=tenant_id,
+        )
+        cls.require_included(cycle_course=cycle_course)
+        return cycle_course
+
+    @classmethod
+    def _locked_cycle_course(cls, *, cycle_course_id, tenant_id):
+        return (
+            CycleCourse.objects.select_for_update()
+            .select_related(
+                "cycle",
+                "cycle__tenant",
+                "course",
+                "responsible_department",
+                "responsible_department__campus",
+                "reviewer",
+            )
+            .get(id=cycle_course_id, cycle__tenant_id=tenant_id)
+        )
+
+    @classmethod
+    def _validate_reason(cls, reason):
+        cleaned = (reason or "").strip()
+        if not cls.REASON_MIN_LENGTH <= len(cleaned) <= cls.REASON_MAX_LENGTH:
+            raise ValidationError(
+                f"Reason must be from {cls.REASON_MIN_LENGTH} to {cls.REASON_MAX_LENGTH} characters."
+            )
+        return cleaned
+
+    @classmethod
+    def _require_current_confirmation(cls, *, cycle_course, expected_updated_at):
+        if expected_updated_at != cls.transition_token(cycle_course):
+            raise CycleCourseTransitionConflict(
+                "The course examination changed after this page was loaded. Review the latest state and try again."
+            )
+
+    @staticmethod
+    def _require_draft_active_department(*, cycle_course):
+        if cycle_course.cycle.status != ExaminationCycle.Status.DRAFT:
+            raise ValidationError(
+                "Only Draft examination cycles can change course inclusion."
+            )
+        if (
+            cycle_course.responsible_department_id
+            and not cycle_course.responsible_department.is_active
+        ):
+            raise ValidationError(
+                "The responsible exam department is inactive. Reactivate or reassign it before changing inclusion."
+            )
+
+    @classmethod
+    def _require_exempt_transition_window(cls, *, cycle_course):
+        cls._require_draft_active_department(cycle_course=cycle_course)
+        if FacultyContribution.objects.filter(cycle_course=cycle_course).exists():
+            raise ValidationError(
+                "This course has downstream faculty contribution data and cannot change inclusion."
+            )
+        if Question.objects.filter(contribution__cycle_course=cycle_course).exists():
+            raise ValidationError(
+                "This course has downstream examination question data and cannot change inclusion."
+            )
+
+    @classmethod
+    def _require_restore_transition_window(cls, *, cycle_course):
+        """A dormant configuration is preserved and does not block restoration."""
+        cls._require_draft_active_department(cycle_course=cycle_course)
+
+    @staticmethod
+    def _state_payload(cycle_course):
+        return {
+            "inclusion_status": cycle_course.inclusion_status,
+            "exemption_category": cycle_course.exemption_category,
+            "exemption_reason": cycle_course.exemption_reason,
+            "exemption_changed_by_id": cycle_course.exemption_changed_by_id,
+            "exemption_changed_at": cycle_course.exemption_changed_at,
+            "reviewer_id": cycle_course.reviewer_id,
+        }
+
+    @classmethod
+    def _audit_transition(
+        cls,
+        *,
+        action,
+        cycle_course,
+        actor,
+        reason,
+        before,
+        reviewer_revalidated,
+        reviewer_cleared,
+        expected_updated_at,
+        request,
+    ):
+        offering_rows = list(
+            cycle_course.offering_snapshots.values_list("id", "campus_id")
+        )
+        offering_campus_ids = sorted({campus_id for _id, campus_id in offering_rows})
+        AuditService.log_event(
+            action=action,
+            portal="ADMIN",
+            entity_type="CycleCourse",
+            entity_id=cycle_course.id,
+            actor=actor,
+            tenant=cycle_course.cycle.tenant_id,
+            campus=(
+                cycle_course.responsible_department.campus_id
+                if cycle_course.responsible_department_id
+                else None
+            ),
+            before_data=before,
+            after_data=cls._state_payload(cycle_course),
+            metadata={
+                "cycle_id": cycle_course.cycle_id,
+                "course_id": cycle_course.course_id,
+                "responsible_department_id": cycle_course.responsible_department_id,
+                "responsible_department_campus_id": (
+                    cycle_course.responsible_department.campus_id
+                    if cycle_course.responsible_department_id
+                    else None
+                ),
+                "offering_count": len(offering_rows),
+                "offering_campus_ids": offering_campus_ids,
+                "transition_reason": reason,
+                "reviewer_revalidated": reviewer_revalidated,
+                "reviewer_cleared": reviewer_cleared,
+                "expected_updated_at": expected_updated_at,
+            },
+            request=request,
+        )
+
+    @classmethod
+    @transaction.atomic
+    def exempt(
+        cls,
+        *,
+        cycle_course_id,
+        tenant_id,
+        user,
+        exemption_category,
+        reason,
+        expected_updated_at,
+        request=None,
+    ):
+        cycle_course = cls._locked_cycle_course(
+            cycle_course_id=cycle_course_id,
+            tenant_id=tenant_id,
+        )
+        DepartmentalExamAuthorizationService.require_configure_cycle_course(
+            user=user,
+            cycle_course=cycle_course,
+        )
+        if cycle_course.inclusion_status == CycleCourse.InclusionStatus.EXEMPT:
+            return cycle_course, False
+        cls._require_current_confirmation(
+            cycle_course=cycle_course,
+            expected_updated_at=expected_updated_at,
+        )
+        cls._require_exempt_transition_window(cycle_course=cycle_course)
+        reason = cls._validate_reason(reason)
+        if exemption_category not in CycleCourse.ExemptionCategory.values:
+            raise ValidationError("Select an approved exemption category.")
+
+        before = cls._state_payload(cycle_course)
+        cycle_course.inclusion_status = CycleCourse.InclusionStatus.EXEMPT
+        cycle_course.exemption_category = exemption_category
+        cycle_course.exemption_reason = reason
+        cycle_course.exemption_changed_by = user
+        cycle_course.exemption_changed_at = timezone.now()
+        cycle_course.full_clean()
+        cycle_course.save(
+            update_fields=[
+                "inclusion_status",
+                "exemption_category",
+                "exemption_reason",
+                "exemption_changed_by",
+                "exemption_changed_at",
+                "updated_at",
+            ]
+        )
+        cls._audit_transition(
+            action="DE_EXAM_CYCLE_COURSE_EXEMPTED",
+            cycle_course=cycle_course,
+            actor=user,
+            reason=reason,
+            before=before,
+            reviewer_revalidated=False,
+            reviewer_cleared=False,
+            expected_updated_at=expected_updated_at,
+            request=request,
+        )
+        return cycle_course, True
+
+    @classmethod
+    @transaction.atomic
+    def restore(
+        cls,
+        *,
+        cycle_course_id,
+        tenant_id,
+        user,
+        reason,
+        expected_updated_at,
+        request=None,
+    ):
+        cycle_course = cls._locked_cycle_course(
+            cycle_course_id=cycle_course_id,
+            tenant_id=tenant_id,
+        )
+        DepartmentalExamAuthorizationService.require_configure_cycle_course(
+            user=user,
+            cycle_course=cycle_course,
+        )
+        if cycle_course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED:
+            return cycle_course, False
+        cls._require_current_confirmation(
+            cycle_course=cycle_course,
+            expected_updated_at=expected_updated_at,
+        )
+        cls._require_restore_transition_window(cycle_course=cycle_course)
+        reason = cls._validate_reason(reason)
+
+        before = cls._state_payload(cycle_course)
+        reviewer_revalidated = bool(cycle_course.reviewer_id)
+        reviewer_cleared = False
+        if cycle_course.reviewer_id and not DepartmentalExamAuthorizationService.is_eligible_reviewer(
+            user=cycle_course.reviewer,
+            tenant_id=cycle_course.cycle.tenant_id,
+            responsible_department=cycle_course.responsible_department,
+        ):
+            cycle_course.reviewer = None
+            reviewer_cleared = True
+
+        cycle_course.inclusion_status = CycleCourse.InclusionStatus.INCLUDED
+        cycle_course.exemption_category = ""
+        cycle_course.exemption_reason = ""
+        cycle_course.exemption_changed_by = user
+        cycle_course.exemption_changed_at = timezone.now()
+        cycle_course.full_clean()
+        cycle_course.save(
+            update_fields=[
+                "inclusion_status",
+                "exemption_category",
+                "exemption_reason",
+                "exemption_changed_by",
+                "exemption_changed_at",
+                "reviewer",
+                "updated_at",
+            ]
+        )
+        cls._audit_transition(
+            action="DE_EXAM_CYCLE_COURSE_RESTORED",
+            cycle_course=cycle_course,
+            actor=user,
+            reason=reason,
+            before=before,
+            reviewer_revalidated=reviewer_revalidated,
+            reviewer_cleared=reviewer_cleared,
+            expected_updated_at=expected_updated_at,
+            request=request,
+        )
+        return cycle_course, True
 
 
 class ExaminationCycleService:

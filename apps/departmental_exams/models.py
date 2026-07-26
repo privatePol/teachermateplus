@@ -73,10 +73,16 @@ class CycleCourse(TimeStampedModel):
             and self.responsible_department.tenant_id != self.cycle.tenant_id
         ):
             raise ValidationError("Responsible department must belong to the cycle tenant.")
-        if self.inclusion_status == self.InclusionStatus.EXEMPT and (not self.exemption_category or not self.exemption_reason.strip()):
-            raise ValidationError("Exempt courses require an approved category and reason.")
-        if self.exemption_category == self.ExemptionCategory.OTHER_OUTPUT_BASED and len(self.exemption_reason.strip()) < 10:
-            raise ValidationError("Other output-based exemptions require a specific explanation.")
+        exemption_reason = (self.exemption_reason or "").strip()
+        if self.inclusion_status == self.InclusionStatus.EXEMPT:
+            if not self.exemption_category or not exemption_reason:
+                raise ValidationError("Exempt courses require an approved category and reason.")
+            if not 10 <= len(exemption_reason) <= 500:
+                raise ValidationError("Exemption reason must be from 10 to 500 characters.")
+            if not self.exemption_changed_by_id or not self.exemption_changed_at:
+                raise ValidationError("Exempt courses require the actor and time of the exemption.")
+        elif self.exemption_category or exemption_reason:
+            raise ValidationError("Included courses cannot retain active exemption details.")
 
 
 class CycleCourseOffering(TimeStampedModel):

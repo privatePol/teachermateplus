@@ -1,0 +1,38 @@
+{% extends "admin_portal/base.html" %}
+{% block content %}
+<div class="container" style="max-width: 760px;">
+  <h1>{{ title }}</h1>
+  <p class="lead">{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p>
+  {% if transition == 'EXEMPT' %}
+  <div class="alert alert-warning">
+    Exempting this course removes it from later configuration, contribution, review, generation, and document workflows for this examination cycle. Its course, offering snapshots, exam department, and reviewer assignment will be preserved.
+  </div>
+  {% else %}
+  <div class="alert alert-info">
+    Restoring this course returns it to Included status. Its course, offering, and responsible-department snapshots will not change. The reviewer will be retained only if still eligible.
+  </div>
+  {% endif %}
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {{ form.expected_updated_at }}
+    {% if form.exemption_category %}
+    <div class="mb-3">
+      {{ form.exemption_category.label_tag }}
+      {{ form.exemption_category }}
+      {{ form.exemption_category.errors }}
+    </div>
+    {% endif %}
+    <div class="mb-3">
+      {{ form.reason.label_tag }}
+      {{ form.reason }}
+      {% if form.reason.help_text %}<div class="form-text">{{ form.reason.help_text }}</div>{% endif %}
+      {{ form.reason.errors }}
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn {% if transition == 'EXEMPT' %}btn-danger{% else %}btn-success{% endif %}" type="submit">{{ confirm_label }}</button>
+      <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:cycle_course_administration' cycle_course.id %}">{{ cancel_label }}</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
