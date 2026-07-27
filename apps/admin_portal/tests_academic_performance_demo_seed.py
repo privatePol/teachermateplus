@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from io import StringIO
 
 from django.core.management import call_command
@@ -10,6 +11,7 @@ from apps.accounts.models import User
 from apps.academics.models import AcademicYear, Course, CourseOffering, Term
 from apps.academics.services import AcademicGovernanceService
 from apps.admin_portal.academic_performance import AcademicPerformanceInsightService
+from apps.faculty_portal.services import FacultyPerformanceService
 from apps.grading.models import (
     CourseTemplateAssignment,
     GradeActivity,
@@ -184,15 +186,28 @@ class AcademicPerformanceInsightsDemoSeedTests(TestCase):
             is_active=True,
         ).first()
         self.assertIsNotNone(zero_score)
+        self.assertEqual(zero_score.computed_score, Decimal("50"))
+        fairview_period = self._period(fairview_missing, "MIDTERM")
         fairview_summary = AcademicPerformanceInsightService.get_section_performance_summary(
             fairview_missing,
-            self._period(fairview_missing, "MIDTERM"),
+            fairview_period,
         )
-        self.assertGreater(fairview_summary["missing_output_count"], 0)
-        self.assertNotEqual(
-            fairview_summary["missing_output_count"],
-            fairview_summary["student_count"],
+        fairview_snapshot = FacultyPerformanceService.get_class_performance_snapshot(
+            fairview_missing,
+            fairview_period,
         )
+        fairview_coverage = fairview_summary["coverage"]
+        self.assertGreater(fairview_coverage["computed_grade_count"], 0)
+        self.assertLess(
+            fairview_coverage["computed_grade_count"],
+            fairview_coverage["active_enrollment_count"],
+        )
+        self.assertGreater(fairview_coverage["no_grade_count"], 0)
+        self.assertEqual(
+            fairview_snapshot["readiness"]["missing_template_bucket_count"],
+            0,
+        )
+        self.assertEqual(fairview_summary["status"], "Needs Attention")
 
         self.assertEqual(
             self._consistency_statuses("A221-ACGN", "PRELIM"),

@@ -958,6 +958,10 @@ class Command(BaseCommand):
         elif course_code == "A132-ITAPPS" and campus_index == 1 and section_index == 1:
             base = {"QUIZ": 58, "OUTPUT": 68, "EXAM": 62}[category]
             missing = (student_index + activity_index + period_index) % 3 == 0
+            if period_index == 1 and student_index == 1:
+                # Keep one non-zero Fairview Midterm learner complete so this
+                # scenario demonstrates Needs Attention rather than Incomplete Data.
+                missing = False
             if student_index == 0 and activity_index == 0:
                 missing = False
                 return Decimal("0"), False
