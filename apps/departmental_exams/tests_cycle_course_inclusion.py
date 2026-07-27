@@ -29,7 +29,12 @@ from .models import (
     FacultyContribution,
     Question,
 )
-from .services import CycleCourseInclusionService, DepartmentalExamAuthorizationService
+from .services import (
+    CourseExamConfigurationService,
+    CycleCourseInclusionService,
+    DepartmentalExamAuthorizationService,
+    ExaminationCycleConfigurationService,
+)
 
 
 class CycleCourseInclusionTests(TestCase):
@@ -405,6 +410,36 @@ class CycleCourseInclusionTests(TestCase):
             ).count(),
             1,
         )
+
+    def test_stage4_exempt_closes_activity_free_open_configuration_without_manual_close_audit(self):
+        self.cycle.item_count_mode = ExaminationCycle.ItemCountMode.PER_COURSE
+        self.cycle.save(update_fields=["item_count_mode"])
+        configuration, _ = CourseExamConfigurationService.save_course_draft(
+            cycle_course_id=self.cycle_course.id,
+            tenant_id=self.tenant.id,
+            user=self.configurer,
+            expected_revision=0,
+            final_item_count=50,
+            questions_required_per_faculty=20,
+            coverage="Required learning outcomes",
+            additional_instructions="",
+            contribution_deadline=timezone.now() + timezone.timedelta(days=7),
+        )
+        configuration.workflow_status = CourseExamConfiguration.WorkflowStatus.OPEN
+        configuration.opened_at = timezone.now()
+        configuration.opened_by = self.configurer
+        configuration.save(
+            update_fields=["workflow_status", "opened_at", "opened_by", "updated_at"]
+        )
+        self.assertEqual(self._exempt().status_code, 302)
+        configuration.refresh_from_db()
+        self.assertEqual(configuration.workflow_status, CourseExamConfiguration.WorkflowStatus.CLOSED)
+        exempt_audit = AuditLog.objects.get(action="DE_EXAM_CYCLE_COURSE_EXEMPTED", entity_id=str(self.cycle_course.id))
+        self.assertEqual(exempt_audit.after_json["configuration"]["workflow_status"], "CLOSED")
+        self.assertFalse(AuditLog.objects.filter(action="DE_EXAM_COURSE_CONTRIBUTION_CLOSED").exists())
+        self.assertEqual(self._restore().status_code, 302)
+        configuration.refresh_from_db()
+        self.assertEqual(configuration.workflow_status, CourseExamConfiguration.WorkflowStatus.CLOSED)
 
     def test_substantive_contribution_and_question_data_block_exemption(self):
         contribution = self._create_contribution()

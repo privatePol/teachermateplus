@@ -1,11 +1,21 @@
 # HANDOFF.md
 
-Last updated by Codex: 2026-07-26
+Last updated by Codex: 2026-07-27
 
 ## Purpose
 This file preserves continuity between Codex sessions for TeacherMate+ V1.
 
 ## Current Session Summary
+### Departmental Exam Builder Stage 4 — Course Configuration
+- Current status: implementation and Gate 3 automated developer validation are complete on `feat/departmental-exam-builder` at `40a28f56b03f6b4109b9fc2ea663299712f9065e` (`docs(departmental-exams): finalize stage 3 handoff`). Cycle Fixed/Per-Course modes, separate final-item and faculty-question counts, course coverage/instructions, cycle and course Draft/Open/Closed lifecycles, explicit contribution opening, snapshots, responsibility/inclusion guards, exact scope/permission restrictions, bounded private audit evidence, migration preflight, and cycle -> parent -> configuration locking are implemented. The Departmental Exam Builder group has exactly two menu entries; Stage 5-7 routes and permissions remain absent.
+- Gate 3 evidence: Django system check passed; migration drift check passed with no changes detected; migration plan was expected; focused Stage 4 suite passed 81 with one expected SQLite concurrency skip; full departmental-exams package passed 153 with one expected SQLite concurrency skip; Stage 1-3 regressions passed 72/72; Admin help and roles passed 30/30; query and propagation batching checks passed; scoped Git diff check passed.
+- Final Sol High independent re-review: B — Approved after non-blocking documentation/test follow-up. No Blocker, High, or Medium implementation finding remains. Implementation is approved to proceed to selective staging review after this documentation refresh.
+- Migration required: `apps/departmental_exams/migrations/0002_stage4_course_configuration.py`. It has not been applied to the normal local database, staging, or production; no additional migration is required beyond this Stage 4 migration.
+- Pending safe staging-environment checks: MariaDB migration smoke, MariaDB concurrency smoke, and browser smoke. No MariaDB result is inferred from SQLite.
+- Git/deployment status: Gate 5 selective staging passed and Gate 6 staged-diff validation passed with verdict A — Staged diff validated; ready for commit authorization. Stage 4 is approved for local commit. `logs/system.log` remains unrelated, protected, and unstaged. No push, migration application, staging deployment, production deployment, or service restart occurred.
+- Migration `apps/departmental_exams/migrations/0002_stage4_course_configuration.py` is required but remains unapplied. MariaDB migration smoke, MariaDB concurrency smoke, and browser smoke remain pending safe staging-environment checks.
+- Next approval gate: local commit authorization. Stage 5 has not started; no faculty contribution encoding, assignment workflow, question submission, generation, answer-key, PDF, Pair Code, or QR implementation is exposed.
+
 ### Departmental Exam Builder Stage 3 Included/Exempt workflow
 - Date: 2026-07-26
 - Git checkpoint: branch `feat/departmental-exam-builder`; HEAD `af08c596929d6471203c7ea1d14ce5c6998a8b1e`; HEAD message `docs(departmental-exams): document stage 3 workflow`. Completed commits are Stage 1-2 foundation `558fa476a08b93ac39615bf30e37307ad6a9c370` (`feat(departmental-exams): add stage 1-2 foundation`), Stage 3 application code `e06cce744dfb2f249ca2dcac131e462890549a96` (`feat(departmental-exams): add course inclusion workflow`), and Stage 3 documentation `af08c596929d6471203c7ea1d14ce5c6998a8b1e` (`docs(departmental-exams): document stage 3 workflow`). Stage 3 implementation, validation, code commit, and documentation commit are complete; Stage 3 has not been pushed or deployed.
@@ -17,7 +27,7 @@ This file preserves continuity between Codex sessions for TeacherMate+ V1.
 - Migration status: no new migrations are required for Stage 3, and none was created, committed, or applied to the normal local development database. Four existing migrations remain locally unapplied: `academics.0011_course_exam_department`, `departmental_exams.0001_initial`, `rbac.0032_seed_departmental_exam_permissions`, and `navigation.0017_seed_departmental_exam_menus`.
 - Current worktree/safety: the expected remaining local worktree modification after this HANDOFF correction is `logs/system.log`. It must never be opened, read, diffed, edited, staged, restored, discarded, stashed, reset, cleaned, or committed. No migration has been applied to the normal local development database.
 - Pending before release: browser smoke for confirmation forms, error/success states, responsive behavior, reviewer read-only visibility, and full-reason privacy; MariaDB concurrency smoke for administration-versus-transition races and lock behavior; staging deployment; and production deployment. No push, deployment, migration application, or service restart has occurred.
-- Next project work should continue in a new chat/session for Stage 4 inspection and design verification. Stage 4 has not begun and remains planned only for Fixed Item Count for All Courses, Configure Item Count per Course, `final_item_count`, `questions_required_per_faculty`, coverage/instructions, deadline, and the publish/open-for-contribution gate. Obtain explicit approval before any Stage 4 implementation, push, deployment, migration application, or service restart.
+- Stage 4 implementation, automated validation, final independent re-review, Gate 5 selective staging, and Gate 6 staged-diff validation are complete. Stage 4 is approved for local commit. Stage 5 has not started. Obtain explicit approval before commit, push, deployment, migration application, or service restart.
 
 ### Departmental Exam Builder foundation authorization and batching remediation
 - Date: 2026-07-25

@@ -17,8 +17,8 @@
         <td>{{ item.offering_count }}</td>
         <td>{% if item.responsible_department %}{{ item.responsible_department }}{% else %}<span class="text-warning">Needs Exam Department</span>{% endif %}</td>
         <td>{{ item.reviewer|default:'Unassigned' }}</td>
-        <td><span class="badge {% if item.inclusion_status == 'EXEMPT' %}text-bg-warning{% else %}text-bg-success{% endif %}">{{ item.get_inclusion_status_display }}</span></td>
-        <td>{% if item.can_administer %}<a href="{% url 'departmental_exams:cycle_course_administration' item.id %}">Administer</a>{% endif %}</td>
+        <td><span class="badge {% if item.inclusion_status == 'EXEMPT' %}text-bg-warning{% else %}text-bg-success{% endif %}">{{ item.get_inclusion_status_display }}</span><div class="small text-muted">{{ item.readiness.label }}</div></td>
+        <td>{% if item.can_administer %}<a href="{% url 'departmental_exams:cycle_course_administration' item.id %}">Administer</a> · <a href="{% url 'departmental_exams:course_configuration' item.id %}">Configure</a>{% endif %}</td>
       </tr>
       {% empty %}
       <tr><td colspan="7">No course examinations are available in your scope.</td></tr>

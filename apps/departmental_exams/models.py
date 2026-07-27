@@ -5,6 +5,9 @@ from apps.core.models import ActivatableModel, TimeStampedModel
 
 
 class ExaminationCycle(TimeStampedModel, ActivatableModel):
+    class ItemCountMode(models.TextChoices):
+        FIXED_ALL = "FIXED_ALL", "Fixed Item Count for All Courses"
+        PER_COURSE = "PER_COURSE", "Configure Item Count per Course"
     class ExamPeriod(models.TextChoices):
         MIDTERM = "MIDTERM", "Midterm"
         FINAL = "FINAL", "Final"
@@ -19,11 +22,24 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
     term = models.ForeignKey("academics.Term", on_delete=models.PROTECT, related_name="examination_cycles")
     exam_period = models.CharField(max_length=10, choices=ExamPeriod.choices)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
+    item_count_mode = models.CharField(max_length=12, choices=ItemCountMode.choices, null=True, blank=True)
+    fixed_final_item_count = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
+    contributor_instructions = models.TextField(blank=True)
     created_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="created_examination_cycles")
 
     class Meta:
         db_table = "departmental_exam_cycles"
-        constraints = [models.UniqueConstraint(fields=["tenant", "academic_year", "term", "exam_period"], name="uq_de_cycle_scope_period")]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "academic_year", "term", "exam_period"], name="uq_de_cycle_scope_period"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(item_count_mode__isnull=True, fixed_final_item_count__isnull=True)
+                    | models.Q(item_count_mode="FIXED_ALL", fixed_final_item_count__gte=1, fixed_final_item_count__lte=200)
+                    | models.Q(item_count_mode="PER_COURSE", fixed_final_item_count__isnull=True)
+                ),
+                name="ck_de_cycle_item_count_mode",
+            ),
+        ]
         indexes = [models.Index(fields=["tenant", "term", "status"], name="idx_de_cycle_scope_status")]
 
     def clean(self):
@@ -33,6 +49,10 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
             raise ValidationError("Academic year must belong to the selected tenant.")
         if self.tenant_id and self.term_id and self.term.tenant_id != self.tenant_id:
             raise ValidationError("Term must belong to the selected tenant.")
+        if self.item_count_mode == self.ItemCountMode.FIXED_ALL and not (self.fixed_final_item_count and 1 <= self.fixed_final_item_count <= 200):
+            raise ValidationError({"fixed_final_item_count": "Fixed final item count must be from 1 to 200."})
+        if self.item_count_mode in (None, self.ItemCountMode.PER_COURSE) and self.fixed_final_item_count is not None:
+            raise ValidationError({"fixed_final_item_count": "A fixed final item count is allowed only in Fixed mode."})
 
 
 class CycleCourse(TimeStampedModel):
@@ -107,29 +127,43 @@ class CycleCourseOffering(TimeStampedModel):
 
 
 class CourseExamConfiguration(TimeStampedModel):
+    class WorkflowStatus(models.TextChoices):
+        DRAFT = "DRAFT", "Draft"
+        OPEN = "OPEN", "Open for Faculty Contribution"
+        CLOSED = "CLOSED", "Closed"
+
     cycle_course = models.OneToOneField(CycleCourse, on_delete=models.PROTECT, related_name="configuration")
-    final_item_count = models.PositiveSmallIntegerField(default=50)
-    required_questions_per_faculty = models.PositiveSmallIntegerField(default=1)
+    final_item_count = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
+    questions_required_per_faculty = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
     general_instructions = models.TextField(blank=True)
-    submission_deadline = models.DateTimeField(null=True, blank=True)
+    contribution_deadline = models.DateTimeField(null=True, blank=True)
     easy_percent = models.PositiveSmallIntegerField(default=30)
     moderate_percent = models.PositiveSmallIntegerField(default=50)
     difficult_percent = models.PositiveSmallIntegerField(default=20)
-    is_published = models.BooleanField(default=False)
-    published_at = models.DateTimeField(null=True, blank=True)
-    published_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="published_exam_configurations")
+    workflow_status = models.CharField(max_length=10, choices=WorkflowStatus.choices, default=WorkflowStatus.DRAFT)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    opened_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="opened_exam_configurations")
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closed_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="closed_exam_configurations")
+    coverage = models.TextField(blank=True)
+    additional_instructions = models.TextField(blank=True)
+    contributor_instructions_snapshot = models.TextField(blank=True)
+    item_count_mode_snapshot = models.CharField(max_length=12, choices=ExaminationCycle.ItemCountMode.choices, null=True, blank=True)
     revision = models.PositiveIntegerField(default=1)
 
     class Meta:
         db_table = "departmental_exam_configurations"
+        indexes = [models.Index(fields=["workflow_status", "contribution_deadline"], name="idx_de_cfg_status_deadline")]
 
     @property
     def maximum_score(self):
         return self.final_item_count
 
     def clean(self):
-        if not 50 <= self.final_item_count <= 75:
-            raise ValidationError({"final_item_count": "Final item count must be from 50 to 75."})
+        for field in ("final_item_count", "questions_required_per_faculty"):
+            value = getattr(self, field)
+            if value is not None and not 1 <= value <= 200:
+                raise ValidationError({field: "Value must be from 1 to 200."})
         if (self.easy_percent, self.moderate_percent, self.difficult_percent) != (30, 50, 20):
             raise ValidationError("Version 1A uses the approved 30/50/20 difficulty distribution.")
 

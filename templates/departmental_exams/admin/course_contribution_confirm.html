@@ -1,0 +1,2 @@
+{% extends "admin_portal/base.html" %}
+{% block content %}<div class="container"><h1>{% if action == 'open' %}Open for Faculty Contribution{% elif action == 'close' %}Close Contribution{% elif action == 'reopen' %}Reopen Contribution{% else %}Revert Unpublished Configuration{% endif %}</h1><p>{{ cycle_course.course }}</p><form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Confirm</button> <a href="{% url 'departmental_exams:course_configuration' cycle_course.id %}">Cancel</a></form></div>{% endblock %}

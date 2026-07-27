@@ -20,9 +20,10 @@
         <td>{{ item.reviewer|default:'Unassigned' }}</td>
         <td>
           <span class="badge {% if item.inclusion_status == 'EXEMPT' %}text-bg-warning{% else %}text-bg-success{% endif %}">{{ item.get_inclusion_status_display }}</span>
+          <div class="small text-muted">{{ item.readiness.label }}</div>
           {% if item.inclusion_status == 'EXEMPT' and not item.can_administer %}<div class="small text-muted">Read-only</div>{% endif %}
         </td>
-        <td>{% if item.can_administer %}<a href="{% url 'departmental_exams:cycle_course_administration' item.id %}">Administer</a>{% endif %}</td>
+        <td>{% if item.can_administer %}<a href="{% url 'departmental_exams:cycle_course_administration' item.id %}">Administer</a> · <a href="{% url 'departmental_exams:course_configuration' item.id %}">Configure</a>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

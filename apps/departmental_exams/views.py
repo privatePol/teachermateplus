@@ -12,17 +12,37 @@ from apps.core.decorators import portal_required
 from apps.core.services.audit import AuditService
 
 from .forms import (
+    CourseContributionCloseForm,
+    CourseContributionOpenForm,
+    CourseContributionReopenForm,
+    CourseExamConfigurationForm,
+    CourseExamConfigurationRevertForm,
     CycleCourseAdministrationForm,
     CycleCourseExemptionForm,
     CycleCourseRestoreForm,
     ExaminationCycleForm,
+    ExaminationCycleCloseForm,
+    ExaminationCycleConfigurationForm,
+    ExaminationCycleOpenForm,
 )
-from .models import CycleCourse, CycleCourseOffering, ExaminationCycle
+from .models import (
+    CourseExamConfiguration,
+    CycleCourse,
+    CycleCourseOffering,
+    ExaminationCycle,
+    FacultyContribution,
+    Question,
+)
 from .services import (
+    CourseExamConfigurationConflict,
+    CourseExamConfigurationReadinessService,
+    CourseExamConfigurationService,
+    CycleCourseAdministrationService,
     CycleCourseInclusionService,
     CycleCourseTransitionConflict,
     DepartmentalExamAuthorizationService,
     ExaminationCycleService,
+    ExaminationCycleConfigurationService,
 )
 
 
@@ -46,6 +66,66 @@ def cycle_list_view(request):
         .order_by("-created_at")
     )
     return render(request, "departmental_exams/admin/cycle_list.html", {"cycles": cycles})
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def cycle_configuration_view(request, cycle_id):
+    tenant_id = _tenant_id(request)
+    cycle = get_object_or_404(ExaminationCycle.objects.filter(tenant_id=tenant_id), id=cycle_id)
+    DepartmentalExamAuthorizationService.require_permission(user=request.user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
+    lifecycle_flags = ExaminationCycleConfigurationService.lifecycle_flags(cycle)
+    form = ExaminationCycleConfigurationForm(request.POST or None, instance=cycle, initial={"expected_updated_at": ExaminationCycleConfigurationService.transition_token(cycle)})
+    status = 200
+    if request.method == "POST" and not lifecycle_flags["can_edit_cycle_configuration"]:
+        raise Http404("Cycle configuration is read-only in its current lifecycle state.")
+    if request.method == "POST" and form.is_valid():
+        try:
+            cycle, changed = ExaminationCycleConfigurationService.save_cycle_configuration(cycle_id=cycle.id, tenant_id=tenant_id, user=request.user, expected_updated_at=form.cleaned_data["expected_updated_at"], **{key: form.cleaned_data[key] for key in ("item_count_mode", "fixed_final_item_count", "contributor_instructions")}, request=request)
+        except CourseExamConfigurationConflict as exc:
+            form.add_error(None, str(exc)); status = 409
+        except ValidationError as exc:
+            form.add_error(None, exc); status = 400
+        else:
+            messages.success(request, "Cycle configuration saved." if changed else "Cycle configuration is unchanged.")
+            return redirect("departmental_exams:cycle_configuration", cycle_id=cycle.id)
+    return render(request, "departmental_exams/admin/cycle_configuration.html", {"cycle": cycle, "form": form, "lifecycle_flags": lifecycle_flags}, status=status)
+
+
+def _cycle_transition_view(request, cycle_id, *, action):
+    tenant_id = _tenant_id(request)
+    cycle = get_object_or_404(ExaminationCycle.objects.filter(tenant_id=tenant_id), id=cycle_id)
+    DepartmentalExamAuthorizationService.require_permission(user=request.user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
+    lifecycle_flags = ExaminationCycleConfigurationService.lifecycle_flags(cycle)
+    if not lifecycle_flags[f"can_{action}_cycle"]:
+        raise Http404("This cycle transition is not available in its current lifecycle state.")
+    form_class = ExaminationCycleOpenForm if action == "open" else ExaminationCycleCloseForm
+    form = form_class(request.POST or None, initial={"expected_updated_at": ExaminationCycleConfigurationService.transition_token(cycle)})
+    status = 200
+    if request.method == "POST" and form.is_valid():
+        try:
+            method = ExaminationCycleConfigurationService.open_cycle if action == "open" else ExaminationCycleConfigurationService.close_cycle
+            cycle, changed = method(cycle_id=cycle.id, tenant_id=tenant_id, user=request.user, expected_updated_at=form.cleaned_data["expected_updated_at"], request=request)
+        except CourseExamConfigurationConflict as exc:
+            form.add_error(None, str(exc)); status = 409
+        except ValidationError as exc:
+            form.add_error(None, exc); status = 400
+        else:
+            messages.success(request, "Cycle opened." if action == "open" and changed else "Cycle closed." if changed else "Cycle is already in that state.")
+            return redirect("departmental_exams:cycle_configuration", cycle_id=cycle.id)
+    return render(request, "departmental_exams/admin/cycle_transition_confirm.html", {"cycle": cycle, "form": form, "action": action, "lifecycle_flags": lifecycle_flags}, status=status)
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def cycle_open_view(request, cycle_id):
+    return _cycle_transition_view(request, cycle_id, action="open")
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def cycle_close_view(request, cycle_id):
+    return _cycle_transition_view(request, cycle_id, action="close")
 
 
 @portal_required("ADMIN")
@@ -84,7 +164,7 @@ def cycle_course_list_view(request, cycle_id):
         ExaminationCycle.objects.filter(tenant_id=tenant_id), id=cycle_id
     )
     base_courses = CycleCourse.objects.filter(cycle=cycle).select_related(
-        "course", "responsible_department", "reviewer"
+        "cycle", "course", "responsible_department", "reviewer", "configuration"
     ).prefetch_related("offering_snapshots__campus")
     configurer_courses = (
         DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
@@ -114,6 +194,9 @@ def cycle_course_list_view(request, cycle_id):
         course.included_campuses = sorted({row.campus.name for row in snapshots})
         course.offering_count = len(snapshots)
         course.can_administer = course.id in configurer_ids
+        course.readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
+            cycle_course=course, configuration=getattr(course, "configuration", None), user=request.user
+        )
     return render(
         request,
         "departmental_exams/admin/cycle_course_list.html",
@@ -135,6 +218,7 @@ def assigned_course_examinations_view(request):
             "course",
             "responsible_department",
             "reviewer",
+            "configuration",
         )
         .prefetch_related("offering_snapshots__campus")
     )
@@ -169,11 +253,163 @@ def assigned_course_examinations_view(request):
         course.included_campuses = sorted({row.campus.name for row in snapshots})
         course.offering_count = len(snapshots)
         course.can_administer = course.id in configurer_ids
+        course.readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
+            cycle_course=course, configuration=getattr(course, "configuration", None), user=request.user
+        )
     return render(
         request,
         "departmental_exams/admin/assigned_course_examination_list.html",
         {"courses": courses},
     )
+
+
+def _course_configuration_context(*, tenant_id, cycle_course_id, user):
+    parent = get_object_or_404(
+        CycleCourse.objects.select_related("cycle", "course", "responsible_department", "responsible_department__campus", "reviewer").prefetch_related("offering_snapshots__campus"),
+        id=cycle_course_id,
+        cycle__tenant_id=tenant_id,
+    )
+    DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
+    configuration = CourseExamConfiguration.objects.filter(cycle_course=parent).first()
+    readiness = CourseExamConfigurationReadinessService.evaluate_readiness(cycle_course=parent, configuration=configuration, user=user)
+    return parent, configuration, readiness
+
+
+def _course_action_flags(*, parent, configuration, readiness):
+    """Derive the mutation surface from lifecycle state, not status alone."""
+    responsible_department_is_active = bool(
+        parent.responsible_department_id
+        and parent.responsible_department.is_active
+    )
+    mutable = (
+        parent.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+        and responsible_department_is_active
+        and parent.cycle.status != ExaminationCycle.Status.CLOSED
+    )
+    has_activity = bool(
+        configuration
+        and (
+            FacultyContribution.objects.filter(cycle_course=parent).exists()
+            or Question.objects.filter(contribution__cycle_course=parent).exists()
+        )
+    )
+    open_blockers = set(readiness["blockers"]) - {"Closed"}
+    return {
+        "can_save_draft": mutable
+        and parent.cycle.status in (ExaminationCycle.Status.DRAFT, ExaminationCycle.Status.OPEN)
+        and (not configuration or configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.DRAFT),
+        "can_open": bool(
+            mutable
+            and configuration
+            and parent.cycle.status == ExaminationCycle.Status.OPEN
+            and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.DRAFT
+            and readiness["can_open"]
+        ),
+        "can_close": bool(
+            mutable
+            and configuration
+            and parent.cycle.status == ExaminationCycle.Status.OPEN
+            and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN
+            and not has_activity
+        ),
+        "can_reopen": bool(
+            mutable
+            and configuration
+            and parent.cycle.status == ExaminationCycle.Status.OPEN
+            and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED
+            and not has_activity
+            and not open_blockers
+        ),
+        "can_revert": bool(
+            mutable
+            and configuration
+            and parent.cycle.status == ExaminationCycle.Status.OPEN
+            and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED
+            and not has_activity
+        ),
+    }
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def course_configuration_view(request, cycle_course_id):
+    tenant_id = _tenant_id(request)
+    parent, configuration, readiness = _course_configuration_context(tenant_id=tenant_id, cycle_course_id=cycle_course_id, user=request.user)
+    action_flags = _course_action_flags(
+        parent=parent, configuration=configuration, readiness=readiness
+    )
+    initial = {"expected_revision": configuration.revision if configuration else 0}
+    form = CourseExamConfigurationForm(request.POST or None, instance=configuration, initial=initial)
+    status = 200
+    if request.method == "POST" and not action_flags["can_save_draft"]:
+        raise Http404("Course configuration is read-only in its current lifecycle state.")
+    if request.method == "POST" and form.is_valid():
+        try:
+            configuration, changed = CourseExamConfigurationService.save_course_draft(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], **{key: form.cleaned_data[key] for key in ("final_item_count", "questions_required_per_faculty", "coverage", "additional_instructions", "contribution_deadline")}, request=request)
+        except CourseExamConfigurationConflict as exc:
+            form.add_error(None, str(exc)); status = 409
+        except ValidationError as exc:
+            form.add_error(None, exc); status = 400
+        else:
+            messages.success(request, "Course examination configuration saved." if changed else "Course examination configuration is unchanged.")
+            return redirect("departmental_exams:course_configuration", cycle_course_id=parent.id)
+    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "action_flags": action_flags, "form": form}, status=status)
+
+
+def _course_contribution_transition_view(request, cycle_course_id, *, action):
+    tenant_id = _tenant_id(request)
+    parent, configuration, readiness = _course_configuration_context(tenant_id=tenant_id, cycle_course_id=cycle_course_id, user=request.user)
+    if not configuration:
+        raise Http404("Course configuration does not exist.")
+    action_flags = _course_action_flags(
+        parent=parent, configuration=configuration, readiness=readiness
+    )
+    if not action_flags[f"can_{action}"]:
+        raise Http404("This course contribution action is not available in its current lifecycle state.")
+    form_class = {"open": CourseContributionOpenForm, "close": CourseContributionCloseForm, "reopen": CourseContributionReopenForm, "revert": CourseExamConfigurationRevertForm}[action]
+    form = form_class(request.POST or None, initial={"expected_revision": configuration.revision})
+    status = 200
+    if request.method == "POST" and form.is_valid():
+        try:
+            if action in ("open", "reopen"):
+                method = CourseExamConfigurationService.open_for_contribution if action == "open" else CourseExamConfigurationService.reopen_contribution
+                configuration, changed = method(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], request=request)
+            elif action == "close":
+                configuration, changed = CourseExamConfigurationService.close_contribution(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], reason=form.cleaned_data["reason"], request=request)
+            else:
+                configuration, changed = CourseExamConfigurationService.revert_unpublished_configuration(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], reason=form.cleaned_data["reason"], request=request)
+        except CourseExamConfigurationConflict as exc:
+            form.add_error(None, str(exc)); status = 409
+        except ValidationError as exc:
+            form.add_error(None, exc); status = 400
+        else:
+            messages.success(request, "Course contribution workflow updated." if changed else "Course contribution workflow is already in that state.")
+            return redirect("departmental_exams:course_configuration", cycle_course_id=parent.id)
+    return render(request, "departmental_exams/admin/course_contribution_confirm.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "form": form, "action": action}, status=status)
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def course_contribution_open_view(request, cycle_course_id):
+    return _course_contribution_transition_view(request, cycle_course_id, action="open")
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def course_contribution_close_view(request, cycle_course_id):
+    return _course_contribution_transition_view(request, cycle_course_id, action="close")
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def course_contribution_reopen_view(request, cycle_course_id):
+    return _course_contribution_transition_view(request, cycle_course_id, action="reopen")
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def course_configuration_revert_view(request, cycle_course_id):
+    return _course_contribution_transition_view(request, cycle_course_id, action="revert")
 
 
 @portal_required("ADMIN")
@@ -190,7 +426,7 @@ def cycle_course_administration_view(request, cycle_course_id):
     if request.method == "POST":
         with transaction.atomic():
             cycle_course = get_object_or_404(
-                course_queryset.select_for_update(),
+                course_queryset,
                 id=cycle_course_id,
                 cycle__tenant_id=tenant_id,
             )
@@ -247,14 +483,10 @@ def cycle_course_administration_view(request, cycle_course_id):
                 reviewer = (
                     User.objects.filter(id=reviewer_id).first() if reviewer_id else None
                 )
-                if not reviewer or not DepartmentalExamAuthorizationService.is_eligible_reviewer(
-                    user=reviewer,
-                    tenant_id=tenant_id,
-                    responsible_department=department,
-                ):
+                if not reviewer:
                     form.add_error(
                         "reviewer",
-                        "Reviewer must have an active role, explicit department scope, and review/generate permission.",
+                        "Reviewer no longer exists.",
                     )
                     return render(
                         request,
@@ -262,34 +494,26 @@ def cycle_course_administration_view(request, cycle_course_id):
                         {"cycle_course": cycle_course, "form": form},
                     )
 
-            before = {
-                "responsible_department_id": cycle_course.responsible_department_id,
-                "reviewer_id": cycle_course.reviewer_id,
-            }
-            cycle_course.responsible_department = department
-            cycle_course.reviewer = reviewer
-            cycle_course.full_clean()
-            cycle_course.save(
-                update_fields=["responsible_department", "reviewer", "updated_at"]
-            )
-            AuditService.log_event(
-                action="DE_EXAM_CYCLE_COURSE_ADMIN_UPDATED",
-                portal="ADMIN",
-                entity_type="CycleCourse",
-                entity_id=cycle_course.id,
-                actor=request.user,
-                tenant=tenant_id,
-                before_data=before,
-                after_data={
-                    "responsible_department_id": department.id,
-                    "reviewer_id": reviewer.id if reviewer else None,
-                },
-                metadata={
-                    "cycle_id": cycle_course.cycle_id,
-                    "course_id": cycle_course.course_id,
-                },
-                request=request,
-            )
+            try:
+                cycle_course, _changed = CycleCourseAdministrationService.update_responsibility(
+                    cycle_course_id=cycle_course.id,
+                    tenant_id=tenant_id,
+                    user=request.user,
+                    responsible_department=department,
+                    reviewer=reviewer,
+                    request=request,
+                )
+            except ValidationError as exc:
+                if hasattr(exc, "error_dict"):
+                    for field, errors in exc.error_dict.items():
+                        form.add_error(field if field in form.fields else None, errors)
+                else:
+                    form.add_error(None, exc)
+                return render(
+                    request,
+                    "departmental_exams/admin/cycle_course_administration.html",
+                    {"cycle_course": cycle_course, "form": form},
+                )
         messages.success(request, "Exam department and reviewer updated.")
         return redirect(
             "departmental_exams:cycle_course_administration",
