@@ -10,7 +10,7 @@ from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, Role, RolePermission, UserRole
 from apps.tenants.models import Campus, Department, Program, Tenant
 
-from .models import CycleCourse, CycleCourseOffering, ExaminationCycle
+from .models import CourseExamConfiguration, CycleCourse, CycleCourseOffering, ExaminationCycle
 
 
 _DEFAULT_DEPARTMENT = object()
@@ -63,8 +63,8 @@ class Stage4TestCase(TestCase):
         self,
         *,
         status=ExaminationCycle.Status.DRAFT,
-        mode=None,
-        fixed=None,
+        default_questions_required_per_faculty=None,
+        default_final_item_count=None,
         instructions="",
         scope_suffix=None,
     ):
@@ -87,7 +87,8 @@ class Stage4TestCase(TestCase):
         return ExaminationCycle.objects.create(
             tenant=self.tenant, academic_year=academic_year, term=term,
             exam_period=ExaminationCycle.ExamPeriod.MIDTERM, status=status,
-            item_count_mode=mode, fixed_final_item_count=fixed,
+            default_questions_required_per_faculty=default_questions_required_per_faculty,
+            default_final_item_count=default_final_item_count,
             contributor_instructions=instructions, created_by=self.admin,
         )
 
@@ -105,6 +106,33 @@ class Stage4TestCase(TestCase):
     def future_deadline(self):
         return timezone.now() + timezone.timedelta(days=7)
 
+    def make_configuration(
+        self,
+        parent,
+        *,
+        quota=50,
+        final_count=50,
+        quota_source="OVERRIDE",
+        final_source="OVERRIDE",
+        workflow=CourseExamConfiguration.WorkflowStatus.DRAFT,
+        opened_at=None,
+        coverage="Core outcomes",
+        deadline=None,
+    ):
+        return CourseExamConfiguration.objects.create(
+            cycle_course=parent,
+            questions_required_per_faculty=quota,
+            questions_required_per_faculty_source=quota_source,
+            final_item_count=final_count,
+            final_item_count_source=final_source,
+            cycle_defaults_revision_snapshot=parent.cycle.defaults_revision,
+            workflow_status=workflow,
+            opened_at=opened_at,
+            opened_by=self.admin if opened_at else None,
+            coverage=coverage,
+            contribution_deadline=deadline or self.future_deadline(),
+        )
+
 
 class Stage4TransactionTestCase(TransactionTestCase):
     """Same fixture contract for tests that require real transaction boundaries."""
@@ -113,6 +141,7 @@ class Stage4TransactionTestCase(TransactionTestCase):
     make_cycle = Stage4TestCase.make_cycle
     make_course = Stage4TestCase.make_course
     future_deadline = Stage4TestCase.future_deadline
+    make_configuration = Stage4TestCase.make_configuration
 
     def setUp(self):
         super().setUp()

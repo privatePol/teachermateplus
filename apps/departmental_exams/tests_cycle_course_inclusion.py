@@ -360,11 +360,13 @@ class CycleCourseInclusionTests(TestCase):
         configuration = CourseExamConfiguration.objects.create(
             cycle_course=self.cycle_course,
             final_item_count=60,
+            final_item_count_source="OVERRIDE",
             general_instructions="Retain this configuration while exempt.",
         )
         expected_configuration = {
             "id": configuration.id,
             "final_item_count": configuration.final_item_count,
+            "final_item_count_source": configuration.final_item_count_source,
             "general_instructions": configuration.general_instructions,
             "revision": configuration.revision,
         }
@@ -377,10 +379,15 @@ class CycleCourseInclusionTests(TestCase):
             {
                 "id": configuration.id,
                 "final_item_count": configuration.final_item_count,
+                "final_item_count_source": configuration.final_item_count_source,
                 "general_instructions": configuration.general_instructions,
                 "revision": configuration.revision,
             },
             expected_configuration,
+        )
+        self.assertEqual(
+            CourseExamConfiguration.objects.get(cycle_course=self.cycle_course).pk,
+            expected_configuration["id"],
         )
         self.assertEqual(
             AuditLog.objects.filter(
@@ -398,10 +405,15 @@ class CycleCourseInclusionTests(TestCase):
             {
                 "id": configuration.id,
                 "final_item_count": configuration.final_item_count,
+                "final_item_count_source": configuration.final_item_count_source,
                 "general_instructions": configuration.general_instructions,
                 "revision": configuration.revision,
             },
             expected_configuration,
+        )
+        self.assertEqual(
+            CourseExamConfiguration.objects.get(cycle_course=self.cycle_course).pk,
+            expected_configuration["id"],
         )
         self.assertEqual(
             AuditLog.objects.filter(
@@ -412,15 +424,18 @@ class CycleCourseInclusionTests(TestCase):
         )
 
     def test_stage4_exempt_closes_activity_free_open_configuration_without_manual_close_audit(self):
-        self.cycle.item_count_mode = ExaminationCycle.ItemCountMode.PER_COURSE
-        self.cycle.save(update_fields=["item_count_mode"])
+        self.cycle.default_questions_required_per_faculty = 50
+        self.cycle.default_final_item_count = 50
+        self.cycle.save(update_fields=["default_questions_required_per_faculty", "default_final_item_count"])
         configuration, _ = CourseExamConfigurationService.save_course_draft(
             cycle_course_id=self.cycle_course.id,
             tenant_id=self.tenant.id,
             user=self.configurer,
             expected_revision=0,
             final_item_count=50,
-            questions_required_per_faculty=20,
+            final_item_count_mode="DEFAULT",
+            questions_required_per_faculty=50,
+            questions_required_per_faculty_mode="DEFAULT",
             coverage="Required learning outcomes",
             additional_instructions="",
             contribution_deadline=timezone.now() + timezone.timedelta(days=7),

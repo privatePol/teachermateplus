@@ -168,7 +168,7 @@ ADMIN_HELP_SECTIONS = [
     {
         "code": "departmental-exam-builder",
         "title": "Departmental Exam Builder",
-        "summary": "Create examination cycles, assign exact course responsibility, and control which courses participate.",
+        "summary": "Create examination cycles, control Included or Exempt courses, and configure the current Stage 4 course-readiness workflow.",
         "topics": [
             {
                 "code": "departmental-exam-course-control",
@@ -188,6 +188,9 @@ ADMIN_HELP_SECTIONS = [
                     "Leave a course Included when it will use the departmental examination workflow.",
                     "Choose Exempt only while the cycle is Draft, select the approved category, and enter a specific reason. A saved exam configuration is preserved but dormant; configuration alone does not block Exempt.",
                     "Use Restore to Included only while the cycle is Draft when an exemption must be reversed. Restore preserves the saved configuration, does not use the Exempt-only faculty contribution or question blocker, and revalidates the reviewer assignment.",
+                    "On Configure Examination Cycle, authorized cycle managers may set independent 50-75 defaults for questions required per faculty and final questionnaire item count, plus contributor instructions. Review the confirmation page, then use Apply defaults; its short-lived signed POST submits directly to the apply action without putting instructions or reasons in links.",
+                    "On Course Examination Configuration, authorized exact-responsibility users may use each current cycle default or set a 50-75 course override, then record coverage, optional additional instructions, and a contribution deadline. Each source is shown as DEFAULT or OVERRIDE.",
+                    "Use the Draft/Open/Closed controls only for the current Stage 4 readiness lifecycle. First opening preserves the historical configuration snapshot, and a Closed governing cycle hides and denies every configuration/default mutation. These controls do not create faculty contributions, questions, official questionnaires, answer keys, or exports.",
                 ],
                 "check_first": [
                     "Confirm the selected tenant and the responsible department campus.",
@@ -213,7 +216,7 @@ ADMIN_HELP_SECTIONS = [
                     },
                 ],
                 "avoid": "Do not confuse Included with a separate action. New cycle courses start Included; Restore is the only reverse of Exempt.",
-                "next_step": "Review the audit entry and confirm the course status before beginning any later configuration stage.",
+                "next_step": "Review readiness, the source of each count, and the audit entry. Faculty contribution/question work is a future Stage 5 workflow and is not available from this guide.",
             },
         ],
     },

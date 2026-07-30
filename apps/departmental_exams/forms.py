@@ -74,24 +74,33 @@ class ExaminationCycleForm(forms.ModelForm):
 
 class ExaminationCycleConfigurationForm(forms.ModelForm):
     expected_updated_at = forms.CharField(widget=forms.HiddenInput)
+    reason = forms.CharField(required=False, max_length=500, widget=forms.Textarea(attrs={"rows": 3}), help_text="Required (10-500 characters) when changing defaults on an Open cycle.")
 
     class Meta:
         model = ExaminationCycle
-        fields = ["item_count_mode", "fixed_final_item_count", "contributor_instructions"]
+        fields = ["default_questions_required_per_faculty", "default_final_item_count", "contributor_instructions"]
         widgets = {"contributor_instructions": forms.Textarea(attrs={"rows": 4})}
 
     def clean_contributor_instructions(self):
         return (self.cleaned_data.get("contributor_instructions") or "").strip()
 
+    def clean_reason(self):
+        return (self.cleaned_data.get("reason") or "").strip()
+
     def clean(self):
         cleaned = super().clean()
-        mode = cleaned.get("item_count_mode")
-        fixed = cleaned.get("fixed_final_item_count")
-        if mode == ExaminationCycle.ItemCountMode.FIXED_ALL and fixed is None:
-            self.add_error("fixed_final_item_count", "Fixed final item count is required in Fixed mode.")
-        if mode == ExaminationCycle.ItemCountMode.PER_COURSE:
-            cleaned["fixed_final_item_count"] = None
+        for field in ("default_questions_required_per_faculty", "default_final_item_count"):
+            value = cleaned.get(field)
+            if value is not None and not 50 <= value <= 75:
+                self.add_error(field, "Value must be from 50 to 75.")
         return cleaned
+
+
+class CycleDefaultsConfirmationForm(forms.Form):
+    # This is the only field accepted by the confirmation POST. It carries a
+    # signed, actor-bound snapshot of every authoritative value; ordinary
+    # hidden inputs must never be trusted for a confirmed cycle update.
+    confirmation_state = forms.CharField(widget=forms.HiddenInput)
 
 
 class _CycleTransitionForm(forms.Form):
@@ -108,17 +117,27 @@ class ExaminationCycleCloseForm(_CycleTransitionForm):
 
 class CourseExamConfigurationForm(forms.ModelForm):
     expected_revision = forms.IntegerField(widget=forms.HiddenInput)
+    questions_required_per_faculty_mode = forms.ChoiceField(choices=[("DEFAULT", "Use cycle default"), ("OVERRIDE", "Use course override")])
+    final_item_count_mode = forms.ChoiceField(choices=[("DEFAULT", "Use cycle default"), ("OVERRIDE", "Use course override")])
+
+    def __init__(self, *args, cycle=None, **kwargs):
+        self.cycle = cycle
+        super().__init__(*args, **kwargs)
 
     class Meta:
         model = CourseExamConfiguration
         fields = [
             "final_item_count", "questions_required_per_faculty", "coverage",
-            "additional_instructions", "contribution_deadline",
+            "additional_instructions", "contribution_deadline", "final_item_count_source",
+            "questions_required_per_faculty_source", "cycle_defaults_revision_snapshot",
         ]
         widgets = {
             "coverage": forms.Textarea(attrs={"rows": 3}),
             "additional_instructions": forms.Textarea(attrs={"rows": 3}),
             "contribution_deadline": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "final_item_count_source": forms.HiddenInput(),
+            "questions_required_per_faculty_source": forms.HiddenInput(),
+            "cycle_defaults_revision_snapshot": forms.HiddenInput(),
         }
 
     def clean_coverage(self):
@@ -131,13 +150,42 @@ class CourseExamConfigurationForm(forms.ModelForm):
         cleaned = super().clean()
         for field in ("final_item_count", "questions_required_per_faculty"):
             value = cleaned.get(field)
-            if value is not None and not 1 <= value <= 200:
-                self.add_error(field, "Value must be from 1 to 200.")
+            mode = cleaned.get(f"{field}_mode")
+            if mode == "OVERRIDE" and (value is None or not 50 <= value <= 75):
+                self.add_error(field, "A course override must be from 50 to 75.")
+            if mode == "DEFAULT" and value is not None and not 50 <= value <= 75:
+                self.add_error(field, "Value must be from 50 to 75.")
+        if self.cycle:
+            pairs = (
+                ("questions_required_per_faculty", "questions_required_per_faculty_mode", "questions_required_per_faculty_source", self.cycle.default_questions_required_per_faculty),
+                ("final_item_count", "final_item_count_mode", "final_item_count_source", self.cycle.default_final_item_count),
+            )
+            for field, mode_field, source_field, default in pairs:
+                if cleaned.get(mode_field) == "DEFAULT":
+                    if default is None or not 50 <= default <= 75:
+                        self.add_error(field, "A valid cycle default is required.")
+                    else:
+                        cleaned[field] = default
+                        cleaned[source_field] = "DEFAULT"
+                elif cleaned.get(mode_field) == "OVERRIDE":
+                    cleaned[source_field] = "OVERRIDE"
+            cleaned["cycle_defaults_revision_snapshot"] = self.cycle.defaults_revision
         return cleaned
 
 
 class _ConfigurationActionForm(forms.Form):
     expected_revision = forms.IntegerField(widget=forms.HiddenInput)
+
+
+class CourseOverrideRemovalForm(_ConfigurationActionForm):
+    return_questions_required_per_faculty = forms.BooleanField(required=False)
+    return_final_item_count = forms.BooleanField(required=False)
+
+    def clean(self):
+        cleaned = super().clean()
+        if not (cleaned.get("return_questions_required_per_faculty") or cleaned.get("return_final_item_count")):
+            raise forms.ValidationError("Select at least one override to return to the cycle default.")
+        return cleaned
 
 
 class CourseContributionOpenForm(_ConfigurationActionForm):

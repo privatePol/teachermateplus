@@ -14,14 +14,14 @@
   {% else %}
     <div class="card card-body">
       <dl class="mb-0">
-        <dt>Item-count mode</dt>
-        <dd>{{ cycle.get_item_count_mode_display|default:"Not configured" }}</dd>
-        <dt>Fixed final item count</dt>
-        <dd>{{ cycle.fixed_final_item_count|default:"Not configured" }}</dd>
+        <dt>Default questions required per faculty</dt>
+        <dd>{{ cycle.default_questions_required_per_faculty|default:"Not configured" }}</dd>
+        <dt>Default final questionnaire item count</dt>
+        <dd>{{ cycle.default_final_item_count|default:"Not configured" }}</dd>
         <dt>Contributor instructions</dt>
         <dd>{{ cycle.contributor_instructions|default:"None" }}</dd>
       </dl>
-      <p class="text-muted mb-0">Cycle configuration is frozen.</p>
+      <p class="text-muted mb-0">Cycle defaults are unavailable after closing the cycle.</p>
     </div>
   {% endif %}
 

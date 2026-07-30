@@ -30,6 +30,9 @@
       {% if action_flags.can_revert %}
         <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_configuration_revert' cycle_course.id %}">Revert to Draft</a>
       {% endif %}
+      {% if action_flags.can_save_draft and configuration %}
+        <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_remove_overrides' cycle_course.id %}">Return selected overrides to defaults</a>
+      {% endif %}
     </div>
   {% endif %}
 </div>

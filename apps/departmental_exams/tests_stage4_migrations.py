@@ -1,38 +1,42 @@
-"""Historical-model forward/reverse tests for the unapplied Stage 4 migration."""
+"""Historical-model tests for the CAO 0003 migration; execution is Gate 3."""
 
-from django.db import connection
+import hashlib
+from importlib import import_module
+
+from django.db import IntegrityError, connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 from django.utils import timezone
-from importlib import import_module
 
 
-class Stage4MigrationTests(TransactionTestCase):
-    migrate_from = ("departmental_exams", "0001_initial")
-    migrate_to = ("departmental_exams", "0002_stage4_course_configuration")
+class CAOCountMigrationTests(TransactionTestCase):
+    migrate_from = ("departmental_exams", "0002_stage4_course_configuration")
+    migrate_to = ("departmental_exams", "0003_cao_default_override_counts")
 
     def setUp(self):
         super().setUp()
+        self.fixture_sequence = 0
+        self.fixture_scope = hashlib.sha256(
+            self._testMethodName.encode("utf-8")
+        ).hexdigest()[:10].upper()
         self.executor = MigrationExecutor(connection)
-        self.migrate_from_state = self._migration_state(self.migrate_from)
-        self.migrate_to_state = self._migration_state(self.migrate_to)
-        self.executor.migrate(self.migrate_from_state)
-        self.old_apps = self.executor.loader.project_state(self.migrate_from_state).apps
-
-    def _migration_state(self, departmental_exams_target):
-        """Keep dependency apps at their real schema state while pinning this app."""
-        return [
-            departmental_exams_target if app_label == "departmental_exams" else node
-            for node in self.executor.loader.graph.leaf_nodes()
-            for app_label, _migration_name in [node]
-        ]
+        self.from_state = self._state(self.migrate_from)
+        self.to_state = self._state(self.migrate_to)
+        self.executor.migrate(self.from_state)
+        self.old_apps = self.executor.loader.project_state(self.from_state).apps
 
     def tearDown(self):
-        # Restore the test database migration state for the remaining suite.
         MigrationExecutor(connection).migrate(MigrationExecutor(connection).loader.graph.leaf_nodes())
         super().tearDown()
 
-    def _legacy_scope(self, *, published=False, actor=True, timestamp=True):
+    def _state(self, departmental_target):
+        return [
+            departmental_target if app_label == "departmental_exams" else node
+            for node in self.executor.loader.graph.leaf_nodes()
+            for app_label, _name in [node]
+        ]
+
+    def _legacy_configuration(self, *, mode="FIXED_ALL", fixed=50, quota=50, final_count=50, workflow="DRAFT", opened=False):
         Tenant = self.old_apps.get_model("tenants", "Tenant")
         Campus = self.old_apps.get_model("tenants", "Campus")
         Department = self.old_apps.get_model("tenants", "Department")
@@ -43,123 +47,144 @@ class Stage4MigrationTests(TransactionTestCase):
         Cycle = self.old_apps.get_model("departmental_exams", "ExaminationCycle")
         CycleCourse = self.old_apps.get_model("departmental_exams", "CycleCourse")
         Configuration = self.old_apps.get_model("departmental_exams", "CourseExamConfiguration")
-        token = f"M{Configuration.objects.count() + 1}"
-        tenant = Tenant.objects.create(code=token, name=f"Migration {token}")
-        campus = Campus.objects.create(tenant=tenant, code=token, name=f"Campus {token}")
-        department = Department.objects.create(tenant=tenant, campus=campus, code=token, name=f"Department {token}")
-        user = User.objects.create(
-            username=f"migration-{token}",
-            email=f"migration-{token}@example.edu",
-            password="",
-            first_name="",
-            last_name="",
-            is_active=True,
-            is_staff=False,
-            is_superuser=False,
-            faculty_quick_tour_disabled=False,
-        )
+        self.fixture_sequence += 1
+        token = f"CAO{self.fixture_scope}{self.fixture_sequence}"
+        tenant = Tenant.objects.create(code=token, name=token)
+        campus = Campus.objects.create(tenant=tenant, code=token, name=token)
+        department = Department.objects.create(tenant=tenant, campus=campus, code=token, name=token)
+        user = User.objects.create(username=f"{token}-user", email=f"{token}@example.edu", password="", first_name="", last_name="", is_active=True, is_staff=False, is_superuser=False, faculty_quick_tour_disabled=False)
         year = Year.objects.create(tenant=tenant, code=token, name=token, start_date="2026-06-01", end_date="2027-05-31")
         term = Term.objects.create(tenant=tenant, academic_year=year, code=token, name=token)
         course = Course.objects.create(tenant=tenant, code=token, title=token, exam_department=department)
-        cycle = Cycle.objects.create(tenant=tenant, academic_year=year, term=term, exam_period="MIDTERM", created_by=user)
+        cycle = Cycle.objects.create(tenant=tenant, academic_year=year, term=term, exam_period="MIDTERM", item_count_mode=mode, fixed_final_item_count=fixed, created_by=user)
         parent = CycleCourse.objects.create(cycle=cycle, course=course, responsible_department=department)
-        configuration = Configuration.objects.create(
-            cycle_course=parent, final_item_count=61, required_questions_per_faculty=19,
-            general_instructions="Legacy instructions", submission_deadline=timezone.now() + timezone.timedelta(days=3),
-            easy_percent=30, moderate_percent=50, difficult_percent=20, revision=7,
-            is_published=published, published_by=user if actor else None,
-            published_at=timezone.now() if timestamp else None,
-        )
-        return configuration, parent
+        configuration = Configuration.objects.create(cycle_course=parent, final_item_count=final_count, questions_required_per_faculty=quota, workflow_status=workflow, opened_at=timezone.now() if opened else None, opened_by=user if opened else None, revision=7)
+        return {
+            "tenant": tenant,
+            "campus": campus,
+            "department": department,
+            "user": user,
+            "year": year,
+            "term": term,
+            "course": course,
+            "cycle": cycle,
+            "parent": parent,
+            "configuration": configuration,
+        }
+
+    @staticmethod
+    def _cleanup_failed_preflight_fixture(fixture):
+        """Remove only this historical-state fixture after a failed preflight."""
+        fixture["configuration"].delete()
+        fixture["parent"].delete()
+        fixture["cycle"].delete()
+        fixture["course"].delete()
+        fixture["term"].delete()
+        fixture["year"].delete()
+        fixture["user"].delete()
+        fixture["department"].delete()
+        fixture["campus"].delete()
+        fixture["tenant"].delete()
 
     def _forward(self):
         self.executor = MigrationExecutor(connection)
-        self.executor.migrate(self.migrate_to_state)
-        return self.executor.loader.project_state(self.migrate_to_state).apps
+        self.executor.migrate(self.to_state)
+        return self.executor.loader.project_state(self.to_state).apps
 
-    def _delete_legacy_configuration(self, *, configuration_id):
-        """Remove deliberately malformed 0001 data before base teardown migrates forward."""
-        Configuration = self.old_apps.get_model(
-            "departmental_exams", "CourseExamConfiguration"
-        )
-        Configuration.objects.filter(pk=configuration_id).delete()
-
-    def test_forward_preserves_legacy_draft_values_and_null_transitional_mode(self):
-        legacy, parent = self._legacy_scope(published=False)
-        apps = self._forward()
-        Configuration = apps.get_model("departmental_exams", "CourseExamConfiguration")
-        migrated = Configuration.objects.get(pk=legacy.pk)
-        self.assertEqual(migrated.workflow_status, "DRAFT")
-        self.assertEqual(migrated.final_item_count, 61)
-        self.assertEqual(migrated.questions_required_per_faculty, 19)
-        self.assertEqual(migrated.additional_instructions, "Legacy instructions")
-        self.assertEqual(migrated.contribution_deadline, legacy.submission_deadline)
-        self.assertEqual(migrated.revision, 7)
-        self.assertEqual(migrated.cycle_course_id, parent.id)
-        self.assertIsNone(migrated.item_count_mode_snapshot)
-        Cycle = apps.get_model("departmental_exams", "ExaminationCycle")
-        self.assertIsNone(Cycle.objects.get(pk=parent.cycle_id).item_count_mode)
-
-    def test_forward_maps_trusted_published_to_closed_and_reverse_restores_boolean(self):
-        legacy, _ = self._legacy_scope(published=True)
-        apps = self._forward()
-        Configuration = apps.get_model("departmental_exams", "CourseExamConfiguration")
-        self.assertEqual(Configuration.objects.get(pk=legacy.pk).workflow_status, "CLOSED")
-        self.executor = MigrationExecutor(connection)
-        self.executor.migrate(self.migrate_from_state)
-        old_apps = self.executor.loader.project_state(self.migrate_from_state).apps
-        LegacyConfiguration = old_apps.get_model("departmental_exams", "CourseExamConfiguration")
-        self.assertTrue(LegacyConfiguration.objects.get(pk=legacy.pk).is_published)
-
-    def test_reverse_uses_0001_defaults_for_incomplete_stage4_draft_counts(self):
-        legacy, _ = self._legacy_scope(published=False)
-        apps = self._forward()
-        Configuration = apps.get_model("departmental_exams", "CourseExamConfiguration")
-        Configuration.objects.filter(pk=legacy.pk).update(
-            final_item_count=None, questions_required_per_faculty=None
-        )
-        self.executor = MigrationExecutor(connection)
-        self.executor.migrate(self.migrate_from_state)
-        old_apps = self.executor.loader.project_state(self.migrate_from_state).apps
-        LegacyConfiguration = old_apps.get_model("departmental_exams", "CourseExamConfiguration")
-        reversed_configuration = LegacyConfiguration.objects.get(pk=legacy.pk)
-        self.assertEqual(reversed_configuration.final_item_count, 50)
-        self.assertEqual(reversed_configuration.required_questions_per_faculty, 1)
-        self.assertFalse(reversed_configuration.is_published)
-
-    def test_forward_fails_closed_when_published_actor_or_timestamp_is_missing(self):
-        legacy, _ = self._legacy_scope(published=True, actor=False)
-        try:
-            with self.assertRaisesRegex(RuntimeError, "trustworthy published_at and published_by"):
-                self._forward()
-        finally:
-            self._delete_legacy_configuration(configuration_id=legacy.pk)
-
-    def test_forward_fails_closed_when_published_timestamp_is_missing(self):
-        legacy, _ = self._legacy_scope(published=True, timestamp=False)
-        try:
-            with self.assertRaisesRegex(RuntimeError, "trustworthy published_at and published_by"):
-                self._forward()
-        finally:
-            self._delete_legacy_configuration(configuration_id=legacy.pk)
-
-    def test_constraint_and_index_names_are_mariadb_safe_and_migration_has_no_rbac_operations(self):
-        migration = import_module("apps.departmental_exams.migrations.0002_stage4_course_configuration")
-        names = []
-        for operation in migration.Migration.operations:
-            constraint = getattr(operation, "constraint", None)
-            index = getattr(operation, "index", None)
-            if constraint:
-                names.append(constraint.name)
-            if index:
-                names.append(index.name)
-        self.assertSetEqual(set(names), {"ck_de_cycle_item_count_mode", "idx_de_cfg_status_deadline"})
+    def test_preflight_is_first_and_mariadb_safe_without_rbac_or_navigation_operations(self):
+        migration = import_module("apps.departmental_exams.migrations.0003_cao_default_override_counts")
+        self.assertEqual(migration.Migration.operations[0].__class__.__name__, "RunPython")
+        self.assertEqual(migration.Migration.operations[0].code.__name__, "preflight_immutable_counts")
+        names = [operation.constraint.name for operation in migration.Migration.operations if getattr(operation, "constraint", None)]
         self.assertTrue(all(len(name) <= 64 for name in names))
-        self.assertFalse(any(operation.__class__.__name__.startswith("RunSQL") for operation in migration.Migration.operations))
+        self.assertFalse(any("rbac" in repr(operation).lower() or "navigation" in repr(operation).lower() for operation in migration.Migration.operations))
 
-    def test_legacy_published_data_preflight_is_the_first_operation_before_schema_changes(self):
-        migration = import_module("apps.departmental_exams.migrations.0002_stage4_course_configuration")
-        first_operation = migration.Migration.operations[0]
-        self.assertEqual(first_operation.__class__.__name__, "RunPython")
-        self.assertEqual(first_operation.code.__name__, "preflight_legacy_published_rows")
-        self.assertNotIn("AddField", [operation.__class__.__name__ for operation in migration.Migration.operations[:1]])
+    def test_forward_backfill_marks_fixed_match_default_and_other_values_override(self):
+        matching_fixture = self._legacy_configuration(fixed=50, final_count=50, quota=60)
+        other_fixture = self._legacy_configuration(mode="PER_COURSE", fixed=None, final_count=75, quota=50)
+        cycle = matching_fixture["cycle"]
+        matching = matching_fixture["configuration"]
+        other = other_fixture["configuration"]
+        apps = self._forward()
+        Cycle = apps.get_model("departmental_exams", "ExaminationCycle")
+        Configuration = apps.get_model("departmental_exams", "CourseExamConfiguration")
+        migrated_cycle = Cycle.objects.get(pk=cycle.pk)
+        matched = Configuration.objects.get(pk=matching.pk)
+        overridden = Configuration.objects.get(pk=other.pk)
+        self.assertEqual(migrated_cycle.default_final_item_count, 50)
+        self.assertIsNone(migrated_cycle.default_questions_required_per_faculty)
+        self.assertEqual((matched.final_item_count_source, matched.questions_required_per_faculty_source), ("DEFAULT", "OVERRIDE"))
+        self.assertEqual(overridden.final_item_count_source, "OVERRIDE")
+
+    def test_invalid_never_opened_draft_values_are_cleared_and_revisioned(self):
+        fixture = self._legacy_configuration(quota=49, final_count=76)
+        configuration = fixture["configuration"]
+        apps = self._forward()
+        Configuration = apps.get_model("departmental_exams", "CourseExamConfiguration")
+        migrated = Configuration.objects.get(pk=configuration.pk)
+        self.assertIsNone(migrated.questions_required_per_faculty)
+        self.assertIsNone(migrated.questions_required_per_faculty_source)
+        self.assertIsNone(migrated.final_item_count)
+        self.assertIsNone(migrated.final_item_count_source)
+        self.assertEqual(migrated.revision, 8)
+
+    def test_invalid_immutable_open_closed_or_ever_opened_row_fails_preflight(self):
+        for workflow, opened in (("OPEN", False), ("CLOSED", False), ("DRAFT", True)):
+            fixture = self._legacy_configuration(quota=49, final_count=50, workflow=workflow, opened=opened)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "immutable configuration"):
+                    self._forward()
+            finally:
+                self._cleanup_failed_preflight_fixture(fixture)
+
+    def test_constraints_and_reverse_preserve_effective_values_but_lose_provenance(self):
+        fixture = self._legacy_configuration(fixed=50, final_count=50, quota=60)
+        cycle = fixture["cycle"]
+        configuration = fixture["configuration"]
+        apps = self._forward()
+        Cycle = apps.get_model("departmental_exams", "ExaminationCycle")
+        Configuration = apps.get_model("departmental_exams", "CourseExamConfiguration")
+        with self.assertRaises(IntegrityError):
+            Cycle.objects.filter(pk=cycle.pk).update(default_final_item_count=76)
+        with self.assertRaises(IntegrityError):
+            Configuration.objects.filter(pk=configuration.pk).update(final_item_count=49)
+        self.executor = MigrationExecutor(connection)
+        self.executor.migrate(self.from_state)
+        old_apps = self.executor.loader.project_state(self.from_state).apps
+        OldCycle = old_apps.get_model("departmental_exams", "ExaminationCycle")
+        OldConfiguration = old_apps.get_model("departmental_exams", "CourseExamConfiguration")
+        self.assertEqual(OldCycle.objects.get(pk=cycle.pk).item_count_mode, "PER_COURSE")
+        self.assertIsNone(OldCycle.objects.get(pk=cycle.pk).fixed_final_item_count)
+        self.assertEqual((OldConfiguration.objects.get(pk=configuration.pk).questions_required_per_faculty, OldConfiguration.objects.get(pk=configuration.pk).final_item_count), (60, 50))
+
+    def test_value_source_constraints_reject_one_sided_nulls_and_bad_ranges(self):
+        fixture = self._legacy_configuration(fixed=50, final_count=50, quota=50)
+        configuration = fixture["configuration"]
+        apps = self._forward()
+        Configuration = apps.get_model("departmental_exams", "CourseExamConfiguration")
+        cases = (
+            (None, None, True),
+            (50, "DEFAULT", True),
+            (50, "OVERRIDE", True),
+            (None, "DEFAULT", False),
+            (50, None, False),
+            (49, "DEFAULT", False),
+            (50, "DEFAULT", True),
+            (75, "OVERRIDE", True),
+            (76, "DEFAULT", False),
+        )
+        for value_field, source_field in (
+            ("questions_required_per_faculty", "questions_required_per_faculty_source"),
+            ("final_item_count", "final_item_count_source"),
+        ):
+            for value, source, accepted in cases:
+                with self.subTest(value_field=value_field, value=value, source=source):
+                    if accepted:
+                        Configuration.objects.filter(pk=configuration.pk).update(
+                            **{value_field: value, source_field: source}
+                        )
+                    else:
+                        with self.assertRaises(IntegrityError):
+                            Configuration.objects.filter(pk=configuration.pk).update(
+                                **{value_field: value, source_field: source}
+                            )

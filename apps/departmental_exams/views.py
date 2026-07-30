@@ -3,7 +3,9 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.http import Http404
+from django.core import signing
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
 from apps.academics.models import AcademicYear, Term
@@ -17,6 +19,7 @@ from .forms import (
     CourseContributionReopenForm,
     CourseExamConfigurationForm,
     CourseExamConfigurationRevertForm,
+    CourseOverrideRemovalForm,
     CycleCourseAdministrationForm,
     CycleCourseExemptionForm,
     CycleCourseRestoreForm,
@@ -24,6 +27,7 @@ from .forms import (
     ExaminationCycleCloseForm,
     ExaminationCycleConfigurationForm,
     ExaminationCycleOpenForm,
+    CycleDefaultsConfirmationForm,
 )
 from .models import (
     CourseExamConfiguration,
@@ -50,6 +54,68 @@ def _tenant_id(request):
     return getattr(request, "scope", {}).get("tenant_id") or getattr(
         request.user, "default_tenant_id", None
     )
+
+
+_CYCLE_DEFAULTS_CONFIRMATION_PURPOSE = "cycle-defaults-apply-v1"
+_CYCLE_DEFAULTS_CONFIRMATION_SALT = "departmental-exams-cycle-defaults-v2"
+_CYCLE_DEFAULTS_CONFIRMATION_MAX_AGE_SECONDS = 900
+
+
+def _cycle_defaults_confirmation_token(*, request, cycle, tenant_id, cleaned_data):
+    """Issue a POST-only, timestamped confirmation snapshot for one actor."""
+    return signing.dumps(
+        {
+            "purpose": _CYCLE_DEFAULTS_CONFIRMATION_PURPOSE,
+            "actor_id": request.user.id,
+            "tenant_id": tenant_id,
+            "cycle_id": cycle.id,
+            "expected_updated_at": cleaned_data["expected_updated_at"],
+            "default_questions_required_per_faculty": cleaned_data[
+                "default_questions_required_per_faculty"
+            ],
+            "default_final_item_count": cleaned_data["default_final_item_count"],
+            "contributor_instructions": cleaned_data["contributor_instructions"],
+            "reason": cleaned_data["reason"],
+        },
+        salt=_CYCLE_DEFAULTS_CONFIRMATION_SALT,
+    )
+
+
+def _load_cycle_defaults_confirmation(*, request, cycle, tenant_id):
+    """Fail closed without disclosing signer/parser details or raw values."""
+    token = request.POST.get("confirmation_state")
+    if not token:
+        raise Http404("This cycle-default confirmation is no longer available.")
+    try:
+        state = signing.loads(
+            token,
+            salt=_CYCLE_DEFAULTS_CONFIRMATION_SALT,
+            max_age=_CYCLE_DEFAULTS_CONFIRMATION_MAX_AGE_SECONDS,
+        )
+    except (signing.BadSignature, TypeError, ValueError):
+        raise Http404("This cycle-default confirmation is no longer available.")
+    required_keys = {
+        "purpose",
+        "actor_id",
+        "tenant_id",
+        "cycle_id",
+        "expected_updated_at",
+        "default_questions_required_per_faculty",
+        "default_final_item_count",
+        "contributor_instructions",
+        "reason",
+    }
+    if not isinstance(state, dict) or not required_keys.issubset(state):
+        raise Http404("This cycle-default confirmation is no longer available.")
+    if state["purpose"] != _CYCLE_DEFAULTS_CONFIRMATION_PURPOSE:
+        raise Http404("This cycle-default confirmation is no longer available.")
+    if state["actor_id"] != request.user.id:
+        raise PermissionDenied("This cycle-default confirmation is not valid for the current user.")
+    if state["tenant_id"] != tenant_id or state["cycle_id"] != cycle.id:
+        raise Http404("This cycle-default confirmation is no longer available.")
+    if not isinstance(state["expected_updated_at"], str):
+        raise Http404("This cycle-default confirmation is no longer available.")
+    return state
 
 
 @portal_required("ADMIN")
@@ -80,16 +146,61 @@ def cycle_configuration_view(request, cycle_id):
     if request.method == "POST" and not lifecycle_flags["can_edit_cycle_configuration"]:
         raise Http404("Cycle configuration is read-only in its current lifecycle state.")
     if request.method == "POST" and form.is_valid():
+        confirmation_state = _cycle_defaults_confirmation_token(
+            request=request,
+            cycle=cycle,
+            tenant_id=tenant_id,
+            cleaned_data=form.cleaned_data,
+        )
+        confirmation_form = CycleDefaultsConfirmationForm(
+            initial={"confirmation_state": confirmation_state}
+        )
+        return render(
+            request,
+            "departmental_exams/admin/cycle_defaults_confirm.html",
+            {"cycle": cycle, "form": confirmation_form},
+        )
+    return render(request, "departmental_exams/admin/cycle_configuration.html", {"cycle": cycle, "form": form, "lifecycle_flags": lifecycle_flags}, status=status)
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def cycle_apply_defaults_view(request, cycle_id):
+    tenant_id = _tenant_id(request)
+    cycle = get_object_or_404(ExaminationCycle.objects.filter(tenant_id=tenant_id), id=cycle_id)
+    DepartmentalExamAuthorizationService.require_permission(user=request.user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
+    if cycle.status == ExaminationCycle.Status.CLOSED:
+        raise Http404("Closed cycles cannot apply defaults.")
+    confirmation_state = _load_cycle_defaults_confirmation(
+        request=request,
+        cycle=cycle,
+        tenant_id=tenant_id,
+    )
+    form = CycleDefaultsConfirmationForm(request.POST)
+    status = 200
+    if request.method == "POST" and form.is_valid():
         try:
-            cycle, changed = ExaminationCycleConfigurationService.save_cycle_configuration(cycle_id=cycle.id, tenant_id=tenant_id, user=request.user, expected_updated_at=form.cleaned_data["expected_updated_at"], **{key: form.cleaned_data[key] for key in ("item_count_mode", "fixed_final_item_count", "contributor_instructions")}, request=request)
+            cycle, changed = ExaminationCycleConfigurationService.save_cycle_configuration(
+                cycle_id=cycle.id,
+                tenant_id=tenant_id,
+                user=request.user,
+                expected_updated_at=confirmation_state["expected_updated_at"],
+                default_questions_required_per_faculty=confirmation_state[
+                    "default_questions_required_per_faculty"
+                ],
+                default_final_item_count=confirmation_state["default_final_item_count"],
+                contributor_instructions=confirmation_state["contributor_instructions"],
+                reason=confirmation_state["reason"],
+                request=request,
+            )
         except CourseExamConfigurationConflict as exc:
             form.add_error(None, str(exc)); status = 409
         except ValidationError as exc:
             form.add_error(None, exc); status = 400
         else:
-            messages.success(request, "Cycle configuration saved." if changed else "Cycle configuration is unchanged.")
+            messages.success(request, "Cycle defaults applied." if changed else "Cycle defaults are unchanged.")
             return redirect("departmental_exams:cycle_configuration", cycle_id=cycle.id)
-    return render(request, "departmental_exams/admin/cycle_configuration.html", {"cycle": cycle, "form": form, "lifecycle_flags": lifecycle_flags}, status=status)
+    return render(request, "departmental_exams/admin/cycle_defaults_confirm.html", {"cycle": cycle, "form": form}, status=status)
 
 
 def _cycle_transition_view(request, cycle_id, *, action):
@@ -297,7 +408,7 @@ def _course_action_flags(*, parent, configuration, readiness):
     return {
         "can_save_draft": mutable
         and parent.cycle.status in (ExaminationCycle.Status.DRAFT, ExaminationCycle.Status.OPEN)
-        and (not configuration or configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.DRAFT),
+        and (not configuration or (configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.DRAFT and not configuration.opened_at)),
         "can_open": bool(
             mutable
             and configuration
@@ -339,13 +450,15 @@ def course_configuration_view(request, cycle_course_id):
         parent=parent, configuration=configuration, readiness=readiness
     )
     initial = {"expected_revision": configuration.revision if configuration else 0}
-    form = CourseExamConfigurationForm(request.POST or None, instance=configuration, initial=initial)
+    if configuration:
+        initial.update({"questions_required_per_faculty_mode": configuration.questions_required_per_faculty_source or "DEFAULT", "final_item_count_mode": configuration.final_item_count_source or "DEFAULT"})
+    form = CourseExamConfigurationForm(request.POST or None, instance=configuration, initial=initial, cycle=parent.cycle)
     status = 200
     if request.method == "POST" and not action_flags["can_save_draft"]:
         raise Http404("Course configuration is read-only in its current lifecycle state.")
     if request.method == "POST" and form.is_valid():
         try:
-            configuration, changed = CourseExamConfigurationService.save_course_draft(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], **{key: form.cleaned_data[key] for key in ("final_item_count", "questions_required_per_faculty", "coverage", "additional_instructions", "contribution_deadline")}, request=request)
+            configuration, changed = CourseExamConfigurationService.save_course_draft(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], **{key: form.cleaned_data[key] for key in ("final_item_count", "questions_required_per_faculty", "final_item_count_mode", "questions_required_per_faculty_mode", "coverage", "additional_instructions", "contribution_deadline")}, request=request)
         except CourseExamConfigurationConflict as exc:
             form.add_error(None, str(exc)); status = 409
         except ValidationError as exc:
@@ -354,6 +467,30 @@ def course_configuration_view(request, cycle_course_id):
             messages.success(request, "Course examination configuration saved." if changed else "Course examination configuration is unchanged.")
             return redirect("departmental_exams:course_configuration", cycle_course_id=parent.id)
     return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "action_flags": action_flags, "form": form}, status=status)
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def course_remove_overrides_view(request, cycle_course_id):
+    tenant_id = _tenant_id(request)
+    parent, configuration, readiness = _course_configuration_context(tenant_id=tenant_id, cycle_course_id=cycle_course_id, user=request.user)
+    if not configuration or configuration.opened_at or configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.DRAFT:
+        raise Http404("Overrides cannot be removed in this lifecycle state.")
+    if request.method == "GET" and parent.cycle.status == ExaminationCycle.Status.CLOSED:
+        raise Http404("Overrides cannot be removed in this lifecycle state.")
+    form = CourseOverrideRemovalForm(request.POST or None, initial={"expected_revision": configuration.revision})
+    status = 200
+    if request.method == "POST" and form.is_valid():
+        try:
+            configuration, changed = CourseExamConfigurationService.remove_overrides(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], return_questions_required_per_faculty=form.cleaned_data["return_questions_required_per_faculty"], return_final_item_count=form.cleaned_data["return_final_item_count"], request=request)
+        except CourseExamConfigurationConflict as exc:
+            form.add_error(None, str(exc)); status = 409
+        except ValidationError as exc:
+            form.add_error(None, exc); status = 400
+        else:
+            messages.success(request, "Selected overrides returned to the cycle defaults." if changed else "No overrides changed.")
+            return redirect("departmental_exams:course_configuration", cycle_course_id=parent.id)
+    return render(request, "departmental_exams/admin/course_override_remove_confirm.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "form": form}, status=status)
 
 
 def _course_contribution_transition_view(request, cycle_course_id, *, action):

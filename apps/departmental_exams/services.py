@@ -50,23 +50,27 @@ class CourseExamConfigurationReadinessService:
                 blockers.append("Open for Faculty Contribution")
             if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED:
                 blockers.append("Closed")
-            if configuration.item_count_mode_snapshot != cycle.item_count_mode:
+            if configuration.final_item_count is None or not 50 <= configuration.final_item_count <= 75:
                 blockers.append("Needs Configuration")
-            if configuration.final_item_count is None or not 1 <= configuration.final_item_count <= 200:
+            if configuration.questions_required_per_faculty is None or not 50 <= configuration.questions_required_per_faculty <= 75:
                 blockers.append("Needs Configuration")
-            if configuration.questions_required_per_faculty is None or not 1 <= configuration.questions_required_per_faculty <= 200:
+            if configuration.final_item_count_source not in ("DEFAULT", "OVERRIDE") or configuration.questions_required_per_faculty_source not in ("DEFAULT", "OVERRIDE"):
                 blockers.append("Needs Configuration")
+            # Defaults remain live only until the first opening.  Opened rows
+            # are immutable historical snapshots and must not become stale.
+            if not configuration.opened_at:
+                if configuration.final_item_count_source == "DEFAULT" and configuration.final_item_count != cycle.default_final_item_count:
+                    blockers.append("Needs Configuration")
+                if configuration.questions_required_per_faculty_source == "DEFAULT" and configuration.questions_required_per_faculty != cycle.default_questions_required_per_faculty:
+                    blockers.append("Needs Configuration")
+                if configuration.cycle_defaults_revision_snapshot != cycle.defaults_revision:
+                    blockers.append("Needs Configuration")
             if not (configuration.coverage or "").strip():
                 blockers.append("Needs Configuration")
             if not configuration.contribution_deadline:
                 blockers.append("Needs Configuration")
             elif configuration.contribution_deadline <= timezone.now():
                 blockers.append("Contribution Deadline Passed")
-            if (
-                configuration.item_count_mode_snapshot == ExaminationCycle.ItemCountMode.FIXED_ALL
-                and configuration.final_item_count != cycle.fixed_final_item_count
-            ):
-                blockers.append("Needs Configuration")
         if for_mutation and user:
             try:
                 DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=cycle_course)
@@ -100,8 +104,9 @@ class ExaminationCycleConfigurationService:
         """Keep cycle audit evidence bounded while preserving exact stored guidance."""
         instructions = cycle.contributor_instructions or ""
         return {
-            "item_count_mode": cycle.item_count_mode,
-            "fixed_final_item_count": cycle.fixed_final_item_count,
+            "default_questions_required_per_faculty": cycle.default_questions_required_per_faculty,
+            "default_final_item_count": cycle.default_final_item_count,
+            "defaults_revision": cycle.defaults_revision,
             "contributor_instructions_sha256": hashlib.sha256(
                 instructions.encode("utf-8")
             ).hexdigest(),
@@ -109,35 +114,27 @@ class ExaminationCycleConfigurationService:
         }
 
     @staticmethod
+    def _text_audit_evidence(*, value, label):
+        """Record confidential free text without putting it in broad metadata."""
+        value = value or ""
+        return {
+            f"{label}_sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+            f"{label}_length": len(value),
+        }
+
+    @staticmethod
     def lifecycle_flags(cycle):
         """Derive cycle mutation availability from persisted lifecycle state."""
-        valid_mode = cycle.item_count_mode in ExaminationCycle.ItemCountMode.values
-        valid_fixed_count = (
-            cycle.item_count_mode == ExaminationCycle.ItemCountMode.FIXED_ALL
-            and cycle.fixed_final_item_count is not None
-            and 1 <= cycle.fixed_final_item_count <= 200
-        )
-        valid_per_course = (
-            cycle.item_count_mode == ExaminationCycle.ItemCountMode.PER_COURSE
-            and cycle.fixed_final_item_count is None
-        )
         return {
-            "can_edit_cycle_configuration": cycle.status == ExaminationCycle.Status.DRAFT,
+            "can_edit_cycle_configuration": cycle.status in (ExaminationCycle.Status.DRAFT, ExaminationCycle.Status.OPEN),
             "can_open_cycle": (
                 cycle.status == ExaminationCycle.Status.DRAFT
-                and valid_mode
-                and (valid_fixed_count or valid_per_course)
             ),
             "can_close_cycle": cycle.status == ExaminationCycle.Status.OPEN,
         }
 
     @classmethod
-    def _assert_no_open_activity(cls, *, cycle):
-        if CourseExamConfiguration.objects.filter(cycle_course__cycle=cycle, opened_at__isnull=False).exists() or FacultyContribution.objects.filter(cycle_course__cycle=cycle).exists() or Question.objects.filter(contribution__cycle_course__cycle=cycle).exists():
-            raise ValidationError("Item-count mode cannot change after a course has opened or downstream activity exists.")
-
-    @classmethod
-    def _propagate_mode_to_drafts(cls, *, cycle):
+    def _propagate_defaults_to_drafts(cls, *, cycle, changed_defaults):
         """Propagate in stable parent-ID batches while retaining parent-first locks.
 
         This intentionally does not use per-row permission checks: the manager
@@ -146,53 +143,131 @@ class ExaminationCycleConfigurationService:
         """
         last_parent_id = 0
         created = updated = 0
-        overwritten = []
+        affected_configuration_ids = []
+        excluded_by_reason = {}
+
+        def exclude(reason):
+            excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
+
         while True:
+            # Cycle -> CycleCourse is the first pair of locks. We lock a
+            # bounded stable ID range before deriving eligible parent IDs so
+            # exclusion counters and later child locks see one coherent batch.
             parents = list(
                 CycleCourse.objects.select_for_update()
-                .filter(
-                    cycle=cycle,
-                    inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
-                    id__gt=last_parent_id,
-                    responsible_department__isnull=False,
-                    responsible_department__is_active=True,
-                )
+                .select_related("responsible_department")
+                .filter(cycle=cycle, id__gt=last_parent_id)
                 .order_by("id")[: cls.PROPAGATION_BATCH_SIZE]
             )
             if not parents:
                 break
             last_parent_id = parents[-1].id
-            configuration_by_parent = {
+            eligible_parent_ids = []
+            for parent in parents:
+                if parent.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
+                    exclude("EXEMPT")
+                elif not parent.responsible_department_id:
+                    exclude("NULL_RESPONSIBILITY")
+                elif not parent.responsible_department.is_active:
+                    exclude("INACTIVE_RESPONSIBILITY")
+                else:
+                    eligible_parent_ids.append(parent.id)
+            if not eligible_parent_ids:
+                continue
+
+            # CycleCourse -> CourseExamConfiguration -> downstream checks.
+            # Each activity relation is queried once per locked batch; no
+            # permission or activity query is issued for an individual course.
+            all_existing_configurations_by_parent = {
                 configuration.cycle_course_id: configuration
                 for configuration in CourseExamConfiguration.objects.select_for_update().filter(
-                    cycle_course_id__in=[parent.id for parent in parents],
-                    workflow_status=CourseExamConfiguration.WorkflowStatus.DRAFT,
+                    cycle_course_id__in=eligible_parent_ids,
                 )
             }
+            contribution_active_parent_ids = set(
+                FacultyContribution.objects.filter(
+                    cycle_course_id__in=eligible_parent_ids
+                )
+                .order_by()
+                .values_list("cycle_course_id", flat=True)
+                .distinct()
+            )
+            question_active_parent_ids = set(
+                Question.objects.filter(
+                    contribution__cycle_course_id__in=eligible_parent_ids
+                )
+                .order_by()
+                .values_list("contribution__cycle_course_id", flat=True)
+                .distinct()
+            )
             creates = []
             changes = []
-            for parent in parents:
-                configuration = configuration_by_parent.get(parent.id)
-                if configuration is None:
-                    if cycle.item_count_mode == ExaminationCycle.ItemCountMode.FIXED_ALL:
-                        creates.append(CourseExamConfiguration(
-                            cycle_course=parent,
-                            final_item_count=cycle.fixed_final_item_count,
-                            item_count_mode_snapshot=cycle.item_count_mode,
-                        ))
+            for parent_id in eligible_parent_ids:
+                has_activity = (
+                    parent_id in contribution_active_parent_ids
+                    or parent_id in question_active_parent_ids
+                )
+                existing_configuration = all_existing_configurations_by_parent.get(parent_id)
+                if existing_configuration is not None:
+                    if existing_configuration.opened_at is not None:
+                        exclude("EVER_OPENED")
+                        continue
+                    if existing_configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN:
+                        exclude("OPEN")
+                        continue
+                    if existing_configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED:
+                        exclude("CLOSED")
+                        continue
+                    if has_activity:
+                        exclude("DOWNSTREAM_ACTIVITY")
+                        continue
+                    configuration = existing_configuration
+                elif has_activity:
+                    exclude("DOWNSTREAM_ACTIVITY")
+                    continue
+                else:
+                    values = {
+                        "cycle_course_id": parent_id,
+                        "revision": 1,
+                        "cycle_defaults_revision_snapshot": cycle.defaults_revision,
+                    }
+                    # A new child receives every current valid default, not
+                    # just the default that triggered this propagation pass.
+                    for field, default in (
+                        (
+                            "questions_required_per_faculty",
+                            cycle.default_questions_required_per_faculty,
+                        ),
+                        ("final_item_count", cycle.default_final_item_count),
+                    ):
+                        if default is not None and 50 <= default <= 75:
+                            values[field] = default
+                            values[f"{field}_source"] = "DEFAULT"
+                    creates.append(CourseExamConfiguration(**values))
                     continue
                 prior = {
+                    "questions_required_per_faculty": configuration.questions_required_per_faculty,
+                    "questions_required_per_faculty_source": configuration.questions_required_per_faculty_source,
                     "final_item_count": configuration.final_item_count,
-                    "item_count_mode_snapshot": configuration.item_count_mode_snapshot,
+                    "final_item_count_source": configuration.final_item_count_source,
+                    "cycle_defaults_revision_snapshot": configuration.cycle_defaults_revision_snapshot,
                 }
-                configuration.item_count_mode_snapshot = cycle.item_count_mode
-                if cycle.item_count_mode == ExaminationCycle.ItemCountMode.FIXED_ALL:
-                    configuration.final_item_count = cycle.fixed_final_item_count
+                if "questions_required_per_faculty" in changed_defaults and configuration.questions_required_per_faculty_source in (None, "DEFAULT"):
+                    configuration.questions_required_per_faculty = cycle.default_questions_required_per_faculty
+                    configuration.questions_required_per_faculty_source = "DEFAULT" if cycle.default_questions_required_per_faculty is not None else None
+                if "final_item_count" in changed_defaults and configuration.final_item_count_source in (None, "DEFAULT"):
+                    configuration.final_item_count = cycle.default_final_item_count
+                    configuration.final_item_count_source = "DEFAULT" if cycle.default_final_item_count is not None else None
+                configuration.cycle_defaults_revision_snapshot = cycle.defaults_revision
                 if prior != {
+                    "questions_required_per_faculty": configuration.questions_required_per_faculty,
+                    "questions_required_per_faculty_source": configuration.questions_required_per_faculty_source,
                     "final_item_count": configuration.final_item_count,
-                    "item_count_mode_snapshot": configuration.item_count_mode_snapshot,
+                    "final_item_count_source": configuration.final_item_count_source,
+                    "cycle_defaults_revision_snapshot": configuration.cycle_defaults_revision_snapshot,
                 }:
-                    overwritten.append({"configuration_id": configuration.id, "before": prior, "after": {"final_item_count": configuration.final_item_count, "item_count_mode_snapshot": configuration.item_count_mode_snapshot}})
+                    if len(affected_configuration_ids) < cls.PROPAGATION_BATCH_SIZE:
+                        affected_configuration_ids.append(configuration.id)
                     configuration.revision += 1
                     configuration.updated_at = timezone.now()
                     changes.append(configuration)
@@ -202,53 +277,83 @@ class ExaminationCycleConfigurationService:
             if changes:
                 CourseExamConfiguration.objects.bulk_update(
                     changes,
-                    ["final_item_count", "item_count_mode_snapshot", "revision", "updated_at"],
+                    ["questions_required_per_faculty", "questions_required_per_faculty_source", "final_item_count", "final_item_count_source", "cycle_defaults_revision_snapshot", "revision", "updated_at"],
                     batch_size=cls.PROPAGATION_BATCH_SIZE,
                 )
                 updated += len(changes)
-        return {"created": created, "updated": updated, "overwritten": overwritten}
+        return {
+            "created": created,
+            "updated": updated,
+            "affected_configuration_ids": affected_configuration_ids,
+            "excluded_by_reason": excluded_by_reason,
+        }
 
     @classmethod
     @transaction.atomic
-    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, item_count_mode, fixed_final_item_count, contributor_instructions, request=None):
+    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, default_questions_required_per_faculty, default_final_item_count, contributor_instructions, reason="", request=None):
         cycle = cls._lock_cycle(cycle_id=cycle_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_permission(user=user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
-        if cycle.status != ExaminationCycle.Status.DRAFT:
-            raise ValidationError("Cycle configuration is frozen once the cycle is Open or Closed.")
+        if cycle.status == ExaminationCycle.Status.CLOSED:
+            raise ValidationError("Closed cycles cannot change defaults.")
         if expected_updated_at != cls.transition_token(cycle):
             raise CourseExamConfigurationConflict("The examination cycle changed after this page was loaded.")
-        if item_count_mode not in ExaminationCycle.ItemCountMode.values:
-            raise ValidationError("Select an item-count mode.")
-        if item_count_mode == ExaminationCycle.ItemCountMode.FIXED_ALL and not (fixed_final_item_count and 1 <= fixed_final_item_count <= 200):
-            raise ValidationError("Fixed final item count must be from 1 to 200.")
-        if item_count_mode == ExaminationCycle.ItemCountMode.PER_COURSE:
-            fixed_final_item_count = None
+        for value in (default_questions_required_per_faculty, default_final_item_count):
+            if value is not None and not 50 <= value <= 75:
+                raise ValidationError("Cycle defaults must be from 50 to 75.")
         contributor_instructions = contributor_instructions or ""
-        mode_or_fixed_changed = (
-            cycle.item_count_mode != item_count_mode
-            or cycle.fixed_final_item_count != fixed_final_item_count
-        )
-        if mode_or_fixed_changed:
-            cls._assert_no_open_activity(cycle=cycle)
+        defaults_changed = cycle.default_questions_required_per_faculty != default_questions_required_per_faculty or cycle.default_final_item_count != default_final_item_count
+        reason = (reason or "").strip()
+        if cycle.status == ExaminationCycle.Status.OPEN and defaults_changed and not 10 <= len(reason) <= 500:
+            raise ValidationError("An administrative reason from 10 to 500 characters is required while the cycle is Open.")
         before = cls._configuration_audit_payload(cycle)
         changed = (
-            cycle.item_count_mode != item_count_mode
-            or cycle.fixed_final_item_count != fixed_final_item_count
+            defaults_changed
             or cycle.contributor_instructions != contributor_instructions
         )
         if not changed:
             return cycle, False
-        cycle.item_count_mode = item_count_mode
-        cycle.fixed_final_item_count = fixed_final_item_count
+        cycle.default_questions_required_per_faculty = default_questions_required_per_faculty
+        cycle.default_final_item_count = default_final_item_count
+        if defaults_changed:
+            cycle.defaults_revision += 1
         cycle.contributor_instructions = contributor_instructions
         cycle.full_clean()
-        cycle.save(update_fields=["item_count_mode", "fixed_final_item_count", "contributor_instructions", "updated_at"])
+        cycle.save(update_fields=["default_questions_required_per_faculty", "default_final_item_count", "defaults_revision", "contributor_instructions", "updated_at"])
         propagation = (
-            cls._propagate_mode_to_drafts(cycle=cycle)
-            if (before["item_count_mode"], before["fixed_final_item_count"]) != (item_count_mode, fixed_final_item_count)
-            else {"created": 0, "updated": 0, "overwritten": []}
+            cls._propagate_defaults_to_drafts(cycle=cycle, changed_defaults={key for key, value in (("questions_required_per_faculty", default_questions_required_per_faculty), ("final_item_count", default_final_item_count)) if getattr(cycle, f"default_{key}") != before[f"default_{key}"]})
+            if defaults_changed
+            else {
+                "created": 0,
+                "updated": 0,
+                "affected_configuration_ids": [],
+                "excluded_by_reason": {},
+            }
         )
-        AuditService.log_event(action="DE_EXAM_CYCLE_CONFIGURATION_UPDATED", portal="ADMIN", entity_type="ExaminationCycle", entity_id=cycle.id, actor=user, tenant=tenant_id, before_data=before, after_data=cls._configuration_audit_payload(cycle), metadata={"expected_updated_at": expected_updated_at, "propagation": propagation}, request=request)
+        metadata = {
+            "expected_updated_at": expected_updated_at,
+            "propagation": {
+                "created": propagation["created"],
+                "updated": propagation["updated"],
+                "affected_configuration_ids": propagation[
+                    "affected_configuration_ids"
+                ],
+                "excluded_by_reason": propagation["excluded_by_reason"],
+            },
+        }
+        if defaults_changed:
+            metadata.update(cls._text_audit_evidence(value=reason, label="reason"))
+        AuditService.log_event(
+            action="DE_EXAM_CYCLE_CONFIGURATION_UPDATED",
+            portal="ADMIN",
+            entity_type="ExaminationCycle",
+            entity_id=cycle.id,
+            actor=user,
+            tenant=tenant_id,
+            before_data=before,
+            after_data=cls._configuration_audit_payload(cycle),
+            metadata=metadata,
+            request=request,
+        )
         return cycle, True
 
     @classmethod
@@ -262,13 +367,9 @@ class ExaminationCycleConfigurationService:
             raise ValidationError("Only Draft cycles can be opened.")
         if expected_updated_at != cls.transition_token(cycle):
             raise CourseExamConfigurationConflict("The examination cycle changed after this page was loaded.")
-        if cycle.item_count_mode not in ExaminationCycle.ItemCountMode.values:
-            raise ValidationError("Select an item-count mode before opening the cycle.")
-        if cycle.item_count_mode == ExaminationCycle.ItemCountMode.FIXED_ALL and not cycle.fixed_final_item_count:
-            raise ValidationError("Fixed mode requires a valid fixed final item count.")
         cycle.status = ExaminationCycle.Status.OPEN
         cycle.save(update_fields=["status", "updated_at"])
-        AuditService.log_event(action="DE_EXAM_CYCLE_OPENED", portal="ADMIN", entity_type="ExaminationCycle", entity_id=cycle.id, actor=user, tenant=tenant_id, metadata={"item_count_mode": cycle.item_count_mode, "fixed_final_item_count": cycle.fixed_final_item_count}, request=request)
+        AuditService.log_event(action="DE_EXAM_CYCLE_OPENED", portal="ADMIN", entity_type="ExaminationCycle", entity_id=cycle.id, actor=user, tenant=tenant_id, metadata=cls._configuration_audit_payload(cycle), request=request)
         return cycle, True
 
     @classmethod
@@ -1162,9 +1263,15 @@ class CourseExamConfigurationService:
             "final_item_count": configuration.final_item_count,
             "questions_required_per_faculty": configuration.questions_required_per_faculty,
             "coverage": configuration.coverage,
-            "additional_instructions": configuration.additional_instructions,
+            **ExaminationCycleConfigurationService._text_audit_evidence(
+                value=configuration.additional_instructions,
+                label="additional_instructions",
+            ),
             "contribution_deadline": configuration.contribution_deadline,
-            "item_count_mode_snapshot": configuration.item_count_mode_snapshot,
+            "questions_required_per_faculty_source": configuration.questions_required_per_faculty_source,
+            "final_item_count_source": configuration.final_item_count_source,
+            "cycle_defaults_revision_snapshot": configuration.cycle_defaults_revision_snapshot,
+            "legacy_item_count_mode_snapshot": configuration.legacy_item_count_mode_snapshot,
             "workflow_status": configuration.workflow_status,
             "opened_at": configuration.opened_at,
             "opened_by_id": configuration.opened_by_id,
@@ -1224,33 +1331,37 @@ class CourseExamConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def save_course_draft(cls, *, cycle_course_id, tenant_id, user, expected_revision, final_item_count, questions_required_per_faculty, coverage, additional_instructions, contribution_deadline, request=None):
+    def save_course_draft(cls, *, cycle_course_id, tenant_id, user, expected_revision, final_item_count, questions_required_per_faculty, final_item_count_mode, questions_required_per_faculty_mode, coverage, additional_instructions, contribution_deadline, request=None):
         parent, configuration = cls._lock_parent_and_configuration(cycle_course_id=cycle_course_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
         cls._require_active_responsible_department(parent)
         cls._require_cycle_allows_draft_save(parent)
-        if configuration and configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.DRAFT:
+        if configuration and (configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.DRAFT or configuration.opened_at):
             raise ValidationError("Only Draft configurations can be edited. Revert an unpublished configuration first.")
         if configuration:
             cls._require_revision(configuration, expected_revision)
         elif expected_revision not in (None, 0):
             raise CourseExamConfigurationConflict("The course configuration was created after this page was loaded.")
-        mode = parent.cycle.item_count_mode
-        if mode not in ExaminationCycle.ItemCountMode.values:
-            raise ValidationError("Configure the cycle item-count mode first.")
-        if mode == ExaminationCycle.ItemCountMode.FIXED_ALL:
-            final_item_count = parent.cycle.fixed_final_item_count
-        if final_item_count is not None and not 1 <= final_item_count <= 200:
-            raise ValidationError("Final item count must be from 1 to 200.")
-        if questions_required_per_faculty is not None and not 1 <= questions_required_per_faculty <= 200:
-            raise ValidationError("Faculty question quota must be from 1 to 200.")
+        cycle = parent.cycle
+        def resolve(value, mode, default, label):
+            if mode == "DEFAULT":
+                if default is None or not 50 <= default <= 75:
+                    raise ValidationError(f"Configure a valid cycle default for {label} before using it.")
+                return default, "DEFAULT"
+            if mode == "OVERRIDE" and value is not None and 50 <= value <= 75:
+                return value, "OVERRIDE"
+            raise ValidationError(f"{label} override must be from 50 to 75.")
+        questions_required_per_faculty, questions_required_per_faculty_source = resolve(questions_required_per_faculty, questions_required_per_faculty_mode, cycle.default_questions_required_per_faculty, "faculty quota")
+        final_item_count, final_item_count_source = resolve(final_item_count, final_item_count_mode, cycle.default_final_item_count, "final item count")
         if configuration is None:
             configuration = CourseExamConfiguration(cycle_course=parent, revision=1)
             before = None
         else:
             before = cls._configuration_payload(configuration)
-        values = {"final_item_count": final_item_count, "questions_required_per_faculty": questions_required_per_faculty, "coverage": (coverage or "").strip(), "additional_instructions": (additional_instructions or "").strip(), "contribution_deadline": contribution_deadline, "item_count_mode_snapshot": mode}
-        if before and all(before[key] == value for key, value in values.items()):
+        values = {"final_item_count": final_item_count, "final_item_count_source": final_item_count_source, "questions_required_per_faculty": questions_required_per_faculty, "questions_required_per_faculty_source": questions_required_per_faculty_source, "cycle_defaults_revision_snapshot": cycle.defaults_revision, "coverage": (coverage or "").strip(), "additional_instructions": (additional_instructions or "").strip(), "contribution_deadline": contribution_deadline}
+        if before and all(
+            getattr(configuration, key) == value for key, value in values.items()
+        ):
             return configuration, False
         for key, value in values.items():
             setattr(configuration, key, value)
@@ -1258,7 +1369,54 @@ class CourseExamConfigurationService:
             configuration.revision += 1
         configuration.full_clean()
         configuration.save()
-        cls._audit(action="DE_EXAM_COURSE_CONFIGURATION_SAVED", parent=parent, configuration=configuration, actor=user, before=before, request=request, metadata={"expected_revision": expected_revision, "resulting_revision": configuration.revision, "mode": mode, "fixed_final_item_count": parent.cycle.fixed_final_item_count})
+        cls._audit(action="DE_EXAM_COURSE_CONFIGURATION_SAVED", parent=parent, configuration=configuration, actor=user, before=before, request=request, metadata={"expected_revision": expected_revision, "resulting_revision": configuration.revision})
+        return configuration, True
+
+    @classmethod
+    @transaction.atomic
+    def remove_overrides(cls, *, cycle_course_id, tenant_id, user, expected_revision, return_questions_required_per_faculty, return_final_item_count, request=None):
+        parent, configuration = cls._lock_parent_and_configuration(cycle_course_id=cycle_course_id, tenant_id=tenant_id)
+        DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
+        cls._require_active_responsible_department(parent)
+        cls._require_cycle_allows_draft_save(parent)
+        cls._require_no_activity(parent)
+        if not configuration or configuration.opened_at or configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.DRAFT:
+            raise ValidationError("Historical or non-Draft configurations cannot return to cycle defaults.")
+        cls._require_revision(configuration, expected_revision)
+        if not return_questions_required_per_faculty and not return_final_item_count:
+            raise ValidationError("Select at least one override to return to the cycle default.")
+        cycle = parent.cycle
+        before = cls._configuration_payload(configuration)
+        changes = {}
+        if (
+            return_questions_required_per_faculty
+            and configuration.questions_required_per_faculty_source == "OVERRIDE"
+        ):
+            if cycle.default_questions_required_per_faculty is None:
+                raise ValidationError("The cycle faculty quota default is not configured.")
+            changes.update(
+                questions_required_per_faculty=cycle.default_questions_required_per_faculty,
+                questions_required_per_faculty_source="DEFAULT",
+            )
+        if (
+            return_final_item_count
+            and configuration.final_item_count_source == "OVERRIDE"
+        ):
+            if cycle.default_final_item_count is None:
+                raise ValidationError("The cycle final item count default is not configured.")
+            changes.update(
+                final_item_count=cycle.default_final_item_count,
+                final_item_count_source="DEFAULT",
+            )
+        if not changes:
+            return configuration, False
+        for field, value in changes.items():
+            setattr(configuration, field, value)
+        configuration.cycle_defaults_revision_snapshot = cycle.defaults_revision
+        configuration.revision += 1
+        configuration.full_clean()
+        configuration.save()
+        cls._audit(action="DE_EXAM_COURSE_OVERRIDES_REMOVED", parent=parent, configuration=configuration, actor=user, before=before, request=request, metadata={"expected_revision": expected_revision, "resulting_revision": configuration.revision})
         return configuration, True
 
     @classmethod
@@ -1334,7 +1492,20 @@ class CourseExamConfigurationService:
         configuration.closed_by = user
         configuration.revision += 1
         configuration.save(update_fields=["workflow_status", "closed_at", "closed_by", "revision", "updated_at"])
-        cls._audit(action="DE_EXAM_COURSE_CONTRIBUTION_CLOSED", parent=parent, configuration=configuration, actor=user, before=before, request=request, metadata={"close_reason": reason, "expected_revision": expected_revision, "resulting_revision": configuration.revision})
+        cls._audit(
+            action="DE_EXAM_COURSE_CONTRIBUTION_CLOSED",
+            parent=parent,
+            configuration=configuration,
+            actor=user,
+            before=before,
+            request=request,
+            metadata={
+                "close_reason_sha256": hashlib.sha256(reason.encode("utf-8")).hexdigest(),
+                "close_reason_length": len(reason),
+                "expected_revision": expected_revision,
+                "resulting_revision": configuration.revision,
+            },
+        )
         return configuration, True
 
     @classmethod
@@ -1363,5 +1534,18 @@ class CourseExamConfigurationService:
         configuration.closed_by = None
         configuration.revision += 1
         configuration.save(update_fields=["workflow_status", "closed_at", "closed_by", "revision", "updated_at"])
-        cls._audit(action="DE_EXAM_COURSE_CONFIGURATION_REVERTED", parent=parent, configuration=configuration, actor=user, before=before, request=request, metadata={"revert_reason": reason, "expected_revision": expected_revision, "resulting_revision": configuration.revision})
+        cls._audit(
+            action="DE_EXAM_COURSE_CONFIGURATION_REVERTED",
+            parent=parent,
+            configuration=configuration,
+            actor=user,
+            before=before,
+            request=request,
+            metadata={
+                "revert_reason_sha256": hashlib.sha256(reason.encode("utf-8")).hexdigest(),
+                "revert_reason_length": len(reason),
+                "expected_revision": expected_revision,
+                "resulting_revision": configuration.revision,
+            },
+        )
         return configuration, True

@@ -22,8 +22,12 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
     term = models.ForeignKey("academics.Term", on_delete=models.PROTECT, related_name="examination_cycles")
     exam_period = models.CharField(max_length=10, choices=ExamPeriod.choices)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
-    item_count_mode = models.CharField(max_length=12, choices=ItemCountMode.choices, null=True, blank=True)
-    fixed_final_item_count = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
+    # Kept solely to preserve the 0002 migration history.  New runtime code
+    # must use the independent CAO defaults below.
+    legacy_item_count_mode = models.CharField(max_length=12, choices=ItemCountMode.choices, null=True, blank=True)
+    default_final_item_count = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
+    default_questions_required_per_faculty = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
+    defaults_revision = models.PositiveIntegerField(default=0)
     contributor_instructions = models.TextField(blank=True)
     created_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="created_examination_cycles")
 
@@ -31,14 +35,8 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
         db_table = "departmental_exam_cycles"
         constraints = [
             models.UniqueConstraint(fields=["tenant", "academic_year", "term", "exam_period"], name="uq_de_cycle_scope_period"),
-            models.CheckConstraint(
-                condition=(
-                    models.Q(item_count_mode__isnull=True, fixed_final_item_count__isnull=True)
-                    | models.Q(item_count_mode="FIXED_ALL", fixed_final_item_count__gte=1, fixed_final_item_count__lte=200)
-                    | models.Q(item_count_mode="PER_COURSE", fixed_final_item_count__isnull=True)
-                ),
-                name="ck_de_cycle_item_count_mode",
-            ),
+            models.CheckConstraint(condition=models.Q(default_questions_required_per_faculty__isnull=True) | models.Q(default_questions_required_per_faculty__gte=50, default_questions_required_per_faculty__lte=75), name="ck_de_cycle_default_q_50_75"),
+            models.CheckConstraint(condition=models.Q(default_final_item_count__isnull=True) | models.Q(default_final_item_count__gte=50, default_final_item_count__lte=75), name="ck_de_cycle_default_final_50_75"),
         ]
         indexes = [models.Index(fields=["tenant", "term", "status"], name="idx_de_cycle_scope_status")]
 
@@ -49,10 +47,10 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
             raise ValidationError("Academic year must belong to the selected tenant.")
         if self.tenant_id and self.term_id and self.term.tenant_id != self.tenant_id:
             raise ValidationError("Term must belong to the selected tenant.")
-        if self.item_count_mode == self.ItemCountMode.FIXED_ALL and not (self.fixed_final_item_count and 1 <= self.fixed_final_item_count <= 200):
-            raise ValidationError({"fixed_final_item_count": "Fixed final item count must be from 1 to 200."})
-        if self.item_count_mode in (None, self.ItemCountMode.PER_COURSE) and self.fixed_final_item_count is not None:
-            raise ValidationError({"fixed_final_item_count": "A fixed final item count is allowed only in Fixed mode."})
+        for field in ("default_questions_required_per_faculty", "default_final_item_count"):
+            value = getattr(self, field)
+            if value is not None and not 50 <= value <= 75:
+                raise ValidationError({field: "Value must be from 50 to 75."})
 
 
 class CycleCourse(TimeStampedModel):
@@ -135,6 +133,9 @@ class CourseExamConfiguration(TimeStampedModel):
     cycle_course = models.OneToOneField(CycleCourse, on_delete=models.PROTECT, related_name="configuration")
     final_item_count = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
     questions_required_per_faculty = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
+    questions_required_per_faculty_source = models.CharField(max_length=8, choices=[("DEFAULT", "Cycle default"), ("OVERRIDE", "Course override")], null=True, blank=True)
+    final_item_count_source = models.CharField(max_length=8, choices=[("DEFAULT", "Cycle default"), ("OVERRIDE", "Course override")], null=True, blank=True)
+    cycle_defaults_revision_snapshot = models.PositiveIntegerField(null=True, blank=True)
     general_instructions = models.TextField(blank=True)
     contribution_deadline = models.DateTimeField(null=True, blank=True)
     easy_percent = models.PositiveSmallIntegerField(default=30)
@@ -148,11 +149,15 @@ class CourseExamConfiguration(TimeStampedModel):
     coverage = models.TextField(blank=True)
     additional_instructions = models.TextField(blank=True)
     contributor_instructions_snapshot = models.TextField(blank=True)
-    item_count_mode_snapshot = models.CharField(max_length=12, choices=ExaminationCycle.ItemCountMode.choices, null=True, blank=True)
+    legacy_item_count_mode_snapshot = models.CharField(max_length=12, choices=ExaminationCycle.ItemCountMode.choices, null=True, blank=True)
     revision = models.PositiveIntegerField(default=1)
 
     class Meta:
         db_table = "departmental_exam_configurations"
+        constraints = [
+            models.CheckConstraint(condition=(models.Q(questions_required_per_faculty__isnull=True, questions_required_per_faculty_source__isnull=True) | models.Q(questions_required_per_faculty__isnull=False, questions_required_per_faculty_source__isnull=False, questions_required_per_faculty__gte=50, questions_required_per_faculty__lte=75, questions_required_per_faculty_source__in=["DEFAULT", "OVERRIDE"])), name="ck_de_cfg_q_value_source"),
+            models.CheckConstraint(condition=(models.Q(final_item_count__isnull=True, final_item_count_source__isnull=True) | models.Q(final_item_count__isnull=False, final_item_count_source__isnull=False, final_item_count__gte=50, final_item_count__lte=75, final_item_count_source__in=["DEFAULT", "OVERRIDE"])), name="ck_de_cfg_final_value_source"),
+        ]
         indexes = [models.Index(fields=["workflow_status", "contribution_deadline"], name="idx_de_cfg_status_deadline")]
 
     @property
@@ -160,10 +165,31 @@ class CourseExamConfiguration(TimeStampedModel):
         return self.final_item_count
 
     def clean(self):
-        for field in ("final_item_count", "questions_required_per_faculty"):
+        for field, source_field in (("final_item_count", "final_item_count_source"), ("questions_required_per_faculty", "questions_required_per_faculty_source")):
             value = getattr(self, field)
-            if value is not None and not 1 <= value <= 200:
-                raise ValidationError({field: "Value must be from 1 to 200."})
+            source = getattr(self, source_field)
+            if value is None and source is not None:
+                raise ValidationError({source_field: "A source is allowed only when its value is set."})
+            if value is not None and (not 50 <= value <= 75 or source not in ("DEFAULT", "OVERRIDE")):
+                raise ValidationError({field: "Value must be from 50 to 75 with a default or override source."})
+        if self.cycle_course_id and not self.opened_at:
+            cycle = self.cycle_course.cycle
+            if self.questions_required_per_faculty_source == "DEFAULT" and self.questions_required_per_faculty != cycle.default_questions_required_per_faculty:
+                raise ValidationError({"questions_required_per_faculty": "The default-sourced quota must match the current cycle default."})
+            if self.final_item_count_source == "DEFAULT" and self.final_item_count != cycle.default_final_item_count:
+                raise ValidationError({"final_item_count": "The default-sourced final count must match the current cycle default."})
+            if self.cycle_defaults_revision_snapshot != cycle.defaults_revision:
+                raise ValidationError({"cycle_defaults_revision_snapshot": "Draft configuration must match the current cycle defaults revision."})
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "opened_at", "questions_required_per_faculty", "questions_required_per_faculty_source",
+                "final_item_count", "final_item_count_source", "cycle_defaults_revision_snapshot",
+            ).first()
+            if previous and previous["opened_at"] and any(
+                previous[field] != getattr(self, field)
+                for field in ("questions_required_per_faculty", "questions_required_per_faculty_source", "final_item_count", "final_item_count_source", "cycle_defaults_revision_snapshot")
+            ):
+                raise ValidationError("Opened course configuration count values and provenance are immutable.")
         if (self.easy_percent, self.moderate_percent, self.difficult_percent) != (30, 50, 20):
             raise ValidationError("Version 1A uses the approved 30/50/20 difficulty distribution.")
 

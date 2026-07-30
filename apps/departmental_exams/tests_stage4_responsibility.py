@@ -16,11 +16,12 @@ from .stage4_test_support import Stage4TestCase
 
 class Stage4ResponsibilityTests(Stage4TestCase):
     def _draft_configuration(self):
-        cycle = self.make_cycle(mode="PER_COURSE")
+        cycle = self.make_cycle(default_questions_required_per_faculty=50, default_final_item_count=50)
         parent = self.make_course(cycle=cycle)
         configuration, _ = CourseExamConfigurationService.save_course_draft(
             cycle_course_id=parent.id, tenant_id=self.tenant.id, user=self.configurer, expected_revision=0,
-            final_item_count=50, questions_required_per_faculty=15, coverage="Draft coverage",
+            final_item_count=50, final_item_count_mode="DEFAULT",
+            questions_required_per_faculty=50, questions_required_per_faculty_mode="DEFAULT", coverage="Draft coverage",
             additional_instructions="", contribution_deadline=self.future_deadline(),
         )
         return parent, configuration

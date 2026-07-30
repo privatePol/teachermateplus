@@ -1,116 +1,209 @@
-"""Database-aware Stage 4 locking tests; SQLite skips row-lock assertions explicitly."""
+"""Transactional lock-order tests for CAO writers and supported backends."""
 
 import threading
-from unittest import skipUnless
 from unittest.mock import patch
 
 from django.db import close_old_connections, connection
 
-from .models import CourseExamConfiguration, ExaminationCycle
-from .services import CourseExamConfigurationService, ExaminationCycleConfigurationService
+from apps.accounts.models import User
+
+from .models import CourseExamConfiguration, CycleCourse, ExaminationCycle
+from .services import (
+    CourseExamConfigurationConflict,
+    CourseExamConfigurationService,
+    ExaminationCycleConfigurationService,
+)
 from .stage4_test_support import Stage4TransactionTestCase
 
 
-class Stage4LockingTests(Stage4TransactionTestCase):
-    def _openable(self):
-        cycle = self.make_cycle(mode=ExaminationCycle.ItemCountMode.PER_COURSE)
-        cycle, _ = ExaminationCycleConfigurationService.open_cycle(
+class CAOLockingTests(Stage4TransactionTestCase):
+    def _defaults(self, cycle, *, quota=50, final_count=50):
+        return ExaminationCycleConfigurationService.save_cycle_configuration(
             cycle_id=cycle.id, tenant_id=self.tenant.id, user=self.manager,
             expected_updated_at=ExaminationCycleConfigurationService.transition_token(cycle),
+            default_questions_required_per_faculty=quota, default_final_item_count=final_count,
+            contributor_instructions="CAO instructions",
         )
+
+    def test_cycle_default_propagation_locks_cycle_before_parent_and_children(self):
+        cycle = self.make_cycle()
+        self.make_course(cycle=cycle, code="A")
+        self.make_course(cycle=cycle, code="B")
+        with patch.object(ExaminationCycleConfigurationService, "_lock_cycle", wraps=ExaminationCycleConfigurationService._lock_cycle) as lock_cycle, patch.object(CycleCourse.objects, "select_for_update", wraps=CycleCourse.objects.select_for_update) as lock_parent:
+            self._defaults(cycle)
+        self.assertEqual(lock_cycle.call_count, 1)
+        self.assertGreaterEqual(lock_parent.call_count, 1)
+
+    def test_default_propagation_uses_configured_bounded_batches(self):
+        cycle = self.make_cycle()
+        for number in range(ExaminationCycleConfigurationService.PROPAGATION_BATCH_SIZE + 1):
+            self.make_course(cycle=cycle, code=f"BATCH{number}")
+        with patch.object(ExaminationCycleConfigurationService, "PROPAGATION_BATCH_SIZE", 2):
+            cycle, changed = self._defaults(cycle)
+        self.assertTrue(changed)
+        self.assertEqual(cycle.defaults_revision, 1)
+
+    def test_override_writer_uses_parent_first_lock_and_rolls_back_audit_failure(self):
+        cycle = self.make_cycle(status=ExaminationCycle.Status.OPEN, default_questions_required_per_faculty=50, default_final_item_count=50)
         parent = self.make_course(cycle=cycle)
-        configuration, _ = CourseExamConfigurationService.save_course_draft(
-            cycle_course_id=parent.id, tenant_id=self.tenant.id, user=self.configurer, expected_revision=0,
-            final_item_count=40, questions_required_per_faculty=10, coverage="Locking coverage",
-            additional_instructions="", contribution_deadline=self.future_deadline(),
-        )
-        return cycle, parent, configuration
+        with patch("apps.departmental_exams.services.AuditService.log_event", side_effect=RuntimeError("audit failure")):
+            with self.assertRaises(RuntimeError):
+                CourseExamConfigurationService.save_course_draft(
+                    cycle_course_id=parent.id, tenant_id=self.tenant.id, user=self.configurer,
+                    expected_revision=0, questions_required_per_faculty=60,
+                    questions_required_per_faculty_mode="OVERRIDE", final_item_count=50,
+                    final_item_count_mode="DEFAULT", coverage="Core outcomes",
+                    additional_instructions="", contribution_deadline=self.future_deadline(),
+                )
+        self.assertFalse(hasattr(parent, "configuration"))
 
-    def test_parent_lock_helper_precedes_child_lookup(self):
-        _cycle, parent, configuration = self._openable()
-        calls = []
-        original_parent = __import__("apps.departmental_exams.services", fromlist=["CycleCourseInclusionService"]).CycleCourseInclusionService.lock_included_cycle_course
-        with patch("apps.departmental_exams.services.CycleCourseInclusionService.lock_included_cycle_course", side_effect=lambda **kwargs: (calls.append("parent"), original_parent(**kwargs))[1]), patch("apps.departmental_exams.services.CourseExamConfiguration.objects.select_for_update", wraps=CourseExamConfiguration.objects.select_for_update) as child_lock:
-            CourseExamConfigurationService.open_for_contribution(
-                cycle_course_id=parent.id, tenant_id=self.tenant.id, user=self.configurer, expected_revision=configuration.revision,
-            )
-        self.assertEqual(calls, ["parent"])
-        self.assertTrue(child_lock.called)
+    def test_default_propagation_rolls_back_child_write_and_later_batch_failures(self):
+        cycle = self.make_cycle()
+        first = self.make_course(cycle=cycle, code="ROLLBACK-FIRST")
+        with patch.object(
+            CourseExamConfiguration.objects,
+            "bulk_create",
+            side_effect=RuntimeError("child write failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "child write failure"):
+                self._defaults(cycle)
+        cycle.refresh_from_db()
+        self.assertIsNone(cycle.default_questions_required_per_faculty)
+        self.assertFalse(CourseExamConfiguration.objects.filter(cycle_course=first).exists())
 
-    def test_cycle_lock_precedes_course_parent_lock(self):
-        _cycle, parent, configuration = self._openable()
-        calls = []
-        original_cycle = ExaminationCycle.objects.select_for_update
-        from .models import CycleCourse
-        original_parent = CycleCourse.objects.select_for_update
+        cycle = self.make_cycle(scope_suffix="rollback-later-batch")
+        first = self.make_course(cycle=cycle, code="ROLLBACK-BATCH-A")
+        second = self.make_course(cycle=cycle, code="ROLLBACK-BATCH-B")
+        original_bulk_create = CourseExamConfiguration.objects.bulk_create
+        calls = 0
+
+        def fail_second_batch(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("later batch failure")
+            return original_bulk_create(*args, **kwargs)
 
         with patch.object(
-            ExaminationCycle.objects,
-            "select_for_update",
-            side_effect=lambda *args, **kwargs: (calls.append("cycle"), original_cycle(*args, **kwargs))[1],
+            ExaminationCycleConfigurationService, "PROPAGATION_BATCH_SIZE", 1
         ), patch.object(
-            CycleCourse.objects,
-            "select_for_update",
-            side_effect=lambda *args, **kwargs: (calls.append("parent"), original_parent(*args, **kwargs))[1],
+            CourseExamConfiguration.objects,
+            "bulk_create",
+            side_effect=fail_second_batch,
         ):
-            CourseExamConfigurationService.open_for_contribution(
-                cycle_course_id=parent.id, tenant_id=self.tenant.id, user=self.configurer,
-                expected_revision=configuration.revision,
-            )
-        self.assertEqual(calls[:2], ["cycle", "parent"])
-
-    def test_propagation_locks_parent_batches_in_stable_id_order(self):
-        cycle = self.make_cycle()
-        parents = [self.make_course(cycle=cycle, code=f"LOCK-{index}") for index in range(5)]
-        observed = []
-        original = CourseExamConfiguration.objects.bulk_create
-        with patch.object(CourseExamConfiguration.objects, "bulk_create", side_effect=lambda rows, **kwargs: (observed.extend(row.cycle_course_id for row in rows), original(rows, **kwargs))[1]):
-            ExaminationCycleConfigurationService.save_cycle_configuration(
-                cycle_id=cycle.id, tenant_id=self.tenant.id, user=self.manager,
-                expected_updated_at=ExaminationCycleConfigurationService.transition_token(cycle),
-                item_count_mode=ExaminationCycle.ItemCountMode.FIXED_ALL, fixed_final_item_count=35, contributor_instructions="",
-            )
-        self.assertEqual(observed, sorted(parent.id for parent in parents))
-
-    def test_failed_propagation_rolls_back_cycle_and_created_children(self):
-        cycle = self.make_cycle()
-        parent = self.make_course(cycle=cycle)
-        with patch("apps.departmental_exams.services.CourseExamConfiguration.objects.bulk_create", side_effect=RuntimeError("batch failure")):
-            with self.assertRaises(RuntimeError):
-                ExaminationCycleConfigurationService.save_cycle_configuration(
-                    cycle_id=cycle.id, tenant_id=self.tenant.id, user=self.manager,
-                    expected_updated_at=ExaminationCycleConfigurationService.transition_token(cycle),
-                    item_count_mode=ExaminationCycle.ItemCountMode.FIXED_ALL, fixed_final_item_count=35, contributor_instructions="",
-                )
+            with self.assertRaisesRegex(RuntimeError, "later batch failure"):
+                self._defaults(cycle)
         cycle.refresh_from_db()
-        self.assertIsNone(cycle.item_count_mode)
-        self.assertFalse(CourseExamConfiguration.objects.filter(cycle_course=parent).exists())
+        self.assertIsNone(cycle.default_questions_required_per_faculty)
+        self.assertFalse(
+            CourseExamConfiguration.objects.filter(cycle_course__in=(first, second)).exists()
+        )
 
-    @skipUnless(connection.vendor != "sqlite", "SQLite does not provide the row-lock behavior required for concurrent Stage 4 assertions.")
-    def test_two_concurrent_open_requests_have_one_real_transition(self):
-        _cycle, parent, configuration = self._openable()
-        barrier = threading.Barrier(2)
-        results = []
+    def test_mariadb_concurrent_default_and_override_preserves_one_child_and_override(self):
+        if connection.vendor == "sqlite":
+            self.skipTest(
+                "SQLite does not provide meaningful row-lock scheduling evidence."
+            )
+        if connection.vendor != "mysql":
+            self.skipTest(
+                "This deterministic schedule is supported only for the "
+                f"MySQL/MariaDB row-lock semantics used in deployment; backend "
+                f"{connection.vendor!r} is not claimed by this test."
+            )
+        cycle = self.make_cycle(
+            default_questions_required_per_faculty=50,
+            default_final_item_count=50,
+        )
+        parent = self.make_course(cycle=cycle, code="CONCURRENT")
+        cycle_token = ExaminationCycleConfigurationService.transition_token(cycle)
+        expected_deadline = self.future_deadline().replace(microsecond=0)
+        start = threading.Barrier(2)
         errors = []
 
-        def open_once():
+        def save_defaults():
             close_old_connections()
             try:
-                barrier.wait()
-                result = CourseExamConfigurationService.open_for_contribution(
-                    cycle_course_id=parent.id, tenant_id=self.tenant.id, user=self.configurer, expected_revision=configuration.revision,
+                start.wait(timeout=10)
+                manager = User.objects.get(pk=self.manager.pk)
+                ExaminationCycleConfigurationService.save_cycle_configuration(
+                    cycle_id=cycle.id,
+                    tenant_id=self.tenant.id,
+                    user=manager,
+                    expected_updated_at=cycle_token,
+                    default_questions_required_per_faculty=55,
+                    default_final_item_count=55,
+                    contributor_instructions="Concurrent CAO defaults",
                 )
-                results.append(result[1])
-            except Exception as exc:  # surfaced in the owning test thread
+            except BaseException as exc:  # asserted after both workers join
                 errors.append(exc)
             finally:
                 close_old_connections()
 
-        workers = [threading.Thread(target=open_once) for _ in range(2)]
-        for worker in workers:
-            worker.start()
-        for worker in workers:
-            worker.join()
-        self.assertFalse(errors, errors)
-        self.assertEqual(results.count(True), 1)
-        self.assertEqual(results.count(False), 1)
+        def save_override():
+            close_old_connections()
+            try:
+                start.wait(timeout=10)
+                configurer = User.objects.get(pk=self.configurer.pk)
+                kwargs = {
+                    "cycle_course_id": parent.id,
+                    "tenant_id": self.tenant.id,
+                    "user": configurer,
+                    "questions_required_per_faculty": 60,
+                    "questions_required_per_faculty_mode": "OVERRIDE",
+                    "final_item_count": 50,
+                    "final_item_count_mode": "DEFAULT",
+                    "coverage": "Concurrent coverage",
+                    "additional_instructions": "",
+                    "contribution_deadline": expected_deadline,
+                }
+                try:
+                    CourseExamConfigurationService.save_course_draft(
+                        expected_revision=0,
+                        **kwargs,
+                    )
+                except CourseExamConfigurationConflict:
+                    current = CourseExamConfiguration.objects.get(cycle_course_id=parent.id)
+                    CourseExamConfigurationService.save_course_draft(
+                        expected_revision=current.revision,
+                        **kwargs,
+                    )
+            except BaseException as exc:  # asserted after both workers join
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        default_thread = threading.Thread(target=save_defaults)
+        override_thread = threading.Thread(target=save_override)
+        default_thread.start()
+        override_thread.start()
+        default_thread.join(timeout=20)
+        override_thread.join(timeout=20)
+        self.assertFalse(default_thread.is_alive())
+        self.assertFalse(override_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            CourseExamConfiguration.objects.filter(cycle_course_id=parent.id).count(), 1
+        )
+        cycle.refresh_from_db()
+        configuration = CourseExamConfiguration.objects.get(cycle_course_id=parent.id)
+        self.assertEqual(
+            (
+                configuration.questions_required_per_faculty,
+                configuration.questions_required_per_faculty_source,
+                configuration.final_item_count,
+                configuration.final_item_count_source,
+                configuration.cycle_defaults_revision_snapshot,
+                configuration.revision,
+            ),
+            (60, "OVERRIDE", 55, "DEFAULT", 1, 2),
+        )
+        self.assertEqual(
+            (
+                cycle.default_questions_required_per_faculty,
+                cycle.default_final_item_count,
+                cycle.defaults_revision,
+            ),
+            (55, 55, 1),
+        )
+        self.assertEqual(configuration.coverage, "Concurrent coverage")
+        self.assertEqual(configuration.contribution_deadline, expected_deadline)
