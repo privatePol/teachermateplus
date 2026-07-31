@@ -1,0 +1,38 @@
+{% extends "admin_portal/base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+  <h1>Configure Examination Cycle</h1>
+  <p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }} ({{ cycle.get_status_display }})</p>
+
+  {% if lifecycle_flags.can_edit_cycle_configuration %}
+    <form method="post" class="card card-body">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button class="btn btn-primary">Save cycle configuration</button>
+    </form>
+  {% else %}
+    <div class="card card-body">
+      <dl class="mb-0">
+        <dt>Default questions required per faculty</dt>
+        <dd>{{ cycle.default_questions_required_per_faculty|default:"Not configured" }}</dd>
+        <dt>Default final questionnaire item count</dt>
+        <dd>{{ cycle.default_final_item_count|default:"Not configured" }}</dd>
+        <dt>Contributor instructions</dt>
+        <dd>{{ cycle.contributor_instructions|default:"None" }}</dd>
+      </dl>
+      <p class="text-muted mb-0">Cycle defaults are unavailable after closing the cycle.</p>
+    </div>
+  {% endif %}
+
+  <div class="mt-3">
+    {% if lifecycle_flags.can_open_cycle %}
+      <a class="btn btn-success" href="{% url 'departmental_exams:cycle_open' cycle.id %}">Open cycle</a>
+    {% endif %}
+    {% if lifecycle_flags.can_close_cycle %}
+      <a class="btn btn-warning" href="{% url 'departmental_exams:cycle_close' cycle.id %}">Close cycle</a>
+    {% endif %}
+    <a href="{% url 'departmental_exams:cycle_course_list' cycle.id %}">Course examinations</a>
+  </div>
+</div>
+{% endblock %}

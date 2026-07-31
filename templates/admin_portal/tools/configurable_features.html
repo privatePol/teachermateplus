@@ -330,6 +330,19 @@
 
   <div class="settings-card-grid">
   <div class="card border-0 shadow-sm settings-card is-collapsed">
+    <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-departmental-exams" aria-expanded="false" aria-controls="feature-card-departmental-exams">
+      <strong>Departmental Exam Builder</strong><span class="toggle-indicator" aria-hidden="true">+</span>
+    </button>
+    <button class="settings-card-summary" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-departmental-exams" aria-expanded="false" aria-controls="feature-card-departmental-exams">
+      <span class="settings-card-summary-title">Departmental Exam Builder</span><span class="settings-card-summary-text">Enable tenant-scoped examination-cycle management, grouped course administration, and Included/Exempt course control for authorized users.</span>
+    </button>
+    <div id="feature-card-departmental-exams" class="collapse"><div class="card-body"><div class="form-check form-switch mb-0">
+      {{ form.departmental_exam_builder_enabled }}
+      <label class="form-check-label" for="{{ form.departmental_exam_builder_enabled.id_for_label }}">{{ form.departmental_exam_builder_enabled.label }}</label>
+      <div class="form-text">{{ form.departmental_exam_builder_enabled.help_text }}</div>
+    </div></div></div>
+  </div>
+  <div class="card border-0 shadow-sm settings-card is-collapsed">
     <button class="card-header settings-card-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#feature-card-academic-interventions" aria-expanded="false" aria-controls="feature-card-academic-interventions">
       <strong>Student Academic Intervention Tracking</strong>
       <span class="toggle-indicator" aria-hidden="true">+</span>

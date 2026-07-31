@@ -170,6 +170,14 @@ class Course(TimeStampedModel, ActivatableModel):
     department = models.ForeignKey(
         "tenants.Department", on_delete=models.PROTECT, related_name="courses", blank=True, null=True
     )
+    exam_department = models.ForeignKey(
+        "tenants.Department",
+        on_delete=models.PROTECT,
+        related_name="exam_department_courses",
+        blank=True,
+        null=True,
+        help_text="Departmental Exam Builder ownership only; does not change ordinary course visibility.",
+    )
     code = models.CharField(max_length=50)
     title = models.CharField(max_length=255)
     units = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
@@ -191,6 +199,13 @@ class Course(TimeStampedModel, ActivatableModel):
 
     def __str__(self):
         return f"{self.code} - {self.title}"
+
+    def clean(self):
+        super().clean()
+        if self.exam_department_id and self.tenant_id and self.exam_department.tenant_id != self.tenant_id:
+            raise ValidationError("Exam department must belong to the selected tenant.")
+        if self.exam_department_id and not self.exam_department.is_active:
+            raise ValidationError("Exam department is inactive and cannot own departmental examinations.")
 
 
 class Section(TimeStampedModel, ActivatableModel):

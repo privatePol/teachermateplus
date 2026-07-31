@@ -1,0 +1,7 @@
+{% extends "admin_portal/base.html" %}
+{% block content %}
+<div class="container-fluid"><h1>Return course overrides to cycle defaults</h1>
+<p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p>
+<form method="post" class="card card-body">{% csrf_token %}{{ form.as_p }}<button class="btn btn-warning">Confirm return to defaults</button></form>
+</div>
+{% endblock %}

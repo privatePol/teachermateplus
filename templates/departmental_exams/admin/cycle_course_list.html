@@ -1,0 +1,29 @@
+{% extends "admin_portal/base.html" %}
+{% block content %}
+<div class="container-fluid">
+  <h1>{{ cycle.get_exam_period_display }} Course Examinations</h1>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Course</th><th>Campuses</th><th>Offerings</th><th>Exam department</th>
+        <th>Reviewer</th><th>Status</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in courses %}
+      <tr>
+        <td>{{ item.course.code }} &mdash; {{ item.course.title }}</td>
+        <td>{{ item.included_campuses|join:', ' }}</td>
+        <td>{{ item.offering_count }}</td>
+        <td>{% if item.responsible_department %}{{ item.responsible_department }}{% else %}<span class="text-warning">Needs Exam Department</span>{% endif %}</td>
+        <td>{{ item.reviewer|default:'Unassigned' }}</td>
+        <td><span class="badge {% if item.inclusion_status == 'EXEMPT' %}text-bg-warning{% else %}text-bg-success{% endif %}">{{ item.get_inclusion_status_display }}</span><div class="small text-muted">{{ item.readiness.label }}</div></td>
+        <td>{% if item.can_administer %}<a href="{% url 'departmental_exams:cycle_course_administration' item.id %}">Administer</a> · <a href="{% url 'departmental_exams:course_configuration' item.id %}">Configure</a>{% endif %}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7">No course examinations are available in your scope.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

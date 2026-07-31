@@ -1,0 +1,39 @@
+{% extends "admin_portal/base.html" %}
+{% block content %}
+<div class="container-fluid">
+  <h1>Course Examination Configuration</h1>
+  <p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p>
+  <p>
+    <span class="badge text-bg-secondary">{{ readiness.label }}</span>
+    {% if readiness.blockers %}<span class="text-muted">{{ readiness.blockers|join:', ' }}</span>{% endif %}
+  </p>
+  {% if action_flags.can_save_draft %}
+    <form method="post" class="card card-body">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <button class="btn btn-primary">Save Draft Configuration</button>
+    </form>
+  {% else %}
+    <p class="text-muted">This course configuration is read-only in its current lifecycle state.</p>
+  {% endif %}
+  {% if configuration %}
+    <div class="mt-3">
+      {% if action_flags.can_open %}
+        <a class="btn btn-success" href="{% url 'departmental_exams:course_contribution_open' cycle_course.id %}">Open for Faculty Contribution</a>
+      {% endif %}
+      {% if action_flags.can_close %}
+        <a class="btn btn-warning" href="{% url 'departmental_exams:course_contribution_close' cycle_course.id %}">Close contribution</a>
+      {% endif %}
+      {% if action_flags.can_reopen %}
+        <a class="btn btn-success" href="{% url 'departmental_exams:course_contribution_reopen' cycle_course.id %}">Reopen contribution</a>
+      {% endif %}
+      {% if action_flags.can_revert %}
+        <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_configuration_revert' cycle_course.id %}">Revert to Draft</a>
+      {% endif %}
+      {% if action_flags.can_save_draft and configuration %}
+        <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_remove_overrides' cycle_course.id %}">Return selected overrides to defaults</a>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

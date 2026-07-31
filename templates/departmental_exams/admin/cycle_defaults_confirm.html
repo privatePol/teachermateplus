@@ -1,0 +1,8 @@
+{% extends "admin_portal/base.html" %}
+{% block content %}
+<div class="container-fluid"><h1>Apply cycle defaults</h1>
+<p>Confirm propagation of the current defaults to eligible never-opened Draft course configurations.</p>
+<p class="text-muted">Confirmation details are submitted from this page and are never placed in the URL.</p>
+<form method="post" action="{% url 'departmental_exams:cycle_apply_defaults' cycle.id %}" class="card card-body" autocomplete="off">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Apply defaults</button></form>
+</div>
+{% endblock %}

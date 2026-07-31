@@ -438,6 +438,7 @@
         <strong>Faculty Operations</strong>
         <p>Use these for faculty loads, submissions, reopen requests, corrections, and clearance.</p>
         <div class="admin-guide-topic-links">
+          <a href="#departmental-exam-builder">Exam Builder</a>
           <a href="#submission">Grade Submissions</a>
           <a href="#assignment-acceptance">Assignments</a>
           <a href="#submission">Submissions</a>
@@ -682,6 +683,9 @@
             <li>In <strong>Admin Portal -> Enrollment</strong>, use the status summary cards to quickly review how many rows are currently <strong>ACTIVE</strong>, <strong>DRP</strong>, <strong>W</strong>, or <strong>INC</strong> inside the current filtered scope.</li>
             <li>For one-student checking, open <strong>Admin Portal -> Enrollment -> Student Enrollment Query</strong>, search the student, select the Academic Year and Term, then review the enrollment and grade details shown on the page.</li>
           </ol>
+          <div class="guide-note" id="departmental-exam-builder">
+            <strong>Departmental Exam Builder:</strong> Create the cycle from <strong>Overview / Exam Cycles</strong>, then use <strong>Assigned Course Examinations -> Administer</strong>. New cycle courses start <strong>Included</strong>. Use <strong>Exempt</strong> only while the cycle is Draft, choose the approved category, and enter a specific reason. A saved exam configuration is preserved but dormant while Exempt, and configuration alone does not block Exempt. Faculty contribution or question activity blocks choosing Exempt. Use <strong>Restore to Included</strong> only while the cycle is Draft to reverse it; Restore preserves the configuration, does not use the Exempt-only contribution/question blocker, and revalidates the reviewer (an ineligible reviewer may be cleared). No downstream data is deleted. Reviewers see exempt assignments as read-only. For current Stage 4 readiness, authorized managers set independent 50-75 cycle defaults and contributor instructions, review the confirmation page, and use <strong>Apply defaults</strong>; the signed POST does not put instructions or reasons in links. Authorized course configurators select a DEFAULT or OVERRIDE source for each 50-75 course count, coverage, optional instructions, and deadline. The Draft/Open/Closed readiness controls preserve the first-open historical snapshot, while a Closed governing cycle hides and denies configuration/default mutations. They do not provide faculty contribution, question-bank, official questionnaire, answer-key, generation, review/approval, PDF, or export actions.
+          </div>
           <div class="guide-note">
             Clean records help prevent grading problems.
           </div>
