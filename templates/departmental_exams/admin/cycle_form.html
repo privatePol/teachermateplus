@@ -1,2 +1,14 @@
 {% extends "admin_portal/base.html" %}
-{% block content %}<div class="container"><h1>Create Examination Cycle</h1><form method="post">{% csrf_token %}{{ form.as_p }}<button class="btn btn-primary">Create cycle</button></form></div>{% endblock %}
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_list' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Create Examination Cycle</li></ol></nav>
+<header class="de-exam-hero"><div class="d-flex justify-content-between gap-3 flex-wrap"><div><h1>Create Examination Cycle</h1><p>Capture active offerings once and group them into one shared examination per course.</p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:cycle_list' %}">Back to Departmental Exam Builder</a></div></header>
+<div class="card de-exam-card"><div class="card-body">
+  <div class="de-exam-section-title mb-1">Cycle Scope</div><p class="text-muted">Choose the academic year, term, and examination period for this tenant.</p>
+  <form method="post" novalidate>{% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row g-3">{% for field in form %}<div class="col-md-6"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}{% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div>{% endfor %}</div>
+    <div class="d-flex gap-2 mt-4"><button class="btn btn-success" type="submit">Create Cycle</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:cycle_list' %}">Cancel</a></div>
+  </form>
+</div></div>
+{% endblock %}

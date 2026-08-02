@@ -1,0 +1,26 @@
+{% load tz %}
+<div class="de-effective">
+  {% if configuration %}
+    <div class="de-effective-row">
+      <span>Faculty quota</span>
+      <span><strong>{{ configuration.questions_required_per_faculty|default:"--" }}</strong>
+        {% if configuration.questions_required_per_faculty_source == "DEFAULT" %}<span class="badge text-bg-secondary">DEFAULT</span>{% elif configuration.questions_required_per_faculty_source == "OVERRIDE" %}<span class="badge text-bg-warning">OVERRIDE</span>{% else %}<span class="badge text-bg-light text-dark border">NOT CONFIGURED</span>{% endif %}
+      </span>
+    </div>
+    <div class="de-effective-row">
+      <span>Final items</span>
+      <span><strong>{{ configuration.final_item_count|default:"--" }}</strong>
+        {% if configuration.final_item_count_source == "DEFAULT" %}<span class="badge text-bg-secondary">DEFAULT</span>{% elif configuration.final_item_count_source == "OVERRIDE" %}<span class="badge text-bg-warning">OVERRIDE</span>{% else %}<span class="badge text-bg-light text-dark border">NOT CONFIGURED</span>{% endif %}
+      </span>
+    </div>
+    <div class="de-effective-row">
+      <span>Deadline</span>
+      <span class="text-end">
+        {% if configuration.contribution_deadline %}<strong>{{ configuration.contribution_deadline|localtime|date:"M j, Y g:i A" }}</strong>{% else %}<strong>--</strong>{% endif %}
+        {% if configuration.contribution_deadline_source == "DEFAULT" %}<span class="badge text-bg-secondary">DEFAULT</span>{% elif configuration.contribution_deadline_source == "OVERRIDE" %}<span class="badge text-bg-warning">OVERRIDE</span>{% else %}<span class="badge text-bg-light text-dark border">NOT CONFIGURED</span>{% endif %}
+      </span>
+    </div>
+  {% else %}
+    <span class="badge text-bg-light text-dark border">NOT CONFIGURED</span>
+  {% endif %}
+</div>

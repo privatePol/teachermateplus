@@ -20,11 +20,121 @@ from .models import (
     ExaminationCycle,
     FacultyContribution,
     Question,
+    normalize_contribution_deadline_to_minute,
 )
 
 
 class CourseExamConfigurationConflict(ValidationError):
     """Raised for stale cycle/configuration confirmations."""
+
+
+class CycleCourseCampusPresentationService:
+    """Prepare distinct, deterministic campus display data from prefetched snapshots."""
+
+    @staticmethod
+    def _format_list(labels):
+        if len(labels) < 2:
+            return "".join(labels)
+        if len(labels) == 2:
+            return f"{labels[0]} and {labels[1]}"
+        return f"{', '.join(labels[:-1])}, and {labels[-1]}"
+
+    @classmethod
+    def from_prefetched_snapshots(cls, cycle_course):
+        snapshots = getattr(cycle_course, "_prefetched_objects_cache", {}).get(
+            "offering_snapshots"
+        )
+        if snapshots is None:
+            raise ValueError("Offering snapshots must be prefetched for campus display.")
+
+        campuses_by_id = {}
+        for snapshot in snapshots:
+            if snapshot.campus_id is None:
+                raise ValueError("Campus display requires a stable campus identity.")
+            campuses_by_id.setdefault(snapshot.campus_id, snapshot.campus)
+
+        campuses = tuple(
+            sorted(
+                campuses_by_id.values(),
+                key=lambda campus: (
+                    (campus.name or "").casefold(),
+                    campus.name or "",
+                    campus.pk,
+                ),
+            )
+        )
+        labels = tuple(campus.name for campus in campuses)
+        return {
+            "campuses": campuses,
+            "labels": labels,
+            "list_text": cls._format_list(labels),
+            "offering_count": len(snapshots),
+        }
+
+
+class CourseExamDefaultTrackingPolicy:
+    """Canonical eligibility policy for live cycle-default tracking."""
+
+    @staticmethod
+    def parent_exclusion_reason(cycle_course):
+        if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
+            return "EXEMPT"
+        if not cycle_course.responsible_department_id:
+            return "NULL_RESPONSIBILITY"
+        if not cycle_course.responsible_department.is_active:
+            return "INACTIVE_RESPONSIBILITY"
+        return None
+
+    @classmethod
+    def exclusion_reason(
+        cls, *, cycle_course, configuration, has_downstream_activity
+    ):
+        reason = cls.parent_exclusion_reason(cycle_course)
+        if reason:
+            return reason
+        if configuration is not None:
+            if configuration.opened_at is not None:
+                return "EVER_OPENED"
+            if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN:
+                return "OPEN"
+            if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED:
+                return "CLOSED"
+        if has_downstream_activity:
+            return "DOWNSTREAM_ACTIVITY"
+        return None
+
+    @staticmethod
+    def has_downstream_activity(cycle_course):
+        cached = getattr(cycle_course, "_has_downstream_activity_cache", None)
+        if cached is not None:
+            return cached
+        annotated_contributions = getattr(
+            cycle_course, "has_contribution_activity", None
+        )
+        annotated_questions = getattr(cycle_course, "has_question_activity", None)
+        if annotated_contributions is not None and annotated_questions is not None:
+            result = bool(annotated_contributions or annotated_questions)
+        else:
+            result = (
+                FacultyContribution.objects.filter(
+                    cycle_course=cycle_course
+                ).exists()
+                or Question.objects.filter(
+                    contribution__cycle_course=cycle_course
+                ).exists()
+            )
+        cycle_course._has_downstream_activity_cache = result
+        return result
+
+    @classmethod
+    def is_live_default_tracking(
+        cls, *, cycle_course, configuration, has_downstream_activity
+    ):
+        return cls.exclusion_reason(
+            cycle_course=cycle_course,
+            configuration=configuration,
+            has_downstream_activity=has_downstream_activity,
+        ) is None
 
 
 class CourseExamConfigurationReadinessService:
@@ -46,6 +156,16 @@ class CourseExamConfigurationReadinessService:
         if not configuration:
             blockers.append("Needs Configuration")
         else:
+            has_downstream_activity = (
+                CourseExamDefaultTrackingPolicy.has_downstream_activity(cycle_course)
+            )
+            tracks_current_defaults = (
+                CourseExamDefaultTrackingPolicy.is_live_default_tracking(
+                    cycle_course=cycle_course,
+                    configuration=configuration,
+                    has_downstream_activity=has_downstream_activity,
+                )
+            )
             if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN:
                 blockers.append("Open for Faculty Contribution")
             if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED:
@@ -56,13 +176,35 @@ class CourseExamConfigurationReadinessService:
                 blockers.append("Needs Configuration")
             if configuration.final_item_count_source not in ("DEFAULT", "OVERRIDE") or configuration.questions_required_per_faculty_source not in ("DEFAULT", "OVERRIDE"):
                 blockers.append("Needs Configuration")
-            # Defaults remain live only until the first opening.  Opened rows
-            # are immutable historical snapshots and must not become stale.
-            if not configuration.opened_at:
+            if (
+                configuration.contribution_deadline is None
+                and configuration.contribution_deadline_source is not None
+            ) or (
+                configuration.contribution_deadline is not None
+                and configuration.contribution_deadline_source not in ("DEFAULT", "OVERRIDE")
+            ):
+                blockers.append("Needs Configuration")
+            # Only rows eligible for propagation track the current defaults.
+            # Protected rows retain their historical materialized values.
+            if tracks_current_defaults:
                 if configuration.final_item_count_source == "DEFAULT" and configuration.final_item_count != cycle.default_final_item_count:
                     blockers.append("Needs Configuration")
                 if configuration.questions_required_per_faculty_source == "DEFAULT" and configuration.questions_required_per_faculty != cycle.default_questions_required_per_faculty:
                     blockers.append("Needs Configuration")
+                if configuration.contribution_deadline_source == "DEFAULT":
+                    try:
+                        deadline_matches_default = (
+                            normalize_contribution_deadline_to_minute(
+                                configuration.contribution_deadline
+                            )
+                            == normalize_contribution_deadline_to_minute(
+                                cycle.default_contribution_deadline
+                            )
+                        )
+                    except ValidationError:
+                        deadline_matches_default = False
+                    if not deadline_matches_default:
+                        blockers.append("Needs Configuration")
                 if configuration.cycle_defaults_revision_snapshot != cycle.defaults_revision:
                     blockers.append("Needs Configuration")
             if not (configuration.coverage or "").strip():
@@ -106,6 +248,7 @@ class ExaminationCycleConfigurationService:
         return {
             "default_questions_required_per_faculty": cycle.default_questions_required_per_faculty,
             "default_final_item_count": cycle.default_final_item_count,
+            "default_contribution_deadline": cycle.default_contribution_deadline,
             "defaults_revision": cycle.defaults_revision,
             "contributor_instructions_sha256": hashlib.sha256(
                 instructions.encode("utf-8")
@@ -162,16 +305,14 @@ class ExaminationCycleConfigurationService:
             if not parents:
                 break
             last_parent_id = parents[-1].id
+            parents_by_id = {parent.id: parent for parent in parents}
             eligible_parent_ids = []
             for parent in parents:
-                if parent.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
-                    exclude("EXEMPT")
-                elif not parent.responsible_department_id:
-                    exclude("NULL_RESPONSIBILITY")
-                elif not parent.responsible_department.is_active:
-                    exclude("INACTIVE_RESPONSIBILITY")
-                else:
-                    eligible_parent_ids.append(parent.id)
+                reason = CourseExamDefaultTrackingPolicy.parent_exclusion_reason(parent)
+                if reason:
+                    exclude(reason)
+                    continue
+                eligible_parent_ids.append(parent.id)
             if not eligible_parent_ids:
                 continue
 
@@ -208,23 +349,17 @@ class ExaminationCycleConfigurationService:
                     or parent_id in question_active_parent_ids
                 )
                 existing_configuration = all_existing_configurations_by_parent.get(parent_id)
-                if existing_configuration is not None:
-                    if existing_configuration.opened_at is not None:
-                        exclude("EVER_OPENED")
-                        continue
-                    if existing_configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN:
-                        exclude("OPEN")
-                        continue
-                    if existing_configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED:
-                        exclude("CLOSED")
-                        continue
-                    if has_activity:
-                        exclude("DOWNSTREAM_ACTIVITY")
-                        continue
-                    configuration = existing_configuration
-                elif has_activity:
-                    exclude("DOWNSTREAM_ACTIVITY")
+                parent = parents_by_id[parent_id]
+                reason = CourseExamDefaultTrackingPolicy.exclusion_reason(
+                    cycle_course=parent,
+                    configuration=existing_configuration,
+                    has_downstream_activity=has_activity,
+                )
+                if reason:
+                    exclude(reason)
                     continue
+                if existing_configuration is not None:
+                    configuration = existing_configuration
                 else:
                     values = {
                         "cycle_course_id": parent_id,
@@ -243,6 +378,9 @@ class ExaminationCycleConfigurationService:
                         if default is not None and 50 <= default <= 75:
                             values[field] = default
                             values[f"{field}_source"] = "DEFAULT"
+                    if cycle.default_contribution_deadline is not None:
+                        values["contribution_deadline"] = cycle.default_contribution_deadline
+                        values["contribution_deadline_source"] = "DEFAULT"
                     creates.append(CourseExamConfiguration(**values))
                     continue
                 prior = {
@@ -250,6 +388,8 @@ class ExaminationCycleConfigurationService:
                     "questions_required_per_faculty_source": configuration.questions_required_per_faculty_source,
                     "final_item_count": configuration.final_item_count,
                     "final_item_count_source": configuration.final_item_count_source,
+                    "contribution_deadline": configuration.contribution_deadline,
+                    "contribution_deadline_source": configuration.contribution_deadline_source,
                     "cycle_defaults_revision_snapshot": configuration.cycle_defaults_revision_snapshot,
                 }
                 if "questions_required_per_faculty" in changed_defaults and configuration.questions_required_per_faculty_source in (None, "DEFAULT"):
@@ -258,12 +398,17 @@ class ExaminationCycleConfigurationService:
                 if "final_item_count" in changed_defaults and configuration.final_item_count_source in (None, "DEFAULT"):
                     configuration.final_item_count = cycle.default_final_item_count
                     configuration.final_item_count_source = "DEFAULT" if cycle.default_final_item_count is not None else None
+                if "contribution_deadline" in changed_defaults and configuration.contribution_deadline_source in (None, "DEFAULT"):
+                    configuration.contribution_deadline = cycle.default_contribution_deadline
+                    configuration.contribution_deadline_source = "DEFAULT" if cycle.default_contribution_deadline is not None else None
                 configuration.cycle_defaults_revision_snapshot = cycle.defaults_revision
                 if prior != {
                     "questions_required_per_faculty": configuration.questions_required_per_faculty,
                     "questions_required_per_faculty_source": configuration.questions_required_per_faculty_source,
                     "final_item_count": configuration.final_item_count,
                     "final_item_count_source": configuration.final_item_count_source,
+                    "contribution_deadline": configuration.contribution_deadline,
+                    "contribution_deadline_source": configuration.contribution_deadline_source,
                     "cycle_defaults_revision_snapshot": configuration.cycle_defaults_revision_snapshot,
                 }:
                     if len(affected_configuration_ids) < cls.PROPAGATION_BATCH_SIZE:
@@ -277,7 +422,7 @@ class ExaminationCycleConfigurationService:
             if changes:
                 CourseExamConfiguration.objects.bulk_update(
                     changes,
-                    ["questions_required_per_faculty", "questions_required_per_faculty_source", "final_item_count", "final_item_count_source", "cycle_defaults_revision_snapshot", "revision", "updated_at"],
+                    ["questions_required_per_faculty", "questions_required_per_faculty_source", "final_item_count", "final_item_count_source", "contribution_deadline", "contribution_deadline_source", "cycle_defaults_revision_snapshot", "revision", "updated_at"],
                     batch_size=cls.PROPAGATION_BATCH_SIZE,
                 )
                 updated += len(changes)
@@ -290,7 +435,7 @@ class ExaminationCycleConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, default_questions_required_per_faculty, default_final_item_count, contributor_instructions, reason="", request=None):
+    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, default_questions_required_per_faculty, default_final_item_count, contributor_instructions, default_contribution_deadline=None, reason="", request=None):
         cycle = cls._lock_cycle(cycle_id=cycle_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_permission(user=user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
         if cycle.status == ExaminationCycle.Status.CLOSED:
@@ -301,7 +446,25 @@ class ExaminationCycleConfigurationService:
             if value is not None and not 50 <= value <= 75:
                 raise ValidationError("Cycle defaults must be from 50 to 75.")
         contributor_instructions = contributor_instructions or ""
-        defaults_changed = cycle.default_questions_required_per_faculty != default_questions_required_per_faculty or cycle.default_final_item_count != default_final_item_count
+        normalized_default_deadline = normalize_contribution_deadline_to_minute(
+            default_contribution_deadline
+        )
+        deadline_changed = (
+            normalize_contribution_deadline_to_minute(
+                cycle.default_contribution_deadline
+            )
+            != normalized_default_deadline
+        )
+        effective_default_deadline = (
+            normalized_default_deadline
+            if deadline_changed
+            else cycle.default_contribution_deadline
+        )
+        defaults_changed = (
+            cycle.default_questions_required_per_faculty != default_questions_required_per_faculty
+            or cycle.default_final_item_count != default_final_item_count
+            or deadline_changed
+        )
         reason = (reason or "").strip()
         if cycle.status == ExaminationCycle.Status.OPEN and defaults_changed and not 10 <= len(reason) <= 500:
             raise ValidationError("An administrative reason from 10 to 500 characters is required while the cycle is Open.")
@@ -314,13 +477,14 @@ class ExaminationCycleConfigurationService:
             return cycle, False
         cycle.default_questions_required_per_faculty = default_questions_required_per_faculty
         cycle.default_final_item_count = default_final_item_count
+        cycle.default_contribution_deadline = effective_default_deadline
         if defaults_changed:
             cycle.defaults_revision += 1
         cycle.contributor_instructions = contributor_instructions
         cycle.full_clean()
-        cycle.save(update_fields=["default_questions_required_per_faculty", "default_final_item_count", "defaults_revision", "contributor_instructions", "updated_at"])
+        cycle.save(update_fields=["default_questions_required_per_faculty", "default_final_item_count", "default_contribution_deadline", "defaults_revision", "contributor_instructions", "updated_at"])
         propagation = (
-            cls._propagate_defaults_to_drafts(cycle=cycle, changed_defaults={key for key, value in (("questions_required_per_faculty", default_questions_required_per_faculty), ("final_item_count", default_final_item_count)) if getattr(cycle, f"default_{key}") != before[f"default_{key}"]})
+            cls._propagate_defaults_to_drafts(cycle=cycle, changed_defaults={key for key, value in (("questions_required_per_faculty", default_questions_required_per_faculty), ("final_item_count", default_final_item_count), ("contribution_deadline", effective_default_deadline)) if getattr(cycle, f"default_{key}") != before[f"default_{key}"]})
             if defaults_changed
             else {
                 "created": 0,
@@ -533,6 +697,49 @@ class DepartmentalExamAuthorizationService:
             .filter(Q(has_role_permission=True) | Q(has_direct_allow=True))
             .order_by("campus__name", "name", "code")
         )
+
+    @classmethod
+    def reviewable_departments(cls, *, user, tenant_id):
+        """Return exact active department scopes that grant reviewer capability."""
+        departments = Department.objects.filter(tenant_id=tenant_id, is_active=True)
+        if not user or not user.is_authenticated or not user.is_active:
+            return departments.none()
+        if user.is_superuser:
+            return departments
+        campus_id = OuterRef("campus_id")
+        exact_membership = UserRole.objects.filter(
+            user=user,
+            is_active=True,
+            role__is_active=True,
+            tenant_id=tenant_id,
+            department_id=OuterRef("pk"),
+        ).filter(Q(campus_id=campus_id) | Q(campus_id__isnull=True))
+        return departments.annotate(
+            has_exact_membership=Exists(exact_membership),
+            **cls._effective_permission_annotations(
+                user=user,
+                permission_code=cls.REVIEWER_PERMISSION,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+            ),
+        ).filter(
+            has_exact_membership=True,
+            has_direct_deny=False,
+        ).filter(Q(has_role_permission=True) | Q(has_direct_allow=True))
+
+    @classmethod
+    def require_assigned_course_route_capability(cls, *, user, tenant_id):
+        """Allow a non-disclosing empty list only for a valid route-capable user."""
+        cls.require_enabled(tenant_id=tenant_id)
+        if not user or not user.is_authenticated or not user.is_active:
+            raise PermissionDenied("An active user is required for course examination access.")
+        if user.is_superuser:
+            return
+        if cls.configurable_departments(user=user, tenant_id=tenant_id).exists():
+            return
+        if cls.reviewable_departments(user=user, tenant_id=tenant_id).exists():
+            return
+        raise PermissionDenied("You do not have current course examination access.")
 
     @classmethod
     def require_configure_cycle_course(cls, *, user, cycle_course):
@@ -1268,6 +1475,7 @@ class CourseExamConfigurationService:
                 label="additional_instructions",
             ),
             "contribution_deadline": configuration.contribution_deadline,
+            "contribution_deadline_source": configuration.contribution_deadline_source,
             "questions_required_per_faculty_source": configuration.questions_required_per_faculty_source,
             "final_item_count_source": configuration.final_item_count_source,
             "cycle_defaults_revision_snapshot": configuration.cycle_defaults_revision_snapshot,
@@ -1297,7 +1505,7 @@ class CourseExamConfigurationService:
 
     @staticmethod
     def _require_no_activity(parent):
-        if FacultyContribution.objects.filter(cycle_course=parent).exists() or Question.objects.filter(contribution__cycle_course=parent).exists():
+        if CourseExamDefaultTrackingPolicy.has_downstream_activity(parent):
             raise ValidationError("This course has downstream contribution or question activity and cannot change this workflow.")
 
     @staticmethod
@@ -1331,7 +1539,7 @@ class CourseExamConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def save_course_draft(cls, *, cycle_course_id, tenant_id, user, expected_revision, final_item_count, questions_required_per_faculty, final_item_count_mode, questions_required_per_faculty_mode, coverage, additional_instructions, contribution_deadline, request=None):
+    def save_course_draft(cls, *, cycle_course_id, tenant_id, user, expected_revision, final_item_count, questions_required_per_faculty, final_item_count_mode, questions_required_per_faculty_mode, coverage, additional_instructions, contribution_deadline, contribution_deadline_mode=None, request=None):
         parent, configuration = cls._lock_parent_and_configuration(cycle_course_id=cycle_course_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
         cls._require_active_responsible_department(parent)
@@ -1353,12 +1561,82 @@ class CourseExamConfigurationService:
             raise ValidationError(f"{label} override must be from 50 to 75.")
         questions_required_per_faculty, questions_required_per_faculty_source = resolve(questions_required_per_faculty, questions_required_per_faculty_mode, cycle.default_questions_required_per_faculty, "faculty quota")
         final_item_count, final_item_count_source = resolve(final_item_count, final_item_count_mode, cycle.default_final_item_count, "final item count")
+        submitted_deadline = normalize_contribution_deadline_to_minute(
+            contribution_deadline
+        )
+        existing_deadline_source = (
+            configuration.contribution_deadline_source if configuration else None
+        )
+        if contribution_deadline_mode is None:
+            if existing_deadline_source in CourseExamConfiguration.ValueSource.values:
+                contribution_deadline_source = existing_deadline_source
+                contribution_deadline = (
+                    configuration.contribution_deadline
+                    if submitted_deadline is None
+                    else submitted_deadline
+                )
+            elif submitted_deadline is not None:
+                contribution_deadline = submitted_deadline
+                contribution_deadline_source = CourseExamConfiguration.ValueSource.OVERRIDE
+            else:
+                contribution_deadline = None
+                contribution_deadline_source = None
+        elif contribution_deadline_mode == CourseExamConfiguration.ValueSource.DEFAULT:
+            contribution_deadline = cycle.default_contribution_deadline
+            contribution_deadline_source = (
+                CourseExamConfiguration.ValueSource.DEFAULT
+                if contribution_deadline is not None
+                else None
+            )
+        elif contribution_deadline_mode == CourseExamConfiguration.ValueSource.OVERRIDE:
+            if submitted_deadline is None:
+                raise ValidationError("A course deadline override requires a contribution deadline.")
+            contribution_deadline = submitted_deadline
+            contribution_deadline_source = CourseExamConfiguration.ValueSource.OVERRIDE
+        else:
+            raise ValidationError("Unsupported contribution deadline mode.")
+        has_downstream_activity = (
+            CourseExamDefaultTrackingPolicy.has_downstream_activity(parent)
+            if configuration is not None
+            else False
+        )
+        tracks_current_defaults = CourseExamDefaultTrackingPolicy.is_live_default_tracking(
+            cycle_course=parent,
+            configuration=configuration,
+            has_downstream_activity=has_downstream_activity,
+        )
+        if (
+            tracks_current_defaults
+            and contribution_deadline_source == CourseExamConfiguration.ValueSource.DEFAULT
+            and normalize_contribution_deadline_to_minute(contribution_deadline)
+            != normalize_contribution_deadline_to_minute(
+                cycle.default_contribution_deadline
+            )
+        ):
+            raise ValidationError(
+                "The default-sourced deadline must match the current cycle default."
+            )
+        if (
+            configuration is not None
+            and configuration.contribution_deadline_source
+            == contribution_deadline_source
+            and normalize_contribution_deadline_to_minute(
+                configuration.contribution_deadline
+            )
+            == normalize_contribution_deadline_to_minute(contribution_deadline)
+        ):
+            contribution_deadline = configuration.contribution_deadline
+        if (
+            contribution_deadline is not None
+            and contribution_deadline_source is None
+        ):
+            raise ValidationError("A course deadline override requires a contribution deadline.")
         if configuration is None:
             configuration = CourseExamConfiguration(cycle_course=parent, revision=1)
             before = None
         else:
             before = cls._configuration_payload(configuration)
-        values = {"final_item_count": final_item_count, "final_item_count_source": final_item_count_source, "questions_required_per_faculty": questions_required_per_faculty, "questions_required_per_faculty_source": questions_required_per_faculty_source, "cycle_defaults_revision_snapshot": cycle.defaults_revision, "coverage": (coverage or "").strip(), "additional_instructions": (additional_instructions or "").strip(), "contribution_deadline": contribution_deadline}
+        values = {"final_item_count": final_item_count, "final_item_count_source": final_item_count_source, "questions_required_per_faculty": questions_required_per_faculty, "questions_required_per_faculty_source": questions_required_per_faculty_source, "contribution_deadline": contribution_deadline, "contribution_deadline_source": contribution_deadline_source, "cycle_defaults_revision_snapshot": cycle.defaults_revision, "coverage": (coverage or "").strip(), "additional_instructions": (additional_instructions or "").strip()}
         if before and all(
             getattr(configuration, key) == value for key, value in values.items()
         ):
@@ -1374,7 +1652,7 @@ class CourseExamConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def remove_overrides(cls, *, cycle_course_id, tenant_id, user, expected_revision, return_questions_required_per_faculty, return_final_item_count, request=None):
+    def remove_overrides(cls, *, cycle_course_id, tenant_id, user, expected_revision, return_questions_required_per_faculty, return_final_item_count, return_contribution_deadline=False, request=None):
         parent, configuration = cls._lock_parent_and_configuration(cycle_course_id=cycle_course_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
         cls._require_active_responsible_department(parent)
@@ -1383,7 +1661,7 @@ class CourseExamConfigurationService:
         if not configuration or configuration.opened_at or configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.DRAFT:
             raise ValidationError("Historical or non-Draft configurations cannot return to cycle defaults.")
         cls._require_revision(configuration, expected_revision)
-        if not return_questions_required_per_faculty and not return_final_item_count:
+        if not return_questions_required_per_faculty and not return_final_item_count and not return_contribution_deadline:
             raise ValidationError("Select at least one override to return to the cycle default.")
         cycle = parent.cycle
         before = cls._configuration_payload(configuration)
@@ -1407,6 +1685,16 @@ class CourseExamConfigurationService:
             changes.update(
                 final_item_count=cycle.default_final_item_count,
                 final_item_count_source="DEFAULT",
+            )
+        if (
+            return_contribution_deadline
+            and configuration.contribution_deadline_source == "OVERRIDE"
+        ):
+            changes.update(
+                contribution_deadline=cycle.default_contribution_deadline,
+                contribution_deadline_source=(
+                    "DEFAULT" if cycle.default_contribution_deadline is not None else None
+                ),
             )
         if not changes:
             return configuration, False

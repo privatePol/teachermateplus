@@ -1,8 +1,19 @@
 from django import forms
+from django.utils.dateparse import parse_datetime
 
-from .models import CourseExamConfiguration, CycleCourse, ExaminationCycle
+from .models import (
+    CourseExamConfiguration,
+    CycleCourse,
+    ExaminationCycle,
+    normalize_contribution_deadline_to_minute,
+)
 from apps.tenants.models import Department
 from apps.accounts.models import User
+
+
+_STALE_FORM_STATE_ERROR = (
+    "This page state is missing or invalid. Reload the page and try again."
+)
 
 
 class CycleCourseAdministrationForm(forms.Form):
@@ -29,6 +40,8 @@ class CycleCourseAdministrationForm(forms.Form):
                 reviewer_queryset if reviewer_queryset is not None else User.objects.none()
             )
             self.fields["reviewer"].initial = cycle_course.reviewer_id
+        self.fields["responsible_department"].widget.attrs["class"] = "form-select"
+        self.fields["reviewer"].widget.attrs["class"] = "form-select"
 
 
 class CycleCourseExemptionForm(forms.Form):
@@ -45,6 +58,11 @@ class CycleCourseExemptionForm(forms.Form):
     )
     expected_updated_at = forms.CharField(widget=forms.HiddenInput())
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["exemption_category"].widget.attrs["class"] = "form-select"
+        self.fields["reason"].widget.attrs["class"] = "form-control"
+
 
 class CycleCourseRestoreForm(forms.Form):
     reason = forms.CharField(
@@ -57,8 +75,17 @@ class CycleCourseRestoreForm(forms.Form):
     )
     expected_updated_at = forms.CharField(widget=forms.HiddenInput())
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["reason"].widget.attrs["class"] = "form-control"
+
 
 class ExaminationCycleForm(forms.ModelForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-select")
+
     class Meta:
         model = ExaminationCycle
         fields = ["academic_year", "term", "exam_period"]
@@ -73,16 +100,44 @@ class ExaminationCycleForm(forms.ModelForm):
 
 
 class ExaminationCycleConfigurationForm(forms.ModelForm):
-    expected_updated_at = forms.CharField(widget=forms.HiddenInput)
+    expected_updated_at = forms.CharField(
+        widget=forms.HiddenInput,
+        error_messages={"required": _STALE_FORM_STATE_ERROR},
+    )
     reason = forms.CharField(required=False, max_length=500, widget=forms.Textarea(attrs={"rows": 3}), help_text="Required (10-500 characters) when changing defaults on an Open cycle.")
 
     class Meta:
         model = ExaminationCycle
-        fields = ["default_questions_required_per_faculty", "default_final_item_count", "contributor_instructions"]
-        widgets = {"contributor_instructions": forms.Textarea(attrs={"rows": 4})}
+        fields = ["default_questions_required_per_faculty", "default_final_item_count", "default_contribution_deadline", "contributor_instructions"]
+        widgets = {
+            "default_questions_required_per_faculty": forms.NumberInput(attrs={"class": "form-control"}),
+            "default_final_item_count": forms.NumberInput(attrs={"class": "form-control"}),
+            "default_contribution_deadline": forms.DateTimeInput(
+                format="%Y-%m-%dT%H:%M",
+                attrs={"type": "datetime-local", "class": "form-control"},
+            ),
+            "contributor_instructions": forms.Textarea(attrs={"rows": 4, "class": "form-control"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["default_contribution_deadline"].input_formats = ["%Y-%m-%dT%H:%M"]
+        self.fields["expected_updated_at"].widget.attrs["class"] = "d-none"
+        self.fields["reason"].widget.attrs["class"] = "form-control"
 
     def clean_contributor_instructions(self):
         return (self.cleaned_data.get("contributor_instructions") or "").strip()
+
+    def clean_expected_updated_at(self):
+        value = self.cleaned_data["expected_updated_at"]
+        if parse_datetime(value) is None:
+            raise forms.ValidationError(_STALE_FORM_STATE_ERROR)
+        return value
+
+    def clean_default_contribution_deadline(self):
+        return normalize_contribution_deadline_to_minute(
+            self.cleaned_data.get("default_contribution_deadline")
+        )
 
     def clean_reason(self):
         return (self.cleaned_data.get("reason") or "").strip()
@@ -116,25 +171,38 @@ class ExaminationCycleCloseForm(_CycleTransitionForm):
 
 
 class CourseExamConfigurationForm(forms.ModelForm):
-    expected_revision = forms.IntegerField(widget=forms.HiddenInput)
+    expected_revision = forms.IntegerField(
+        widget=forms.HiddenInput,
+        error_messages={
+            "required": _STALE_FORM_STATE_ERROR,
+            "invalid": _STALE_FORM_STATE_ERROR,
+        },
+    )
     questions_required_per_faculty_mode = forms.ChoiceField(choices=[("DEFAULT", "Use cycle default"), ("OVERRIDE", "Use course override")])
     final_item_count_mode = forms.ChoiceField(choices=[("DEFAULT", "Use cycle default"), ("OVERRIDE", "Use course override")])
+    contribution_deadline_mode = forms.ChoiceField(required=False, choices=[("DEFAULT", "Use cycle default"), ("OVERRIDE", "Course override")])
 
     def __init__(self, *args, cycle=None, **kwargs):
         self.cycle = cycle
         super().__init__(*args, **kwargs)
+        self.fields["contribution_deadline"].input_formats = ["%Y-%m-%dT%H:%M"]
+        for name in ("questions_required_per_faculty_mode", "final_item_count_mode", "contribution_deadline_mode"):
+            self.fields[name].widget.attrs["class"] = "form-select"
 
     class Meta:
         model = CourseExamConfiguration
         fields = [
             "final_item_count", "questions_required_per_faculty", "coverage",
-            "additional_instructions", "contribution_deadline", "final_item_count_source",
+            "additional_instructions", "contribution_deadline", "contribution_deadline_source", "final_item_count_source",
             "questions_required_per_faculty_source", "cycle_defaults_revision_snapshot",
         ]
         widgets = {
-            "coverage": forms.Textarea(attrs={"rows": 3}),
-            "additional_instructions": forms.Textarea(attrs={"rows": 3}),
-            "contribution_deadline": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "final_item_count": forms.NumberInput(attrs={"class": "form-control"}),
+            "questions_required_per_faculty": forms.NumberInput(attrs={"class": "form-control"}),
+            "coverage": forms.Textarea(attrs={"rows": 3, "class": "form-control"}),
+            "additional_instructions": forms.Textarea(attrs={"rows": 3, "class": "form-control"}),
+            "contribution_deadline": forms.DateTimeInput(format="%Y-%m-%dT%H:%M", attrs={"type": "datetime-local", "class": "form-control"}),
+            "contribution_deadline_source": forms.HiddenInput(),
             "final_item_count_source": forms.HiddenInput(),
             "questions_required_per_faculty_source": forms.HiddenInput(),
             "cycle_defaults_revision_snapshot": forms.HiddenInput(),
@@ -145,6 +213,11 @@ class CourseExamConfigurationForm(forms.ModelForm):
 
     def clean_additional_instructions(self):
         return (self.cleaned_data.get("additional_instructions") or "").strip()
+
+    def clean_contribution_deadline(self):
+        return normalize_contribution_deadline_to_minute(
+            self.cleaned_data.get("contribution_deadline")
+        )
 
     def clean(self):
         cleaned = super().clean()
@@ -170,6 +243,62 @@ class CourseExamConfigurationForm(forms.ModelForm):
                 elif cleaned.get(mode_field) == "OVERRIDE":
                     cleaned[source_field] = "OVERRIDE"
             cleaned["cycle_defaults_revision_snapshot"] = self.cycle.defaults_revision
+
+        deadline_mode_was_submitted = (
+            self.is_bound and "contribution_deadline_mode" in self.data
+        )
+        deadline_mode = cleaned.get("contribution_deadline_mode")
+        if not deadline_mode_was_submitted:
+            cleaned["contribution_deadline_mode"] = None
+            existing_source = getattr(
+                self.instance, "contribution_deadline_source", None
+            )
+            existing_deadline = getattr(
+                self.instance, "contribution_deadline", None
+            )
+            if existing_source in CourseExamConfiguration.ValueSource.values:
+                cleaned["contribution_deadline_source"] = existing_source
+                if cleaned.get("contribution_deadline") is None:
+                    cleaned["contribution_deadline"] = existing_deadline
+            elif cleaned.get("contribution_deadline") is not None:
+                cleaned["contribution_deadline_source"] = (
+                    CourseExamConfiguration.ValueSource.OVERRIDE
+                )
+            else:
+                cleaned["contribution_deadline_source"] = None
+        elif deadline_mode not in CourseExamConfiguration.ValueSource.values:
+            if "contribution_deadline_mode" not in self.errors:
+                self.add_error(
+                    "contribution_deadline_mode",
+                    "Select a supported contribution deadline mode.",
+                )
+        elif deadline_mode == CourseExamConfiguration.ValueSource.DEFAULT:
+            if self.cycle is None:
+                self.add_error(
+                    "contribution_deadline_mode",
+                    "The cycle default contribution deadline cannot be resolved without a cycle.",
+                )
+            else:
+                cleaned["contribution_deadline"] = (
+                    self.cycle.default_contribution_deadline
+                )
+                cleaned["contribution_deadline_source"] = (
+                    CourseExamConfiguration.ValueSource.DEFAULT
+                    if self.cycle.default_contribution_deadline is not None
+                    else None
+                )
+        elif (
+            deadline_mode == CourseExamConfiguration.ValueSource.OVERRIDE
+            and cleaned.get("contribution_deadline") is None
+        ):
+            self.add_error(
+                "contribution_deadline",
+                "A course override requires a contribution deadline.",
+            )
+        elif deadline_mode == CourseExamConfiguration.ValueSource.OVERRIDE:
+            cleaned["contribution_deadline_source"] = (
+                CourseExamConfiguration.ValueSource.OVERRIDE
+            )
         return cleaned
 
 
@@ -180,10 +309,15 @@ class _ConfigurationActionForm(forms.Form):
 class CourseOverrideRemovalForm(_ConfigurationActionForm):
     return_questions_required_per_faculty = forms.BooleanField(required=False)
     return_final_item_count = forms.BooleanField(required=False)
+    return_contribution_deadline = forms.BooleanField(required=False)
 
     def clean(self):
         cleaned = super().clean()
-        if not (cleaned.get("return_questions_required_per_faculty") or cleaned.get("return_final_item_count")):
+        if not (
+            cleaned.get("return_questions_required_per_faculty")
+            or cleaned.get("return_final_item_count")
+            or cleaned.get("return_contribution_deadline")
+        ):
             raise forms.ValidationError("Select at least one override to return to the cycle default.")
         return cleaned
 
@@ -201,6 +335,10 @@ class _ReasonedConfigurationActionForm(_ConfigurationActionForm):
 
     def clean_reason(self):
         return (self.cleaned_data["reason"] or "").strip()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["reason"].widget.attrs["class"] = "form-control"
 
 
 class CourseContributionCloseForm(_ReasonedConfigurationActionForm):

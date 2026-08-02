@@ -1,7 +1,13 @@
 {% extends "admin_portal/base.html" %}
-{% block content %}
-<div class="container-fluid"><h1>Return course overrides to cycle defaults</h1>
-<p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p>
-<form method="post" class="card card-body">{% csrf_token %}{{ form.as_p }}<button class="btn btn-warning">Confirm return to defaults</button></form>
-</div>
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Assigned Course Examinations</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:course_configuration' cycle_course.id %}">Course Configuration</a></li><li class="breadcrumb-item active">Return Overrides</li></ol></nav>
+<header class="de-exam-hero"><div class="d-flex justify-content-between gap-3 flex-wrap"><div><h1>Return course overrides to cycle defaults</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:course_configuration' cycle_course.id %}">Back to Course Configuration</a></div></header>
+<div class="card de-exam-card"><div class="card-body"><div class="alert alert-warning">Selected overrides will return to the current cycle value. If no cycle contribution deadline exists, removing that override stores NOT CONFIGURED and the course cannot open.</div>
+<form method="post" novalidate>{% csrf_token %}{{ form.expected_revision }}{% for hidden_field in form.hidden_fields %}{% if hidden_field.errors %}<div class="alert alert-danger" role="alert"><ul class="errorlist mb-0">{% for error in hidden_field.errors %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}{% endfor %}{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+  <div class="form-check mb-2">{{ form.return_questions_required_per_faculty }} <label class="form-check-label" for="{{ form.return_questions_required_per_faculty.id_for_label }}">Questions required per faculty</label></div>
+  <div class="form-check mb-2">{{ form.return_final_item_count }} <label class="form-check-label" for="{{ form.return_final_item_count.id_for_label }}">Final questionnaire item count</label></div>
+  <div class="form-check mb-3">{{ form.return_contribution_deadline }} <label class="form-check-label" for="{{ form.return_contribution_deadline.id_for_label }}">Contribution deadline</label></div>
+  <button class="btn btn-warning" type="submit">Confirm Return to Defaults</button> <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_configuration' cycle_course.id %}">Cancel</a>
+</form></div></div>
 {% endblock %}

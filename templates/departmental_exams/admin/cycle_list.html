@@ -1,2 +1,21 @@
 {% extends "admin_portal/base.html" %}
-{% block content %}<div class="container-fluid"><div class="d-flex justify-content-between align-items-center mb-3"><h1>Departmental Exam Builder</h1><a class="btn btn-primary" href="{% url 'departmental_exams:cycle_create' %}">Create Exam Cycle</a></div><table class="table"><thead><tr><th>Academic Year</th><th>Term</th><th>Exam</th><th>Status</th><th></th></tr></thead><tbody>{% for cycle in cycles %}<tr><td>{{ cycle.academic_year }}</td><td>{{ cycle.term }}</td><td>{{ cycle.get_exam_period_display }}</td><td>{{ cycle.get_status_display }}</td><td><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Configure cycle</a> · <a href="{% url 'departmental_exams:cycle_course_list' cycle.id %}">Course examinations</a></td></tr>{% empty %}<tr><td colspan="5">No examination cycles in this tenant scope.</td></tr>{% endfor %}</tbody></table></div>{% endblock %}
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<header class="de-exam-hero">
+  <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
+    <div><h1>Departmental Exam Builder</h1><p>Create and operate tenant-scoped examination cycles and grouped course examinations.</p></div>
+    <a class="btn btn-light btn-sm" href="{% url 'departmental_exams:cycle_create' %}">Create Examination Cycle</a>
+  </div>
+</header>
+<div class="card de-exam-card"><div class="card-body">
+  <div class="de-exam-section-title mb-3">Overview / Exam Cycles</div>
+  <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+    <thead><tr><th>Academic Year</th><th>Term</th><th>Examination</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+    <tbody>{% for cycle in cycles %}<tr>
+      <td>{{ cycle.academic_year }}</td><td>{{ cycle.term }}</td><td>{{ cycle.get_exam_period_display }}</td>
+      <td><span class="badge {% if cycle.status == 'DRAFT' %}text-bg-secondary{% elif cycle.status == 'OPEN' %}text-bg-success{% else %}text-bg-dark{% endif %}">{{ cycle.get_status_display }}</span></td>
+      <td class="text-end"><a class="btn btn-sm btn-outline-success" href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Configure</a>{% if cycle.can_view_course_examinations %} <a class="btn btn-sm btn-outline-secondary" href="{% url 'departmental_exams:cycle_course_list' cycle.id %}">Course Examinations</a>{% endif %}</td>
+    </tr>{% empty %}<tr><td colspan="5" class="text-center text-muted py-5">No examination cycles exist in the current tenant scope.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div></div>
+{% endblock %}

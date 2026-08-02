@@ -1,38 +1,10 @@
 {% extends "admin_portal/base.html" %}
-{% block content %}
-<div class="container" style="max-width: 760px;">
-  <h1>{{ title }}</h1>
-  <p class="lead">{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p>
-  {% if transition == 'EXEMPT' %}
-  <div class="alert alert-warning">
-    Exempting this course removes it from later configuration, contribution, review, generation, and document workflows for this examination cycle. Its course, offering snapshots, exam department, and reviewer assignment will be preserved.
-  </div>
-  {% else %}
-  <div class="alert alert-info">
-    Restoring this course returns it to Included status. Its course, offering, and responsible-department snapshots will not change. The reviewer will be retained only if still eligible.
-  </div>
-  {% endif %}
-  <form method="post" novalidate>
-    {% csrf_token %}
-    {{ form.non_field_errors }}
-    {{ form.expected_updated_at }}
-    {% if form.exemption_category %}
-    <div class="mb-3">
-      {{ form.exemption_category.label_tag }}
-      {{ form.exemption_category }}
-      {{ form.exemption_category.errors }}
-    </div>
-    {% endif %}
-    <div class="mb-3">
-      {{ form.reason.label_tag }}
-      {{ form.reason }}
-      {% if form.reason.help_text %}<div class="form-text">{{ form.reason.help_text }}</div>{% endif %}
-      {{ form.reason.errors }}
-    </div>
-    <div class="d-flex gap-2">
-      <button class="btn {% if transition == 'EXEMPT' %}btn-danger{% else %}btn-success{% endif %}" type="submit">{{ confirm_label }}</button>
-      <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:cycle_course_administration' cycle_course.id %}">{{ cancel_label }}</a>
-    </div>
-  </form>
-</div>
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Assigned Course Examinations</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_course_administration' cycle_course.id %}">Administer</a></li><li class="breadcrumb-item active">Confirm Inclusion</li></ol></nav>
+<header class="de-exam-hero"><div class="d-flex justify-content-between gap-3 flex-wrap"><div><h1>{{ title }}</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Assigned Course Examinations</a></div></header>
+<div class="card de-exam-card"><div class="card-body">
+{% if transition == 'EXEMPT' %}<div class="alert alert-warning">Exempting this course removes it from later configuration, contribution, review, generation, and document workflows for this cycle. Course, offering snapshots, responsible exam department, and reviewer assignment are preserved.</div>{% else %}<div class="alert alert-info">Restoring returns the course to Included status. Course, offering, and responsible-department snapshots do not change. The reviewer is retained only if still eligible.</div>{% endif %}
+<form method="post" novalidate>{% csrf_token %}{{ form.expected_updated_at }}{% for hidden_field in form.hidden_fields %}{% if hidden_field.errors %}<div class="alert alert-danger" role="alert"><ul class="errorlist mb-0">{% for error in hidden_field.errors %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}{% endfor %}{% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}{% if form.exemption_category %}<div class="mb-3"><label class="form-label" for="{{ form.exemption_category.id_for_label }}">{{ form.exemption_category.label }}</label>{{ form.exemption_category }}{{ form.exemption_category.errors }}</div>{% endif %}<div class="mb-3"><label class="form-label" for="{{ form.reason.id_for_label }}">{{ form.reason.label }}</label>{{ form.reason }}{% if form.reason.help_text %}<div class="form-text">{{ form.reason.help_text }}</div>{% endif %}{{ form.reason.errors }}</div><button class="btn {% if transition == 'EXEMPT' %}btn-danger{% else %}btn-success{% endif %}" type="submit">{{ confirm_label }}</button> <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:cycle_course_administration' cycle_course.id %}">{{ cancel_label }}</a></form>
+</div></div>
 {% endblock %}

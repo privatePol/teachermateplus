@@ -528,6 +528,152 @@ class CycleCourseAdministrationTests(TestCase):
             self.client.get(reverse("departmental_exams:cycle_list")).status_code, 403
         )
 
+    def test_single_campus_snapshots_render_one_campus_across_grouped_course_pages(self):
+        for number in range(4):
+            self._offering(suffix=f"single-campus-{number}")
+        cycle = self._create_cycle()
+        cycle_course = CycleCourse.objects.get(cycle=cycle, course=self.course)
+        self.client.force_login(self.admin)
+
+        administration = self.client.get(
+            reverse(
+                "departmental_exams:cycle_course_administration",
+                args=[cycle_course.id],
+            )
+        )
+        cycle_list = self.client.get(
+            reverse("departmental_exams:cycle_course_list", args=[cycle.id])
+        )
+        assigned_list = self.client.get(
+            reverse("departmental_exams:assigned_course_examinations")
+        )
+        configuration = self.client.get(
+            reverse(
+                "departmental_exams:course_configuration", args=[cycle_course.id]
+            )
+        )
+
+        for response in (administration, cycle_list, assigned_list, configuration):
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            administration.context["cycle_course"].campus_presentation["labels"],
+            (self.campus_a.name,),
+        )
+        self.assertContains(
+            administration,
+            f"One grouped course examination is shared across {self.campus_a.name}.",
+            count=1,
+        )
+        self.assertEqual(
+            cycle_list.context["courses"][0].included_campuses,
+            (self.campus_a.name,),
+        )
+        self.assertEqual(
+            assigned_list.context["courses"][0].included_campuses,
+            (self.campus_a.name,),
+        )
+        self.assertEqual(
+            configuration.context["cycle_course"].campus_presentation["labels"],
+            (self.campus_a.name,),
+        )
+
+    def test_distinct_campus_display_is_complete_ordered_and_snapshot_scoped(self):
+        campus_c = Campus.objects.create(
+            tenant=self.tenant, code="C", name="Campus C"
+        )
+        department_c = Department.objects.create(
+            tenant=self.tenant, campus=campus_c, code="ART", name="Arts"
+        )
+        hidden_campus = Campus.objects.create(
+            tenant=self.tenant, code="HIDDEN", name="Campus Z Hidden"
+        )
+        for number in range(3):
+            self._offering(suffix=f"three-campus-a-{number}")
+        for number in range(2):
+            self._offering(
+                campus=self.campus_b,
+                department=self.department_b,
+                suffix=f"three-campus-b-{number}",
+            )
+            self._offering(
+                campus=campus_c,
+                department=department_c,
+                suffix=f"three-campus-c-{number}",
+            )
+        cycle = self._create_cycle()
+        cycle_course = CycleCourse.objects.get(cycle=cycle, course=self.course)
+        expected_labels = (
+            self.campus_a.name,
+            self.campus_b.name,
+            campus_c.name,
+        )
+        expected_text = f"{self.campus_a.name}, {self.campus_b.name}, and {campus_c.name}"
+        self.client.force_login(self.admin)
+
+        administration_url = reverse(
+            "departmental_exams:cycle_course_administration", args=[cycle_course.id]
+        )
+        administration = self.client.get(administration_url)
+        repeated_administration = self.client.get(administration_url)
+        cycle_list = self.client.get(
+            reverse("departmental_exams:cycle_course_list", args=[cycle.id])
+        )
+        assigned_list = self.client.get(
+            reverse("departmental_exams:assigned_course_examinations")
+        )
+        configuration = self.client.get(
+            reverse(
+                "departmental_exams:course_configuration", args=[cycle_course.id]
+            )
+        )
+
+        for response in (
+            administration,
+            repeated_administration,
+            cycle_list,
+            assigned_list,
+            configuration,
+        ):
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            administration.context["cycle_course"].campus_presentation["labels"],
+            expected_labels,
+        )
+        self.assertEqual(
+            repeated_administration.context[
+                "cycle_course"
+            ].campus_presentation["labels"],
+            expected_labels,
+        )
+        self.assertContains(
+            administration,
+            f"One grouped course examination is shared across {expected_text}.",
+            count=1,
+        )
+        self.assertNotContains(administration, hidden_campus.name)
+
+        cycle_row = next(
+            row for row in cycle_list.context["courses"] if row.id == cycle_course.id
+        )
+        assigned_row = next(
+            row for row in assigned_list.context["courses"] if row.id == cycle_course.id
+        )
+        self.assertEqual(cycle_row.included_campuses, expected_labels)
+        self.assertEqual(assigned_row.included_campuses, expected_labels)
+        self.assertEqual(cycle_row.offering_count, 7)
+        self.assertEqual(assigned_row.offering_count, 7)
+        self.assertNotContains(cycle_list, hidden_campus.name)
+        self.assertNotContains(assigned_list, hidden_campus.name)
+        self.assertEqual(
+            configuration.context["cycle_course"].campus_presentation["labels"],
+            expected_labels,
+        )
+        self.assertContains(
+            configuration,
+            f"One grouped examination is shared across {expected_text};",
+            count=1,
+        )
+
     def test_review_generate_only_reviewer_list_is_limited_to_explicit_assignment(self):
         self._offering(suffix="1")
         other_course = Course.objects.create(
@@ -1311,6 +1457,15 @@ class CycleCourseAdministrationTests(TestCase):
             {base_cycle_course.id},
         )
 
+        duplicate_offering = self._offering(
+            suffix="routed-query-duplicate-campus"
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=base_cycle_course,
+            offering=duplicate_offering,
+            campus=self.campus_a,
+        )
+
         expected_visible_ids = {base_cycle_course.id}
         for number in range(8):
             department = self.department_a if number % 2 == 0 else self.department_b
@@ -1423,6 +1578,14 @@ class CycleCourseAdministrationTests(TestCase):
             {row.id for row in large_response.context["courses"]},
             expected_visible_ids,
         )
+        rendered_base_row = next(
+            row
+            for row in large_response.context["courses"]
+            if row.id == base_cycle_course.id
+        )
+        self.assertEqual(
+            rendered_base_row.included_campuses, (self.campus_a.name,)
+        )
         self.assertLessEqual(
             len(large_query_context), len(small_query_context) + 2
         )
@@ -1464,8 +1627,18 @@ class CycleCourseAdministrationTests(TestCase):
 
         self.assertEqual(small_response.status_code, 200)
         self.assertEqual(large_response.status_code, 200)
-        self.assertContains(large_response, self.campus_a.name)
-        self.assertContains(large_response, self.campus_b.name)
+        self.assertEqual(
+            large_response.context["cycle_course"].campus_presentation["labels"],
+            (self.campus_a.name, self.campus_b.name),
+        )
+        self.assertContains(
+            large_response,
+            (
+                "One grouped course examination is shared across "
+                f"{self.campus_a.name} and {self.campus_b.name}."
+            ),
+            count=1,
+        )
         self.assertLessEqual(
             len(large_query_context), len(small_query_context) + 2
         )
@@ -2142,12 +2315,17 @@ class CycleCourseAdministrationTests(TestCase):
 
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(list_url).status_code, 200)
-        self.assertEqual(
-            self.client.get(
-                reverse("departmental_exams:assigned_course_examinations")
-            ).status_code,
-            403,
+        assigned_empty = self.client.get(
+            reverse("departmental_exams:assigned_course_examinations")
         )
+        self.assertEqual(assigned_empty.status_code, 200)
+        self.assertContains(
+            assigned_empty, "No course examinations are currently assigned"
+        )
+        self.assertContains(
+            assigned_empty, "Courses outside your authorized scope are not shown"
+        )
+        self.assertNotContains(assigned_empty, self.course.code)
         self.assertEqual(self.client.get(administration_url).status_code, 200)
         missing_department = self.client.post(
             administration_url, {"reviewer_id": reviewer.id}
@@ -2903,7 +3081,9 @@ class CycleCourseAdministrationTests(TestCase):
                 self.assertEqual(self.client.get(administration_url).status_code, 403)
 
         self.client.force_login(self.admin)
-        self.assertEqual(self.client.get(assigned_url).status_code, 403)
+        superuser_empty = self.client.get(assigned_url)
+        self.assertEqual(superuser_empty.status_code, 200)
+        self.assertContains(superuser_empty, "No course examinations are currently assigned")
         self.assertEqual(self.client.get(administration_url).status_code, 200)
         cycle_course.refresh_from_db()
         self.assertEqual(cycle_course.responsible_department_id, original_department_id)
@@ -3080,6 +3260,18 @@ class CycleCourseAdministrationTests(TestCase):
             {row.id for row in small_response.context["courses"]}, expected_visible_ids
         )
 
+        duplicate_offering = self._offering(
+            suffix="assigned-query-duplicate-campus"
+        )
+        duplicate_row = CycleCourse.objects.get(
+            cycle=first_cycle, course=self.course
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=duplicate_row,
+            offering=duplicate_offering,
+            campus=self.campus_a,
+        )
+
         parent, child = self._department_hierarchy()
         campus_c = Campus.objects.create(
             tenant=self.tenant,
@@ -3201,6 +3393,14 @@ class CycleCourseAdministrationTests(TestCase):
         self.assertEqual(
             {row.id for row in large_response.context["courses"]},
             expected_visible_ids,
+        )
+        rendered_duplicate_row = next(
+            row
+            for row in large_response.context["courses"]
+            if row.id == duplicate_row.id
+        )
+        self.assertEqual(
+            rendered_duplicate_row.included_campuses, (self.campus_a.name,)
         )
         self.assertLessEqual(
             len(large_query_context), len(small_query_context) + 2

@@ -140,7 +140,7 @@ class AdminHelpGuideTests(TestCase):
 
         self.assertIn("superadmin", {section["code"] for section in sections})
 
-    def test_departmental_exam_configurer_receives_stage3_help(self):
+    def test_departmental_exam_configurer_receives_stage41_help(self):
         user = self._make_user(
             username="departmental_exam_guide",
             role_code="DEPARTMENTAL_EXAM_CONFIGURER",
@@ -168,6 +168,9 @@ class AdminHelpGuideTests(TestCase):
         self.assertIn("blocks Exempt only", topic["check_first"][1])
         self.assertIn("not a Restore blocker", topic["actions"][1]["avoid"])
         self.assertIn("No downstream data is deleted", topic["actions"][1]["editable"])
+        self.assertIn("shared across its listed campuses", topic["steps"][1])
+        self.assertIn("cycle-wide contribution deadline", topic["steps"][6])
+        self.assertIn("NOT CONFIGURED", topic["steps"][7])
         self.client.force_login(user)
         role_response = self.client.get(reverse("admin_portal:guide"))
         self.assertEqual(role_response.status_code, 200)
@@ -182,6 +185,8 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, "blocks choosing Exempt")
         self.assertContains(response, "does not use the Exempt-only contribution/question blocker")
         self.assertContains(response, "No downstream data is deleted")
+        self.assertContains(response, "cycle-wide contribution deadline")
+        self.assertContains(response, "NOT CONFIGURED")
 
     def test_admin_guide_can_restore_legacy_template(self):
         user = User.objects.create_superuser(

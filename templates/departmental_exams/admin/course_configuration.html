@@ -1,39 +1,36 @@
 {% extends "admin_portal/base.html" %}
-{% block content %}
-<div class="container-fluid">
-  <h1>Course Examination Configuration</h1>
-  <p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p>
-  <p>
-    <span class="badge text-bg-secondary">{{ readiness.label }}</span>
-    {% if readiness.blockers %}<span class="text-muted">{{ readiness.blockers|join:', ' }}</span>{% endif %}
-  </p>
-  {% if action_flags.can_save_draft %}
-    <form method="post" class="card card-body">
-      {% csrf_token %}
-      {{ form.as_p }}
-      <button class="btn btn-primary">Save Draft Configuration</button>
-    </form>
-  {% else %}
-    <p class="text-muted">This course configuration is read-only in its current lifecycle state.</p>
-  {% endif %}
-  {% if configuration %}
-    <div class="mt-3">
-      {% if action_flags.can_open %}
-        <a class="btn btn-success" href="{% url 'departmental_exams:course_contribution_open' cycle_course.id %}">Open for Faculty Contribution</a>
-      {% endif %}
-      {% if action_flags.can_close %}
-        <a class="btn btn-warning" href="{% url 'departmental_exams:course_contribution_close' cycle_course.id %}">Close contribution</a>
-      {% endif %}
-      {% if action_flags.can_reopen %}
-        <a class="btn btn-success" href="{% url 'departmental_exams:course_contribution_reopen' cycle_course.id %}">Reopen contribution</a>
-      {% endif %}
-      {% if action_flags.can_revert %}
-        <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_configuration_revert' cycle_course.id %}">Revert to Draft</a>
-      {% endif %}
-      {% if action_flags.can_save_draft and configuration %}
-        <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_remove_overrides' cycle_course.id %}">Return selected overrides to defaults</a>
-      {% endif %}
-    </div>
-  {% endif %}
+{% load tz %}
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Assigned Course Examinations</a></li><li class="breadcrumb-item active">Course Configuration</li></ol></nav>
+<header class="de-exam-hero"><div class="d-flex justify-content-between gap-3 flex-wrap"><div><h1>Course Examination Configuration</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}. One grouped examination is shared across {{ cycle_course.campus_presentation.list_text }}; it is not separate per campus.</p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Assigned Course Examinations</a></div></header>
+<div class="alert alert-light border"><strong>Responsible Exam Department:</strong> {{ cycle_course.responsible_department }}. One department owns this grouped examination across its listed campuses; responsibility is not assigned separately per campus.</div>
+<div class="row g-3">
+  <div class="col-xl-8">
+    <div class="card de-exam-card"><div class="card-body">
+      <div class="d-flex justify-content-between gap-2 flex-wrap mb-3"><div><div class="de-exam-section-title">Configuration</div><div class="text-muted small">Choose the normal cycle value or an intentional course exception.</div></div><span class="badge text-bg-secondary align-self-start">{{ readiness.label }}</span></div>
+      {% if "Contribution Deadline Passed" in readiness.blockers %}<div class="alert alert-warning">The saved contribution deadline is in the past. It may remain saved, but opening or reopening is blocked until the effective deadline is in the future.</div>{% endif %}
+      {% if action_flags.can_save_draft %}
+      <form method="post" novalidate>{% csrf_token %}{% for hidden_field in form.hidden_fields %}{% if hidden_field.errors %}<div class="alert alert-danger" role="alert"><ul class="errorlist mb-0">{% for error in hidden_field.errors %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}{{ hidden_field }}{% endfor %}
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="row g-3">
+          <div class="col-md-6"><label class="form-label" for="{{ form.questions_required_per_faculty_mode.id_for_label }}">Faculty quota mode</label>{{ form.questions_required_per_faculty_mode }}<div class="form-text">Cycle default: {{ cycle_course.cycle.default_questions_required_per_faculty|default:"NOT CONFIGURED" }}</div>{{ form.questions_required_per_faculty_mode.errors }}</div>
+          <div class="col-md-6"><label class="form-label" for="{{ form.questions_required_per_faculty.id_for_label }}">Questions required per faculty</label>{{ form.questions_required_per_faculty }}<div class="form-text">Required from 50 to 75 for an override.</div>{{ form.questions_required_per_faculty.errors }}</div>
+          <div class="col-md-6"><label class="form-label" for="{{ form.final_item_count_mode.id_for_label }}">Final item count mode</label>{{ form.final_item_count_mode }}<div class="form-text">Cycle default: {{ cycle_course.cycle.default_final_item_count|default:"NOT CONFIGURED" }}</div>{{ form.final_item_count_mode.errors }}</div>
+          <div class="col-md-6"><label class="form-label" for="{{ form.final_item_count.id_for_label }}">Final questionnaire item count</label>{{ form.final_item_count }}<div class="form-text">Required from 50 to 75 for an override.</div>{{ form.final_item_count.errors }}</div>
+          <div class="col-md-6"><label class="form-label" for="{{ form.contribution_deadline_mode.id_for_label }}">Contribution deadline mode</label>{{ form.contribution_deadline_mode }}<div class="form-text">Use the inherited cycle default or create one course exception.</div>{{ form.contribution_deadline_mode.errors }}</div>
+          <div class="col-md-6"><label class="form-label" for="{{ form.contribution_deadline.id_for_label }}">Contribution deadline</label>{{ form.contribution_deadline }}<div class="form-text">Cycle default: {% if cycle_course.cycle.default_contribution_deadline %}{{ cycle_course.cycle.default_contribution_deadline|localtime|date:"M j, Y g:i A" }}{% else %}NOT CONFIGURED; this course cannot open until a deadline is configured.{% endif %} Times use Asia/Manila.</div>{{ form.contribution_deadline.errors }}</div>
+          <div class="col-12"><label class="form-label" for="{{ form.coverage.id_for_label }}">Coverage</label>{{ form.coverage }}{{ form.coverage.errors }}</div>
+          <div class="col-12"><label class="form-label" for="{{ form.additional_instructions.id_for_label }}">Additional instructions</label>{{ form.additional_instructions }}{{ form.additional_instructions.errors }}</div>
+        </div>
+        <button class="btn btn-success mt-3" type="submit">Save Draft Configuration</button>
+      </form>
+      {% else %}<div class="alert alert-light border mb-0">This course configuration is read-only in its current lifecycle state. Effective values and first-open history remain visible.</div>{% endif %}
+    </div></div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card de-exam-card mb-3"><div class="card-body"><div class="de-exam-section-title mb-2">Effective Configuration</div>{% include "departmental_exams/admin/_effective_configuration.html" with configuration=configuration %}{% if configuration %}<hr><div class="small"><strong>Coverage</strong><div class="text-muted">{{ configuration.coverage|default:"Not configured" }}</div><strong>Additional instructions</strong><div class="text-muted">{{ configuration.additional_instructions|default:"None" }}</div></div>{% endif %}</div></div>
+    {% if configuration %}<div class="card de-exam-card"><div class="card-body"><div class="de-exam-section-title mb-2">Workflow Actions</div><div class="d-grid gap-2">{% if action_flags.can_open %}<a class="btn btn-success" href="{% url 'departmental_exams:course_contribution_open' cycle_course.id %}">Open for Faculty Contribution</a>{% endif %}{% if action_flags.can_close %}<a class="btn btn-warning" href="{% url 'departmental_exams:course_contribution_close' cycle_course.id %}">Close Contribution</a>{% endif %}{% if action_flags.can_reopen %}<a class="btn btn-success" href="{% url 'departmental_exams:course_contribution_reopen' cycle_course.id %}">Reopen contribution</a>{% endif %}{% if action_flags.can_revert %}<a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_configuration_revert' cycle_course.id %}">Revert to Draft</a>{% endif %}{% if action_flags.can_save_draft %}<a class="btn btn-outline-secondary" href="{% url 'departmental_exams:course_remove_overrides' cycle_course.id %}">Return Overrides to Defaults</a>{% endif %}</div></div></div>{% endif %}
+  </div>
 </div>
 {% endblock %}

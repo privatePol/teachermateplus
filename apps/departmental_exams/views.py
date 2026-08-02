@@ -1,11 +1,12 @@
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.http import Http404
 from django.core import signing
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 
 from apps.academics.models import AcademicYear, Term
@@ -41,7 +42,9 @@ from .services import (
     CourseExamConfigurationConflict,
     CourseExamConfigurationReadinessService,
     CourseExamConfigurationService,
+    CourseExamDefaultTrackingPolicy,
     CycleCourseAdministrationService,
+    CycleCourseCampusPresentationService,
     CycleCourseInclusionService,
     CycleCourseTransitionConflict,
     DepartmentalExamAuthorizationService,
@@ -54,6 +57,31 @@ def _tenant_id(request):
     return getattr(request, "scope", {}).get("tenant_id") or getattr(
         request.user, "default_tenant_id", None
     )
+
+
+def _with_downstream_activity_flags(queryset):
+    """Annotate activity once so list readiness never adds per-row queries."""
+    return queryset.annotate(
+        has_contribution_activity=Exists(
+            FacultyContribution.objects.filter(cycle_course_id=OuterRef("pk"))
+        ),
+        has_question_activity=Exists(
+            Question.objects.filter(
+                contribution__cycle_course_id=OuterRef("pk")
+            )
+        ),
+    )
+
+
+def _prepare_cycle_course_campus_display(cycle_course):
+    """Attach template-ready campus data without querying beyond the prefetch."""
+    presentation = CycleCourseCampusPresentationService.from_prefetched_snapshots(
+        cycle_course
+    )
+    cycle_course.campus_presentation = presentation
+    cycle_course.included_campuses = presentation["labels"]
+    cycle_course.offering_count = presentation["offering_count"]
+    return presentation
 
 
 _CYCLE_DEFAULTS_CONFIRMATION_PURPOSE = "cycle-defaults-apply-v1"
@@ -74,6 +102,11 @@ def _cycle_defaults_confirmation_token(*, request, cycle, tenant_id, cleaned_dat
                 "default_questions_required_per_faculty"
             ],
             "default_final_item_count": cleaned_data["default_final_item_count"],
+            "default_contribution_deadline": (
+                cleaned_data["default_contribution_deadline"].isoformat()
+                if cleaned_data["default_contribution_deadline"] is not None
+                else None
+            ),
             "contributor_instructions": cleaned_data["contributor_instructions"],
             "reason": cleaned_data["reason"],
         },
@@ -102,6 +135,7 @@ def _load_cycle_defaults_confirmation(*, request, cycle, tenant_id):
         "expected_updated_at",
         "default_questions_required_per_faculty",
         "default_final_item_count",
+        "default_contribution_deadline",
         "contributor_instructions",
         "reason",
     }
@@ -115,7 +149,29 @@ def _load_cycle_defaults_confirmation(*, request, cycle, tenant_id):
         raise Http404("This cycle-default confirmation is no longer available.")
     if not isinstance(state["expected_updated_at"], str):
         raise Http404("This cycle-default confirmation is no longer available.")
+    if state["default_contribution_deadline"] is not None:
+        if not isinstance(state["default_contribution_deadline"], str):
+            raise Http404("This cycle-default confirmation is no longer available.")
+        parsed_deadline = parse_datetime(state["default_contribution_deadline"])
+        if parsed_deadline is None:
+            raise Http404("This cycle-default confirmation is no longer available.")
+        state["default_contribution_deadline"] = parsed_deadline
     return state
+
+
+def _visible_cycle_ids_for_user(*, user, tenant_id):
+    base_courses = CycleCourse.objects.filter(cycle__tenant_id=tenant_id)
+    configurer = DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
+        user=user, tenant_id=tenant_id, queryset=base_courses
+    )
+    reviewer = DepartmentalExamAuthorizationService.reviewer_visible_cycle_courses(
+        user=user, tenant_id=tenant_id, queryset=base_courses
+    )
+    return set(
+        base_courses.filter(
+            Q(id__in=configurer.values("id")) | Q(id__in=reviewer.values("id"))
+        ).values_list("cycle_id", flat=True).distinct()
+    )
 
 
 @portal_required("ADMIN")
@@ -126,11 +182,14 @@ def cycle_list_view(request):
         permission="departmental_exams.manage_cycles",
         tenant_id=tenant_id,
     )
-    cycles = (
+    cycles = list(
         ExaminationCycle.objects.filter(tenant_id=tenant_id)
         .select_related("academic_year", "term")
         .order_by("-created_at")
     )
+    visible_cycle_ids = _visible_cycle_ids_for_user(user=request.user, tenant_id=tenant_id)
+    for cycle in cycles:
+        cycle.can_view_course_examinations = cycle.id in visible_cycle_ids
     return render(request, "departmental_exams/admin/cycle_list.html", {"cycles": cycles})
 
 
@@ -141,6 +200,9 @@ def cycle_configuration_view(request, cycle_id):
     cycle = get_object_or_404(ExaminationCycle.objects.filter(tenant_id=tenant_id), id=cycle_id)
     DepartmentalExamAuthorizationService.require_permission(user=request.user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
     lifecycle_flags = ExaminationCycleConfigurationService.lifecycle_flags(cycle)
+    can_view_course_examinations = cycle.id in _visible_cycle_ids_for_user(
+        user=request.user, tenant_id=tenant_id
+    )
     form = ExaminationCycleConfigurationForm(request.POST or None, instance=cycle, initial={"expected_updated_at": ExaminationCycleConfigurationService.transition_token(cycle)})
     status = 200
     if request.method == "POST" and not lifecycle_flags["can_edit_cycle_configuration"]:
@@ -160,7 +222,7 @@ def cycle_configuration_view(request, cycle_id):
             "departmental_exams/admin/cycle_defaults_confirm.html",
             {"cycle": cycle, "form": confirmation_form},
         )
-    return render(request, "departmental_exams/admin/cycle_configuration.html", {"cycle": cycle, "form": form, "lifecycle_flags": lifecycle_flags}, status=status)
+    return render(request, "departmental_exams/admin/cycle_configuration.html", {"cycle": cycle, "form": form, "lifecycle_flags": lifecycle_flags, "can_view_course_examinations": can_view_course_examinations}, status=status)
 
 
 @portal_required("ADMIN")
@@ -171,14 +233,27 @@ def cycle_apply_defaults_view(request, cycle_id):
     DepartmentalExamAuthorizationService.require_permission(user=request.user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
     if cycle.status == ExaminationCycle.Status.CLOSED:
         raise Http404("Closed cycles cannot apply defaults.")
-    confirmation_state = _load_cycle_defaults_confirmation(
-        request=request,
-        cycle=cycle,
-        tenant_id=tenant_id,
-    )
+    if request.method != "POST":
+        raise Http404("This cycle-default confirmation is no longer available.")
     form = CycleDefaultsConfirmationForm(request.POST)
     status = 200
-    if request.method == "POST" and form.is_valid():
+    confirmation_state = None
+    if not form.is_valid():
+        status = 404
+    else:
+        try:
+            confirmation_state = _load_cycle_defaults_confirmation(
+                request=request,
+                cycle=cycle,
+                tenant_id=tenant_id,
+            )
+        except Http404:
+            form.add_error(
+                "confirmation_state",
+                "This cycle-default confirmation is missing, invalid, or no longer available.",
+            )
+            status = 404
+    if confirmation_state is not None:
         try:
             cycle, changed = ExaminationCycleConfigurationService.save_cycle_configuration(
                 cycle_id=cycle.id,
@@ -189,6 +264,9 @@ def cycle_apply_defaults_view(request, cycle_id):
                     "default_questions_required_per_faculty"
                 ],
                 default_final_item_count=confirmation_state["default_final_item_count"],
+                default_contribution_deadline=confirmation_state[
+                    "default_contribution_deadline"
+                ],
                 contributor_instructions=confirmation_state["contributor_instructions"],
                 reason=confirmation_state["reason"],
                 request=request,
@@ -211,7 +289,8 @@ def _cycle_transition_view(request, cycle_id, *, action):
     if not lifecycle_flags[f"can_{action}_cycle"]:
         raise Http404("This cycle transition is not available in its current lifecycle state.")
     form_class = ExaminationCycleOpenForm if action == "open" else ExaminationCycleCloseForm
-    form = form_class(request.POST or None, initial={"expected_updated_at": ExaminationCycleConfigurationService.transition_token(cycle)})
+    form_data = request.POST if request.method == "POST" else None
+    form = form_class(form_data, initial={"expected_updated_at": ExaminationCycleConfigurationService.transition_token(cycle)})
     status = 200
     if request.method == "POST" and form.is_valid():
         try:
@@ -292,18 +371,18 @@ def cycle_course_list_view(request, cycle_id):
         )
     )
     configurer_ids = set(configurer_courses.values_list("id", flat=True))
-    courses = base_courses.filter(
-        Q(id__in=configurer_courses.values("id"))
-        | Q(id__in=reviewer_courses.values("id"))
-    ).distinct()
+    courses = _with_downstream_activity_flags(
+        base_courses.filter(
+            Q(id__in=configurer_courses.values("id"))
+            | Q(id__in=reviewer_courses.values("id"))
+        ).distinct()
+    )
 
     courses = list(courses.order_by("course__code"))
     if not courses:
         raise PermissionDenied("You do not have current course examination access.")
     for course in courses:
-        snapshots = list(course.offering_snapshots.all())
-        course.included_campuses = sorted({row.campus.name for row in snapshots})
-        course.offering_count = len(snapshots)
+        _prepare_cycle_course_campus_display(course)
         course.can_administer = course.id in configurer_ids
         course.readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
             cycle_course=course, configuration=getattr(course, "configuration", None), user=request.user
@@ -319,7 +398,9 @@ def cycle_course_list_view(request, cycle_id):
 def assigned_course_examinations_view(request):
     """List only the grouped course examinations currently assigned to the user."""
     tenant_id = _tenant_id(request)
-    DepartmentalExamAuthorizationService.require_enabled(tenant_id=tenant_id)
+    DepartmentalExamAuthorizationService.require_assigned_course_route_capability(
+        user=request.user, tenant_id=tenant_id
+    )
     base_courses = (
         CycleCourse.objects.filter(cycle__tenant_id=tenant_id)
         .select_related(
@@ -350,19 +431,16 @@ def assigned_course_examinations_view(request):
     )
     configurer_ids = set(configurer_courses.values_list("id", flat=True))
     courses = list(
-        base_courses.filter(
-            Q(id__in=configurer_courses.values("id"))
-            | Q(id__in=reviewer_courses.values("id"))
+        _with_downstream_activity_flags(
+            base_courses.filter(
+                Q(id__in=configurer_courses.values("id"))
+                | Q(id__in=reviewer_courses.values("id"))
+            ).distinct()
         )
-        .distinct()
         .order_by("-cycle__created_at", "course__code")
     )
-    if not courses:
-        raise PermissionDenied("You do not have current course examination access.")
     for course in courses:
-        snapshots = list(course.offering_snapshots.all())
-        course.included_campuses = sorted({row.campus.name for row in snapshots})
-        course.offering_count = len(snapshots)
+        _prepare_cycle_course_campus_display(course)
         course.can_administer = course.id in configurer_ids
         course.readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
             cycle_course=course, configuration=getattr(course, "configuration", None), user=request.user
@@ -376,11 +454,14 @@ def assigned_course_examinations_view(request):
 
 def _course_configuration_context(*, tenant_id, cycle_course_id, user):
     parent = get_object_or_404(
-        CycleCourse.objects.select_related("cycle", "course", "responsible_department", "responsible_department__campus", "reviewer").prefetch_related("offering_snapshots__campus"),
+        _with_downstream_activity_flags(
+            CycleCourse.objects.select_related("cycle", "course", "responsible_department", "responsible_department__campus", "reviewer").prefetch_related("offering_snapshots__campus")
+        ),
         id=cycle_course_id,
         cycle__tenant_id=tenant_id,
     )
     DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
+    _prepare_cycle_course_campus_display(parent)
     configuration = CourseExamConfiguration.objects.filter(cycle_course=parent).first()
     readiness = CourseExamConfigurationReadinessService.evaluate_readiness(cycle_course=parent, configuration=configuration, user=user)
     return parent, configuration, readiness
@@ -399,10 +480,7 @@ def _course_action_flags(*, parent, configuration, readiness):
     )
     has_activity = bool(
         configuration
-        and (
-            FacultyContribution.objects.filter(cycle_course=parent).exists()
-            or Question.objects.filter(contribution__cycle_course=parent).exists()
-        )
+        and CourseExamDefaultTrackingPolicy.has_downstream_activity(parent)
     )
     open_blockers = set(readiness["blockers"]) - {"Closed"}
     return {
@@ -451,14 +529,16 @@ def course_configuration_view(request, cycle_course_id):
     )
     initial = {"expected_revision": configuration.revision if configuration else 0}
     if configuration:
-        initial.update({"questions_required_per_faculty_mode": configuration.questions_required_per_faculty_source or "DEFAULT", "final_item_count_mode": configuration.final_item_count_source or "DEFAULT"})
+        initial.update({"questions_required_per_faculty_mode": configuration.questions_required_per_faculty_source or "DEFAULT", "final_item_count_mode": configuration.final_item_count_source or "DEFAULT", "contribution_deadline_mode": configuration.contribution_deadline_source or "DEFAULT"})
+    else:
+        initial["contribution_deadline_mode"] = "DEFAULT"
     form = CourseExamConfigurationForm(request.POST or None, instance=configuration, initial=initial, cycle=parent.cycle)
     status = 200
     if request.method == "POST" and not action_flags["can_save_draft"]:
         raise Http404("Course configuration is read-only in its current lifecycle state.")
     if request.method == "POST" and form.is_valid():
         try:
-            configuration, changed = CourseExamConfigurationService.save_course_draft(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], **{key: form.cleaned_data[key] for key in ("final_item_count", "questions_required_per_faculty", "final_item_count_mode", "questions_required_per_faculty_mode", "coverage", "additional_instructions", "contribution_deadline")}, request=request)
+            configuration, changed = CourseExamConfigurationService.save_course_draft(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], **{key: form.cleaned_data[key] for key in ("final_item_count", "questions_required_per_faculty", "final_item_count_mode", "questions_required_per_faculty_mode", "coverage", "additional_instructions", "contribution_deadline", "contribution_deadline_mode")}, request=request)
         except CourseExamConfigurationConflict as exc:
             form.add_error(None, str(exc)); status = 409
         except ValidationError as exc:
@@ -482,7 +562,7 @@ def course_remove_overrides_view(request, cycle_course_id):
     status = 200
     if request.method == "POST" and form.is_valid():
         try:
-            configuration, changed = CourseExamConfigurationService.remove_overrides(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], return_questions_required_per_faculty=form.cleaned_data["return_questions_required_per_faculty"], return_final_item_count=form.cleaned_data["return_final_item_count"], request=request)
+            configuration, changed = CourseExamConfigurationService.remove_overrides(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], return_questions_required_per_faculty=form.cleaned_data["return_questions_required_per_faculty"], return_final_item_count=form.cleaned_data["return_final_item_count"], return_contribution_deadline=form.cleaned_data["return_contribution_deadline"], request=request)
         except CourseExamConfigurationConflict as exc:
             form.add_error(None, str(exc)); status = 409
         except ValidationError as exc:
@@ -553,7 +633,7 @@ def course_configuration_revert_view(request, cycle_course_id):
 def cycle_course_administration_view(request, cycle_course_id):
     tenant_id = _tenant_id(request)
     course_queryset = CycleCourse.objects.select_related(
-        "cycle", "course", "responsible_department", "reviewer"
+        "cycle", "course", "responsible_department", "reviewer", "configuration"
     ).prefetch_related(
         Prefetch(
             "offering_snapshots",
@@ -570,6 +650,7 @@ def cycle_course_administration_view(request, cycle_course_id):
             DepartmentalExamAuthorizationService.require_configure_cycle_course(
                 user=request.user, cycle_course=cycle_course
             )
+            _prepare_cycle_course_campus_display(cycle_course)
             department_queryset = (
                 DepartmentalExamAuthorizationService.configurable_departments(
                     user=request.user, tenant_id=tenant_id
@@ -665,6 +746,7 @@ def cycle_course_administration_view(request, cycle_course_id):
     DepartmentalExamAuthorizationService.require_configure_cycle_course(
         user=request.user, cycle_course=cycle_course
     )
+    _prepare_cycle_course_campus_display(cycle_course)
     department_queryset = DepartmentalExamAuthorizationService.configurable_departments(
         user=request.user, tenant_id=tenant_id
     )
