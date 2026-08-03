@@ -57,19 +57,20 @@
 
     <div class="row g-3 align-items-end">
       <div class="col-lg-8">
-        <label class="form-label" for="id_department">Responsible Exam Department</label>
-        <select class="form-select" id="id_department" name="department" form="bulk-exam-assignment-form" required>
-          <option value="">Select a Department</option>
-          {% for department in form.fields.department.queryset %}
-          <option value="{{ department.id }}" {% if form.department.value|stringformat:'s' == department.id|stringformat:'s' %}selected{% endif %}>{{ department.code }} — {{ department.name }} — {{ department.campus.code }}</option>
-          {% endfor %}
-        </select>
-        <div class="form-text">Campus-qualified labels preserve the exact Department record selected.</div>
+        <label class="form-label fw-semibold" for="id_department">{{ form.department.label }}</label>
+        {{ form.department }}
+        <div class="form-text">Choose the exact campus group, then the responsible lead Department. Campus-qualified labels remain visible after selection.</div>
         {% for error in form.department.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
       </div>
       <div class="col-lg-4">
         <div class="fw-semibold text-success" id="selected-course-count">0 Courses selected</div>
         <div class="form-text">{{ filtered_course_count }} currently shown by the server-side filters.</div>
+        <div class="alert alert-success py-2 px-3 mt-3 mb-0" id="selected-target-summary" hidden>
+          <div class="small text-uppercase fw-semibold">Responsible lead department:</div>
+          <div class="fw-semibold" id="selected-target-department"></div>
+          <div class="small text-uppercase fw-semibold mt-2">Selected Courses:</div>
+          <div class="fw-semibold" id="selected-target-count">0</div>
+        </div>
       </div>
     </div>
   </div>
@@ -91,13 +92,9 @@
         </select>
       </div>
       <div class="col-lg-3">
-        <label class="form-label" for="current-department">Current Exam Department</label>
-        <select class="form-select" id="current-department" name="current_department_id">
-          <option value="">Any Department</option>
-          {% for department in department_options %}
-          <option value="{{ department.id }}" {% if current_department_id|stringformat:'s' == department.id|stringformat:'s' %}selected{% endif %}>{{ department.code }} — {{ department.name }} — {{ department.campus.code }}</option>
-          {% endfor %}
-        </select>
+        <label class="form-label" for="current-department">{{ department_filter_form.current_department_id.label }}</label>
+        {{ department_filter_form.current_department_id }}
+        <div class="form-text">Campus headings separate exact Department records.</div>
       </div>
       <div class="col-lg-1 d-grid">
         <button class="btn btn-outline-secondary" type="submit">Filter</button>
@@ -178,10 +175,24 @@
     const checkboxes = Array.from(document.querySelectorAll(".course-checkbox"));
     const countLabel = document.getElementById("selected-course-count");
     const replaceCheckbox = document.getElementById("id_replace_existing");
+    const departmentSelect = document.getElementById("id_department");
+    const targetSummary = document.getElementById("selected-target-summary");
+    const targetDepartment = document.getElementById("selected-target-department");
+    const targetCount = document.getElementById("selected-target-count");
+
+    function selectedTargetText(option) {
+      return option.dataset.campusCode + " — " + option.dataset.campusName + " — " +
+        option.dataset.departmentCode + " — " + option.dataset.departmentName;
+    }
 
     function updateSelectedCount() {
       const count = checkboxes.filter(function (checkbox) { return checkbox.checked; }).length;
       countLabel.textContent = count + (count === 1 ? " Course selected" : " Courses selected");
+      targetCount.textContent = String(count);
+      const selectedOption = departmentSelect.selectedOptions[0];
+      const hasTarget = Boolean(selectedOption && selectedOption.value);
+      targetSummary.hidden = !hasTarget;
+      targetDepartment.textContent = hasTarget ? selectedTargetText(selectedOption) : "";
     }
 
     function applyLocalSearch() {
@@ -210,12 +221,24 @@
     checkboxes.forEach(function (checkbox) {
       checkbox.addEventListener("change", updateSelectedCount);
     });
+    departmentSelect.addEventListener("change", updateSelectedCount);
     searchField.addEventListener("input", applyLocalSearch);
 
     assignmentForm.addEventListener("submit", function (event) {
-      if (replaceCheckbox.checked && !window.confirm(
-        "Replace existing Exam Department assignments for all selected Courses? This deliberate replacement will be audited."
-      )) {
+      const selectedOption = departmentSelect.selectedOptions[0];
+      if (!selectedOption || !selectedOption.value) {
+        return;
+      }
+      const selectedCount = checkboxes.filter(function (checkbox) { return checkbox.checked; }).length;
+      const replacementMode = replaceCheckbox.checked
+        ? "Replace different existing Exam Department assignments (audited)."
+        : "Keep different existing Exam Department assignments; update unassigned Courses only.";
+      const confirmation =
+        "Responsible lead department:\n" + selectedTargetText(selectedOption) +
+        "\n\nSelected Courses: " + selectedCount +
+        "\nReplacement mode: " + replacementMode +
+        "\n\nProceed with this assignment?";
+      if (!window.confirm(confirmation)) {
         event.preventDefault();
       }
     });

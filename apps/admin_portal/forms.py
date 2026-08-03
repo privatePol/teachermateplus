@@ -22,7 +22,7 @@ from apps.academics.models import (
     Term,
 )
 from apps.academics.services import FacultyAssignmentSafetyService
-from apps.admin_portal.course_exam_department import exam_department_label
+from apps.admin_portal.course_exam_department import configure_exam_department_field
 from apps.core.services.settings import SystemSettingService
 from apps.core.services.features import FeatureSettingsService
 from apps.enrollment.services import EnrollmentService
@@ -1078,10 +1078,10 @@ class CourseForm(forms.ModelForm):
             exam_department_queryset = (
                 exam_department_queryset | current_exam_department_queryset
             )
-        exam_department_field.queryset = exam_department_queryset.select_related(
-            "campus"
-        ).order_by("campus__name", "name", "code", "id")
-        exam_department_field.label_from_instance = exam_department_label
+        configure_exam_department_field(
+            exam_department_field,
+            exam_department_queryset,
+        )
         selected_campus_id = None
         raw_campus_id = (
             self.data.get(self.add_prefix("campus"))
@@ -1197,8 +1197,11 @@ class BulkExamDepartmentAssignmentForm(forms.Form):
     def __init__(self, *args, department_queryset=None, course_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
         if department_queryset is not None:
-            self.fields["department"].queryset = department_queryset
-        self.fields["department"].label_from_instance = exam_department_label
+            configure_exam_department_field(
+                self.fields["department"],
+                department_queryset,
+            )
+        self.fields["department"].widget.attrs["form"] = "bulk-exam-assignment-form"
         if course_queryset is not None:
             self.fields["course_ids"].choices = [
                 (str(course_id), str(course_id))
@@ -1210,6 +1213,24 @@ class BulkExamDepartmentAssignmentForm(forms.Form):
         if len(course_ids) != len(set(course_ids)):
             raise forms.ValidationError("Duplicate Course IDs are not allowed.")
         return [int(course_id) for course_id in course_ids]
+
+
+class ExamDepartmentFilterForm(forms.Form):
+    current_department_id = forms.ModelChoiceField(
+        queryset=Department.objects.none(),
+        required=False,
+        empty_label="Any Department",
+        label="Current Exam Department",
+    )
+
+    def __init__(self, *args, department_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if department_queryset is not None:
+            configure_exam_department_field(
+                self.fields["current_department_id"],
+                department_queryset,
+            )
+        self.fields["current_department_id"].widget.attrs["id"] = "current-department"
 
 
 class SectionForm(forms.ModelForm):

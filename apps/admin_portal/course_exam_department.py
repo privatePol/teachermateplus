@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from django import forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 
@@ -12,9 +13,129 @@ from apps.tenants.models import Department
 from .services import AdminScopeService
 
 
+EXAM_DEPARTMENT_ORDERING = (
+    "campus__code",
+    "campus__name",
+    "code",
+    "name",
+    "pk",
+)
+
+
+def order_exam_departments(queryset):
+    """Apply the shared deterministic ordering for Exam Department choices."""
+    return queryset.order_by(*EXAM_DEPARTMENT_ORDERING)
+
+
+def exam_department_campus_label(department) -> str:
+    """Return the database-backed campus heading for grouped choices."""
+    return f"{department.campus.code} — {department.campus.name}"
+
+
 def exam_department_label(department) -> str:
     """Return the campus-qualified label used for exact exam ownership."""
     return f"{department.code} — {department.name} — {department.campus.code}"
+
+
+class CampusGroupedDepartmentSelect(forms.Select):
+    """Render ordered Department model choices under native campus optgroups."""
+
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(
+            name,
+            value,
+            label,
+            selected,
+            index,
+            subindex=subindex,
+            attrs=attrs,
+        )
+        department = getattr(value, "instance", None)
+        if department is not None:
+            option["attrs"].update(
+                {
+                    "data-campus-code": department.campus.code,
+                    "data-campus-name": department.campus.name,
+                    "data-department-code": department.code,
+                    "data-department-name": department.name,
+                }
+            )
+        return option
+
+    def optgroups(self, name, value, attrs=None):
+        groups = []
+        current_group_key = None
+        current_subgroup = None
+        has_selected = False
+
+        for option_value, option_label in self.choices:
+            if option_value is None:
+                option_value = ""
+            department = getattr(option_value, "instance", None)
+            selected = (not has_selected or self.allow_multiple_selected) and str(
+                option_value
+            ) in value
+            has_selected |= selected
+
+            if department is None:
+                group_index = len(groups)
+                groups.append(
+                    (
+                        None,
+                        [
+                            self.create_option(
+                                name,
+                                option_value,
+                                option_label,
+                                selected,
+                                group_index,
+                                attrs=attrs,
+                            )
+                        ],
+                        group_index,
+                    )
+                )
+                current_group_key = None
+                current_subgroup = None
+                continue
+
+            group_key = department.campus_id
+            if group_key != current_group_key:
+                current_group_key = group_key
+                current_subgroup = []
+                groups.append(
+                    (
+                        exam_department_campus_label(department),
+                        current_subgroup,
+                        len(groups),
+                    )
+                )
+            group_index = groups[-1][2]
+            current_subgroup.append(
+                self.create_option(
+                    name,
+                    option_value,
+                    option_label,
+                    selected,
+                    group_index,
+                    subindex=len(current_subgroup),
+                    attrs=attrs,
+                )
+            )
+        return groups
+
+
+def configure_exam_department_field(field, queryset):
+    """Apply shared ordering, labels, grouping, and readable native sizing."""
+    field.widget = CampusGroupedDepartmentSelect(
+        attrs={
+            **field.widget.attrs,
+            "style": "min-height: 3rem; font-size: 1rem;",
+        }
+    )
+    field.label_from_instance = exam_department_label
+    field.queryset = order_exam_departments(queryset.select_related("campus"))
+    return field
 
 
 @dataclass(frozen=True)

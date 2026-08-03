@@ -376,6 +376,157 @@ class BulkExamDepartmentAssignmentTests(TestCase):
                 f"BSBA — Business Administration — {department.campus.code}",
             )
 
+    def test_department_selectors_share_scoped_deterministic_ordering_and_empty_choices(self):
+        campus_01 = Campus.objects.create(
+            tenant=self.tenant, code="NCBA-01", name="Alpha Campus"
+        )
+        campus_02 = Campus.objects.create(
+            tenant=self.tenant, code="NCBA-02", name="Beta Campus"
+        )
+        departments = [
+            Department.objects.create(
+                tenant=self.tenant,
+                campus=campus_01,
+                code="ZZZ",
+                name="Last Department",
+            ),
+            Department.objects.create(
+                tenant=self.tenant,
+                campus=campus_01,
+                code="AAA",
+                name="First Department",
+            ),
+            Department.objects.create(
+                tenant=self.tenant,
+                campus=campus_01,
+                code="SHARED",
+                name="Shared Department",
+            ),
+            Department.objects.create(
+                tenant=self.tenant,
+                campus=campus_02,
+                code="ZZZ",
+                name="Last Department",
+            ),
+            Department.objects.create(
+                tenant=self.tenant,
+                campus=campus_02,
+                code="AAA",
+                name="First Department",
+            ),
+            Department.objects.create(
+                tenant=self.tenant,
+                campus=campus_02,
+                code="SHARED",
+                name="Shared Department",
+            ),
+        ]
+
+        response = self.client.get(self.url)
+        responsible_field = response.context["form"].fields["department"]
+        responsible_queryset = responsible_field.queryset
+        current_queryset = response.context["department_options"]
+        current_field = response.context["department_filter_form"].fields[
+            "current_department_id"
+        ]
+        responsible_ids = list(responsible_queryset.values_list("id", flat=True))
+        current_ids = list(current_queryset.values_list("id", flat=True))
+        created_ids = {department.id for department in departments}
+
+        self.assertEqual(
+            responsible_queryset.query.order_by,
+            ("campus__code", "campus__name", "code", "name", "pk"),
+        )
+        self.assertEqual(current_queryset.query.order_by, responsible_queryset.query.order_by)
+        self.assertEqual(current_ids, responsible_ids)
+
+        def grouped_signature(field):
+            return [
+                (
+                    group_name,
+                    [
+                        (str(option["value"]), str(option["label"]))
+                        for option in options
+                    ],
+                )
+                for group_name, options, _index in field.widget.optgroups(
+                    field.widget.attrs.get("name", "department"),
+                    [""],
+                )
+            ]
+
+        responsible_groups = grouped_signature(responsible_field)
+        current_groups = grouped_signature(current_field)
+        self.assertIsNone(responsible_groups[0][0])
+        self.assertEqual(responsible_groups[0][1], [("", "Select a Department")])
+        self.assertIsNone(current_groups[0][0])
+        self.assertEqual(current_groups[0][1], [("", "Any Department")])
+        self.assertEqual(responsible_groups[1:], current_groups[1:])
+        self.assertEqual(
+            [group_name for group_name, _options in responsible_groups[1:3]],
+            ["NCBA-01 — Alpha Campus", "NCBA-02 — Beta Campus"],
+        )
+        self.assertEqual(
+            [department_id for department_id in responsible_ids if department_id in created_ids],
+            [
+                departments[1].id,
+                departments[2].id,
+                departments[0].id,
+                departments[4].id,
+                departments[5].id,
+                departments[3].id,
+            ],
+        )
+        self.assertNotIn(self.inactive_department.id, responsible_ids)
+        self.assertNotIn(self.other_department.id, responsible_ids)
+        self.assertIn(departments[2].id, responsible_ids)
+        self.assertIn(departments[5].id, responsible_ids)
+        self.assertNotEqual(departments[2].id, departments[5].id)
+
+        course_form = CourseForm(
+            tenant_queryset=Tenant.objects.filter(id=self.tenant.id),
+            campus_queryset=Campus.objects.filter(tenant=self.tenant),
+            department_queryset=Department.objects.filter(
+                tenant=self.tenant,
+                is_active=True,
+            ),
+        )
+        course_groups = grouped_signature(course_form.fields["exam_department"])
+        self.assertEqual(course_groups[1:], responsible_groups[1:])
+
+        responsible_choices = list(responsible_field.choices)
+        self.assertEqual(str(responsible_choices[0][0]), "")
+        self.assertEqual(responsible_choices[0][1], "Select a Department")
+
+        content = response.content.decode()
+        responsible_start = content.index('id="id_department"')
+        responsible_html = content[
+            responsible_start : content.index("</select>", responsible_start)
+        ]
+        current_start = content.index('id="current-department"')
+        current_html = content[
+            current_start : content.index("</select>", current_start)
+        ]
+        self.assertLess(
+            responsible_html.index('<option value=""'),
+            responsible_html.index(f'<option value="{responsible_ids[0]}"'),
+        )
+        self.assertLess(
+            current_html.index('<option value=""'),
+            current_html.index(f'<option value="{current_ids[0]}"'),
+        )
+        self.assertIn('<optgroup label="NCBA-01 — Alpha Campus">', responsible_html)
+        self.assertIn('<optgroup label="NCBA-02 — Beta Campus">', current_html)
+        self.assertIn(
+            f'value="{departments[2].id}" data-campus-code="NCBA-01"',
+            responsible_html,
+        )
+        self.assertContains(response, 'id="selected-target-summary"')
+        self.assertContains(response, "Responsible lead department:")
+        self.assertContains(response, "Selected Courses:")
+        self.assertContains(response, "Replacement mode:")
+        self.assertIn('<optgroup label="NCBA-01 — Alpha Campus">', str(course_form["exam_department"]))
+
     def test_course_create_and_edit_exam_department_choices_use_exact_campus_labels(self):
         department_queryset = Department.objects.filter(
             tenant=self.tenant,

@@ -47,6 +47,7 @@ from apps.admin_portal.forms import (
     CorrectionPetitionWindowPolicyForm,
     CourseForm,
     BulkExamDepartmentAssignmentForm,
+    ExamDepartmentFilterForm,
     CourseOfferingForm,
     CourseBaseValueOverrideForm,
     BulkCourseTemplateAssignmentForm,
@@ -115,6 +116,7 @@ from apps.admin_portal.services import AdminScopeService, model_before_after
 from apps.admin_portal.course_exam_department import (
     BulkExamDepartmentAssignmentService,
     exam_department_label,
+    order_exam_departments,
 )
 from apps.admin_portal.submission_readiness import GradeSubmissionReadinessService
 from apps.admin_portal.tenant_data_export import TenantDataExportChallengeService, TenantSQLiteExportService
@@ -484,7 +486,7 @@ def _style_form(form):
             continue
         if getattr(widget, "input_type", None) == "checkbox":
             widget.attrs["class"] = "form-check-input"
-        elif widget_name in {"Select", "SelectMultiple"}:
+        elif isinstance(widget, django_forms.Select):
             widget.attrs["class"] = "form-select"
         else:
             widget.attrs["class"] = "form-control"
@@ -8382,11 +8384,10 @@ def course_list_view(request):
 @permission_required("courses.update")
 def bulk_exam_department_assignment_view(request):
     tenant_id = getattr(request, "scope", {}).get("tenant_id")
-    department_queryset = (
+    department_queryset = order_exam_departments(
         AdminScopeService.active_scoped_departments(request)
         .filter(tenant_id=tenant_id)
         .select_related("campus")
-        .order_by("campus__code", "code", "name", "id")
     )
     authorized_course_queryset = (
         AdminScopeService.active_scoped_courses(request)
@@ -8447,6 +8448,12 @@ def bulk_exam_department_assignment_view(request):
     else:
         current_department_id = ""
 
+    department_filter_form = ExamDepartmentFilterForm(
+        department_queryset=department_queryset,
+        initial={"current_department_id": current_department_id},
+    )
+    _style_form(department_filter_form)
+
     if request.method == "POST" and form.is_valid():
         try:
             result = BulkExamDepartmentAssignmentService.assign(
@@ -8506,6 +8513,7 @@ def bulk_exam_department_assignment_view(request):
         "assignment_status": assignment_status,
         "current_department_id": current_department_id,
         "department_options": department_queryset,
+        "department_filter_form": department_filter_form,
         "course_rows": course_rows,
         "filtered_course_count": len(course_rows),
     }
