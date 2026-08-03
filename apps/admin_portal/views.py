@@ -46,6 +46,7 @@ from apps.admin_portal.forms import (
     CorrectionGovernanceSettingForm,
     CorrectionPetitionWindowPolicyForm,
     CourseForm,
+    BulkExamDepartmentAssignmentForm,
     CourseOfferingForm,
     CourseBaseValueOverrideForm,
     BulkCourseTemplateAssignmentForm,
@@ -111,6 +112,10 @@ from apps.interventions.services import (
     AcademicInterventionMonitoringService,
 )
 from apps.admin_portal.services import AdminScopeService, model_before_after
+from apps.admin_portal.course_exam_department import (
+    BulkExamDepartmentAssignmentService,
+    exam_department_label,
+)
 from apps.admin_portal.submission_readiness import GradeSubmissionReadinessService
 from apps.admin_portal.tenant_data_export import TenantDataExportChallengeService, TenantSQLiteExportService
 from apps.admin_portal.grade_distribution import GradeDistributionMonitorService
@@ -8371,6 +8376,145 @@ def course_list_view(request):
     context.update(_scope_context(request))
     context["departments"] = AdminScopeService.active_scoped_departments(request)
     return render(request, "admin_portal/academics/course_list.html", context)
+
+
+@portal_required("ADMIN")
+@permission_required("courses.update")
+def bulk_exam_department_assignment_view(request):
+    tenant_id = getattr(request, "scope", {}).get("tenant_id")
+    department_queryset = (
+        AdminScopeService.active_scoped_departments(request)
+        .filter(tenant_id=tenant_id)
+        .select_related("campus")
+        .order_by("campus__code", "code", "name", "id")
+    )
+    authorized_course_queryset = (
+        AdminScopeService.active_scoped_courses(request)
+        .filter(tenant_id=tenant_id)
+        .order_by("code", "title", "id")
+    )
+    form = BulkExamDepartmentAssignmentForm(
+        request.POST or None,
+        department_queryset=department_queryset,
+        course_queryset=authorized_course_queryset,
+    )
+    _style_form(form)
+
+    q = (request.POST.get("q") if request.method == "POST" else request.GET.get("q", "")) or ""
+    q = q.strip()[:200]
+    assignment_status = (
+        request.POST.get("assignment_status")
+        if request.method == "POST"
+        else request.GET.get("assignment_status", "unassigned")
+    )
+    if assignment_status not in {"unassigned", "assigned", "all"}:
+        assignment_status = "unassigned"
+    current_department_id = (
+        request.POST.get("current_department_id")
+        if request.method == "POST"
+        else request.GET.get("current_department_id", "")
+    ) or ""
+
+    filtered_courses = authorized_course_queryset.select_related(
+        "exam_department", "exam_department__campus"
+    )
+    if q:
+        filtered_courses = filtered_courses.filter(
+            Q(code__icontains=q) | Q(title__icontains=q)
+        )
+    if assignment_status == "unassigned":
+        filtered_courses = filtered_courses.filter(exam_department__isnull=True)
+    elif assignment_status == "assigned":
+        filtered_courses = filtered_courses.filter(exam_department__isnull=False)
+
+    selected_current_department = None
+    try:
+        parsed_current_department_id = int(current_department_id)
+    except (TypeError, ValueError):
+        parsed_current_department_id = None
+    if parsed_current_department_id:
+        try:
+            selected_current_department = department_queryset.get(
+                id=parsed_current_department_id
+            )
+        except Department.DoesNotExist:
+            selected_current_department = None
+    if selected_current_department:
+        filtered_courses = filtered_courses.filter(
+            exam_department_id=selected_current_department.id
+        )
+        current_department_id = str(selected_current_department.id)
+    else:
+        current_department_id = ""
+
+    if request.method == "POST" and form.is_valid():
+        try:
+            result = BulkExamDepartmentAssignmentService.assign(
+                request=request,
+                department_id=form.cleaned_data["department"].id,
+                course_ids=form.cleaned_data["course_ids"],
+                replace_existing=form.cleaned_data["replace_existing"],
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            messages.success(
+                request,
+                (
+                    f"Responsible Exam Department: {exam_department_label(result.department)}. "
+                    f"Updated: {result.updated_count}. "
+                    f"Unchanged (already assigned to the same Department): {result.unchanged_same_count}. "
+                    f"Skipped (replacement not authorized): {result.skipped_existing_count}. "
+                    f"Total selected: {result.total_selected}."
+                ),
+            )
+            query_params = {
+                "assignment_status": assignment_status,
+            }
+            if q:
+                query_params["q"] = q
+            if current_department_id:
+                query_params["current_department_id"] = current_department_id
+            return redirect(
+                f"{reverse('admin_portal:bulk_exam_department_assignment')}?{urlencode(query_params)}"
+            )
+
+    selected_course_ids = (
+        set(request.POST.getlist("course_ids")) if request.method == "POST" else set()
+    )
+    course_rows = []
+    for course in filtered_courses:
+        course_rows.append(
+            {
+                "course": course,
+                "current_department_label": (
+                    exam_department_label(course.exam_department)
+                    if course.exam_department_id
+                    else "Unassigned"
+                ),
+                "assignment_state": (
+                    "Assigned" if course.exam_department_id else "Unassigned"
+                ),
+                "selected": str(course.id) in selected_course_ids,
+            }
+        )
+
+    context = {
+        "form": form,
+        "title": "Bulk Assign Exam Departments",
+        "q": q,
+        "assignment_status": assignment_status,
+        "current_department_id": current_department_id,
+        "department_options": department_queryset,
+        "course_rows": course_rows,
+        "filtered_course_count": len(course_rows),
+    }
+    context.update(_scope_context(request))
+    return render(
+        request,
+        "admin_portal/academics/bulk_exam_department_assignment.html",
+        context,
+    )
 
 
 @portal_required("ADMIN")
