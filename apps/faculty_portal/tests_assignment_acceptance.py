@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from html.parser import HTMLParser
 from io import BytesIO
 
 from django.conf import settings
@@ -60,6 +61,58 @@ from apps.grading.services import (
     TemplateGovernanceWorkflowService,
 )
 from apps.tenants.models import Campus, Department, Program, SystemSetting, Tenant
+
+
+class _TableRowCellParser(HTMLParser):
+    def __init__(self, target_table_class):
+        super().__init__(convert_charrefs=True)
+        self.target_table_class = target_table_class
+        self.in_target_table = False
+        self.table_depth = 0
+        self.current_row = None
+        self.current_cell = None
+        self.rows = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            if self.in_target_table:
+                self.table_depth += 1
+            else:
+                classes = dict(attrs).get("class", "").split()
+                if self.target_table_class in classes:
+                    self.in_target_table = True
+                    self.table_depth = 1
+            return
+        if not self.in_target_table:
+            return
+        if tag == "tr":
+            self.current_row = []
+        elif tag in {"td", "th"} and self.current_row is not None:
+            self.current_cell = []
+
+    def handle_data(self, data):
+        if self.current_cell is not None:
+            self.current_cell.append(data)
+
+    def handle_endtag(self, tag):
+        if not self.in_target_table:
+            return
+        if tag in {"td", "th"} and self.current_cell is not None:
+            self.current_row.append(" ".join("".join(self.current_cell).split()))
+            self.current_cell = None
+        elif tag == "tr" and self.current_row is not None:
+            self.rows.append(self.current_row)
+            self.current_row = None
+        elif tag == "table":
+            self.table_depth -= 1
+            if self.table_depth == 0:
+                self.in_target_table = False
+
+
+def _table_rows(response, target_table_class):
+    parser = _TableRowCellParser(target_table_class)
+    parser.feed(response.content.decode())
+    return parser.rows
 
 
 class FacultyAssignmentAcceptanceTests(TestCase):
@@ -708,6 +761,122 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             "unused_subcomponent": unused_subcomponent,
             "unused_detail": unused_detail,
             "activities": {"q1": q1, "q2": q2, "r1": r1, "a1": a1, "pex": pex},
+        }
+
+    def _create_periodic_print_scope_fixture(
+        self,
+        *,
+        tenant,
+        campus,
+        academic_year,
+        term,
+        template,
+        period,
+        code,
+    ):
+        department = Department.objects.create(
+            tenant=tenant,
+            campus=campus,
+            code=f"{code}-DEPT",
+            name=f"{code} Department",
+        )
+        program = Program.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            code=f"{code}-PROGRAM",
+            name=f"{code} Program",
+        )
+        course = Course.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            code=f"{code}-COURSE",
+            title=f"{code} Confidential Course",
+        )
+        section = Section.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            code=f"{code}-SECTION",
+            name=f"{code} Section",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            academic_year=academic_year,
+            term=term,
+            course=course,
+            section=section,
+        )
+        CourseTemplateAssignment.objects.create(
+            course=course,
+            grading_template=template,
+            effective_from_term=term,
+        )
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=Role.objects.get(code="FACULTY"),
+            tenant=tenant,
+            campus=campus,
+            department=department,
+        )
+        FacultyAssignment.objects.create(
+            tenant=tenant,
+            campus=campus,
+            offering=offering,
+            faculty_user=self.faculty_user,
+            is_primary=True,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+        )
+        student = Student.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            student_no=f"{code}-STUDENT",
+            last_name=f"{code}Student",
+            first_name="Scoped",
+        )
+        Enrollment.objects.create(
+            tenant=tenant,
+            campus=campus,
+            academic_year=academic_year,
+            term=term,
+            student=student,
+            course_offering=offering,
+            enrollment_status=Enrollment.Status.ACTIVE,
+            encoded_by_user=self.faculty_user,
+            encoded_via_portal=Enrollment.SourcePortal.ADMIN,
+            is_active=True,
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=tenant,
+            campus=campus,
+            offering=offering,
+            template_period=period,
+            student=student,
+            period_grade=Decimal("88.00"),
+        )
+        GradeSubmission.objects.create(
+            tenant=tenant,
+            campus=campus,
+            offering=offering,
+            template_period=period,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        return {
+            "course": course,
+            "offering": offering,
+            "student": student,
+            "period": period,
         }
 
     def _complete_final_clearance_for_offering(self, *, offering=None, student=None):
@@ -2037,7 +2206,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertNotContains(response, "OTHER-COURSE")
         self.assertNotContains(response, "Cross Tenant Activity")
 
-    def test_period_summary_print_sheet_is_pinnacle_ready(self):
+    def test_periodic_grade_print_route_and_manual_print_contract(self):
         self._accept_assignment()
         self._create_active_student(
             student_no="2025-PIN-001",
@@ -2053,7 +2222,7 @@ class FacultyAssignmentAcceptanceTests(TestCase):
             student=student,
             period_grade=Decimal("88.00"),
         )
-        GradeSubmission.objects.create(
+        submission = GradeSubmission.objects.create(
             tenant=self.tenant,
             campus=self.campus,
             offering=self.offering,
@@ -2073,16 +2242,793 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Print Periodic Grades")
-        self.assertContains(response, "logos/ncba-logo.png")
-        self.assertContains(response, "Summary of Periodic Grades")
-        self.assertContains(response, "For encoding of final periodic grades into the Pinnacle system")
-        self.assertContains(response, "NATIONAL COLLEGE OF BUSINESS AND ARTS")
-        self.assertContains(response, "Grading Period:")
-        self.assertContains(response, "Semester / Term:")
-        self.assertContains(response, "Faculty:")
-        self.assertContains(response, "Course Code:")
-        self.assertContains(response, "Course Title:")
-        self.assertContains(response, '<th class="print-grade print-period-grade">PRELIM GRADE</th>', html=True)
+        print_url = reverse(
+            "faculty_portal:period_summary_print",
+            kwargs={"offering_id": self.offering.id, "period_id": self.prelim.id},
+        )
+        self.assertContains(response, f'href="{print_url}"', html=False)
+        self.assertContains(response, 'target="_blank"', html=False)
+        self.assertContains(response, 'rel="noopener"', html=False)
+
+        print_response = self.client.get(print_url)
+
+        self.assertEqual(print_response.status_code, 200)
+        self.assertEqual(print_response["Content-Type"].split(";")[0], "text/html")
+        self.assertContains(print_response, "logos/ncba-logo.png")
+        self.assertContains(print_response, "Summary of Periodic Grades")
+        self.assertContains(print_response, "For encoding of final periodic grades into the Pinnacle system")
+        self.assertContains(print_response, "NATIONAL COLLEGE OF BUSINESS AND ARTS")
+        self.assertContains(print_response, "Grading Period:")
+        self.assertContains(print_response, "Semester / Term:")
+        self.assertContains(print_response, "Faculty:")
+        self.assertContains(print_response, "Course Code:")
+        self.assertContains(print_response, "Course Title:")
+        self.assertContains(print_response, "PRELIM GRADE")
+        self.assertContains(print_response, "PRELIM EXAM")
+        self.assertContains(print_response, 'onclick="window.print();"', html=False)
+        self.assertNotContains(print_response, "window.onload")
+        self.assertNotContains(print_response, 'window.addEventListener("load"')
+        self.assertContains(print_response, "size: legal landscape;")
+        self.assertContains(print_response, ".screen-only")
+        self.assertContains(print_response, "display: table-header-group;")
+        self.assertContains(print_response, "page-break-inside: avoid;")
+
+        submission_updated_at = submission.updated_at
+        grade_count = StudentPeriodGrade.objects.count()
+        score_count = StudentActivityScore.objects.count()
+        post_response = self.client.post(print_url)
+
+        self.assertEqual(post_response.status_code, 405)
+        submission.refresh_from_db()
+        self.assertEqual(submission.updated_at, submission_updated_at)
+        self.assertEqual(StudentPeriodGrade.objects.count(), grade_count)
+        self.assertEqual(StudentActivityScore.objects.count(), score_count)
+
+    def test_periodic_grade_print_enforces_same_user_active_tenant_scope(self):
+        self._accept_assignment()
+        other_tenant = Tenant.objects.create(code="PRINT-TENANT-B", name="Print Tenant B")
+        other_campus = Campus.objects.create(
+            tenant=other_tenant,
+            code="PRINT-TENANT-B-CAMPUS",
+            name="Print Tenant B Campus",
+        )
+        other_year = AcademicYear.objects.create(
+            tenant=other_tenant,
+            code="2025-2026",
+            name="AY 2025-2026",
+            start_date=date(2025, 6, 1),
+            end_date=date(2026, 5, 31),
+        )
+        other_term = Term.objects.create(
+            tenant=other_tenant,
+            academic_year=other_year,
+            code="1ST",
+            name="First Term",
+            sequence_no=1,
+            start_date=date(2025, 6, 1),
+            end_date=date(2025, 10, 31),
+        )
+        other_template = GradingTemplate.objects.create(
+            tenant=other_tenant,
+            code="PRINT-TENANT-B-TEMPLATE",
+            name="Print Tenant B Template",
+            is_published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+            default_base_value=50,
+        )
+        other_period = GradingTemplatePeriod.objects.create(
+            template=other_template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+        )
+        GradingTemplateComponent.objects.create(
+            template_period=other_period,
+            code="CS",
+            name="Class Standing",
+            weight_percentage=100,
+            sort_order=1,
+        )
+        fixture = self._create_periodic_print_scope_fixture(
+            tenant=other_tenant,
+            campus=other_campus,
+            academic_year=other_year,
+            term=other_term,
+            template=other_template,
+            period=other_period,
+            code="TENANT-B",
+        )
+        print_url = reverse(
+            "faculty_portal:period_summary_print",
+            args=[fixture["offering"].id, fixture["period"].id],
+        )
+        self.client.force_login(self.faculty_user)
+
+        denied_response = self.client.get(
+            print_url,
+            {"scope_tenant_id": self.tenant.id, "scope_campus_id": self.campus.id},
+        )
+
+        self.assertEqual(denied_response.status_code, 404)
+        self.assertNotContains(denied_response, fixture["course"].title, status_code=404)
+        self.assertNotContains(denied_response, fixture["student"].last_name, status_code=404)
+
+        allowed_response = self.client.get(
+            print_url,
+            {"scope_tenant_id": other_tenant.id, "scope_campus_id": other_campus.id},
+        )
+
+        self.assertEqual(allowed_response.status_code, 200)
+        self.assertContains(allowed_response, fixture["course"].title)
+        self.assertContains(allowed_response, fixture["student"].last_name)
+
+    def test_periodic_grade_print_enforces_same_user_active_campus_scope(self):
+        self._accept_assignment()
+        other_campus = Campus.objects.create(
+            tenant=self.tenant,
+            code="PRINT-CAMPUS-B",
+            name="Print Campus B",
+        )
+        fixture = self._create_periodic_print_scope_fixture(
+            tenant=self.tenant,
+            campus=other_campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            template=self.template,
+            period=self.prelim,
+            code="CAMPUS-B",
+        )
+        print_url = reverse(
+            "faculty_portal:period_summary_print",
+            args=[fixture["offering"].id, fixture["period"].id],
+        )
+        self.client.force_login(self.faculty_user)
+
+        denied_response = self.client.get(
+            print_url,
+            {"scope_tenant_id": self.tenant.id, "scope_campus_id": self.campus.id},
+        )
+
+        self.assertEqual(denied_response.status_code, 404)
+        self.assertNotContains(denied_response, fixture["course"].title, status_code=404)
+        self.assertNotContains(denied_response, fixture["student"].last_name, status_code=404)
+
+        allowed_response = self.client.get(
+            print_url,
+            {"scope_tenant_id": self.tenant.id, "scope_campus_id": other_campus.id},
+        )
+
+        self.assertEqual(allowed_response.status_code, 200)
+        self.assertContains(allowed_response, fixture["course"].title)
+        self.assertContains(allowed_response, fixture["student"].last_name)
+
+    def test_periodic_grade_print_item_states_and_averages_match_summary_rows(self):
+        self._accept_assignment()
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        exam = GradingTemplateComponent.objects.get(template_period=self.prelim, code="EXAM")
+        exam.is_exam_component = True
+        exam.save(update_fields=["is_exam_component", "updated_at"])
+        quizzes = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="PRINT_QUIZZES",
+            name="Quizzes",
+            weight_percentage=Decimal("50.00"),
+            sort_order=1,
+        )
+        participation = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="PRINT_PARTICIPATION",
+            name="Participation/Output",
+            weight_percentage=Decimal("50.00"),
+            sort_order=2,
+        )
+
+        def create_activity(*, subcomponent, title):
+            return GradeActivity.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=self.prelim,
+                template_component=class_standing,
+                template_subcomponent=subcomponent,
+                title=title,
+                total_score=Decimal("10.00"),
+            )
+
+        participation_activities = [
+            create_activity(subcomponent=participation, title=title)
+            for title in ("PO1 Regular", "PO2 Zero", "PO3 Missing", "PO4 Excused")
+        ]
+        quiz_activities = [
+            create_activity(subcomponent=quizzes, title=title)
+            for title in ("Q1 Regular", "Q2 Zero", "Q3 Missing", "Q4 Excused")
+        ]
+
+        student_specs = [
+            ("2025-PRINT-PO-EXEMPT", "POExcused", "Only", Decimal("12.50")),
+            ("2025-PRINT-QUIZ-EXEMPT", "QuizExcused", "Only", Decimal("15.00")),
+            ("2025-PRINT-REGULAR", "Regular", "Only", Decimal("85.00")),
+            ("2025-PRINT-ZERO", "Zero", "Only", Decimal("0.00")),
+            ("2025-PRINT-MISSING", "Missing", "Only", None),
+            ("2025-PRINT-MIXED", "Mixed", "States", Decimal("40.00")),
+        ]
+        students = {}
+        for student_no, last_name, first_name, class_standing_grade in student_specs:
+            student = self._create_active_student(
+                student_no=student_no,
+                last_name=last_name,
+                first_name=first_name,
+            )
+            students[student_no] = student
+            StudentPeriodGrade.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=self.prelim,
+                student=student,
+                class_standing_grade=class_standing_grade,
+                period_grade=Decimal("75.00"),
+            )
+
+        def create_score(student_no, activity, *, raw, computed, is_excused=False):
+            StudentActivityScore.objects.create(
+                activity=activity,
+                student=students[student_no],
+                raw_score=Decimal(raw),
+                computed_score=Decimal(computed),
+                is_excused=is_excused,
+            )
+
+        create_score("2025-PRINT-PO-EXEMPT", participation_activities[3], raw="0", computed="25", is_excused=True)
+        create_score("2025-PRINT-QUIZ-EXEMPT", quiz_activities[3], raw="0", computed="30", is_excused=True)
+        create_score("2025-PRINT-REGULAR", participation_activities[0], raw="6", computed="80")
+        create_score("2025-PRINT-REGULAR", quiz_activities[0], raw="9", computed="90")
+        create_score("2025-PRINT-ZERO", participation_activities[1], raw="0", computed="0")
+        create_score("2025-PRINT-ZERO", quiz_activities[1], raw="0", computed="0")
+        create_score("2025-PRINT-MIXED", participation_activities[0], raw="6", computed="80")
+        create_score("2025-PRINT-MIXED", participation_activities[1], raw="0", computed="0")
+        create_score("2025-PRINT-MIXED", participation_activities[3], raw="0", computed="40", is_excused=True)
+        create_score("2025-PRINT-MIXED", quiz_activities[0], raw="9", computed="90")
+        create_score("2025-PRINT-MIXED", quiz_activities[1], raw="0", computed="0")
+        create_score("2025-PRINT-MIXED", quiz_activities[3], raw="0", computed="30", is_excused=True)
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_login(self.faculty_user)
+
+        print_response = self.client.get(
+            reverse("faculty_portal:period_summary_print", args=[self.offering.id, self.prelim.id])
+        )
+        summary_response = self.client.get(
+            reverse("faculty_portal:period_summary", args=[self.offering.id, self.prelim.id])
+        )
+
+        self.assertEqual(print_response.status_code, 200)
+        self.assertEqual(summary_response.status_code, 200)
+        missing_values = ["MISSING", "MISSING", "MISSING", "MISSING"]
+        expectations = {
+            "POExcused, Only": {
+                "student_no": "2025-PRINT-PO-EXEMPT",
+                "participation_values": ["MISSING", "MISSING", "MISSING", "EXEMPT"],
+                "participation_average": "25.00",
+                "quiz_values": missing_values,
+                "quiz_average": "\u2014",
+                "class_standing_average": "12.50",
+            },
+            "QuizExcused, Only": {
+                "student_no": "2025-PRINT-QUIZ-EXEMPT",
+                "participation_values": missing_values,
+                "participation_average": "\u2014",
+                "quiz_values": ["MISSING", "MISSING", "MISSING", "EXEMPT"],
+                "quiz_average": "30.00",
+                "class_standing_average": "15.00",
+            },
+            "Regular, Only": {
+                "student_no": "2025-PRINT-REGULAR",
+                "participation_values": ["6.00/80.00", "MISSING", "MISSING", "MISSING"],
+                "participation_average": "80.00",
+                "quiz_values": ["9.00/90.00", "MISSING", "MISSING", "MISSING"],
+                "quiz_average": "90.00",
+                "class_standing_average": "85.00",
+            },
+            "Zero, Only": {
+                "student_no": "2025-PRINT-ZERO",
+                "participation_values": ["MISSING", "0.00/0.00", "MISSING", "MISSING"],
+                "participation_average": "0.00",
+                "quiz_values": ["MISSING", "0.00/0.00", "MISSING", "MISSING"],
+                "quiz_average": "0.00",
+                "class_standing_average": "0.00",
+            },
+            "Missing, Only": {
+                "student_no": "2025-PRINT-MISSING",
+                "participation_values": missing_values,
+                "participation_average": "\u2014",
+                "quiz_values": missing_values,
+                "quiz_average": "\u2014",
+                "class_standing_average": "\u2014",
+            },
+            "Mixed, States": {
+                "student_no": "2025-PRINT-MIXED",
+                "participation_values": ["6.00/80.00", "0.00/0.00", "MISSING", "EXEMPT"],
+                "participation_average": "40.00",
+                "quiz_values": ["9.00/90.00", "0.00/0.00", "MISSING", "EXEMPT"],
+                "quiz_average": "40.00",
+                "class_standing_average": "40.00",
+            },
+        }
+        print_rows = {row["student_name"]: row for row in print_response.context["report"]["rows"]}
+        rendered_print_rows = {
+            row[1]: row
+            for row in _table_rows(print_response, "periodic-grade-table")
+            if len(row) > 1 and row[1] in expectations
+        }
+        summary_rows = {
+            row["student"].student_no: row
+            for row in summary_response.context["rows"]
+        }
+        summary_layout = summary_response.context["summary_layout"]
+
+        def summary_display(value):
+            return "\u2014" if value is None else format(Decimal(value).quantize(Decimal("0.01")), "f")
+
+        for student_name, expected in expectations.items():
+            with self.subTest(student=student_name):
+                print_row = print_rows[student_name]
+                self.assertEqual(print_row["participation_values"], expected["participation_values"])
+                self.assertEqual(print_row["participation_average"], expected["participation_average"])
+                self.assertEqual(print_row["quiz_values"], expected["quiz_values"])
+                self.assertEqual(print_row["quiz_average"], expected["quiz_average"])
+                self.assertEqual(print_row["class_standing_average"], expected["class_standing_average"])
+
+                rendered_cells = rendered_print_rows[student_name]
+                self.assertEqual(rendered_cells[3:7], expected["participation_values"])
+                self.assertEqual(rendered_cells[7], expected["participation_average"])
+                self.assertEqual(rendered_cells[8:12], expected["quiz_values"])
+                self.assertEqual(rendered_cells[12], expected["quiz_average"])
+                self.assertEqual(rendered_cells[13], expected["class_standing_average"])
+
+                summary_row = summary_rows[expected["student_no"]]
+                summary_block = summary_row["class_standing_blocks"][0]
+                summary_averages = {}
+                for section_layout, section_values in zip(
+                    summary_layout["class_standing_blocks"][0]["sections"],
+                    summary_block["sections"],
+                ):
+                    summary_averages[section_layout["color_class"]] = section_values["average"]
+                self.assertEqual(
+                    summary_display(summary_averages.get("summary-group-participation")),
+                    expected["participation_average"],
+                )
+                self.assertEqual(
+                    summary_display(summary_averages.get("summary-group-quizzes")),
+                    expected["quiz_average"],
+                )
+                self.assertEqual(
+                    summary_display(summary_block["total"]),
+                    expected["class_standing_average"],
+                )
+
+    def test_periodic_grade_print_empty_roster_uses_dynamic_total_columns(self):
+        self._accept_assignment()
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        participation = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="EMPTY_PO",
+            name="Participation/Output",
+            weight_percentage=Decimal("50.00"),
+            sort_order=1,
+        )
+        quizzes = GradingTemplateSubcomponent.objects.create(
+            template_component=class_standing,
+            code="EMPTY_QUIZZES",
+            name="Quizzes",
+            weight_percentage=Decimal("50.00"),
+            sort_order=2,
+        )
+        print_url = reverse("faculty_portal:period_summary_print", args=[self.offering.id, self.prelim.id])
+        self.client.force_login(self.faculty_user)
+
+        def assert_empty_row(*, total_columns, participation_colspan, quiz_colspan):
+            response = self.client.get(print_url)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.context["report"]["rows"], [])
+            self.assertEqual(response.context["report"]["total_columns"], total_columns)
+            self.assertEqual(response.context["report"]["participation_colspan"], participation_colspan)
+            self.assertEqual(response.context["report"]["quiz_colspan"], quiz_colspan)
+            self.assertContains(
+                response,
+                f'<td colspan="{total_columns}" class="text-center py-3">'
+                "No applicable enrollment rows are available.</td>",
+                html=True,
+            )
+
+        assert_empty_row(total_columns=7, participation_colspan=1, quiz_colspan=1)
+        po_activities = [
+            GradeActivity.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=self.prelim,
+                template_component=class_standing,
+                template_subcomponent=participation,
+                title=f"PO {index}",
+                total_score=Decimal("10.00"),
+            )
+            for index in range(1, 3)
+        ]
+        assert_empty_row(total_columns=9, participation_colspan=3, quiz_colspan=1)
+        GradeActivity.objects.filter(id__in=[activity.id for activity in po_activities]).update(is_active=False)
+        quiz_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            template_subcomponent=quizzes,
+            title="Quiz 1",
+            total_score=Decimal("10.00"),
+        )
+        assert_empty_row(total_columns=8, participation_colspan=1, quiz_colspan=2)
+        GradeActivity.objects.filter(id__in=[activity.id for activity in po_activities]).update(is_active=True)
+        assert_empty_row(total_columns=10, participation_colspan=3, quiz_colspan=2)
+        self.assertTrue(GradeActivity.objects.filter(id=quiz_activity.id, is_active=True).exists())
+
+    def test_periodic_grade_print_groups_items_states_order_and_full_roster(self):
+        fixture = self._create_period_activity_grouping_fixture()
+        first_student = Student.objects.get(student_no="2025-GRP-001")
+        second_student = Student.objects.get(student_no="2025-GRP-002")
+        activities = fixture["activities"]
+        StudentActivityScore.objects.filter(activity=activities["q1"], student=first_student).update(
+            computed_score=Decimal("50.00")
+        )
+        StudentActivityScore.objects.filter(activity=activities["q2"], student=first_student).update(
+            computed_score=Decimal("85.00")
+        )
+        StudentActivityScore.objects.create(
+            activity=activities["r1"],
+            student=first_student,
+            raw_score=Decimal("9.00"),
+            computed_score=Decimal("97.50"),
+        )
+        StudentActivityScore.objects.create(
+            activity=activities["a1"],
+            student=first_student,
+            raw_score=Decimal("6.00"),
+            computed_score=Decimal("80.00"),
+            is_active=False,
+        )
+        StudentActivityScore.objects.create(
+            activity=activities["a1"],
+            student=second_student,
+            raw_score=Decimal("0.00"),
+            computed_score=Decimal("0.00"),
+            is_excused=True,
+        )
+        StudentActivityScore.objects.create(
+            activity=activities["pex"],
+            student=first_student,
+            raw_score=Decimal("75.00"),
+            computed_score=Decimal("87.50"),
+        )
+        inactive_activity = GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=activities["r1"].template_component,
+            template_subcomponent=fixture["participation"],
+            template_detail=fixture["recitation"],
+            title="Archived Output",
+            total_score=Decimal("10.00"),
+            is_active=False,
+        )
+        inactive_subcomponent = GradingTemplateSubcomponent.objects.create(
+            template_component=activities["r1"].template_component,
+            code="ARCHIVED_GROUP",
+            name="Archived Group",
+            weight_percentage=Decimal("0.00"),
+            sort_order=99,
+            is_active=False,
+        )
+        GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=activities["r1"].template_component,
+            template_subcomponent=inactive_subcomponent,
+            title="Inactive Hierarchy Item",
+            total_score=Decimal("10.00"),
+        )
+        for student, grade in ((first_student, "88.00"), (second_student, "84.00")):
+            StudentPeriodGrade.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=self.prelim,
+                student=student,
+                class_standing_grade=Decimal("86.00"),
+                exam_grade=Decimal("11.00"),
+                period_grade=Decimal(grade),
+            )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(
+            reverse("faculty_portal:period_summary_print", args=[self.offering.id, self.prelim.id]),
+            {"q": "Grouped One"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["report"]["rows"]), 2)
+        self.assertContains(response, "Grouped, One")
+        self.assertContains(response, "Grouped, Two")
+        self.assertContains(response, "Participation / Output")
+        self.assertContains(response, "Quizzes")
+        self.assertContains(response, "P/O Ave")
+        self.assertContains(response, "Quiz Ave")
+        self.assertContains(response, "CS Ave")
+        self.assertContains(response, "0.00/50.00")
+        self.assertContains(response, "9.00/97.50")
+        self.assertContains(response, "MISSING")
+        self.assertContains(response, "EXEMPT")
+        self.assertContains(response, "87.50")
+        self.assertNotContains(response, "11.00")
+        self.assertNotContains(response, inactive_activity.title)
+        self.assertNotContains(response, "Inactive Hierarchy Item")
+        table_html = response.content.decode().split('<table class="table periodic-grade-table">', 1)[1].split(
+            "</table>", 1
+        )[0]
+        self.assertNotIn("Student Number", table_html)
+        self.assertNotIn("Student No", table_html)
+        self.assertNotIn(">Status<", table_html)
+        self.assertNotIn("Activity Ave", table_html)
+        self.assertNotIn("Assignment Ave", table_html)
+        self.assertLess(table_html.index(">R1<"), table_html.index(">A1<"))
+        self.assertLess(table_html.index(">Q1<"), table_html.index(">Q2<"))
+
+    def test_periodic_grade_print_final_semantics_and_empty_groups(self):
+        self._accept_assignment()
+        student = self._create_active_student(
+            student_no="2025-FINAL-PRINT",
+            last_name="Final",
+            first_name="Semantic",
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.final,
+            student=student,
+            class_standing_grade=Decimal("80.00"),
+            exam_grade=Decimal("33.00"),
+            period_grade=Decimal("82.00"),
+        )
+        StudentFinalGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            student=student,
+            final_grade=Decimal("91.00"),
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.final,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(
+            reverse("faculty_portal:period_summary_print", args=[self.offering.id, self.final.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["report"]["grade_label"], "FINAL GRADE")
+        self.assertEqual(response.context["report"]["exam_label"], "FINAL EXAM")
+        self.assertEqual(response.context["report"]["rows"][0]["official_grade"], "91")
+        self.assertEqual(response.context["report"]["rows"][0]["exam_grade"], "82.00")
+        self.assertNotContains(response, "33.00")
+        self.assertEqual(response.context["report"]["participation_columns"], [])
+        self.assertEqual(response.context["report"]["quiz_columns"], [])
+        self.assertEqual(response.context["report"]["participation_colspan"], 1)
+        self.assertEqual(response.context["report"]["quiz_colspan"], 1)
+        self.assertEqual(response.context["report"]["rows"][0]["participation_average"], "\u2014")
+        self.assertEqual(response.context["report"]["rows"][0]["quiz_average"], "\u2014")
+
+    def test_periodic_grade_print_requires_exact_submitted_lifecycle_and_matching_period(self):
+        self._accept_assignment()
+        self.client.force_login(self.faculty_user)
+        print_url = reverse("faculty_portal:period_summary_print", args=[self.offering.id, self.prelim.id])
+
+        self.assertEqual(self.client.get(print_url).status_code, 403)
+        submission = GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.DRAFT,
+        )
+        self.assertEqual(self.client.get(print_url).status_code, 403)
+        submission.status = GradeSubmission.Status.SUBMITTED
+        submission.submitted_by_user = self.faculty_user
+        submission.submitted_at = timezone.now()
+        submission.save(update_fields=["status", "submitted_by_user", "submitted_at", "updated_at"])
+        self.assertEqual(self.client.get(print_url).status_code, 200)
+        submission.status = GradeSubmission.Status.REOPENED
+        submission.save(update_fields=["status", "updated_at"])
+        self.assertEqual(self.client.get(print_url).status_code, 403)
+        submission.status = GradeSubmission.Status.SUBMITTED
+        submission.save(update_fields=["status", "updated_at"])
+        self.assertEqual(self.client.get(print_url).status_code, 200)
+
+        other_template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="OTHER_PRINT_TEMPLATE",
+            name="Other Print Template",
+            is_published=True,
+            approval_status=GradingTemplate.ApprovalStatus.APPROVED,
+        )
+        other_period = GradingTemplatePeriod.objects.create(
+            template=other_template,
+            code="OTHER",
+            name="Other",
+            sequence_no=1,
+        )
+        mismatched_url = reverse("faculty_portal:period_summary_print", args=[self.offering.id, other_period.id])
+        self.assertEqual(self.client.get(mismatched_url).status_code, 404)
+
+    def test_periodic_grade_print_fails_closed_for_unassigned_faculty_and_missing_permission(self):
+        self._accept_assignment()
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        print_url = reverse("faculty_portal:period_summary_print", args=[self.offering.id, self.prelim.id])
+        other_faculty = User.objects.create_user(
+            username="unassigned_periodic_print",
+            email="unassigned-periodic-print@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(
+            user=other_faculty,
+            role=Role.objects.get(code="FACULTY"),
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        self.client.force_login(other_faculty)
+        self.assertEqual(self.client.get(print_url).status_code, 404)
+
+        other_tenant = Tenant.objects.create(code="OTHER-PRINT", name="Other Print Tenant")
+        other_campus = Campus.objects.create(tenant=other_tenant, code="OTHER-PRINT-CAMPUS", name="Other Campus")
+        cross_tenant_faculty = User.objects.create_user(
+            username="cross_tenant_periodic_print",
+            email="cross-tenant-periodic-print@example.com",
+            password="testpass123",
+            default_tenant=other_tenant,
+            default_campus=other_campus,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(
+            user=cross_tenant_faculty,
+            role=Role.objects.get(code="FACULTY"),
+            tenant=other_tenant,
+            campus=other_campus,
+        )
+        self.client.force_login(cross_tenant_faculty)
+        self.assertEqual(self.client.get(print_url).status_code, 404)
+
+        self.client.force_login(self.faculty_user)
+        faculty_access = Permission.objects.get(code="faculty_portal.access")
+        RolePermission.objects.filter(role__code="FACULTY", permission=faculty_access).delete()
+        self.assertIn(self.client.get(print_url).status_code, {403, 404})
+
+    def test_periodic_grade_print_query_growth_is_bounded_for_students_and_items(self):
+        self._accept_assignment()
+        first_student = self._create_active_student(
+            student_no="2025-PRINT-PERF-001",
+            last_name="PrintPerformance",
+            first_name="One",
+        )
+        class_standing = GradingTemplateComponent.objects.get(template_period=self.prelim, code="CS")
+        GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            template_component=class_standing,
+            title="Output 1",
+            total_score=Decimal("10.00"),
+        )
+        StudentPeriodGrade.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            student=first_student,
+            class_standing_grade=Decimal("90.00"),
+            period_grade=Decimal("90.00"),
+        )
+        GradeSubmission.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.prelim,
+            status=GradeSubmission.Status.SUBMITTED,
+            submitted_by_user=self.faculty_user,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_login(self.faculty_user)
+        print_url = reverse("faculty_portal:period_summary_print", args=[self.offering.id, self.prelim.id])
+        self.client.get(print_url)
+        with CaptureQueriesContext(connection) as one_student_context:
+            self.assertEqual(self.client.get(print_url).status_code, 200)
+        for index in range(2, 17):
+            self._create_active_student(
+                student_no=f"2025-PRINT-PERF-{index:03d}",
+                last_name=f"PrintPerformance{index:03d}",
+                first_name="Student",
+            )
+        with CaptureQueriesContext(connection) as many_students_context:
+            many_students_response = self.client.get(print_url)
+        self.assertEqual(many_students_response.status_code, 200)
+        self.assertEqual(len(many_students_response.context["report"]["rows"]), 16)
+        self.assertLessEqual(len(many_students_context), len(one_student_context) + 2)
+
+        long_item_title = "Output 16 With An Intentionally Long Descriptive Assessment Name"
+        for index in range(2, 17):
+            GradeActivity.objects.create(
+                tenant=self.tenant,
+                campus=self.campus,
+                offering=self.offering,
+                template_period=self.prelim,
+                template_component=class_standing,
+                title=long_item_title if index == 16 else f"Output {index}",
+                total_score=Decimal("10.00"),
+            )
+        with CaptureQueriesContext(connection) as many_items_context:
+            many_items_response = self.client.get(print_url)
+        self.assertEqual(many_items_response.status_code, 200)
+        self.assertEqual(len(many_items_response.context["report"]["participation_columns"]), 16)
+        self.assertContains(many_items_response, long_item_title)
+        self.assertLessEqual(len(many_items_context), len(many_students_context) + 2)
 
     def test_class_tabulation_sheet_available_after_all_periods_are_submitted(self):
         self._accept_assignment()
@@ -3228,8 +4174,6 @@ class FacultyAssignmentAcceptanceTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<th rowspan="4" class="metric-col metric-final">PRELIM GRADE</th>', html=True)
-        self.assertContains(response, "Passed")
-        self.assertContains(response, "Failed")
         self.assertContains(response, "93")
         self.assertNotContains(response, "FINAL GRADE")
 
@@ -3617,11 +4561,15 @@ class FacultyAssignmentAcceptanceTests(TestCase):
         self.assertContains(response, ">PFG<", html=False)
         self.assertContains(response, "FINAL EXAM")
         self.assertContains(response, "FINAL GRADE")
-        self.assertContains(response, '<th class="print-grade print-prior-grade">PG</th>', html=False)
-        self.assertContains(response, '<th class="print-grade print-prior-grade">MG</th>', html=False)
-        self.assertContains(response, '<th class="print-grade print-prior-grade">PFG</th>', html=False)
-        self.assertContains(response, '<th class="print-grade print-period-grade">FINAL EXAM</th>', html=False)
-        self.assertContains(response, '<th class="print-grade print-final-grade">FINAL GRADE</th>', html=False)
+        print_response = self.client.get(
+            reverse("faculty_portal:period_summary_print", args=[self.offering.id, self.final.id])
+        )
+        self.assertEqual(print_response.status_code, 200)
+        self.assertContains(print_response, "FINAL GRADE")
+        self.assertContains(print_response, "FINAL EXAM")
+        self.assertNotContains(print_response, ">PG<", html=False)
+        self.assertNotContains(print_response, ">MG<", html=False)
+        self.assertNotContains(print_response, ">PFG<", html=False)
 
     def test_final_period_summary_uses_fx_grade_without_extra_exam_column(self):
         student = self._create_active_student(

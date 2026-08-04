@@ -1,6 +1,4 @@
 {% extends "faculty_portal/base.html" %}
-{% load static %}
-
 {% block extra_head %}
 {{ block.super }}
 <style>
@@ -95,15 +93,6 @@
   .readiness-card.tone-secondary {
     background: linear-gradient(135deg, #f3f4f7 0%, #e0e3ea 100%);
     color: #475467;
-  }
-  .gradebook-print-header {
-    display: none;
-  }
-  .gradebook-print-sheet {
-    display: none;
-  }
-  .gradebook-print-footer {
-    display: none;
   }
   .class-record-card {
     overflow: hidden;
@@ -367,191 +356,6 @@
       white-space: nowrap;
     }
   }
-  @media print {
-    @page {
-      size: portrait;
-      margin: 0.45in;
-    }
-    body,
-    .faculty-app,
-    .faculty-main {
-      background: #ffffff !important;
-    }
-    .faculty-topbar,
-    .faculty-sidebar,
-    .faculty-utility-stack,
-    .no-print {
-      display: none !important;
-    }
-    .faculty-layout {
-      display: block !important;
-      min-height: auto !important;
-    }
-    .faculty-main {
-      padding: 0 !important;
-    }
-    .gradebook-print-header {
-      display: block;
-      text-align: center;
-      margin-bottom: 0.75rem;
-    }
-    .gradebook-print-sheet {
-      display: block;
-      margin-top: 0.5rem;
-    }
-    .gradebook-print-sheet table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.86rem;
-    }
-    .gradebook-print-sheet th,
-    .gradebook-print-sheet td {
-      border: 1px solid #7f8d84;
-      padding: 0.3rem 0.38rem;
-      color: #000000;
-      background: #ffffff;
-    }
-    .gradebook-print-sheet thead th {
-      background: #f2f2f2;
-      text-align: center;
-      font-weight: 700;
-    }
-  .gradebook-print-header .print-brand-row {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .gradebook-print-header .print-logo {
-      width: 66px;
-      height: 66px;
-      object-fit: contain;
-    }
-    .gradebook-print-header .print-school-block {
-      text-align: center;
-    }
-    .gradebook-print-header .print-report-title {
-      margin-top: 0.7rem;
-      font-size: 1rem;
-      color: #111111;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-    .gradebook-print-header .print-report-purpose {
-      margin-top: 0.15rem;
-      font-size: 0.82rem;
-      color: #333333;
-      font-weight: 600;
-    }
-    .gradebook-print-header .print-metadata-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.18rem 1rem;
-      max-width: 7.25in;
-      margin: 0.65rem auto 0;
-      text-align: left;
-      font-size: 0.88rem;
-      color: #111111;
-    }
-    .gradebook-print-header .print-metadata-grid .metadata-full {
-      grid-column: 1 / -1;
-    }
-    .gradebook-print-header .print-metadata-grid .metadata-label {
-      font-weight: 700;
-    }
-    .gradebook-print-sheet .print-row-no {
-      width: 52px;
-      text-align: center;
-    }
-    .gradebook-print-sheet .print-student-no {
-      width: 125px;
-    }
-    .gradebook-print-sheet .print-grade,
-    .gradebook-print-sheet .print-grade-status {
-      text-align: center;
-      width: 110px;
-    }
-    .gradebook-print-header h1 {
-      margin: 0;
-      font-size: 1.35rem;
-      font-weight: 700;
-      color: #000000;
-    }
-    .gradebook-print-header .print-address {
-      margin-top: 0.2rem;
-      font-size: 0.95rem;
-      color: #333333;
-    }
-    .gradebook-print-footer {
-      display: block;
-      margin-top: 1rem;
-      color: #111111;
-      font-size: 0.9rem;
-    }
-    .gradebook-print-footer .none-follows {
-      text-align: center;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      margin-top: 0.85rem;
-    }
-    .gradebook-print-footer .submitted-by {
-      margin-top: 2rem;
-    }
-    .gradebook-print-footer .submitted-by-label {
-      font-weight: 700;
-      margin-bottom: 2.1rem;
-    }
-    .gradebook-print-footer .submitted-by-name {
-      display: inline-block;
-      min-width: 280px;
-      text-align: center;
-      border-top: 1px solid #111111;
-      padding-top: 0.35rem;
-      font-weight: 600;
-    }
-    .class-record-card,
-    .alert,
-    .card {
-      border: 0 !important;
-      box-shadow: none !important;
-    }
-    .class-record-card {
-      display: none !important;
-    }
-    .table-responsive {
-      overflow: visible !important;
-    }
-    .class-record-table {
-      min-width: 0 !important;
-      width: 100% !important;
-      font-size: 0.72rem;
-    }
-    .class-record-table .sticky-col,
-    .class-record-table .sticky-col-2,
-    .class-record-table .sticky-col-3,
-    .class-record-table .sticky-col-4 {
-      position: static !important;
-    }
-    .summary-floating-scrollbar {
-      display: none !important;
-    }
-    .class-record-table th,
-    .class-record-table td {
-      border: 1px solid #9ea9a1 !important;
-      padding: 0.22rem 0.28rem !important;
-      background: #ffffff !important;
-      color: #000000 !important;
-    }
-    .class-record-table .metric-col,
-    .class-record-table .metric-col.metric-final,
-    .class-record-table .perfect-score-row td {
-      background: #f4f4f4 !important;
-    }
-    .class-record-table .status-active-label {
-      display: none !important;
-    }
-  }
 </style>
 {% endblock %}
 
@@ -568,7 +372,12 @@
     </button>
     {% endif %}
     {% if can_print_gradebook_summary %}
-    <button class="btn btn-sm btn-outline-primary print-trigger-btn" type="button" onclick="window.print();">Print Periodic Grades</button>
+    <a
+      class="btn btn-sm btn-outline-primary print-trigger-btn"
+      href="{% url 'faculty_portal:period_summary_print' offering.id period.id %}"
+      target="_blank"
+      rel="noopener"
+    >Print Periodic Grades</a>
     {% endif %}
     {% if "corrections.create" in effective_permissions and system_correction_enabled %}
       <a class="btn btn-sm btn-outline-warning" href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Correction Requests</a>
@@ -853,73 +662,6 @@
 </div>
 {% endif %}
 
-{% if can_print_gradebook_summary %}
-<div class="gradebook-print-header">
-  <div class="print-brand-row">
-    <img class="print-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA">
-    <div class="print-school-block">
-      <h1>{{ print_header_name }}</h1>
-      {% if print_header_address %}
-      <div class="print-address">{{ print_header_address }}</div>
-      {% endif %}
-    </div>
-  </div>
-  <div class="print-report-title">Summary of Periodic Grades</div>
-  <div class="print-report-purpose">For encoding of final periodic grades into the Pinnacle system</div>
-  <div class="print-metadata-grid">
-    <div><span class="metadata-label">Grading Period:</span> {{ period.name }}</div>
-    <div><span class="metadata-label">Academic Year:</span> {{ offering.term.academic_year.code }}</div>
-    <div><span class="metadata-label">Semester / Term:</span> {{ offering.term.name|default:offering.term.code }}</div>
-    <div><span class="metadata-label">Section:</span> {{ offering.section.code }}</div>
-    <div class="metadata-full"><span class="metadata-label">Faculty:</span> {{ request.user.get_full_name|default:request.user.username }}</div>
-    <div><span class="metadata-label">Course Code:</span> {{ offering.course.code }}</div>
-    <div><span class="metadata-label">Units:</span> {{ offering.course.units|default:"" }}</div>
-    <div class="metadata-full"><span class="metadata-label">Course Title:</span> {{ offering.course.title }}</div>
-  </div>
-</div>
-
-<div class="gradebook-print-sheet">
-  <table>
-    <thead>
-      <tr>
-        <th class="print-row-no">No.</th>
-        <th class="print-student-no">Student No</th>
-        <th>Student Name</th>
-        {% for prior in prior_period_headers %}
-        <th class="print-grade print-prior-grade">{{ prior.label }}</th>
-        {% endfor %}
-        <th class="print-grade print-period-grade">{{ period_grade_header_label }}</th>
-        {% if show_official_final_grade %}
-        <th class="print-grade print-final-grade">FINAL GRADE</th>
-        {% endif %}
-        <th class="print-grade-status">Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in rows %}
-      <tr>
-        <td class="print-row-no">{{ forloop.counter }}</td>
-        <td class="print-student-no">{{ row.student.student_no }}</td>
-        <td>{{ row.student.last_name }}, {{ row.student.first_name }}</td>
-        {% for value in row.prior_period_grades %}
-        <td class="print-grade print-prior-grade">{{ value|default:"" }}</td>
-        {% endfor %}
-        <td class="print-grade print-period-grade">{{ row.period_grade|default:"" }}</td>
-        {% if show_official_final_grade %}
-        <td class="print-grade print-final-grade">{{ row.final_grade|default:"" }}</td>
-        {% endif %}
-        <td class="print-grade-status">{{ row.print_grade_status }}</td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="{{ print_sheet_colspan }}" class="text-center">No summary rows available.</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
-
 <div class="card border-0 shadow-sm class-record-card">
   <div class="class-record-caption">
     <div>
@@ -1144,16 +886,6 @@
     </table>
   </div>
 </div>
-
-{% if can_print_gradebook_summary %}
-<div class="gradebook-print-footer">
-  <div class="none-follows">**** NONE FOLLOWS *****</div>
-  <div class="submitted-by">
-    <div class="submitted-by-label">SUBMITTED BY:</div>
-    <div class="submitted-by-name">{{ request.user.full_name|default:request.user.username }}</div>
-  </div>
-</div>
-{% endif %}
 
 {% include "faculty_portal/partials/grade_explanation_modal.html" %}
 {% endblock %}

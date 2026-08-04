@@ -93,6 +93,7 @@ from apps.grading.services import (
     TemplateGovernanceWorkflowService,
     TemplateHotfixService,
 )
+from apps.grading.tabulation import PeriodicGradePrintDataService, PeriodSummaryLayoutService
 from apps.interventions.forms import FacultyDecisionForm, FollowUpForm, InterventionActionForm, ManualInterventionCaseForm
 from apps.interventions.models import AcademicInterventionAction, AcademicInterventionCase
 from apps.interventions.services import (
@@ -823,6 +824,20 @@ def _resolve_offering_period(request, offering_id: int, period_id: int, *, allow
     return offering, template, period
 
 
+def _periodic_grade_report_matches_active_scope(request, offering) -> bool:
+    scope = getattr(request, "scope", None)
+    if not isinstance(scope, dict):
+        return False
+    tenant_id = scope.get("tenant_id")
+    campus_id = scope.get("campus_id")
+    return bool(
+        tenant_id
+        and campus_id
+        and offering.tenant_id == tenant_id
+        and offering.campus_id == campus_id
+    )
+
+
 def _period_edit_state(offering, period):
     scope_state = getattr(offering, "faculty_scope_state", None) or _faculty_offering_scope_state(offering)
     GradingGovernanceService.auto_lock_expired_reopened_gradebook(offering=offering, template_period=period)
@@ -1489,7 +1504,7 @@ def _build_class_tabulation_period_section(*, offering, period, enrollments, sto
             "id",
         )
     )
-    summary_layout = _build_summary_layout(period, activities)
+    summary_layout = PeriodSummaryLayoutService.build_layout(period, activities)
     score_by_activity = {
         (score.student_id, score.activity_id): Decimal(score.computed_score)
         for score in StudentActivityScore.objects.filter(
@@ -1508,7 +1523,7 @@ def _build_class_tabulation_period_section(*, offering, period, enrollments, sto
             "component_scores": {},
             "period_grade": grade_row.period_grade if grade_row else None,
         }
-        summary_values = _build_summary_row_values(base_row, summary_layout, score_by_activity)
+        summary_values = PeriodSummaryLayoutService.build_row_values(base_row, summary_layout, score_by_activity)
         rows.append(
             {
                 "student": enrollment.student,
@@ -5715,7 +5730,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
             "id",
         )
     )
-    summary_layout = _build_summary_layout(period, activities)
+    summary_layout = PeriodSummaryLayoutService.build_layout(period, activities)
     visible_exam_components = [] if official_grade_release["is_final_period_view"] else summary_layout["exam_components"]
     activity_ids = [activity.id for activity in activities]
     summary_score_rows = list(
@@ -5807,7 +5822,7 @@ def period_summary_view(request, offering_id: int, period_id: int):
 
     enriched_rows = []
     for row in rows:
-        summary_values = _build_summary_row_values(row, summary_layout, score_by_activity)
+        summary_values = PeriodSummaryLayoutService.build_row_values(row, summary_layout, score_by_activity)
         period_explain_url = None
         final_explain_url = None
         if official_grade_release["show_period_grade"] and row["period_grade"] is not None:
@@ -5886,16 +5901,6 @@ def period_summary_view(request, offering_id: int, period_id: int):
         else:
             failed_count += 1
 
-    print_header_name = SystemSettingService.get(
-        "PRINT_HEADER_SCHOOL_NAME",
-        tenant_id=offering.tenant_id,
-        default="NATIONAL COLLEGE OF BUSINESS AND ARTS",
-    )
-    print_header_address = SystemSettingService.get(
-        "PRINT_HEADER_SCHOOL_ADDRESS",
-        tenant_id=offering.tenant_id,
-        default=getattr(offering.campus, "address", "") or "",
-    )
     summary_table_colspan = 4
     for block in summary_layout["class_standing_blocks"]:
         for section in block["sections"]:
@@ -5911,12 +5916,6 @@ def period_summary_view(request, offering_id: int, period_id: int):
     summary_table_colspan += 1
     if official_grade_release["show_final_grade"]:
         summary_table_colspan += 1
-    print_sheet_colspan = 3 + len(prior_period_headers)
-    print_sheet_colspan += 1
-    print_sheet_colspan += 1
-    if official_grade_release["show_final_grade"]:
-        print_sheet_colspan += 1
-
     can_print_gradebook_summary = state["is_submitted"]
 
     context = {
@@ -5947,9 +5946,6 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "submission_status": state["submission_status"],
         "correction_mode": state["correction_mode"],
         "system_correction_enabled": state["system_correction_enabled"],
-        "print_header_name": print_header_name,
-        "print_header_address": print_header_address,
-        "generated_at": timezone.localtime(),
         "q": q,
         "passing_threshold": passing_threshold,
         "show_official_period_grade": official_grade_release["show_period_grade"],
@@ -5958,7 +5954,6 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "show_official_final_grade": official_grade_release["show_final_grade"],
         "official_grade_release_notes": official_grade_release["notes"],
         "summary_table_colspan": summary_table_colspan,
-        "print_sheet_colspan": print_sheet_colspan,
         "is_governance_closed": state["is_governance_closed"],
         "governance_message": state["governance_message"],
         "is_within_completion_grace": state["is_within_completion_grace"],
@@ -6013,6 +6008,57 @@ def period_summary_view(request, offering_id: int, period_id: int):
             ]
         )
     return render(request, "faculty_portal/period_summary.html", context)
+
+
+@portal_required("FACULTY")
+@permission_required("faculty_portal.access")
+@require_GET
+def period_summary_print_view(request, offering_id: int, period_id: int):
+    offering, template, period = _resolve_offering_period(
+        request,
+        offering_id,
+        period_id,
+        allow_governance_closed=True,
+    )
+    if not _periodic_grade_report_matches_active_scope(request, offering):
+        raise Http404("Periodic grade report not found.")
+    if period is None:
+        raise Http404("Periodic grade report not found.")
+    state = _period_edit_state(offering, period)
+    if state["submission_status"] != GradeSubmission.Status.SUBMITTED:
+        raise PermissionDenied("The official periodic grade report is available only for a submitted gradebook.")
+
+    enrollments = list(
+        Enrollment.objects.filter(course_offering_id=offering.id, is_active=True).select_related("student")
+    )
+    final_period = template.periods.filter(is_active=True).order_by("-sequence_no", "-id").first()
+    is_final_period = bool(final_period and final_period.id == period.id)
+    period_grade_label = _tabulation_period_grade_column_label(period)
+    report = PeriodicGradePrintDataService.build(
+        offering=offering,
+        period=period,
+        enrollments=enrollments,
+        is_final_period=is_final_period,
+        grade_label="FINAL GRADE" if is_final_period else period_grade_label,
+        final_exam_label=period_grade_label,
+    )
+    context = {
+        "offering": offering,
+        "period": period,
+        "report": report,
+        "print_header_name": SystemSettingService.get(
+            "PRINT_HEADER_SCHOOL_NAME",
+            tenant_id=offering.tenant_id,
+            default="NATIONAL COLLEGE OF BUSINESS AND ARTS",
+        ),
+        "print_header_address": SystemSettingService.get(
+            "PRINT_HEADER_SCHOOL_ADDRESS",
+            tenant_id=offering.tenant_id,
+            default=getattr(offering.campus, "address", "") or "",
+        ),
+        "generated_at": timezone.localtime(),
+    }
+    return render(request, "faculty_portal/periodic_grade_print.html", context)
 
 
 @portal_required("FACULTY")
