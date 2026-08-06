@@ -1,0 +1,104 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Contribution Workspace | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<a class="btn btn-sm btn-outline-secondary mb-3" href="{% url 'departmental_exams:contribution_list' %}">Back to contributions</a>
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between gap-3">
+      <div>
+        <h1 class="h3 mb-1">{{ contribution.cycle_course.course.code }} — {{ contribution.cycle_course.course.title }}</h1>
+        <p class="text-muted mb-1">{{ contribution.cycle_course.cycle.get_exam_period_display }} · {{ contribution.cycle_course.cycle.academic_year }} · {{ contribution.cycle_course.cycle.term }}</p>
+        <p class="mb-0"><strong>Coverage:</strong> {{ configuration.coverage|default:"Not provided" }}</p>
+      </div>
+      <div class="text-end">
+        <div><strong>{{ saved_count }} / {{ quota }}</strong> questions</div>
+        <div>{{ progress_percent }}% complete</div>
+        <div><strong>Deadline:</strong> {{ configuration.contribution_deadline|date:"M j, Y g:i A" }}</div>
+        <div class="small text-muted">{{ configuration.get_contribution_deadline_source_display|default:"No deadline provenance" }}</div>
+      </div>
+    </div>
+    {% if configuration.contributor_instructions_snapshot %}<hr><div>{{ configuration.contributor_instructions_snapshot|linebreaksbr }}</div>{% endif %}
+    {% if configuration.additional_instructions %}<div class="mt-2"><strong>Course instructions:</strong><br>{{ configuration.additional_instructions|linebreaksbr }}</div>{% endif %}
+  </div>
+</div>
+{% if contribution.status == 'SUBMITTED' %}
+  <div class="alert alert-success"><strong>Submitted and read-only.</strong> Submitted {{ contribution.submitted_at|date:"M j, Y g:i A" }}. Your questions remain visible to you, but no further changes are allowed.</div>
+{% elif contribution.roster_status == 'BLOCKED' %}
+  <div class="alert alert-warning"><strong>This Draft is blocked and read-only.</strong> Your current teaching-assignment eligibility is no longer valid. Your saved content remains private and visible here; contact an authorized administrator.</div>
+{% elif live_eligibility_read_only %}
+  <div class="alert alert-warning"><strong>Your current contributor eligibility could not be verified.</strong> This contribution is temporarily read-only until the roster is synchronized.</div>
+{% elif not is_mutable %}
+  <div class="alert alert-warning"><strong>This Draft is currently read-only.</strong> Its cycle, Included course state, contribution window, deadline, quota, or current assignment eligibility no longer permits changes. Contact an authorized administrator.</div>
+{% endif %}
+{% if quota_reached %}
+  <div class="alert alert-success" role="status"><strong>Quota reached.</strong> You have reached the required quota of {{ quota }} questions. You may now submit your contribution.</div>
+{% endif %}
+{% if is_mutable %}
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    {% if not quota_reached %}
+      <a class="btn btn-primary" href="{% url 'departmental_exams:question_create' contribution.id %}">Add question</a>
+      <a class="btn btn-outline-primary" href="{% url 'departmental_exams:csv_upload' contribution.id %}">Upload CSV</a>
+    {% endif %}
+    <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:csv_template' contribution.id %}">Download CSV template</a>
+    {% if saved_count == quota %}<a class="btn btn-success" href="{% url 'departmental_exams:contribution_submit' contribution.id %}">Final submission</a>{% endif %}
+  </div>
+{% endif %}
+{% if questions %}
+  {% if is_mutable %}
+  <form method="post" action="{% url 'departmental_exams:question_reorder' contribution.id %}" id="question-order-form" class="mb-3">
+    {% csrf_token %}
+    <input type="hidden" name="expected_contribution_revision" value="{{ contribution.revision }}">
+    <input type="hidden" name="ordered_question_ids" id="ordered-question-ids">
+    <button class="btn btn-sm btn-outline-primary" type="submit">Save displayed order</button>
+  </form>
+  {% endif %}
+  <div id="question-list">
+    {% for question in questions %}
+      <article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}">
+        <div class="card-body">
+          <div class="d-flex justify-content-between gap-3">
+            <h2 class="h5">Question <span class="question-position">{{ question.position }}</span></h2>
+            <span class="badge text-bg-light">{{ question.get_difficulty_display }} · {{ question.get_entry_method_display }}</span>
+          </div>
+          <div class="mb-2">{{ question.question_text|linebreaksbr }}</div>
+          <ol type="A" class="mb-2">
+            <li{% if question.correct_answer == 'A' %} class="fw-bold"{% endif %}>{{ question.choice_a|linebreaksbr }}</li>
+            <li{% if question.correct_answer == 'B' %} class="fw-bold"{% endif %}>{{ question.choice_b|linebreaksbr }}</li>
+            <li{% if question.correct_answer == 'C' %} class="fw-bold"{% endif %}>{{ question.choice_c|linebreaksbr }}</li>
+            <li{% if question.correct_answer == 'D' %} class="fw-bold"{% endif %}>{{ question.choice_d|linebreaksbr }}</li>
+          </ol>
+          <p class="small mb-2"><strong>Correct answer:</strong> {{ question.correct_answer }}</p>
+          {% if is_mutable %}
+            <div class="d-flex flex-wrap gap-2">
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:question_edit' contribution.id question.id %}">Edit</a>
+              <a class="btn btn-sm btn-outline-danger" href="{% url 'departmental_exams:question_delete' contribution.id question.id %}">Delete</a>
+              <button type="button" class="btn btn-sm btn-outline-secondary move-up">Move up</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary move-down">Move down</button>
+            </div>
+          {% endif %}
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="alert alert-info">No questions have been saved.</div>
+{% endif %}
+{% endblock %}
+{% block extra_js %}{{ block.super }}
+<script>
+(() => {
+  const list = document.getElementById("question-list");
+  const form = document.getElementById("question-order-form");
+  if (!list || !form) return;
+  const renumber = () => [...list.querySelectorAll(".question-card")].forEach((card, index) => card.querySelector(".question-position").textContent = index + 1);
+  list.addEventListener("click", event => {
+    const card = event.target.closest(".question-card");
+    if (!card) return;
+    if (event.target.classList.contains("move-up") && card.previousElementSibling) list.insertBefore(card, card.previousElementSibling);
+    if (event.target.classList.contains("move-down") && card.nextElementSibling) list.insertBefore(card.nextElementSibling, card);
+    renumber();
+  });
+  form.addEventListener("submit", () => document.getElementById("ordered-question-ids").value = [...list.querySelectorAll(".question-card")].map(card => card.dataset.questionId).join(","));
+})();
+</script>
+{% endblock %}

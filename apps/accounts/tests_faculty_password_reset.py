@@ -14,12 +14,7 @@ from apps.rbac.models import Permission, Role, RolePermission, UserRole
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class FacultyPasswordResetEligibilityTests(TestCase):
     def setUp(self):
-        self.faculty_permission = Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
-            is_active=True,
-        )
+        self.faculty_permission = Permission.objects.get(code="faculty_portal.access")
         self.admin_permission = Permission.objects.create(
             code="admin_portal.access",
             module="admin_portal",

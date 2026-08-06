@@ -5,6 +5,75 @@ from apps.academics.services import AcademicGovernanceService
 from apps.rbac.models import UserRole
 
 
+_DEPARTMENTAL_EXAM_ACTIVE_ROUTES = {
+    "FACULTY": {
+        "DE_EXAM_FACULTY_CONTRIBUTIONS": {
+            "departmental_exams:contribution_list",
+            "departmental_exams:contribution_workspace",
+            "departmental_exams:question_create",
+            "departmental_exams:question_edit",
+            "departmental_exams:question_delete",
+            "departmental_exams:question_reorder",
+            "departmental_exams:csv_template",
+            "departmental_exams:csv_upload",
+            "departmental_exams:csv_preview",
+            "departmental_exams:csv_error_report",
+            "departmental_exams:csv_confirm",
+            "departmental_exams:contribution_submit",
+        },
+    },
+    "ADMIN": {
+        "DE_EXAM_CYCLES": {
+            "departmental_exams:cycle_list",
+            "departmental_exams:cycle_create",
+            "departmental_exams:cycle_configuration",
+            "departmental_exams:cycle_apply_defaults",
+            "departmental_exams:cycle_open",
+            "departmental_exams:cycle_close",
+            "departmental_exams:cycle_course_list",
+        },
+        "DE_EXAM_ASSIGNED_COURSES": {
+            "departmental_exams:assigned_course_examinations",
+            "departmental_exams:cycle_course_administration",
+            "departmental_exams:cycle_course_exempt",
+            "departmental_exams:cycle_course_restore",
+            "departmental_exams:course_configuration",
+            "departmental_exams:course_remove_overrides",
+            "departmental_exams:course_contribution_open",
+            "departmental_exams:course_contribution_close",
+            "departmental_exams:course_contribution_reopen",
+            "departmental_exams:course_configuration_revert",
+        },
+        "DE_EXAM_CONTRIBUTOR_MONITORING": {
+            "departmental_exams:contributor_monitoring",
+            "departmental_exams:roster_action",
+        },
+    },
+}
+
+
+def _mark_departmental_exam_active_menu(request, menu, portal):
+    resolver_match = getattr(request, "resolver_match", None)
+    current_route = getattr(resolver_match, "view_name", None)
+    active_code = next(
+        (
+            code
+            for code, route_names in _DEPARTMENTAL_EXAM_ACTIVE_ROUTES.get(
+                portal, {}
+            ).items()
+            if current_route in route_names
+        ),
+        None,
+    )
+    departmental_codes = set(
+        _DEPARTMENTAL_EXAM_ACTIVE_ROUTES.get(portal, {})
+    )
+    for group in menu:
+        for node in group["items"]:
+            if node["item"].code in departmental_codes:
+                node["is_active"] = node["item"].code == active_code
+
+
 def _admin_role_label(user, *, tenant_id=None, campus_id=None):
     if user.is_superuser:
         return "Superadmin"
@@ -61,6 +130,35 @@ def portal_menu(request):
         campus_id=scope.get("campus_id"),
         effective_codes=permissions,
     )
+    if portal in {"ADMIN", "FACULTY"}:
+        # Departmental Exam Stage 5 menu visibility has owner/source and
+        # exact-responsibility requirements beyond a generic permission row.
+        # This read-only filter keeps navigation aligned with direct routes.
+        from apps.departmental_exams.contribution_selectors import (
+            ContributionMonitoringSelector,
+            ContributionSelector,
+        )
+
+        if portal == "FACULTY":
+            stage5_visible = ContributionSelector.faculty_navigation_visible(
+                user=request.user,
+                tenant_id=scope.get("tenant_id") or getattr(request.user, "default_tenant_id", None),
+                campus_id=scope.get("campus_id"),
+            )
+            stage5_code = "DE_EXAM_FACULTY_CONTRIBUTIONS"
+        else:
+            stage5_visible = ContributionMonitoringSelector.navigation_visible(
+                user=request.user,
+                tenant_id=scope.get("tenant_id"),
+            )
+            stage5_code = "DE_EXAM_CONTRIBUTOR_MONITORING"
+        if not stage5_visible:
+            for group in menu:
+                group["items"] = [
+                    node for node in group["items"] if node["item"].code != stage5_code
+                ]
+            menu = [group for group in menu if group["items"]]
+    _mark_departmental_exam_active_menu(request, menu, portal)
     admin_academic_performance_insights_enabled = False
     faculty_quick_tour_enabled = False
     faculty_grade_prediction_enabled = False

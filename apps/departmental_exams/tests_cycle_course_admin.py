@@ -2449,11 +2449,21 @@ class CycleCourseAdministrationTests(TestCase):
             }
 
         self.assertEqual(visible_codes(manager), {"DE_EXAM_CYCLES"})
-        self.assertEqual(visible_codes(configurer), {"DE_EXAM_ASSIGNED_COURSES"})
-        self.assertEqual(visible_codes(reviewer), {"DE_EXAM_ASSIGNED_COURSES"})
+        self.assertEqual(
+            visible_codes(configurer),
+            {"DE_EXAM_ASSIGNED_COURSES", "DE_EXAM_CONTRIBUTOR_MONITORING"},
+        )
+        self.assertEqual(
+            visible_codes(reviewer),
+            {"DE_EXAM_ASSIGNED_COURSES", "DE_EXAM_CONTRIBUTOR_MONITORING"},
+        )
         self.assertEqual(
             visible_codes(dual),
-            {"DE_EXAM_CYCLES", "DE_EXAM_ASSIGNED_COURSES"},
+            {
+                "DE_EXAM_CYCLES",
+                "DE_EXAM_ASSIGNED_COURSES",
+                "DE_EXAM_CONTRIBUTOR_MONITORING",
+            },
         )
         self.assertFalse(visible_codes(no_path))
 
@@ -3170,18 +3180,37 @@ class CycleCourseAdministrationTests(TestCase):
         cases = (
             (
                 manager_reviewer,
-                {"DE_EXAM_CYCLES", "DE_EXAM_ASSIGNED_COURSES"},
+                {
+                    "DE_EXAM_CYCLES",
+                    "DE_EXAM_ASSIGNED_COURSES",
+                    "DE_EXAM_CONTRIBUTOR_MONITORING",
+                },
                 False,
             ),
-            (configurer_reviewer, {"DE_EXAM_ASSIGNED_COURSES"}, True),
+            (
+                configurer_reviewer,
+                {
+                    "DE_EXAM_ASSIGNED_COURSES",
+                    "DE_EXAM_CONTRIBUTOR_MONITORING",
+                },
+                True,
+            ),
             (
                 manager_configurer,
-                {"DE_EXAM_CYCLES", "DE_EXAM_ASSIGNED_COURSES"},
+                {
+                    "DE_EXAM_CYCLES",
+                    "DE_EXAM_ASSIGNED_COURSES",
+                    "DE_EXAM_CONTRIBUTOR_MONITORING",
+                },
                 True,
             ),
             (
                 all_three,
-                {"DE_EXAM_CYCLES", "DE_EXAM_ASSIGNED_COURSES"},
+                {
+                    "DE_EXAM_CYCLES",
+                    "DE_EXAM_ASSIGNED_COURSES",
+                    "DE_EXAM_CONTRIBUTOR_MONITORING",
+                },
                 True,
             ),
         )

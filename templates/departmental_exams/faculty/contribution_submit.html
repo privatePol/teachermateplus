@@ -1,0 +1,12 @@
+{% extends "faculty_portal/base.html" %}
+{% block faculty_content %}
+<h1 class="h3">Final contribution submission</h1>
+<div class="alert alert-warning">Submission requires exactly {{ contribution.quota_snapshot }} valid questions and is permanent in Stage 5. There is no contributor reopen or grace-period override.</div>
+<form method="post" class="card shadow-sm" novalidate><div class="card-body">
+  {% csrf_token %}
+  {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+  {% for hidden in form.hidden_fields %}{{ hidden }}{% if hidden.errors %}<div class="alert alert-danger" role="alert">The page state is missing or invalid. Reload and try again.</div>{% endif %}{% endfor %}
+  <div class="form-check mb-3">{{ form.confirm_exact_quota }}<label class="form-check-label" for="{{ form.confirm_exact_quota.id_for_label }}">{{ form.confirm_exact_quota.label }}</label>{% for error in form.confirm_exact_quota.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>
+  <div class="d-flex flex-wrap gap-2"><button class="btn btn-success" type="submit">Submit final contribution</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Cancel</a></div>
+</div></form>
+{% endblock %}

@@ -17,6 +17,9 @@ class DepartmentalExamSeedMigrationSafetyTests(TestCase):
         self.navigation_migration = import_module(
             "apps.navigation.migrations.0017_seed_departmental_exam_menus"
         )
+        self.stage5_navigation_migration = import_module(
+            "apps.navigation.migrations.0018_seed_departmental_exam_stage5_menus"
+        )
         self.rbac_migration.seed_permissions(django_apps, None)
 
     def test_rbac_reverse_preserves_permission_referenced_by_custom_menu_item(self):
@@ -83,9 +86,12 @@ class DepartmentalExamSeedMigrationSafetyTests(TestCase):
         self.assertTrue(UserPermission.objects.filter(pk=user_link.pk).exists())
 
     def test_navigation_seed_is_idempotent_and_reverse_is_exactly_scoped(self):
+        self.stage5_navigation_migration.unseed(django_apps, None)
         self.navigation_migration.unseed_menu(django_apps, None)
         self.navigation_migration.seed_menu(django_apps, None)
         self.navigation_migration.seed_menu(django_apps, None)
+        self.stage5_navigation_migration.seed(django_apps, None)
+        self.stage5_navigation_migration.seed(django_apps, None)
 
         admin_group = MenuGroup.objects.get(portal="ADMIN", code="DEPARTMENTAL_EXAMS")
         admin_cycles = MenuItem.objects.get(
@@ -97,6 +103,20 @@ class DepartmentalExamSeedMigrationSafetyTests(TestCase):
             menu_group=admin_group,
             portal="ADMIN",
             code="DE_EXAM_ASSIGNED_COURSES",
+        )
+        admin_contributor_monitoring = MenuItem.objects.get(
+            menu_group=admin_group,
+            portal="ADMIN",
+            code="DE_EXAM_CONTRIBUTOR_MONITORING",
+        )
+        faculty_group = MenuGroup.objects.get(
+            portal="FACULTY",
+            code="DEPARTMENTAL_EXAMS",
+        )
+        faculty_contributions = MenuItem.objects.get(
+            menu_group=faculty_group,
+            portal="FACULTY",
+            code="DE_EXAM_FACULTY_CONTRIBUTIONS",
         )
         self.assertEqual(
             MenuItem.objects.filter(portal="ADMIN", code="DE_EXAM_CYCLES").count(),
@@ -121,6 +141,39 @@ class DepartmentalExamSeedMigrationSafetyTests(TestCase):
             },
         )
         self.assertEqual(
+            MenuItem.objects.filter(
+                portal="ADMIN",
+                code="DE_EXAM_CONTRIBUTOR_MONITORING",
+            ).count(),
+            1,
+        )
+        self.assertSetEqual(
+            set(
+                MenuItemPermission.objects.filter(
+                    menu_item=admin_contributor_monitoring
+                ).values_list("permission__code", flat=True)
+            ),
+            {
+                "departmental_exams.configure",
+                "departmental_exams.review_generate",
+            },
+        )
+        self.assertEqual(
+            MenuItem.objects.filter(
+                portal="FACULTY",
+                code="DE_EXAM_FACULTY_CONTRIBUTIONS",
+            ).count(),
+            1,
+        )
+        self.assertSetEqual(
+            set(
+                MenuItemPermission.objects.filter(
+                    menu_item=faculty_contributions
+                ).values_list("permission__code", flat=True)
+            ),
+            {"faculty_portal.access"},
+        )
+        self.assertEqual(
             admin_cycles.route_name,
             "departmental_exams:cycle_list",
         )
@@ -128,16 +181,21 @@ class DepartmentalExamSeedMigrationSafetyTests(TestCase):
             admin_assigned_courses.route_name,
             "departmental_exams:assigned_course_examinations",
         )
+        self.assertEqual(
+            admin_contributor_monitoring.route_name,
+            "departmental_exams:contributor_monitoring",
+        )
+        self.assertEqual(
+            faculty_contributions.route_name,
+            "departmental_exams:contribution_list",
+        )
         self.assertNotEqual(reverse(admin_cycles.route_name), "#")
         self.assertNotEqual(reverse(admin_assigned_courses.route_name), "#")
+        self.assertNotEqual(reverse(admin_contributor_monitoring.route_name), "#")
+        self.assertNotEqual(reverse(faculty_contributions.route_name), "#")
         self.assertFalse(
             MenuItem.objects.filter(
                 code__in=["DE_EXAM_COURSE_SETUP", "DE_EXAM_CONTRIBUTIONS"]
-            ).exists()
-        )
-        self.assertFalse(
-            MenuGroup.objects.filter(
-                portal="FACULTY", code="DEPARTMENTAL_EXAMS"
             ).exists()
         )
 
@@ -161,6 +219,31 @@ class DepartmentalExamSeedMigrationSafetyTests(TestCase):
             menu_item=custom_item,
             permission=custom_permission,
         )
+
+        self.stage5_navigation_migration.unseed(django_apps, None)
+
+        self.assertTrue(MenuItem.objects.filter(pk=admin_cycles.pk).exists())
+        self.assertTrue(
+            MenuItem.objects.filter(pk=admin_assigned_courses.pk).exists()
+        )
+        self.assertFalse(
+            MenuItem.objects.filter(pk=admin_contributor_monitoring.pk).exists()
+        )
+        self.assertFalse(
+            MenuItem.objects.filter(pk=faculty_contributions.pk).exists()
+        )
+        self.assertTrue(
+            MenuGroup.objects.filter(
+                portal="ADMIN", code="DEPARTMENTAL_EXAMS"
+            ).exists()
+        )
+        self.assertFalse(
+            MenuGroup.objects.filter(
+                portal="FACULTY", code="DEPARTMENTAL_EXAMS"
+            ).exists()
+        )
+        self.assertTrue(MenuItem.objects.filter(pk=custom_item.pk).exists())
+        self.assertTrue(MenuItemPermission.objects.filter(pk=custom_link.pk).exists())
 
         self.navigation_migration.unseed_menu(django_apps, None)
 

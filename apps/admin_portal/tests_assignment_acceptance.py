@@ -131,11 +131,7 @@ class AdminFacultyAssignmentAcceptanceViewTests(TestCase):
 
         faculty_role = Role.objects.create(code="FACULTY", name="Faculty")
         admin_role = Role.objects.create(code="CAMPUS_ADMIN", name="Campus Admin")
-        faculty_access = Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
-        )
+        faculty_access = Permission.objects.get(code="faculty_portal.access")
         admin_access = Permission.objects.create(
             code="admin_portal.access",
             module="admin_portal",

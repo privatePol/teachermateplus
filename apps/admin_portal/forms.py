@@ -22,6 +22,7 @@ from apps.academics.models import (
     Term,
 )
 from apps.academics.services import FacultyAssignmentSafetyService
+from apps.admin_portal.course_exam_department import configure_exam_department_field
 from apps.core.services.settings import SystemSettingService
 from apps.core.services.features import FeatureSettingsService
 from apps.enrollment.services import EnrollmentService
@@ -1054,9 +1055,33 @@ class CourseForm(forms.ModelForm):
         department_field = self.fields["department"]
         department_field.queryset = _active_only_queryset(department_field.queryset)
         exam_department_field = self.fields["exam_department"]
-        exam_department_field.queryset = _active_only_queryset(
+        exam_department_queryset = _active_only_queryset(
             exam_department_field.queryset
-        ).select_related("campus").order_by("campus__name", "name", "code")
+        )
+        course_instance = getattr(self, "instance", None)
+        current_exam_department_id = getattr(
+            course_instance, "exam_department_id", None
+        )
+        current_tenant_id = getattr(course_instance, "tenant_id", None)
+        if (
+            getattr(course_instance, "pk", None)
+            and current_exam_department_id
+            and current_tenant_id
+        ):
+            current_exam_department_queryset = Department.objects.filter(
+                id=current_exam_department_id,
+                tenant_id=current_tenant_id,
+                tenant__is_active=True,
+                campus__is_active=True,
+                is_active=True,
+            )
+            exam_department_queryset = (
+                exam_department_queryset | current_exam_department_queryset
+            )
+        configure_exam_department_field(
+            exam_department_field,
+            exam_department_queryset,
+        )
         selected_campus_id = None
         raw_campus_id = (
             self.data.get(self.add_prefix("campus"))
@@ -1129,6 +1154,83 @@ class CourseForm(forms.ModelForm):
                 "Exam department is inactive and cannot own departmental examinations.",
             )
         return cleaned
+
+
+class StrictCheckboxInput(forms.CheckboxInput):
+    def value_from_datadict(self, data, files, name):
+        return data.get(name) if name in data else None
+
+
+class StrictCheckboxBooleanField(forms.BooleanField):
+    widget = StrictCheckboxInput
+
+    def to_python(self, value):
+        if value in (None, "") or value is False:
+            return False
+        if value == "on" or value is True:
+            return True
+        raise forms.ValidationError(
+            "Invalid replacement selection. Use the replacement checkbox explicitly."
+        )
+
+
+class BulkExamDepartmentAssignmentForm(forms.Form):
+    department = forms.ModelChoiceField(
+        queryset=Department.objects.none(),
+        label="Responsible Exam Department",
+        empty_label="Select a Department",
+    )
+    course_ids = forms.MultipleChoiceField(
+        choices=(),
+        label="Courses",
+        error_messages={
+            "required": "Select at least one Course.",
+            "invalid_choice": "One or more selected Courses are outside your current scope.",
+        },
+    )
+    replace_existing = StrictCheckboxBooleanField(
+        required=False,
+        initial=False,
+        label="Replace existing Exam Department assignments",
+    )
+
+    def __init__(self, *args, department_queryset=None, course_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if department_queryset is not None:
+            configure_exam_department_field(
+                self.fields["department"],
+                department_queryset,
+            )
+        self.fields["department"].widget.attrs["form"] = "bulk-exam-assignment-form"
+        if course_queryset is not None:
+            self.fields["course_ids"].choices = [
+                (str(course_id), str(course_id))
+                for course_id in course_queryset.values_list("id", flat=True)
+            ]
+
+    def clean_course_ids(self):
+        course_ids = self.cleaned_data["course_ids"]
+        if len(course_ids) != len(set(course_ids)):
+            raise forms.ValidationError("Duplicate Course IDs are not allowed.")
+        return [int(course_id) for course_id in course_ids]
+
+
+class ExamDepartmentFilterForm(forms.Form):
+    current_department_id = forms.ModelChoiceField(
+        queryset=Department.objects.none(),
+        required=False,
+        empty_label="Any Department",
+        label="Current Exam Department",
+    )
+
+    def __init__(self, *args, department_queryset=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if department_queryset is not None:
+            configure_exam_department_field(
+                self.fields["current_department_id"],
+                department_queryset,
+            )
+        self.fields["current_department_id"].widget.attrs["id"] = "current-department"
 
 
 class SectionForm(forms.ModelForm):
@@ -3267,7 +3369,8 @@ class ConfigurableFeatureSettingForm(forms.Form):
         label="Enable Departmental Exam Builder",
         help_text=(
             "Enables authorized examination-cycle management, grouped course administration, "
-            "and Included/Exempt course control for this tenant."
+            "Included/Exempt course control, faculty question contribution, and aggregate-only "
+            "contributor completion monitoring for this tenant."
         ),
     )
     student_academic_intervention_tracking_enabled = forms.BooleanField(

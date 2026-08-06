@@ -557,9 +557,10 @@
           {% for node in group.items %}
             <a
               href="{{ node.url }}"
-              class="sidebar-link {% if request.path == node.url %}active{% endif %}{% if node.item.code == 'FACULTY_ANALYTICS' %} faculty-mobile-hidden{% endif %}"
+              class="sidebar-link {% if node.is_active or request.path == node.url %}active{% endif %}{% if node.item.code == 'FACULTY_ANALYTICS' %} faculty-mobile-hidden{% endif %}"
               title="{{ node.item.label }}"
               data-menu-code="{{ node.item.code }}"
+              {% if node.is_active or request.path == node.url %}aria-current="page"{% endif %}
             >
               <span class="sidebar-icon">&#9679;</span>
               <span class="sidebar-label">{{ node.item.label }}</span>

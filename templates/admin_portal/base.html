@@ -432,12 +432,12 @@
           <ul class="nav flex-column">
             {% for node in group.items %}
               <li class="nav-item mb-1">
-                <a class="nav-link sidebar-link px-2 py-1" href="{{ node.url }}">{{ node.item.label }}</a>
+                <a class="nav-link sidebar-link px-2 py-1{% if node.is_active %} active{% endif %}" href="{{ node.url }}" data-menu-code="{{ node.item.code }}"{% if node.is_active %} aria-current="page"{% endif %}>{{ node.item.label }}</a>
                 {% if node.children %}
                   <ul class="nav flex-column ms-3">
                     {% for child in node.children %}
                       <li class="nav-item">
-                        <a class="nav-link sidebar-link py-1 px-2" href="{{ child.url }}">{{ child.item.label }}</a>
+                        <a class="nav-link sidebar-link py-1 px-2{% if child.is_active %} active{% endif %}" href="{{ child.url }}" data-menu-code="{{ child.item.code }}"{% if child.is_active %} aria-current="page"{% endif %}>{{ child.item.label }}</a>
                       </li>
                     {% endfor %}
                   </ul>
@@ -718,7 +718,7 @@
     });
     syncCollapsedTooltips(sidebarCollapsed);
 
-    const sidebarLinks = document.querySelectorAll(".admin-sidebar .sidebar-link");
+    const sidebarLinks = [...document.querySelectorAll(".admin-sidebar .sidebar-link")];
     sidebarLinks.forEach((link) => {
       const rawText = (link.querySelector(".sidebar-link-text")?.textContent || link.textContent || "").trim();
       if (!rawText) return;
@@ -811,29 +811,32 @@
     });
 
     const currentPath = window.location.pathname.replace(/\/+$/, "/");
-    sidebarLinks.forEach((link) => {
-      let linkPath = "";
-      try {
-        linkPath = new URL(link.getAttribute("href"), window.location.origin).pathname.replace(/\/+$/, "/");
-      } catch (e) {
-        return;
+    const activateLink = (link) => {
+      link.classList.add("active");
+      link.setAttribute("aria-current", "page");
+      const collapsePanel = link.closest(".sidebar-group-collapse");
+      if (collapsePanel) {
+        collapsePanel.classList.add("show");
+        const groupToggle = document.querySelector(`[data-bs-target="#${collapsePanel.id}"]`);
+        if (groupToggle) groupToggle.setAttribute("aria-expanded", "true");
       }
-      const isActive =
-        linkPath === currentPath ||
-        (linkPath !== "/" && currentPath.startsWith(linkPath));
-      if (isActive) {
-        link.classList.add("active");
-        link.setAttribute("aria-current", "page");
-        const collapsePanel = link.closest(".sidebar-group-collapse");
-        if (collapsePanel) {
-          collapsePanel.classList.add("show");
-          const groupToggle = document.querySelector(`[data-bs-target="#${collapsePanel.id}"]`);
-          if (groupToggle) {
-            groupToggle.setAttribute("aria-expanded", "true");
-          }
+    };
+    const serverActiveLink = sidebarLinks.find((link) => link.classList.contains("active"));
+    if (serverActiveLink) {
+      activateLink(serverActiveLink);
+    } else {
+      const matchingLinks = sidebarLinks.map((link) => {
+        let linkPath = "";
+        try {
+          linkPath = new URL(link.getAttribute("href"), window.location.origin).pathname.replace(/\/+$/, "/");
+        } catch (e) {
+          return null;
         }
-      }
-    });
+        const matches = linkPath === currentPath || (linkPath !== "/" && currentPath.startsWith(linkPath));
+        return matches ? { link, linkPath } : null;
+      }).filter(Boolean).sort((left, right) => right.linkPath.length - left.linkPath.length);
+      if (matchingLinks.length) activateLink(matchingLinks[0].link);
+    }
 
     // Persist filter state for list -> create/edit/update flows.
     const currentPathWithQuery = window.location.pathname + window.location.search;

@@ -228,6 +228,8 @@ class CycleCourseInclusionTests(TestCase):
             faculty_user=self.admin,
             source_assignment=assignment,
             source_campus=self.campus,
+            quota_snapshot=50,
+            configuration_revision_snapshot=1,
         )
 
     def test_exempt_and_restore_are_atomic_audited_transitions(self):
@@ -472,6 +474,7 @@ class CycleCourseInclusionTests(TestCase):
             choice_d="Any response",
             correct_answer="A",
             difficulty=Question.Difficulty.EASY,
+            position=1,
         )
         response = self._exempt()
         self.assertEqual(response.status_code, 400)

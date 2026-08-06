@@ -184,6 +184,8 @@ class Stage41DeadlineBehaviorTests(Stage4TestCase):
             faculty_user=self.admin,
             source_assignment=assignment,
             source_campus=self.campus,
+            quota_snapshot=activity.questions_required_per_faculty,
+            configuration_revision_snapshot=activity.revision,
         )
         snapshots = {
             override.id: (override.contribution_deadline, override.contribution_deadline_source, override.revision),
@@ -292,6 +294,8 @@ class Stage41DeadlineBehaviorTests(Stage4TestCase):
             faculty_user=self.admin,
             source_assignment=assignment,
             source_campus=self.campus,
+            quota_snapshot=activity.questions_required_per_faculty,
+            configuration_revision_snapshot=activity.revision,
         )
         open_parent = self.make_course(cycle=cycle, code="VALID-OPEN")
         opened = self.make_configuration(

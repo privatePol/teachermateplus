@@ -23,12 +23,7 @@ class AdminPasswordResetTests(TestCase):
             action="access",
             is_active=True,
         )
-        self.faculty_permission = Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
-            is_active=True,
-        )
+        self.faculty_permission = Permission.objects.get(code="faculty_portal.access")
         admin_role = Role.objects.create(code="ADMIN_TEST", name="Admin Test")
         RolePermission.objects.create(role=admin_role, permission=self.admin_permission)
         faculty_role = Role.objects.create(code="FACULTY_TEST", name="Faculty Test")

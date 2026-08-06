@@ -23,10 +23,9 @@ class FacultyHelpGuideTests(TestCase):
             privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
             privacy_consent_at=timezone.now(),
         )
-        permission = Permission.objects.create(
+        permission, _ = Permission.objects.get_or_create(
             code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
+            defaults={"module": "faculty_portal", "action": "access"},
         )
         role = Role.objects.create(code="FACULTY", name="Faculty")
         RolePermission.objects.create(role=role, permission=permission)

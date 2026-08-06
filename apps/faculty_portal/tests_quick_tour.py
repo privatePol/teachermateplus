@@ -11,12 +11,7 @@ from apps.rbac.models import Permission, Role, RolePermission, UserRole
 
 class FacultyQuickTourTests(TestCase):
     def setUp(self):
-        faculty_access = Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
-            is_active=True,
-        )
+        faculty_access = Permission.objects.get(code="faculty_portal.access")
         dashboard_read = Permission.objects.create(
             code="dashboard.read",
             module="dashboard",

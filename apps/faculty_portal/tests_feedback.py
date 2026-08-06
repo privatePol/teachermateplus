@@ -18,11 +18,7 @@ class FacultyFeedbackSubmissionTests(TestCase):
         self.campus = Campus.objects.create(tenant=self.tenant, code="MAIN", name="Main Campus")
         self.other_tenant = Tenant.objects.create(code="OTHER", name="Other Tenant")
         self.other_campus = Campus.objects.create(tenant=self.other_tenant, code="OTHER-MAIN", name="Other Campus")
-        self.faculty_access = Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
-        )
+        self.faculty_access = Permission.objects.get(code="faculty_portal.access")
         self.admin_access = Permission.objects.create(
             code="admin_portal.access",
             module="admin_portal",

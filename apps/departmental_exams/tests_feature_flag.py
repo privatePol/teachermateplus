@@ -31,6 +31,7 @@ class DepartmentalExamFeatureFlagTests(TestCase):
             "departmental_exams.manage_cycles": ("departmental_exams", "manage_cycles"),
             "departmental_exams.configure": ("departmental_exams", "configure"),
             "departmental_exams.review_generate": ("departmental_exams", "review_generate"),
+            "faculty_portal.access": ("faculty_portal", "access"),
         }
         for code, (module, action) in permission_specs.items():
             Permission.objects.get_or_create(
@@ -38,12 +39,12 @@ class DepartmentalExamFeatureFlagTests(TestCase):
                 defaults={"module": module, "action": action, "is_active": True},
             )
         cls.permission = Permission.objects.get(code="departmental_exams.manage_cycles")
-        cls.faculty_permission = Permission.objects.get(code="departmental_exams.review_generate")
+        cls.faculty_permission = Permission.objects.get(code="faculty_portal.access")
         cls.group = MenuGroup.objects.get(portal="ADMIN", code="DEPARTMENTAL_EXAMS")
         cls.item, _ = MenuItem.objects.get_or_create(menu_group=cls.group, portal="ADMIN", code="DE_EXAM_TEST", defaults={"label": "Exam Cycles"})
         MenuItemPermission.objects.get_or_create(menu_item=cls.item, permission=cls.permission)
-        cls.faculty_group = MenuGroup.objects.create(
-            portal="FACULTY", code="DEPARTMENTAL_EXAMS", label="Departmental Exam Builder"
+        cls.faculty_group = MenuGroup.objects.get(
+            portal="FACULTY", code="DEPARTMENTAL_EXAMS"
         )
         cls.faculty_item = MenuItem.objects.create(
             menu_group=cls.faculty_group,
@@ -92,7 +93,7 @@ class DepartmentalExamFeatureFlagTests(TestCase):
         self.assertContains(response, "grouped course administration")
         self.assertContains(response, "Included/Exempt course control")
         self.assertNotContains(response, "Course Setup")
-        self.assertNotContains(response, "Faculty Contribution")
+        self.assertContains(response, "faculty question contribution")
 
     def test_configurable_features_post_enables_departmental_exam_builder_for_current_tenant(self):
         self.client.force_login(self.user)

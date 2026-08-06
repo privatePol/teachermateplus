@@ -3,6 +3,27 @@ from __future__ import annotations
 
 FACULTY_HELP_SECTIONS = [
     {
+        "code": "departmental-exam-contributions",
+        "title": "Departmental Exam Question Contributions",
+        "topics": [
+            {
+                "code": "question-contribution-workspace",
+                "title": "Prepare and Submit Your Question Contribution",
+                "purpose": "Lets an eligible assigned faculty member prepare the exact course quota of private plain-text multiple-choice questions.",
+                "how_to_open": ["From the Faculty Portal navigation, open Departmental Exam Builder.", "Choose Question Contributions, then open the grouped course workspace."],
+                "check_first": ["Confirm the cycle, grouped course, campuses, coverage, quota, instructions, and deadline.", "A blocked Draft remains readable but cannot be changed.", "A Submitted contribution is final and read-only."],
+                "actions": [
+                    {"name": "Add or Edit Question", "does": "Saves plain-text question text, four distinct choices, one correct answer, and Easy, Moderate, or Difficult difficulty.", "when": "Use it while the contribution is an Active Draft and before the deadline.", "avoid": "Do not enter HTML, images, another contributor's content, or more than the exact quota.", "result": "The question is saved in your private workspace with a stable position.", "editable": "Editable only while the contribution remains an Active Draft."},
+                    {"name": "Reorder or Delete", "does": "Changes your complete owned question order or removes one Draft question and closes the position gap.", "when": "Use it before final submission.", "avoid": "Do not omit questions from a reorder request.", "result": "Positions remain one-based and stable.", "editable": "Not available when blocked or submitted."},
+                    {"name": "Download and Upload CSV", "does": "Downloads the exact UTF-8 template, validates an append-only CSV, and creates a confidential server-side preview for 30 minutes.", "when": "Use it for multiple questions after replacing or deleting the labeled sample row.", "avoid": "Do not change header spelling, order, case, or spacing; do not exceed 2 MB, 200 nonblank rows, or the remaining quota.", "result": "Errors and warning-only duplicates appear by row; confirmation imports all rows or none.", "editable": "Imported questions remain editable Draft questions until final submission."},
+                    {"name": "Final Submission", "does": "Rechecks current assignment eligibility, lifecycle, deadline, exact quota, revisions, and every question before making the contribution read-only.", "when": "Use it only when the saved count exactly equals the quota and every question is final.", "avoid": "Do not expect a Return, Reopen, or grace-period override in Stage 5.", "result": "The contribution becomes Submitted once; repeated confirmation does not duplicate submission.", "editable": "No. Submitted content remains owner-readable and immutable."},
+                ],
+                "avoid": "Never share another contributor's questions, preview link, correct answers, or confidential CSV content.",
+                "next_step": "If the workspace is blocked or missing, contact the authorized course examination configurer to verify and synchronize your official assignment source.",
+            }
+        ],
+    },
+    {
         "code": "start",
         "title": "Start and Check Your Classes",
         "topics": [
@@ -174,6 +195,7 @@ FACULTY_HELP_SECTIONS = [
                 "check_first": ["Check the highest possible score row.", "Look for blanks, unexpected zeros, and wrong student statuses.", "Confirm all expected activities appear."],
                 "actions": [
                     {"name": "Summary", "does": "Displays the current computed gradebook.", "when": "Use it after every major encoding session and before submission.", "avoid": "Do not submit based only on one activity page.", "result": "The latest saved records are shown using the assigned template.", "editable": "The summary itself is read-only; change source scores or activities."},
+                    {"name": "Print Periodic Grades", "does": "Opens the submitted official periodic-grade HTML report in a new tab.", "when": "Use it after the period status is Submitted, then choose Print from the report preview.", "avoid": "Do not treat a Draft or Reopened working gradebook as an official report.", "result": "The full applicable roster, grouped Participation/Output and Quiz items, averages, and official grade columns are displayed for legal-landscape printing.", "editable": "No records change."},
                     {"name": "Grade Explanation", "does": "Shows how one student's grade was produced.", "when": "Use it when explaining a grade or checking an unexpected result.", "avoid": "Do not compare students or disclose another student's records.", "result": "The calculation path and source values are displayed.", "editable": "No records change."},
                     {"name": "Who Viewed", "does": "Shows recorded gradebook viewing activity.", "when": "Use it when checking access history.", "avoid": "Do not treat a view record as proof that a user changed a grade.", "result": "Available access records are displayed.", "editable": "No."},
                 ],

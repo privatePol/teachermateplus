@@ -9,7 +9,7 @@ from .stage4_test_support import Stage4TestCase
 
 
 class Stage4FutureStageProtectionTests(Stage4TestCase):
-    def test_original_permissions_and_two_item_menu_remain_the_only_surface(self):
+    def test_stage5_reuses_permissions_and_adds_only_approved_menu_surfaces(self):
         self.assertSetEqual(
             set(Permission.objects.filter(module="departmental_exams").values_list("code", flat=True)),
             {
@@ -21,10 +21,21 @@ class Stage4FutureStageProtectionTests(Stage4TestCase):
         group = MenuGroup.objects.get(portal="ADMIN", code="DEPARTMENTAL_EXAMS")
         self.assertSetEqual(
             set(MenuItem.objects.filter(menu_group=group).values_list("code", flat=True)),
-            {"DE_EXAM_CYCLES", "DE_EXAM_ASSIGNED_COURSES"},
+            {
+                "DE_EXAM_CYCLES",
+                "DE_EXAM_ASSIGNED_COURSES",
+                "DE_EXAM_CONTRIBUTOR_MONITORING",
+            },
         )
+        faculty_group = MenuGroup.objects.get(portal="FACULTY", code="DEPARTMENTAL_EXAMS")
+        self.assertSetEqual(
+            set(MenuItem.objects.filter(menu_group=faculty_group).values_list("code", flat=True)),
+            {"DE_EXAM_FACULTY_CONTRIBUTIONS"},
+        )
+        self.assertEqual(reverse("departmental_exams:contribution_list"), "/faculty/departmental-exams/contributions/")
+        self.assertEqual(reverse("departmental_exams:contributor_monitoring"), "/admin-portal/departmental-exams/contributor-monitoring/")
 
-    def test_stage_five_and_later_routes_are_not_exposed(self):
+    def test_stage_six_and_later_routes_are_not_exposed(self):
         for route_name in (
             "departmental_exams:faculty_contribution_list",
             "departmental_exams:question_encode",

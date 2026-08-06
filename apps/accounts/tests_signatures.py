@@ -19,12 +19,7 @@ from apps.tenants.models import Campus, Tenant
 
 class UserSignatureTests(TestCase):
     def setUp(self):
-        Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
-            is_active=True,
-        )
+        Permission.objects.get(code="faculty_portal.access")
         Permission.objects.create(
             code="admin_portal.access",
             module="admin_portal",

@@ -1,0 +1,17 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<h1 class="h3">Contributor Completion Monitoring</h1>
+<p class="text-muted">Aggregate progress only. This page never fetches or displays question text, choices, answers, fingerprints, or preview payloads.</p>
+{% for course in courses %}
+<div class="card shadow-sm mb-3"><div class="card-body">
+  <div class="d-flex flex-wrap justify-content-between gap-3">
+    <div><h2 class="h5">{{ course.course.code }} — {{ course.course.title }}</h2><p class="small text-muted mb-0">{{ course.cycle.academic_year }} · {{ course.cycle.term }} · {{ course.cycle.get_exam_period_display }} · {{ course.responsible_department|default:"No active responsible department" }}</p></div>
+    {% if course.can_configure %}<div>{% if course.configuration.contributor_roster_initialized_at %}<a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:roster_action' course.id 'synchronize' %}">Synchronize roster</a>{% else %}<a class="btn btn-sm btn-primary" href="{% url 'departmental_exams:roster_action' course.id 'initialize' %}">Initialize roster</a>{% endif %}</div>{% endif %}
+  </div>
+  <p class="mt-2"><strong>Roster:</strong> {% if course.configuration.contributor_roster_initialized_at %}Initialized · revision {{ course.configuration.contributor_roster_revision }}{% else %}Not initialized{% endif %}</p>
+  <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Contributor</th><th>Progress</th><th>Workflow</th><th>Roster</th><th>Sources</th><th>Deadline</th></tr></thead><tbody>
+  {% for contribution in course.faculty_contributions.all %}<tr><td>{{ contribution.faculty_user.full_name|default:contribution.faculty_user.username }}</td><td>{{ contribution.saved_question_count }} / {{ contribution.quota_snapshot }} ({{ contribution.progress_percent }}%)</td><td>{{ contribution.get_status_display }}</td><td>{{ contribution.get_roster_status_display }}</td><td>{{ contribution.valid_source_count }} valid / {{ contribution.invalid_source_count }} invalid</td><td>{{ course.configuration.contribution_deadline|date:"M j, Y g:i A" }}{% if contribution.is_overdue %} <span class="badge text-bg-danger">Overdue</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="text-muted">No contributor records.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div></div>
+{% empty %}<div class="alert alert-info">No exact-scoped course examinations are available.</div>{% endfor %}
+{% endblock %}

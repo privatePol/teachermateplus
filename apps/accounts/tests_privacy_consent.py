@@ -25,7 +25,7 @@ class PrivacyConsentFormTests(TestCase):
 class PrivacyConsentViewTests(TestCase):
     def setUp(self):
         Permission.objects.create(code="admin_portal.access", module="admin_portal", action="access")
-        Permission.objects.create(code="faculty_portal.access", module="faculty_portal", action="access")
+        Permission.objects.get(code="faculty_portal.access")
         self.user = User.objects.create_superuser(
             username="facultytester",
             email="facultytester@example.com",
@@ -86,12 +86,7 @@ class PrivacyConsentViewTests(TestCase):
 
 class FacultyRequiredPasswordChangeViewTests(TestCase):
     def setUp(self):
-        Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
-            is_active=True,
-        )
+        Permission.objects.get(code="faculty_portal.access")
         self.current_password = "IssuedPass123!"
         self.user = User.objects.create_superuser(
             username="requiredchange",

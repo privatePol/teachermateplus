@@ -22,11 +22,7 @@ class FacultyPublicLoginTests(TestCase):
             name="College",
         )
         faculty_role = Role.objects.create(code="FACULTY", name="Faculty")
-        faculty_access = Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
-        )
+        faculty_access = Permission.objects.get(code="faculty_portal.access")
         RolePermission.objects.create(role=faculty_role, permission=faculty_access)
         self.user = User.objects.create_user(
             username="faculty_landing",

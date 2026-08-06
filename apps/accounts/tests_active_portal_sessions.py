@@ -21,7 +21,10 @@ class ActivePortalSessionTests(TestCase):
     def setUpTestData(cls):
         for code in ("admin_portal.access", "faculty_portal.access"):
             module, action = code.split(".", 1)
-            Permission.objects.create(code=code, module=module, action=action, is_active=True)
+            Permission.objects.get_or_create(
+                code=code,
+                defaults={"module": module, "action": action, "is_active": True},
+            )
 
         cls.tenant = Tenant.objects.create(code="SESSION-A", name="Session Tenant A")
         cls.other_tenant = Tenant.objects.create(code="SESSION-B", name="Session Tenant B")

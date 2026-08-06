@@ -7,6 +7,26 @@ from apps.core.services.permissions import PermissionService
 
 ADMIN_HELP_SECTIONS = [
     {
+        "code": "departmental-exam-contributors",
+        "title": "Departmental Exam Contributor Rosters",
+        "topics": [
+            {
+                "code": "contributor-monitoring",
+                "title": "Initialize, Synchronize, and Monitor Contributions",
+                "purpose": "Provides exact-responsibility aggregate monitoring without exposing any contributor question content.",
+                "how_to_open": ["Open Departmental Exam Builder in the Admin Portal.", "Choose Contributor Completion."],
+                "check_first": ["The governing cycle and course contribution must be Open.", "Only exact course configurators may initialize or synchronize; an assigned reviewer receives monitoring only.", "Manage Cycles alone does not grant contributor monitoring."],
+                "actions": [
+                    {"name": "Initialize Roster", "does": "Creates one contribution per grouped course and eligible faculty, preserving every concrete assignment/campus source.", "when": "Use this explicit POST for a course that was already Open before Stage 5; future Open transitions initialize automatically.", "avoid": "Do not use roster actions as a manual authorization bypass.", "result": "Valid sources create Active Drafts; an empty result is still recorded as initialized.", "editable": "The action is idempotent and never deletes contribution history."},
+                    {"name": "Synchronize Roster", "does": "Reevaluates active users, tenants, campuses, offerings, accepted assignments, exact Faculty Portal permission, and direct denies source by source.", "when": "Use it after official teaching-assignment changes.", "avoid": "Do not expect one denied campus to invalidate an independently authorized campus source.", "result": "Drafts become Blocked only after the final qualifying source is lost and may reactivate when a valid source returns; Submitted records remain historical.", "editable": "Sources are marked current or invalid and retained as history."},
+                    {"name": "Monitor Completion", "does": "Shows contributor identity, quota, saved count, progress, workflow/roster status, deadline, overdue state, and valid/invalid source counts.", "when": "Use it for operational follow-up within your exact responsible-department or assigned-reviewer scope.", "avoid": "Question text, choices, answers, fingerprints, and import previews are intentionally unavailable.", "result": "You receive aggregate progress only.", "editable": "Monitoring is read-only."},
+                ],
+                "avoid": "Do not request or copy confidential question content through administrative monitoring.",
+                "next_step": "Arrange the separately authorized hourly production scheduler for purge_expired_question_import_previews before deployment.",
+            }
+        ],
+    },
+    {
         "code": "start",
         "title": "Start Here",
         "summary": "Confirm your working scope before opening or changing school records.",

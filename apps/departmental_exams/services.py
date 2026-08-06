@@ -1735,6 +1735,17 @@ class CourseExamConfigurationService:
         configuration.closed_by = None
         configuration.revision += 1
         configuration.save(update_fields=["workflow_status", "opened_at", "opened_by", "closed_at", "closed_by", "contributor_instructions_snapshot", "revision", "updated_at"])
+        # Stage 5 roster creation is part of the same atomic Open transition.
+        # The import stays local to preserve the established Stage 1-4 service
+        # dependency direction.
+        from .contribution_services import ContributionRosterService
+
+        ContributionRosterService.initialize_for_open_locked(
+            cycle_course=parent,
+            configuration=configuration,
+            actor=user,
+            request=request,
+        )
         frozen_instructions = configuration.contributor_instructions_snapshot or ""
         cls._audit(
             action="DE_EXAM_COURSE_CONTRIBUTION_OPENED",

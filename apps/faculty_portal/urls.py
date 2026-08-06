@@ -47,6 +47,7 @@ from .views import (
     period_reopen_request_view,
     period_self_reopen_view,
     period_submit_view,
+    period_summary_print_view,
     period_summary_view,
     parallel_section_comparison_view,
     student_performance_consultation_view,
@@ -182,6 +183,11 @@ urlpatterns = [
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/summary/",
         period_summary_view,
         name="period_summary",
+    ),
+    path(
+        "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/summary/print/",
+        period_summary_print_view,
+        name="period_summary_print",
     ),
     path(
         "faculty/my-courses/<int:offering_id>/periods/<int:period_id>/performance/",

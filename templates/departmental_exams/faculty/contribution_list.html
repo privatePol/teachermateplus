@@ -1,0 +1,40 @@
+{% extends "faculty_portal/base.html" %}
+{% block title %}Question Contributions | TeacherMate+{% endblock %}
+{% block faculty_content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 mb-1">Departmental Exam Question Contributions</h1>
+    <p class="text-muted mb-0">Open your assigned grouped course to prepare or review your own questions.</p>
+  </div>
+</div>
+{% if contributions %}
+  <div class="row g-3">
+    {% for contribution in contributions %}
+      <div class="col-12 col-xl-6">
+        <div class="card h-100 shadow-sm">
+          <div class="card-body">
+            <div class="d-flex justify-content-between gap-3">
+              <div>
+                <h2 class="h5 mb-1">{{ contribution.cycle_course.course.code }} — {{ contribution.cycle_course.course.title }}</h2>
+                <p class="text-muted small mb-2">{{ contribution.cycle_course.cycle.get_exam_period_display }} · {{ contribution.cycle_course.cycle.academic_year }} · {{ contribution.cycle_course.cycle.term }}</p>
+              </div>
+              <div class="text-end">
+                <span class="badge {% if contribution.status == 'SUBMITTED' %}text-bg-success{% elif contribution.roster_status == 'BLOCKED' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
+                  {% if contribution.status == 'SUBMITTED' %}Submitted{% else %}{{ contribution.get_roster_status_display }} Draft{% endif %}
+                </span>
+              </div>
+            </div>
+            <p class="mb-1"><strong>{{ contribution.saved_question_count }} / {{ contribution.quota_snapshot }}</strong> questions saved</p>
+            <div class="progress mb-3" role="progressbar" aria-label="Contribution progress" aria-valuenow="{{ contribution.progress_percent }}" aria-valuemin="0" aria-valuemax="100">
+              <div class="progress-bar" style="width: {{ contribution.progress_percent }}%">{{ contribution.progress_percent }}%</div>
+            </div>
+            <a class="btn btn-primary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Open workspace</a>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="alert alert-info">No contribution roster record is available yet. An authorized course configurer must initialize or synchronize the roster; viewing this page does not create records.</div>
+{% endif %}
+{% endblock %}

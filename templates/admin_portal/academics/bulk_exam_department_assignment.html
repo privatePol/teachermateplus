@@ -1,0 +1,249 @@
+{% extends "admin_portal/base.html" %}
+
+{% block admin_content %}
+<style>
+  .bulk-exam-card {
+    border: 0;
+    border-radius: 1rem;
+    box-shadow: 0 12px 24px rgba(16, 50, 30, 0.06);
+  }
+  .bulk-exam-table-wrap {
+    border: 1px solid #dce5df;
+    border-radius: 0.75rem;
+    max-height: 60vh;
+    overflow: auto;
+  }
+  .bulk-exam-table-wrap thead th {
+    background: var(--bs-body-bg);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .bulk-exam-guidance {
+    background: #f7fbf7;
+    border: 1px solid #dce9de;
+    border-radius: 0.9rem;
+    color: #405c49;
+  }
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <h2 class="h5 mb-0">Bulk Assign Exam Departments</h2>
+  <a class="btn btn-sm btn-outline-secondary" href="{% url 'admin_portal:course_list' %}">Back to Courses</a>
+</div>
+
+<div class="bulk-exam-guidance p-3 mb-3">
+  <div class="fw-semibold mb-2">How Exam Department ownership works</div>
+  <ul class="mb-0 ps-3">
+    <li>The selected Department becomes the responsible lead department for the shared examination across all campuses.</li>
+    <li>The campus shown identifies the responsible lead department; it does not limit the examination to that campus.</li>
+    <li>Changes update the Course definition for future examination-cycle snapshots.</li>
+    <li>Existing CycleCourse responsibility snapshots are not changed.</li>
+  </ul>
+</div>
+
+<form id="bulk-exam-assignment-form" method="post" novalidate>
+  {% csrf_token %}
+  <input type="hidden" name="q" value="{{ q }}">
+  <input type="hidden" name="assignment_status" value="{{ assignment_status }}">
+  <input type="hidden" name="current_department_id" value="{{ current_department_id }}">
+</form>
+
+<div class="card bulk-exam-card mb-3">
+  <div class="card-body">
+    {% if form.non_field_errors %}
+    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <div class="row g-3 align-items-end">
+      <div class="col-lg-8">
+        <label class="form-label fw-semibold" for="id_department">{{ form.department.label }}</label>
+        {{ form.department }}
+        <div class="form-text">Choose the exact campus group, then the responsible lead Department. Campus-qualified labels remain visible after selection.</div>
+        {% for error in form.department.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <div class="col-lg-4">
+        <div class="fw-semibold text-success" id="selected-course-count">0 Courses selected</div>
+        <div class="form-text">{{ filtered_course_count }} currently shown by the server-side filters.</div>
+        <div class="alert alert-success py-2 px-3 mt-3 mb-0" id="selected-target-summary" hidden>
+          <div class="small text-uppercase fw-semibold">Responsible lead department:</div>
+          <div class="fw-semibold" id="selected-target-department"></div>
+          <div class="small text-uppercase fw-semibold mt-2">Selected Courses:</div>
+          <div class="fw-semibold" id="selected-target-count">0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card bulk-exam-card mb-3">
+  <div class="card-body">
+    <form class="row g-3 align-items-end" method="get" id="course-filter-form">
+      <div class="col-lg-5">
+        <label class="form-label" for="course-search">Course search</label>
+        <input class="form-control" id="course-search" name="q" value="{{ q }}" placeholder="Search by Course code or title">
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="assignment-status">Assignment status</label>
+        <select class="form-select" id="assignment-status" name="assignment_status">
+          <option value="unassigned" {% if assignment_status == 'unassigned' %}selected{% endif %}>Unassigned</option>
+          <option value="assigned" {% if assignment_status == 'assigned' %}selected{% endif %}>Assigned</option>
+          <option value="all" {% if assignment_status == 'all' %}selected{% endif %}>All</option>
+        </select>
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label" for="current-department">{{ department_filter_form.current_department_id.label }}</label>
+        {{ department_filter_form.current_department_id }}
+        <div class="form-text">Campus headings separate exact Department records.</div>
+      </div>
+      <div class="col-lg-1 d-grid">
+        <button class="btn btn-outline-secondary" type="submit">Filter</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card bulk-exam-card">
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+      <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-sm btn-outline-primary" id="select-visible-courses" type="button">Select All Visible Filtered Courses</button>
+        <button class="btn btn-sm btn-outline-secondary" id="clear-course-selection" type="button">Clear Selection</button>
+      </div>
+      <span class="text-muted small">Only active Courses in the current authorized tenant scope are eligible.</span>
+    </div>
+
+    {% for error in form.course_ids.errors %}<div class="alert alert-danger py-2">{{ error }}</div>{% endfor %}
+    <div class="bulk-exam-table-wrap">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th class="text-center" style="width: 3rem;">Select</th>
+            <th>Code</th>
+            <th>Title</th>
+            <th>Current Exam Department</th>
+            <th>Assignment State</th>
+          </tr>
+        </thead>
+        <tbody id="course-table-body">
+          {% for row in course_rows %}
+          <tr data-course-row data-search-text="{{ row.course.code|lower }} {{ row.course.title|lower }}">
+            <td class="text-center">
+              <input class="form-check-input course-checkbox" type="checkbox" name="course_ids" value="{{ row.course.id }}" form="bulk-exam-assignment-form" aria-label="Select {{ row.course.code }}" {% if row.selected %}checked{% endif %}>
+            </td>
+            <td class="fw-semibold">{{ row.course.code }}</td>
+            <td>{{ row.course.title }}</td>
+            <td>{{ row.current_department_label }}</td>
+            <td>
+              {% if row.assignment_state == "Assigned" %}
+              <span class="badge text-bg-success">Assigned</span>
+              {% else %}
+              <span class="badge text-bg-secondary">Unassigned</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" class="text-center text-muted py-4">No active Courses match the current filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="alert alert-warning mt-3 mb-3">
+      <div class="form-check">
+        <input class="form-check-input" id="id_replace_existing" type="checkbox" name="replace_existing" form="bulk-exam-assignment-form" {% if form.replace_existing.value %}checked{% endif %}>
+        <label class="form-check-label fw-semibold" for="id_replace_existing">Replace existing Exam Department assignments</label>
+      </div>
+      <div class="small mt-2">
+        Leave this unchecked to update only unassigned Courses. Checking it deliberately replaces a different existing Exam Department on every selected Course. Courses already assigned to the selected Department remain unchanged.
+      </div>
+      {% for error in form.replace_existing.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+      <button class="btn btn-primary" type="submit" form="bulk-exam-assignment-form" {% if not course_rows %}disabled{% endif %}>Assign Selected Courses</button>
+      <a class="btn btn-outline-secondary" href="{% url 'admin_portal:course_list' %}">Back to Courses</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const assignmentForm = document.getElementById("bulk-exam-assignment-form");
+    const searchField = document.getElementById("course-search");
+    const rows = Array.from(document.querySelectorAll("[data-course-row]"));
+    const checkboxes = Array.from(document.querySelectorAll(".course-checkbox"));
+    const countLabel = document.getElementById("selected-course-count");
+    const replaceCheckbox = document.getElementById("id_replace_existing");
+    const departmentSelect = document.getElementById("id_department");
+    const targetSummary = document.getElementById("selected-target-summary");
+    const targetDepartment = document.getElementById("selected-target-department");
+    const targetCount = document.getElementById("selected-target-count");
+
+    function selectedTargetText(option) {
+      return option.dataset.campusCode + " — " + option.dataset.campusName + " — " +
+        option.dataset.departmentCode + " — " + option.dataset.departmentName;
+    }
+
+    function updateSelectedCount() {
+      const count = checkboxes.filter(function (checkbox) { return checkbox.checked; }).length;
+      countLabel.textContent = count + (count === 1 ? " Course selected" : " Courses selected");
+      targetCount.textContent = String(count);
+      const selectedOption = departmentSelect.selectedOptions[0];
+      const hasTarget = Boolean(selectedOption && selectedOption.value);
+      targetSummary.hidden = !hasTarget;
+      targetDepartment.textContent = hasTarget ? selectedTargetText(selectedOption) : "";
+    }
+
+    function applyLocalSearch() {
+      const query = (searchField.value || "").trim().toLowerCase();
+      rows.forEach(function (row) {
+        const text = (row.dataset.searchText || "").toLowerCase();
+        row.hidden = Boolean(query && !text.includes(query));
+      });
+    }
+
+    document.getElementById("select-visible-courses").addEventListener("click", function () {
+      rows.forEach(function (row) {
+        if (!row.hidden) {
+          const checkbox = row.querySelector(".course-checkbox");
+          if (checkbox) { checkbox.checked = true; }
+        }
+      });
+      updateSelectedCount();
+    });
+
+    document.getElementById("clear-course-selection").addEventListener("click", function () {
+      checkboxes.forEach(function (checkbox) { checkbox.checked = false; });
+      updateSelectedCount();
+    });
+
+    checkboxes.forEach(function (checkbox) {
+      checkbox.addEventListener("change", updateSelectedCount);
+    });
+    departmentSelect.addEventListener("change", updateSelectedCount);
+    searchField.addEventListener("input", applyLocalSearch);
+
+    assignmentForm.addEventListener("submit", function (event) {
+      const selectedOption = departmentSelect.selectedOptions[0];
+      if (!selectedOption || !selectedOption.value) {
+        return;
+      }
+      const selectedCount = checkboxes.filter(function (checkbox) { return checkbox.checked; }).length;
+      const replacementMode = replaceCheckbox.checked
+        ? "Replace different existing Exam Department assignments (audited)."
+        : "Keep different existing Exam Department assignments; update unassigned Courses only.";
+      const confirmation =
+        "Responsible lead department:\n" + selectedTargetText(selectedOption) +
+        "\n\nSelected Courses: " + selectedCount +
+        "\nReplacement mode: " + replacementMode +
+        "\n\nProceed with this assignment?";
+      if (!window.confirm(confirmation)) {
+        event.preventDefault();
+      }
+    });
+
+    updateSelectedCount();
+  });
+</script>
+{% endblock %}

@@ -21,12 +21,7 @@ class LoginLockoutTests(TestCase):
             action="access",
             is_active=True,
         )
-        Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty_portal",
-            action="access",
-            is_active=True,
-        )
+        Permission.objects.get(code="faculty_portal.access")
         Permission.objects.create(
             code="users.read",
             module="users",

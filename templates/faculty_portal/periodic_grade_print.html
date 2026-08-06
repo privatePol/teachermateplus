@@ -1,0 +1,347 @@
+{% extends "faculty_portal/base.html" %}
+{% load static %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .periodic-report-shell {
+    color: #17251b;
+  }
+  .periodic-report-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .periodic-report-header {
+    border: 1px solid #d7e2d8;
+    border-radius: 0.75rem;
+    background: #fff;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+  .periodic-report-brand {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.85rem;
+  }
+  .periodic-report-logo {
+    width: 68px;
+    height: 68px;
+    object-fit: contain;
+  }
+  .periodic-report-school-name {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 800;
+  }
+  .periodic-report-address {
+    margin-top: 0.15rem;
+    color: #53645a;
+    font-size: 0.9rem;
+  }
+  .periodic-report-title {
+    margin-top: 0.8rem;
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+  }
+  .periodic-report-purpose {
+    margin-top: 0.15rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #4e5c53;
+  }
+  .periodic-report-metadata {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.25rem 1.25rem;
+    max-width: 900px;
+    margin: 0.85rem auto 0;
+    text-align: left;
+    font-size: 0.9rem;
+  }
+  .periodic-report-metadata .metadata-full {
+    grid-column: 1 / -1;
+  }
+  .periodic-report-metadata .metadata-label {
+    font-weight: 700;
+  }
+  .periodic-report-scroll {
+    width: 100%;
+    overflow-x: auto;
+    border: 1px solid #cbd7cd;
+    border-radius: 0.5rem;
+    background: #fff;
+  }
+  .periodic-grade-table {
+    width: max-content;
+    min-width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+  }
+  .periodic-grade-table th,
+  .periodic-grade-table td {
+    border: 1px solid #98a79c;
+    padding: 0.3rem 0.38rem;
+    vertical-align: middle;
+  }
+  .periodic-grade-table thead th {
+    background: #eaf2eb;
+    color: #1d442c;
+    text-align: center;
+    font-weight: 700;
+  }
+  .periodic-grade-table .group-participation {
+    background: #e8f3f7;
+    color: #244f60;
+  }
+  .periodic-grade-table .group-quizzes {
+    background: #edf6e3;
+    color: #315322;
+  }
+  .periodic-grade-table .row-number {
+    min-width: 44px;
+    text-align: center;
+  }
+  .periodic-grade-table .student-name {
+    min-width: 190px;
+    white-space: normal;
+  }
+  .periodic-grade-table .official-grade,
+  .periodic-grade-table .average-cell,
+  .periodic-grade-table .exam-grade {
+    min-width: 76px;
+    text-align: center;
+    font-weight: 700;
+  }
+  .periodic-grade-table .activity-heading {
+    min-width: 92px;
+    max-width: 150px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.2;
+  }
+  .periodic-grade-table .activity-score {
+    min-width: 92px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .periodic-report-footer {
+    margin-top: 1rem;
+    color: #263b2d;
+    font-size: 0.86rem;
+  }
+  .periodic-report-footer .none-follows {
+    text-align: center;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+  .periodic-report-footer .submitted-by {
+    margin-top: 1.5rem;
+  }
+  .periodic-report-footer .submitted-by-name {
+    display: inline-block;
+    min-width: 260px;
+    margin-top: 1.8rem;
+    border-top: 1px solid #263b2d;
+    padding-top: 0.3rem;
+    text-align: center;
+    font-weight: 600;
+  }
+  @media (max-width: 767.98px) {
+    .periodic-report-controls,
+    .periodic-report-brand {
+      align-items: flex-start;
+    }
+    .periodic-report-controls {
+      flex-direction: column;
+    }
+    .periodic-report-metadata {
+      grid-template-columns: 1fr;
+    }
+    .periodic-report-metadata .metadata-full {
+      grid-column: auto;
+    }
+  }
+  @page {
+    size: legal landscape;
+    margin: 0.35in;
+  }
+  @media print {
+    body,
+    .faculty-app,
+    .faculty-main {
+      background: #fff !important;
+    }
+    .faculty-topbar,
+    .faculty-sidebar,
+    .faculty-utility-stack,
+    .screen-only {
+      display: none !important;
+    }
+    .faculty-layout {
+      display: block !important;
+      min-height: auto !important;
+    }
+    .faculty-main {
+      padding: 0 !important;
+    }
+    .periodic-report-header {
+      border: 0;
+      border-radius: 0;
+      padding: 0;
+      margin-bottom: 0.18in;
+    }
+    .periodic-report-logo {
+      width: 52px;
+      height: 52px;
+    }
+    .periodic-report-school-name {
+      font-size: 12pt;
+    }
+    .periodic-report-title {
+      margin-top: 0.12in;
+      font-size: 9pt;
+    }
+    .periodic-report-purpose,
+    .periodic-report-address,
+    .periodic-report-metadata,
+    .periodic-report-footer {
+      font-size: 6.8pt;
+    }
+    .periodic-report-metadata {
+      gap: 0.04in 0.18in;
+      margin-top: 0.1in;
+    }
+    .periodic-report-scroll {
+      overflow: visible !important;
+      border: 0;
+      border-radius: 0;
+    }
+    .periodic-grade-table {
+      width: 100%;
+      min-width: 0;
+      table-layout: auto;
+      font-size: 5.7pt;
+    }
+    .periodic-grade-table thead {
+      display: table-header-group;
+    }
+    .periodic-grade-table tbody tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .periodic-grade-table th,
+    .periodic-grade-table td {
+      padding: 0.035in 0.045in;
+      border-color: #4d554f;
+      color: #000;
+    }
+    .periodic-grade-table .student-name {
+      min-width: 1.25in;
+    }
+    .periodic-grade-table .activity-heading {
+      min-width: 0.52in;
+      max-width: 0.9in;
+    }
+    .periodic-grade-table .activity-score {
+      min-width: 0;
+      white-space: nowrap;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block faculty_content %}
+<div class="periodic-report-shell">
+  <div class="periodic-report-controls screen-only">
+    <div>
+      <h1 class="h5 mb-1">Periodic Grade Print | {{ offering.course.code }} | {{ period.name }}</h1>
+      <div class="small text-muted">Submitted official report preview. Use Print when ready.</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a class="btn btn-sm btn-outline-secondary" href="{% url 'faculty_portal:period_summary' offering.id period.id %}">Back to Summary</a>
+      <button class="btn btn-sm btn-primary" type="button" onclick="window.print();">Print</button>
+    </div>
+  </div>
+
+  <header class="periodic-report-header">
+    <div class="periodic-report-brand">
+      <img class="periodic-report-logo" src="{% get_media_prefix %}logos/ncba-logo.png" alt="NCBA school logo">
+      <div>
+        <h2 class="periodic-report-school-name">{{ print_header_name }}</h2>
+        {% if print_header_address %}<div class="periodic-report-address">{{ print_header_address }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="periodic-report-title">Summary of Periodic Grades</div>
+    <div class="periodic-report-purpose">For encoding of final periodic grades into the Pinnacle system</div>
+    <div class="periodic-report-metadata">
+      <div><span class="metadata-label">Grading Period:</span> {{ period.name }}</div>
+      <div><span class="metadata-label">Academic Year:</span> {{ offering.academic_year.code }}</div>
+      <div><span class="metadata-label">Semester / Term:</span> {{ offering.term.name|default:offering.term.code }}</div>
+      <div><span class="metadata-label">Section:</span> {{ offering.section.code }}</div>
+      <div class="metadata-full"><span class="metadata-label">Faculty:</span> {{ request.user.get_full_name|default:request.user.username }}</div>
+      <div><span class="metadata-label">Course Code:</span> {{ offering.course.code }}</div>
+      <div><span class="metadata-label">Units:</span> {{ offering.course.units|default:"" }}</div>
+      <div class="metadata-full"><span class="metadata-label">Course Title:</span> {{ offering.course.title }}</div>
+    </div>
+  </header>
+
+  <div class="periodic-report-scroll" aria-label="Periodic grade report table">
+    <table class="table periodic-grade-table">
+      <thead>
+        <tr>
+          <th rowspan="2" class="row-number">No.</th>
+          <th rowspan="2" class="student-name">Student Name</th>
+          <th rowspan="2" class="official-grade">{{ report.grade_label }}</th>
+          <th colspan="{{ report.participation_colspan }}" class="group-participation">Participation / Output</th>
+          <th colspan="{{ report.quiz_colspan }}" class="group-quizzes">Quizzes</th>
+          <th rowspan="2" class="average-cell">CS Ave</th>
+          <th rowspan="2" class="exam-grade">{{ report.exam_label }}</th>
+        </tr>
+        <tr>
+          {% for column in report.participation_columns %}
+          <th class="activity-heading group-participation">{{ column.label }}</th>
+          {% endfor %}
+          <th class="average-cell group-participation">P/O Ave</th>
+          {% for column in report.quiz_columns %}
+          <th class="activity-heading group-quizzes">{{ column.label }}</th>
+          {% endfor %}
+          <th class="average-cell group-quizzes">Quiz Ave</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in report.rows %}
+        <tr>
+          <td class="row-number">{{ row.number }}</td>
+          <td class="student-name">{{ row.student_name }}</td>
+          <td class="official-grade">{{ row.official_grade }}</td>
+          {% for value in row.participation_values %}<td class="activity-score">{{ value }}</td>{% endfor %}
+          <td class="average-cell">{{ row.participation_average }}</td>
+          {% for value in row.quiz_values %}<td class="activity-score">{{ value }}</td>{% endfor %}
+          <td class="average-cell">{{ row.quiz_average }}</td>
+          <td class="average-cell">{{ row.class_standing_average }}</td>
+          <td class="exam-grade">{{ row.exam_grade }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="{{ report.total_columns }}" class="text-center py-3">No applicable enrollment rows are available.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <footer class="periodic-report-footer">
+    <div class="none-follows">**** NONE FOLLOWS *****</div>
+    <div class="submitted-by">
+      <strong>SUBMITTED BY:</strong><br>
+      <span class="submitted-by-name">{{ request.user.get_full_name|default:request.user.username }}</span>
+    </div>
+  </footer>
+</div>
+{% endblock %}

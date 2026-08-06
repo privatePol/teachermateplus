@@ -2726,11 +2726,7 @@ class GradeExplanationServiceTests(TestCase):
             privacy_consent_at=timezone.now(),
         )
         self.faculty_role = Role.objects.create(code="FACULTY", name="Faculty")
-        faculty_access = Permission.objects.create(
-            code="faculty_portal.access",
-            module="faculty",
-            action="access",
-        )
+        faculty_access = Permission.objects.get(code="faculty_portal.access")
         RolePermission.objects.create(role=self.faculty_role, permission=faculty_access)
         UserRole.objects.create(
             user=self.faculty_user,

@@ -77,6 +77,8 @@ class Stage4ResponsibilityTests(Stage4TestCase):
             faculty_user=self.admin,
             source_assignment=assignment,
             source_campus=self.campus,
+            quota_snapshot=configuration.questions_required_per_faculty,
+            configuration_revision_snapshot=configuration.revision,
         )
         with self.assertRaises(ValidationError):
             CycleCourseAdministrationService.update_responsibility(
