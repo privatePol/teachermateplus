@@ -2823,6 +2823,20 @@ class GradingGovernanceService:
             template_period=template_period,
             at=now,
         )
+        is_auto_closed_after_deadline = cls.is_auto_closed_after_deadline(
+            offering=offering,
+            template_period=template_period,
+            now=now,
+        )
+        # A submitted gradebook becomes read-only after its deadline even when
+        # no physical lock row has been flipped.  Keep this predicate aligned
+        # with the Faculty Portal's deadline auto-close governance, while the
+        # editable-window checks below continue to exclude active unlocks.
+        is_locked = bool(
+            is_locked
+            or is_auto_closed_after_deadline
+            or (is_submitted and is_post_deadline)
+        )
         is_editable = bool(
             has_reopen_window
             or has_correction_window

@@ -39,6 +39,7 @@ from apps.grading.models import (
     GradeCorrectionUnlockWindow,
     GradeEncodingControl,
     GradeSubmission,
+    GradeSubmissionReopenRequest,
     GradingPeriodLock,
     GradingTemplate,
     GradingTemplateComponent,
@@ -3588,7 +3589,34 @@ class CorrectionWorkflowTests(TestCase):
         self.assertFalse(state["is_allowed"])
         self.assertEqual(state["policy"].id, CorrectionPetitionWindowPolicy.objects.get(grading_period=alias_period).id)
 
-    def test_correction_lifecycle_rejects_before_deadline_and_unlocked_gradebooks(self):
+    def test_correction_lifecycle_allows_submitted_post_deadline_read_only_gradebook_without_physical_lock(self):
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=False)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+
+        lifecycle_state = GradingGovernanceService.get_correction_request_lifecycle_state(
+            offering=self.offering,
+            template_period=self.period,
+        )
+        filing_state = GradingGovernanceService.get_correction_request_filing_state(
+            offering=self.offering,
+            template_period=self.period,
+        )
+
+        self.assertTrue(lifecycle_state["is_submitted"])
+        self.assertTrue(lifecycle_state["is_post_deadline"])
+        self.assertTrue(lifecycle_state["is_locked"])
+        self.assertFalse(lifecycle_state["is_editable"])
+        self.assertTrue(filing_state["is_allowed"])
+
+    def test_correction_lifecycle_denies_before_deadline(self):
         self._set_correction_lifecycle(deadline_at=timezone.now() + timedelta(hours=1), is_locked=False)
         state = GradingGovernanceService.get_correction_request_lifecycle_state(
             offering=self.offering,
@@ -3610,12 +3638,57 @@ class CorrectionWorkflowTests(TestCase):
                 items=self._correction_item(),
             )
 
-        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=False)
+    def test_correction_lifecycle_denies_active_reopen_window_after_deadline(self):
+        self._set_correction_lifecycle(
+            deadline_at=timezone.now() - timedelta(hours=1),
+            is_locked=False,
+            submission_status=GradeSubmission.Status.REOPENED,
+        )
+        submission = GradingGovernanceService.get_submission(
+            offering=self.offering,
+            template_period=self.period,
+        )
+        GradeSubmissionReopenRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            submission=submission,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.faculty_user,
+            status=GradeSubmissionReopenRequest.Status.APPROVED,
+            justification="Approved deadline reopen.",
+            reviewed_by_user=self.reviewer_user,
+            reviewed_at=timezone.now(),
+        )
+
         state = GradingGovernanceService.get_correction_request_lifecycle_state(
             offering=self.offering,
             template_period=self.period,
         )
+
         self.assertFalse(state["is_allowed"])
+        self.assertTrue(state["is_editable"])
+
+    def test_correction_filing_denies_closed_petition_window(self):
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=False)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.CLOSED,
+            is_active=True,
+        )
+
+        filing_state = GradingGovernanceService.get_correction_request_filing_state(
+            offering=self.offering,
+            template_period=self.period,
+        )
+
+        self.assertTrue(filing_state["lifecycle_state"]["is_allowed"])
+        self.assertFalse(filing_state["petition_window_state"]["is_allowed"])
+        self.assertFalse(filing_state["is_allowed"])
 
     def test_correction_request_is_visible_after_deadline_for_read_only_offering_with_open_petition_window(self):
         self._grant_faculty_correction_access()
