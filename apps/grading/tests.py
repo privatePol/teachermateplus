@@ -18,6 +18,7 @@ from apps.accounts.models import User
 from apps.accounts.models import UserSignatureUsageLog
 from apps.accounts.services import UserSignatureService
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.academics.services import AcademicGovernanceService
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.auditlog.models import AuditLog
 from apps.enrollment.models import Enrollment
@@ -2269,6 +2270,29 @@ class CorrectionWorkflowTests(TestCase):
         self.faculty_user.privacy_consent_at = timezone.now()
         self.faculty_user.save(update_fields=["privacy_consent_version", "privacy_consent_at", "updated_at"])
 
+    def _set_offering_outside_active_scope(self):
+        active_academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2026-2027",
+            name="AY 2026-2027",
+            start_date=date(2026, 6, 1),
+            end_date=date(2027, 5, 31),
+        )
+        active_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=active_academic_year,
+            code="1ST",
+            name="First Term",
+            sequence_no=1,
+            start_date=date(2026, 6, 1),
+            end_date=date(2026, 10, 31),
+        )
+        AcademicGovernanceService.set_active_scope(
+            tenant_id=self.tenant.id,
+            academic_year=active_academic_year,
+            term=active_term,
+        )
+
     def test_correction_route_uses_exact_faculty_role_department_not_offering_department(self):
         college = Department.objects.create(
             tenant=self.tenant,
@@ -3592,6 +3616,77 @@ class CorrectionWorkflowTests(TestCase):
             template_period=self.period,
         )
         self.assertFalse(state["is_allowed"])
+
+    def test_correction_request_is_visible_after_deadline_for_read_only_offering_with_open_petition_window(self):
+        self._grant_faculty_correction_access()
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=True)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.DAYS_AFTER_PERIOD_END,
+            allowed_days_after_period_end=5,
+            is_active=True,
+        )
+        self._set_offering_outside_active_scope()
+        self.client.force_login(self.faculty_user)
+
+        summary_response = self.client.get(
+            reverse("faculty_portal:period_summary", args=[self.offering.id, self.period.id])
+        )
+        periods_response = self.client.get(reverse("faculty_portal:offering_periods", args=[self.offering.id]))
+
+        self.assertEqual(summary_response.status_code, 200)
+        self.assertTrue(summary_response.context["offering"].faculty_is_read_only)
+        self.assertTrue(summary_response.context["can_access_corrections"])
+        self.assertContains(summary_response, "Correction Requests")
+        self.assertEqual(periods_response.status_code, 200)
+        self.assertTrue(periods_response.context["period_cards"][0]["is_read_only_class"])
+        self.assertTrue(periods_response.context["period_cards"][0]["can_access_corrections"])
+        self.assertContains(periods_response, 'aria-label="Corrections"')
+
+    def test_correction_request_is_hidden_before_deadline_while_self_reopen_is_available(self):
+        self._grant_faculty_correction_access()
+        self._set_correction_lifecycle(deadline_at=timezone.now() + timedelta(hours=1), is_locked=False)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(reverse("faculty_portal:period_summary", args=[self.offering.id, self.period.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["can_self_reopen"])
+        self.assertFalse(response.context["can_access_corrections"])
+        self.assertNotContains(response, "Correction Requests")
+
+    def test_correction_request_is_hidden_when_petition_window_is_closed(self):
+        self._grant_faculty_correction_access()
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=True)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.CLOSED,
+            is_active=True,
+        )
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(reverse("faculty_portal:period_summary", args=[self.offering.id, self.period.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["can_access_corrections"])
+        self.assertNotContains(response, "Correction Requests")
 
     def test_period_corrections_direct_get_and_post_are_denied_before_deadline(self):
         self._grant_faculty_correction_access()
