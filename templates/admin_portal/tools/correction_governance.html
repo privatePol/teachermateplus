@@ -79,9 +79,12 @@
               <tr>
                 <td>
                   <div>{{ row.campus.code|default:"(Tenant Default)" }}</div>
-                  <div class="small text-muted">{{ row.academic_year.code }} / {{ row.term.code }}</div>
+                  <div class="small text-muted">
+                    {{ row.academic_year.code|default:"All Academic Years" }} /
+                    {{ row.term.code|default:"All Terms" }}
+                  </div>
                 </td>
-                <td>{{ row.grading_period.template.code }} / {{ row.grading_period.code }}</td>
+                <td>{{ row.canonical_period_key|default:row.grading_period.code }}</td>
                 <td>{{ row.get_policy_mode_display }}</td>
                 <td>{% if row.allowed_days_after_period_end is not None %}{{ row.allowed_days_after_period_end }}{% else %}-{% endif %}</td>
                 <td>

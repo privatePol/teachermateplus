@@ -7,7 +7,7 @@ import re
 from django.contrib import messages
 from django import forms as django_forms
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, Prefetch, Q
 from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.template.loader import render_to_string
@@ -898,6 +898,10 @@ def _period_edit_state(offering, period):
     )
     correction_mode = GradingGovernanceService.get_correction_mode(tenant_id=offering.tenant_id)
     system_correction_enabled = correction_mode == GradingGovernanceService.CORRECTION_MODE_SYSTEM_REQUEST
+    correction_filing_state = GradingGovernanceService.get_correction_request_filing_state(
+        offering=offering,
+        template_period=period,
+    )
     encoding_control = GradeEncodingAccessService.get_closed_control(offering=offering, template_period=period)
     encoding_control_message = GradeEncodingAccessService.build_block_notice(
         encoding_control,
@@ -951,6 +955,11 @@ def _period_edit_state(offering, period):
         "governance_message": governance_state["message"],
         "correction_mode": correction_mode,
         "system_correction_enabled": system_correction_enabled,
+        "correction_lifecycle_state": correction_filing_state["lifecycle_state"],
+        "correction_filing_state": correction_filing_state,
+        "can_access_corrections": bool(
+            system_correction_enabled and correction_filing_state["is_allowed"] and not scope_state["read_only"]
+        ),
     }
 
 
@@ -4002,9 +4011,14 @@ def offering_periods_view(request, offering_id: int):
             submission=submission,
             completion_window_state=completion_window_state,
         )
+        correction_filing_state = GradingGovernanceService.get_correction_request_filing_state(
+            offering=offering,
+            template_period=p,
+        )
         can_access_corrections = bool(
-            submission
-            and submission.status in {GradeSubmission.Status.SUBMITTED, GradeSubmission.Status.REOPENED}
+            GradingGovernanceService.is_system_correction_enabled(tenant_id=offering.tenant_id)
+            and correction_filing_state["is_allowed"]
+            and not offering.faculty_is_read_only
         )
         active_approved_reopen_request = GradingGovernanceService.get_active_approved_reopen_request(
             offering=offering,
@@ -4058,15 +4072,16 @@ def offering_periods_view(request, offering_id: int):
                     active_period_setting=active_grading_period,
                 ),
                 "is_closed_by_active_period": governance_state["is_closed_by_active_period"],
-                  "is_future_period": governance_state["is_future_period"],
-                  "is_past_period": governance_state["is_past_period"],
-                  "closed_message": governance_state["message"],
-                  "can_access_corrections": can_access_corrections,
-                  "is_final_period": bool(periods) and p.id == periods[-1].id,
-                  "can_print_final_clearance": can_print_final_clearance,
-                  "final_clearance_incomplete_courses": final_clearance_preview.get("incomplete_courses", 0),
-              }
-          )
+                "is_future_period": governance_state["is_future_period"],
+                "is_past_period": governance_state["is_past_period"],
+                "closed_message": governance_state["message"],
+                "can_access_corrections": can_access_corrections,
+                "correction_lifecycle_message": correction_filing_state["message"],
+                "is_final_period": bool(periods) and p.id == periods[-1].id,
+                "can_print_final_clearance": can_print_final_clearance,
+                "final_clearance_incomplete_courses": final_clearance_preview.get("incomplete_courses", 0),
+            }
+        )
 
     all_periods_submitted = _all_template_periods_submitted(offering, periods)
     context = {
@@ -5946,6 +5961,8 @@ def period_summary_view(request, offering_id: int, period_id: int):
         "submission_status": state["submission_status"],
         "correction_mode": state["correction_mode"],
         "system_correction_enabled": state["system_correction_enabled"],
+        "can_access_corrections": state["can_access_corrections"],
+        "correction_lifecycle_message": state["correction_filing_state"]["message"],
         "q": q,
         "passing_threshold": passing_threshold,
         "show_official_period_grade": official_grade_release["show_period_grade"],
@@ -6894,10 +6911,10 @@ def period_corrections_view(request, offering_id: int, period_id: int):
             "Please follow the manual paper approval process and request authorized admin reopen.",
         )
         return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
-    petition_window_state = GradingGovernanceService.get_correction_petition_window_state(
-        offering=offering,
-        template_period=period,
-    )
+    if not state["correction_filing_state"]["is_allowed"]:
+        messages.error(request, state["correction_filing_state"]["message"])
+        return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
+    petition_window_state = state["correction_filing_state"]["petition_window_state"]
     enrollments = list(FacultyGradingService.get_active_enrollments(offering))
     student_ids = [row.student_id for row in enrollments]
     student_qs = Student.objects.filter(id__in=student_ids).order_by("last_name", "first_name", "student_no")
@@ -6930,12 +6947,9 @@ def period_corrections_view(request, offering_id: int, period_id: int):
     )
 
     if request.method == "POST":
-        if not petition_window_state["is_allowed"]:
-            messages.error(request, petition_window_state["message"])
-            return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
-        if not state["is_submitted"]:
-            messages.error(request, "You can request correction only after period submission.")
-            return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
+        if not state["correction_filing_state"]["is_allowed"]:
+            messages.error(request, state["correction_filing_state"]["message"])
+            return redirect("faculty_portal:period_summary", offering_id=offering.id, period_id=period.id)
         if form.is_valid():
             items = form.cleaned_data["items"]
             try:
@@ -7238,8 +7252,11 @@ def period_correction_finalize_view(request, offering_id: int, period_id: int, r
             messages.error(request, "This correction request is not in approved status.")
         return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
 
-    window = getattr(correction, "unlock_window", None)
-    if not window or not window.is_active or window.is_consumed:
+    window = GradingGovernanceService.get_active_unlock_window(
+        offering=offering,
+        template_period=period,
+    )
+    if not window or window.correction_request_id != correction.id:
         messages.error(request, "No active correction window to finalize.")
         return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
 
@@ -7254,31 +7271,34 @@ def period_correction_finalize_view(request, offering_id: int, period_id: int, r
         return redirect("faculty_portal:period_corrections", offering_id=offering.id, period_id=period.id)
 
     try:
-        affected_student_ids = {
-            item.student_id for item in correction.items.filter(is_active=True, student__isnull=False) if item.student_id
-        }
-        if affected_student_ids:
-            FacultyGradingService.recompute_period_summary_for_students(
-                user=request.user,
-                offering=offering,
-                template_period=period,
-                student_ids=affected_student_ids,
-                audit_reason="CORRECTION_FINALIZE",
-                audit_portal="FACULTY",
-                period_is_finalized=True,
-                final_is_submitted=True,
-            )
-        else:
-            FacultyGradingService.recompute_period_summary(
-                user=request.user,
-                offering=offering,
-                template_period=period,
-                audit_reason="CORRECTION_FINALIZE",
-                audit_portal="FACULTY",
-                period_is_finalized=True,
-                final_is_submitted=True,
-            )
-        GradingGovernanceService.close_correction_window(request_obj=correction, actor=request.user)
+        with transaction.atomic():
+            affected_student_ids = {
+                item.student_id
+                for item in correction.items.filter(is_active=True, student__isnull=False)
+                if item.student_id
+            }
+            if affected_student_ids:
+                FacultyGradingService.recompute_period_summary_for_students(
+                    user=request.user,
+                    offering=offering,
+                    template_period=period,
+                    student_ids=affected_student_ids,
+                    audit_reason="CORRECTION_FINALIZE",
+                    audit_portal="FACULTY",
+                    period_is_finalized=True,
+                    final_is_submitted=True,
+                )
+            else:
+                FacultyGradingService.recompute_period_summary(
+                    user=request.user,
+                    offering=offering,
+                    template_period=period,
+                    audit_reason="CORRECTION_FINALIZE",
+                    audit_portal="FACULTY",
+                    period_is_finalized=True,
+                    final_is_submitted=True,
+                )
+            GradingGovernanceService.close_correction_window(request_obj=correction, actor=request.user)
     except ValidationError as exc:
         messages.error(request, str(exc))
     else:

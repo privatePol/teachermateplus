@@ -4120,9 +4120,12 @@ def correction_governance_settings_view(request):
     campus_qs = AdminScopeService.active_scoped_campuses(request).filter(tenant_id=tenant_id)
     academic_year_qs = AdminScopeService.active_scoped_academic_years(request).filter(tenant_id=tenant_id)
     term_qs = AdminScopeService.active_scoped_terms(request).filter(tenant_id=tenant_id)
-    grading_period_qs = GradingTemplatePeriod.objects.filter(template__tenant_id=tenant_id, is_active=True).select_related(
-        "template"
-    )
+    grading_period_qs = GradingTemplatePeriod.objects.filter(
+        id__in=[
+            period.id
+            for period in GradingGovernanceService.eligible_configurable_correction_periods(tenant_id=tenant_id)
+        ]
+    ).select_related("template")
 
     mode_form = CorrectionGovernanceSettingForm(
         initial={
@@ -14905,8 +14908,12 @@ def grade_correction_request_create_on_behalf_view(request):
     period_queryset = GradingTemplatePeriod.objects.none()
     if selected_offering:
         try:
-            template = FacultyGradingService.resolve_template_for_offering(selected_offering)
-            period_queryset = template.periods.filter(is_active=True).order_by("sequence_no", "id")
+            eligible_periods = GradingGovernanceService.eligible_correction_periods_for_offering(
+                offering=selected_offering
+            )
+            period_queryset = GradingTemplatePeriod.objects.filter(
+                id__in=[period.id for period in eligible_periods]
+            ).order_by("sequence_no", "id")
         except ValidationError:
             template = None
     else:
@@ -14940,7 +14947,16 @@ def grade_correction_request_create_on_behalf_view(request):
     score_lookup = {}
     correction_form = None
 
-    can_file = bool(selected_offering and selected_period and selected_faculty)
+    can_select_correction = bool(selected_offering and selected_period and selected_faculty)
+    correction_filing_state = (
+        GradingGovernanceService.get_correction_request_filing_state(
+            offering=selected_offering,
+            template_period=selected_period,
+        )
+        if can_select_correction
+        else None
+    )
+    can_file = bool(can_select_correction and correction_filing_state["is_allowed"])
     if can_file:
         enrollments = list(FacultyGradingService.get_active_enrollments(selected_offering))
         student_ids = [row.student_id for row in enrollments]
@@ -14982,11 +14998,12 @@ def grade_correction_request_create_on_behalf_view(request):
         if not setup_form.is_valid():
             messages.error(request, "Review the petition setup fields before submitting.")
         elif not can_file:
-            messages.error(request, "Select a valid offering, grading period, and original faculty member.")
+            if can_select_correction and correction_filing_state:
+                messages.error(request, correction_filing_state["message"])
+            else:
+                messages.error(request, "Select a valid offering, grading period, and original faculty member.")
         elif not GradingGovernanceService.is_system_correction_enabled(tenant_id=selected_offering.tenant_id):
             messages.error(request, "Correction requests are disabled by tenant policy (MANUAL_ONLY).")
-        elif not GradingGovernanceService.is_submitted(offering=selected_offering, template_period=selected_period):
-            messages.error(request, "On-behalf correction petitions are allowed only after period submission.")
         elif correction_form and correction_form.is_valid():
             try:
                 correction = GradingGovernanceService.create_correction_request(
@@ -15078,6 +15095,7 @@ def grade_correction_request_create_on_behalf_view(request):
         "selected_section": selected_section,
         "selected_course": selected_course,
         "can_file": can_file,
+        "correction_filing_state": correction_filing_state,
         "is_submitted": (
             GradingGovernanceService.is_submitted(offering=selected_offering, template_period=selected_period)
             if selected_offering and selected_period

@@ -44,12 +44,26 @@ from apps.grading.models import (
     TemplateHotfixRequest,
     TenantGradingProfile,
 )
-from apps.grading.services import CourseOfferingSafetyService, CourseTemplateAssignmentSafetyService, FacultyGradingService
+from apps.grading.services import (
+    CourseOfferingSafetyService,
+    CourseTemplateAssignmentSafetyService,
+    FacultyGradingService,
+    GradingGovernanceService,
+)
 from apps.navigation.models import MenuGroup, MenuItem
 from apps.rbac.models import Permission, Role, UserRole
 from apps.students.models import Student
 from apps.student_portal.models import StudentAccountLink
 from apps.tenants.models import Campus, Department, Program, Tenant
+
+
+def _normalize_correction_policy_period_key(period) -> str:
+    if not period:
+        return ""
+    # Correction Governance has exact aliases.  Do not use the general
+    # academic substring classifier here: custom periods such as
+    # MIDTERM-REMEDIAL retain their own policy identity.
+    return GradingGovernanceService.canonical_correction_period_key(period)
 
 
 User = get_user_model()
@@ -3086,9 +3100,32 @@ class CorrectionPetitionWindowPolicyForm(forms.ModelForm):
         if term_queryset is not None:
             self.fields["term"].queryset = term_queryset
         if grading_period_queryset is not None:
-            self.fields["grading_period"].queryset = grading_period_queryset
+            candidate_periods = list(
+                grading_period_queryset.filter(
+                    is_active=True,
+                    template__is_active=True,
+                    template__is_published=True,
+                )
+                .select_related("template")
+                .order_by("sequence_no", "template__code", "id")
+            )
+            representative_ids = {}
+            for period in candidate_periods:
+                canonical_key = _normalize_correction_policy_period_key(period)
+                if canonical_key:
+                    representative_ids.setdefault(canonical_key, period.id)
+            allowed_period_ids = list(representative_ids.values())
+            if self.instance and self.instance.pk and self.instance.grading_period_id:
+                allowed_period_ids.append(self.instance.grading_period_id)
+            self.fields["grading_period"].queryset = GradingTemplatePeriod.objects.filter(
+                id__in=allowed_period_ids
+            ).select_related("template").order_by("sequence_no", "template__code", "id")
         self.fields["campus"].required = False
+        self.fields["academic_year"].required = False
+        self.fields["term"].required = False
         self.fields["campus"].help_text = "Leave blank to apply the policy across the entire tenant."
+        self.fields["academic_year"].help_text = "Leave blank to apply across all academic years."
+        self.fields["term"].help_text = "Leave blank to apply across all terms within the selected academic-year scope."
         self.fields["manual_notice"].required = False
         self.fields["manual_notice"].widget = forms.Textarea(attrs={"rows": 3})
         self.fields["manual_notice"].help_text = (
@@ -3121,10 +3158,35 @@ class CorrectionPetitionWindowPolicyForm(forms.ModelForm):
             self.add_error("academic_year", "Academic year must belong to the selected tenant scope.")
         if tenant and term and term.tenant_id != tenant.id:
             self.add_error("term", "Term must belong to the selected tenant scope.")
+        if tenant and grading_period and grading_period.template.tenant_id != tenant.id:
+            self.add_error("grading_period", "Grading period must belong to the selected tenant scope.")
         if academic_year and term and term.academic_year_id != academic_year.id:
             self.add_error("term", "Selected term does not belong to the selected academic year.")
+        if term and not academic_year:
+            self.add_error("term", "Select an academic year when a term scope is selected.")
         if not grading_period:
             self.add_error("grading_period", "Grading period is required.")
+        elif not (
+            grading_period.is_active
+            and grading_period.template.is_active
+            and grading_period.template.is_published
+        ):
+            self.add_error("grading_period", "Choose an active period from an active published grading template.")
+        elif tenant:
+            eligible_ids = {
+                period.id
+                for period in GradingGovernanceService.eligible_configurable_correction_periods(
+                    tenant_id=tenant.id,
+                    campus_id=campus.id if campus else None,
+                    academic_year_id=academic_year.id if academic_year else None,
+                    term_id=term.id if term else None,
+                )
+            }
+            if grading_period.id not in eligible_ids:
+                self.add_error(
+                    "grading_period",
+                    "Choose a grading period applicable to the selected campus, academic year, and term scope.",
+                )
 
         if policy_mode == CorrectionPetitionWindowPolicy.PolicyMode.DAYS_AFTER_PERIOD_END:
             if allowed_days in (None, ""):
@@ -3135,18 +3197,26 @@ class CorrectionPetitionWindowPolicyForm(forms.ModelForm):
         else:
             cleaned["allowed_days_after_period_end"] = None
 
-        if is_active and tenant and academic_year and term and grading_period:
+        if is_active and tenant and grading_period:
+            canonical_period_key = _normalize_correction_policy_period_key(grading_period)
+            self.instance.canonical_period_key = canonical_period_key
             duplicate_qs = CorrectionPetitionWindowPolicy.objects.filter(
                 tenant=tenant,
-                academic_year=academic_year,
-                term=term,
-                grading_period=grading_period,
+                canonical_period_key=canonical_period_key,
                 is_active=True,
             )
             if campus:
                 duplicate_qs = duplicate_qs.filter(campus=campus)
             else:
                 duplicate_qs = duplicate_qs.filter(campus__isnull=True)
+            if academic_year:
+                duplicate_qs = duplicate_qs.filter(academic_year=academic_year)
+            else:
+                duplicate_qs = duplicate_qs.filter(academic_year__isnull=True)
+            if term:
+                duplicate_qs = duplicate_qs.filter(term=term)
+            else:
+                duplicate_qs = duplicate_qs.filter(term__isnull=True)
             if self.instance and self.instance.pk:
                 duplicate_qs = duplicate_qs.exclude(pk=self.instance.pk)
             if duplicate_qs.exists():

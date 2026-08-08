@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
@@ -1133,6 +1136,10 @@ class CorrectionApprovalRouteStep(TimeStampedModel, ActivatableModel):
 
 
 class CorrectionPetitionWindowPolicy(TimeStampedModel, ActivatableModel):
+    CANONICAL_PERIOD_KEY_MAX_LENGTH = 120
+    ACTIVE_SCOPE_KEY_MAX_LENGTH = 64
+    ACTIVE_SCOPE_SERIALIZATION_VERSION = "correction-petition-policy-scope-v1"
+
     class PolicyMode(models.TextChoices):
         OPEN_ANYTIME = "OPEN_ANYTIME", "Open Anytime"
         DAYS_AFTER_PERIOD_END = "DAYS_AFTER_PERIOD_END", "Days After Period End"
@@ -1151,12 +1158,33 @@ class CorrectionPetitionWindowPolicy(TimeStampedModel, ActivatableModel):
         "academics.AcademicYear",
         on_delete=models.PROTECT,
         related_name="correction_petition_policies",
+        blank=True,
+        null=True,
     )
-    term = models.ForeignKey("academics.Term", on_delete=models.PROTECT, related_name="correction_petition_policies")
+    term = models.ForeignKey(
+        "academics.Term",
+        on_delete=models.PROTECT,
+        related_name="correction_petition_policies",
+        blank=True,
+        null=True,
+    )
     grading_period = models.ForeignKey(
         "grading.GradingTemplatePeriod",
         on_delete=models.PROTECT,
         related_name="correction_petition_policies",
+    )
+    canonical_period_key = models.CharField(
+        max_length=CANONICAL_PERIOD_KEY_MAX_LENGTH,
+        db_index=True,
+        help_text="Normalized logical period identity used for correction governance.",
+    )
+    active_scope_key = models.CharField(
+        max_length=ACTIVE_SCOPE_KEY_MAX_LENGTH,
+        blank=True,
+        null=True,
+        unique=True,
+        editable=False,
+        help_text="MariaDB-enforced unique identity for an active correction petition policy scope.",
     )
     policy_mode = models.CharField(max_length=32, choices=PolicyMode.choices, default=PolicyMode.OPEN_ANYTIME)
     allowed_days_after_period_end = models.PositiveIntegerField(blank=True, null=True)
@@ -1166,28 +1194,109 @@ class CorrectionPetitionWindowPolicy(TimeStampedModel, ActivatableModel):
         db_table = "correction_petition_window_policies"
         ordering = ["tenant__name", "campus__name", "academic_year__code", "term__code", "grading_period__code", "id"]
         constraints = [
-            models.UniqueConstraint(
-                fields=["tenant", "academic_year", "term", "grading_period"],
-                condition=Q(is_active=True, campus__isnull=True),
-                name="uq_correction_petition_policy_tenant_scope",
-            ),
-            models.UniqueConstraint(
-                fields=["tenant", "campus", "academic_year", "term", "grading_period"],
-                condition=Q(is_active=True, campus__isnull=False),
-                name="uq_correction_petition_policy_campus_scope",
+            models.CheckConstraint(
+                condition=Q(term__isnull=True) | Q(academic_year__isnull=False),
+                name="ck_corr_petition_term_requires_ay",
             ),
         ]
 
     def clean(self):
         super().clean()
+        if self.term_id and not self.academic_year_id:
+            raise ValidationError({"term": "Term scope requires an academic year scope."})
+        if self.term_id and self.academic_year_id and self.term.academic_year_id != self.academic_year_id:
+            raise ValidationError({"term": "Selected term does not belong to the selected academic year."})
         if self.policy_mode == self.PolicyMode.DAYS_AFTER_PERIOD_END and self.allowed_days_after_period_end is None:
             raise ValidationError({"allowed_days_after_period_end": "Allowed days is required for this policy mode."})
         if self.policy_mode != self.PolicyMode.DAYS_AFTER_PERIOD_END:
             self.allowed_days_after_period_end = None
 
+    def save(self, *args, **kwargs):
+        if self.grading_period_id:
+            from apps.grading.services import GradingGovernanceService
+
+            canonical_key = GradingGovernanceService._normalize_period_key(
+                self.grading_period.code or self.grading_period.name
+            )
+            if not canonical_key:
+                raise ValidationError({"grading_period": "Selected grading period has no usable canonical identity."})
+            if len(canonical_key) > self.CANONICAL_PERIOD_KEY_MAX_LENGTH:
+                raise ValidationError(
+                    {"grading_period": "Selected grading period canonical identity exceeds the supported length."}
+                )
+            self.canonical_period_key = canonical_key
+        self.active_scope_key = self.build_active_scope_key(
+            tenant_id=self.tenant_id,
+            campus_id=self.campus_id,
+            academic_year_id=self.academic_year_id,
+            term_id=self.term_id,
+            canonical_period_key=self.canonical_period_key,
+            is_active=self.is_active,
+        )
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            kwargs["update_fields"] = set(update_fields) | {"canonical_period_key", "active_scope_key"}
+        return super().save(*args, **kwargs)
+
+    @classmethod
+    def build_active_scope_source(
+        cls,
+        *,
+        tenant_id,
+        campus_id,
+        academic_year_id,
+        term_id,
+        canonical_period_key,
+    ):
+        """Serialize the complete logical scope without delimiter ambiguity."""
+        return json.dumps(
+            [
+                cls.ACTIVE_SCOPE_SERIALIZATION_VERSION,
+                tenant_id,
+                campus_id,
+                academic_year_id,
+                term_id,
+                canonical_period_key,
+            ],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+
+    @classmethod
+    def build_active_scope_key(
+        cls,
+        *,
+        tenant_id,
+        campus_id,
+        academic_year_id,
+        term_id,
+        canonical_period_key,
+        is_active,
+    ):
+        """Return the portable unique key for active policies, else ``None``.
+
+        MariaDB permits multiple NULL values in a unique index.  This makes the
+        ordinary ``unique=True`` column enforce exactly one active logical scope
+        while preserving inactive policy history.
+        """
+        if not is_active:
+            return None
+        if not tenant_id or not canonical_period_key:
+            return None
+        source = cls.build_active_scope_source(
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+            academic_year_id=academic_year_id,
+            term_id=term_id,
+            canonical_period_key=canonical_period_key,
+        )
+        return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
     def __str__(self):
         campus = self.campus.code if self.campus_id else "TENANT"
-        return f"{self.tenant.code}:{campus}:{self.academic_year.code}:{self.term.code}:{self.grading_period.code}:{self.policy_mode}"
+        academic_year = self.academic_year.code if self.academic_year_id else "ALL_AY"
+        term = self.term.code if self.term_id else "ALL_TERMS"
+        return f"{self.tenant.code}:{campus}:{academic_year}:{term}:{self.canonical_period_key}:{self.policy_mode}"
 
 
 class GradeCorrectionRequest(TimeStampedModel):
@@ -1314,6 +1423,148 @@ class GradeCorrectionApprovalStep(TimeStampedModel):
 
     def __str__(self):
         return f"{self.correction_request_id}:S{self.step_order}:{self.status}"
+
+
+class ImmutableCorrectionApprovalAuthoritySnapshotQuerySet(models.QuerySet):
+    """Keep correction approval-time authority append-only in application code."""
+
+    def update(self, **kwargs):
+        raise ValidationError("Correction approval authority snapshots are immutable.")
+
+    def delete(self):
+        raise ValidationError("Correction approval authority snapshots are immutable.")
+
+
+class GradeCorrectionApprovalAuthoritySnapshot(models.Model):
+    """Protected approval-time authority evidence for one correction step.
+
+    Audit logs remain useful corroboration, but audit rows are not the sole
+    source of authority for later grade writes.  This record is created only
+    by the approval service in the same transaction as the reviewed step and
+    cannot be changed through the normal Django model API.
+    """
+
+    class AuthorizationType(models.TextChoices):
+        APPROVER_ROLE = "APPROVER_ROLE", "Configured approver role"
+        SUPER_ADMIN_ROLE = "SUPER_ADMIN_ROLE", "Super administrator role"
+        SUPERUSER = "SUPERUSER", "Django superuser"
+
+    approval_step = models.OneToOneField(
+        "grading.GradeCorrectionApprovalStep",
+        on_delete=models.PROTECT,
+        related_name="authority_snapshot",
+    )
+    correction_request = models.ForeignKey(
+        "grading.GradeCorrectionRequest",
+        on_delete=models.PROTECT,
+        related_name="approval_authority_snapshots",
+    )
+    approval_audit_log = models.OneToOneField(
+        "auditlog.AuditLog",
+        on_delete=models.PROTECT,
+        related_name="correction_approval_authority_snapshot",
+    )
+    step_order = models.PositiveSmallIntegerField()
+    reviewer_user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="grade_correction_authority_snapshots",
+    )
+    configured_approver_role = models.ForeignKey(
+        "rbac.Role",
+        on_delete=models.PROTECT,
+        related_name="configured_grade_correction_authority_snapshots",
+    )
+    configured_approver_role_code = models.CharField(max_length=64)
+    approval_route = models.ForeignKey(
+        "grading.CorrectionApprovalRouteRule",
+        on_delete=models.PROTECT,
+        related_name="approval_authority_snapshots",
+    )
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="grade_correction_authority_snapshots",
+    )
+    campus = models.ForeignKey(
+        "tenants.Campus",
+        on_delete=models.PROTECT,
+        related_name="grade_correction_authority_snapshots",
+    )
+    faculty_department = models.ForeignKey(
+        "tenants.Department",
+        on_delete=models.PROTECT,
+        related_name="grade_correction_authority_snapshots",
+    )
+    requires_same_department = models.BooleanField(default=False)
+    authorization_type = models.CharField(max_length=24, choices=AuthorizationType.choices)
+    authority_assignment = models.ForeignKey(
+        "rbac.UserRole",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="grade_correction_authority_snapshots",
+    )
+    authority_role = models.ForeignKey(
+        "rbac.Role",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="authority_grade_correction_snapshots",
+    )
+    authority_role_code = models.CharField(max_length=64, blank=True, null=True)
+    authority_assignment_assigned_at = models.DateTimeField(blank=True, null=True)
+    authority_tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="authority_grade_correction_snapshots",
+    )
+    authority_campus = models.ForeignKey(
+        "tenants.Campus",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="authority_grade_correction_snapshots",
+    )
+    authority_department = models.ForeignKey(
+        "tenants.Department",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="authority_grade_correction_snapshots",
+    )
+    effective_department = models.ForeignKey(
+        "tenants.Department",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="effective_grade_correction_authority_snapshots",
+    )
+    scope_covers_faculty_department = models.BooleanField(default=False)
+    decided_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableCorrectionApprovalAuthoritySnapshotQuerySet.as_manager()
+
+    class Meta:
+        db_table = "grade_correction_approval_authority_snapshots"
+        ordering = ["correction_request_id", "step_order"]
+        indexes = [
+            models.Index(fields=["correction_request", "step_order"], name="idx_corr_auth_request_step"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self)._base_manager.filter(pk=self.pk).exists():
+            raise ValidationError("Correction approval authority snapshots are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Correction approval authority snapshots are immutable.")
+
+    def __str__(self):
+        return f"{self.correction_request_id}:S{self.step_order}:{self.authorization_type}"
 
 
 class GradeCorrectionRequestItem(TimeStampedModel, ActivatableModel):

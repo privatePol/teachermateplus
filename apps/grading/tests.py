@@ -1,10 +1,13 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from importlib import import_module
 from io import BytesIO
+from types import SimpleNamespace
 
 from django.conf import settings
 from django.core import mail
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
@@ -28,9 +31,11 @@ from apps.grading.models import (
     DetailComputationMode,
     FacultyFinalClearanceReport,
     GradeActivity,
+    GradeCorrectionApprovalAuthoritySnapshot,
     GradeCorrectionApprovalStep,
     GradeCorrectionRequest,
     GradeCorrectionRequestItem,
+    GradeCorrectionUnlockWindow,
     GradeEncodingControl,
     GradeSubmission,
     GradingPeriodLock,
@@ -127,6 +132,14 @@ class CorrectionWorkflowTests(TestCase):
             offering=self.offering,
             faculty_user=self.faculty_user,
             is_primary=True,
+        )
+        self.faculty_role = Role.objects.create(code="FACULTY", name="Faculty")
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=self.faculty_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
         )
         self.reviewer_user = User.objects.create_user(
             username="reviewer1",
@@ -270,6 +283,17 @@ class CorrectionWorkflowTests(TestCase):
             submission_snapshot_json={},
             template_snapshot_json={},
         )
+        self.correction_lock = GradingPeriodLock.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            period_code=self.period.code,
+            scope_type=GradingPeriodLock.ScopeType.COURSE,
+            course_offering=self.offering,
+            is_locked=True,
+            deadline_at=timezone.now() - timedelta(hours=1),
+        )
 
     def test_correction_request_form_accepts_multiple_students_and_items(self):
         form = GradeCorrectionRequestForm(
@@ -388,7 +412,7 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(items[1].new_value, "42")
         self.assertEqual(correction.approval_route_id, self.route_rule.id)
 
-    def test_create_correction_request_uses_only_active_route_when_department_not_set(self):
+    def test_correction_route_ignores_missing_default_department_when_faculty_role_is_scoped(self):
         self.faculty_user.default_department = None
         self.faculty_user.save(update_fields=["default_department", "updated_at"])
         custom_role = Role.objects.create(code="NCBA_CAO", name="Chief Academic Officer")
@@ -399,7 +423,7 @@ class CorrectionWorkflowTests(TestCase):
             user=self.faculty_user,
             offering=self.offering,
             template_period=self.period,
-            justification="Route should use configured tenant route.",
+            justification="Faculty role scope should govern without a user default department.",
             items=[
                 {
                     "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
@@ -718,7 +742,7 @@ class CorrectionWorkflowTests(TestCase):
             Decimal("44.00"),
         )
 
-    def test_correction_route_uses_offering_department_before_faculty_default_department(self):
+    def test_correction_route_ignores_user_default_department_when_faculty_role_is_scoped(self):
         other_department = Department.objects.create(
             tenant=self.tenant,
             campus=self.campus,
@@ -732,7 +756,7 @@ class CorrectionWorkflowTests(TestCase):
             user=self.faculty_user,
             offering=self.offering,
             template_period=self.period,
-            justification="Offering department should govern the route.",
+            justification="Faculty role department should govern the route.",
             items=[
                 {
                     "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
@@ -745,6 +769,82 @@ class CorrectionWorkflowTests(TestCase):
 
         self.assertEqual(correction.faculty_department_id, self.department.id)
         self.assertEqual(correction.approval_route_id, self.route_rule.id)
+
+    def test_correction_route_excludes_inactive_ancestor(self):
+        parent = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="INACTIVE_PARENT",
+            name="Inactive Parent",
+            is_active=False,
+        )
+        Department.objects.filter(pk=self.department.id).update(parent=parent)
+        self.route_rule.faculty_department = parent
+        self.route_rule.save(update_fields=["faculty_department", "updated_at"])
+
+        self.assertIsNone(
+            GradingGovernanceService.resolve_correction_route_rule(
+                tenant_id=self.tenant.id,
+                faculty_department_id=self.department.id,
+            )
+        )
+
+    def test_correction_route_excludes_cross_campus_ancestor(self):
+        other_campus = Campus.objects.create(tenant=self.tenant, code="ANCESTOR_OTHER", name="Ancestor Other")
+        parent = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="CROSS_CAMPUS_PARENT",
+            name="Cross Campus Parent",
+        )
+        Department.objects.filter(pk=self.department.id).update(parent=parent)
+        self.route_rule.faculty_department = parent
+        self.route_rule.save(update_fields=["faculty_department", "updated_at"])
+
+        self.assertIsNone(
+            GradingGovernanceService.resolve_correction_route_rule(
+                tenant_id=self.tenant.id,
+                faculty_department_id=self.department.id,
+            )
+        )
+
+    def test_correction_route_excludes_cross_tenant_ancestor(self):
+        other_tenant = Tenant.objects.create(code="OTHER_ANCESTOR", name="Other Ancestor Tenant")
+        other_campus = Campus.objects.create(tenant=other_tenant, code="OTHER_PARENT", name="Other Parent Campus")
+        parent = Department.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            code="CROSS_TENANT_PARENT",
+            name="Cross Tenant Parent",
+        )
+        Department.objects.filter(pk=self.department.id).update(parent=parent)
+        self.route_rule.faculty_department = parent
+        self.route_rule.save(update_fields=["faculty_department", "updated_at"])
+
+        self.assertIsNone(
+            GradingGovernanceService.resolve_correction_route_rule(
+                tenant_id=self.tenant.id,
+                faculty_department_id=self.department.id,
+            )
+        )
+
+    def test_correction_route_cycle_fails_closed(self):
+        parent = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="CYCLE_PARENT",
+            name="Cycle Parent",
+        )
+        Department.objects.filter(pk=self.department.id).update(parent=parent)
+        Department.objects.filter(pk=parent.id).update(parent=self.department)
+        self.route_rule.faculty_department = parent
+        self.route_rule.save(update_fields=["faculty_department", "updated_at"])
+
+        with self.assertRaisesMessage(ValidationError, "hierarchy contains a cycle"):
+            GradingGovernanceService.resolve_correction_route_rule(
+                tenant_id=self.tenant.id,
+                faculty_department_id=self.department.id,
+            )
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_step_approval_notification_is_scoped_to_current_step_and_deduped(self):
@@ -952,6 +1052,82 @@ class CorrectionWorkflowTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("active correction petition window policy already exists", str(form.errors))
 
+    def test_correction_period_normalization_is_exact_across_form_service_model_and_migration(self):
+        from apps.admin_portal.forms import (
+            CorrectionPetitionWindowPolicyForm,
+            _normalize_correction_policy_period_key,
+        )
+
+        migration_0034 = import_module(
+            "apps.grading.migrations.0034_correctionpetitionwindowpolicy_canonical_period"
+        )
+        values = {
+            "PRELIM": "PRELIM",
+            "MIDTERM": "MIDTERM",
+            "PRE-FINAL": "PREFINAL",
+            "PRE FINAL": "PREFINAL",
+            "PREFINAL": "PREFINAL",
+            "FINAL": "FINAL",
+            "MIDTERM-REMEDIAL": "MIDTERMREMEDIAL",
+            "PRELIMINARY": "PRELIMINARY",
+            "POST-FINAL": "POSTFINAL",
+            "PREFI-SPECIAL": "PREFISPECIAL",
+            "FINAL-RETAKE": "FINALRETAKE",
+            "CUSTOM PERIOD": "CUSTOMPERIOD",
+        }
+        custom_periods = []
+        for sequence_no, (value, expected) in enumerate(values.items(), start=10):
+            period = self.period if value == self.period.code else GradingTemplatePeriod.objects.create(
+                template=self.template,
+                code=value,
+                name=value.title(),
+                sequence_no=sequence_no,
+            )
+            self.assertEqual(_normalize_correction_policy_period_key(period), expected)
+            self.assertEqual(GradingGovernanceService.canonical_correction_period_key(period), expected)
+            self.assertEqual(migration_0034._canonical_period_key(value), expected)
+            if value not in {"PRELIM", "MIDTERM", "PRE-FINAL", "PRE FINAL", "PREFINAL", "FINAL"}:
+                custom_periods.append(period)
+
+        form = CorrectionPetitionWindowPolicyForm(
+            tenant=self.tenant,
+            campus_queryset=Campus.objects.filter(id=self.campus.id),
+            academic_year_queryset=AcademicYear.objects.filter(id=self.academic_year.id),
+            term_queryset=Term.objects.filter(id=self.term.id),
+            grading_period_queryset=GradingTemplatePeriod.objects.filter(template=self.template),
+        )
+        selectable_ids = set(form.fields["grading_period"].queryset.values_list("id", flat=True))
+        self.assertTrue({period.id for period in custom_periods}.issubset(selectable_ids))
+
+        custom_period = next(period for period in custom_periods if period.code == "MIDTERM-REMEDIAL")
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=custom_period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+        duplicate_form = CorrectionPetitionWindowPolicyForm(
+            data={
+                "campus": self.campus.id,
+                "academic_year": self.academic_year.id,
+                "term": self.term.id,
+                "grading_period": custom_period.id,
+                "policy_mode": CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+                "manual_notice": "",
+                "is_active": "on",
+            },
+            tenant=self.tenant,
+            campus_queryset=Campus.objects.filter(id=self.campus.id),
+            academic_year_queryset=AcademicYear.objects.filter(id=self.academic_year.id),
+            term_queryset=Term.objects.filter(id=self.term.id),
+            grading_period_queryset=GradingTemplatePeriod.objects.filter(template=self.template),
+        )
+        self.assertFalse(duplicate_form.is_valid())
+        self.assertIn("active correction petition window policy already exists", str(duplicate_form.errors))
+
     def test_correction_petition_policy_form_requires_days_for_days_after_mode(self):
         from apps.admin_portal.forms import CorrectionPetitionWindowPolicyForm
 
@@ -1007,16 +1183,9 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(correction.approval_route_id, self.route_rule.id)
 
     def test_correction_petition_policy_days_after_deadline_blocks_submission(self):
-        lock = GradingPeriodLock.objects.create(
-            tenant=self.tenant,
-            campus=self.campus,
-            academic_year=self.academic_year,
-            term=self.term,
-            period_code=self.period.code,
-            scope_type=GradingPeriodLock.ScopeType.CAMPUS,
-            is_locked=False,
-            deadline_at=timezone.now() - timedelta(days=2),
-        )
+        lock = self.correction_lock
+        lock.deadline_at = timezone.now() - timedelta(days=2)
+        lock.save(update_fields=["deadline_at", "updated_at"])
         CorrectionPetitionWindowPolicy.objects.create(
             tenant=self.tenant,
             campus=self.campus,
@@ -1105,6 +1274,12 @@ class CorrectionWorkflowTests(TestCase):
         self.faculty_user.save(update_fields=["privacy_consent_version", "privacy_consent_at", "updated_at"])
         self.client.force_login(self.faculty_user)
 
+        summary_response = self.client.get(
+            reverse("faculty_portal:period_summary", args=[self.offering.id, self.period.id])
+        )
+        self.assertEqual(summary_response.status_code, 200)
+        self.assertFalse(summary_response.context["can_access_corrections"])
+
         before_count = GradeCorrectionRequest.objects.count()
         response = self.client.post(
             reverse("faculty_portal:period_corrections", args=[self.offering.id, self.period.id]),
@@ -1123,6 +1298,65 @@ class CorrectionWorkflowTests(TestCase):
         self.assertContains(response, "Correction petitions are closed for this grading period.")
         self.assertEqual(GradeCorrectionRequest.objects.count(), before_count)
         self.assertEqual(len(mail.outbox), 0)
+
+    def test_admin_on_behalf_ui_hides_filing_controls_when_petition_window_is_closed(self):
+        admin_access, _ = Permission.objects.get_or_create(
+            code="admin_portal.access",
+            defaults={"module": "admin_portal", "action": "access"},
+        )
+        create_on_behalf, _ = Permission.objects.get_or_create(
+            code="corrections.create_on_behalf",
+            defaults={"module": "corrections", "action": "create_on_behalf"},
+        )
+        admin_role = Role.objects.create(code="ADMIN_ON_BEHALF_WINDOW", name="Admin On Behalf Window")
+        RolePermission.objects.create(role=admin_role, permission=admin_access)
+        RolePermission.objects.create(role=admin_role, permission=create_on_behalf)
+        admin_user = User.objects.create_user(
+            username="admin-on-behalf-window",
+            email="admin-on-behalf-window@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+            privacy_consent_version=getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03"),
+            privacy_consent_at=timezone.now(),
+        )
+        UserRole.objects.create(
+            user=admin_user,
+            role=admin_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.CLOSED,
+            is_active=True,
+        )
+        self.client.force_login(admin_user)
+
+        response = self.client.get(
+            reverse("admin_portal:grade_correction_request_create_on_behalf"),
+            {
+                "campus": self.campus.id,
+                "academic_year": self.academic_year.id,
+                "term": self.term.id,
+                "faculty_user": self.faculty_user.id,
+                "section": self.section.id,
+                "course": self.course.id,
+                "template_period": self.period.id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["can_file"])
+        self.assertFalse(response.context["correction_filing_state"]["is_allowed"])
+        self.assertContains(response, "Correction petitions are closed for this grading period.")
+        self.assertNotContains(response, "Correction Items")
 
     def test_correction_governance_page_renders_policy_section(self):
         admin_access, _ = Permission.objects.get_or_create(
@@ -1439,6 +1673,10 @@ class CorrectionWorkflowTests(TestCase):
         self.assertTrue(updated.unlock_window.is_consumed)
 
     def test_final_approval_recomputes_average_activity_detail_mode(self):
+        # This recomputation setup is deliberately editable; the locked
+        # post-deadline fixture is enabled only for the correction request.
+        self.correction_lock.is_locked = False
+        self.correction_lock.save(update_fields=["is_locked", "updated_at"])
         participation = GradingTemplateSubcomponent.objects.create(
             template_component=self.component,
             code="PART_OUTPUT",
@@ -1515,6 +1753,7 @@ class CorrectionWorkflowTests(TestCase):
         GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
             status=GradeSubmission.Status.SUBMITTED
         )
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=True)
 
         correction = GradingGovernanceService.create_correction_request(
             user=self.faculty_user,
@@ -1558,6 +1797,7 @@ class CorrectionWorkflowTests(TestCase):
         self.assertTrue(final_grade.is_submitted)
 
     def test_score_write_recomputes_scoped_period_and_final_immediately(self):
+        self.correction_lock.delete()
         GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
             status=GradeSubmission.Status.REOPENED
         )
@@ -1587,6 +1827,7 @@ class CorrectionWorkflowTests(TestCase):
         )
 
     def test_official_period_and_final_grades_round_to_whole_numbers(self):
+        self.correction_lock.delete()
         GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
             status=GradeSubmission.Status.REOPENED
         )
@@ -1611,6 +1852,7 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(final_grade.final_grade, Decimal("84"))
 
     def test_exam_component_flag_drives_exam_bucket_without_code_name_dependency(self):
+        self.correction_lock.delete()
         GradeSubmission.objects.filter(offering=self.offering, template_period=self.period).update(
             status=GradeSubmission.Status.REOPENED
         )
@@ -1905,6 +2147,1476 @@ class CorrectionWorkflowTests(TestCase):
         ]
         self.assertEqual(len(pdf_filenames), 1)
         self.assertTrue(pdf_filenames[0].endswith(".pdf"))
+
+    def _correction_item(self, value="40"):
+        return [
+            {
+                "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                "student_id": self.student1.id,
+                "grade_activity_id": self.activity.id,
+                "new_value": value,
+            }
+        ]
+
+    def _legacy_approved_request_with_window(
+        self,
+        *,
+        approval_route=None,
+        step_role=None,
+        requested_action=GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+    ):
+        reviewed_at = timezone.now()
+        reviewer = self.reviewer_user if step_role in (None, self.reviewer_role) else self.cao_user
+        correction = GradeCorrectionRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.faculty_user,
+            initiated_by_user=self.faculty_user,
+            faculty_department=self.department,
+            approval_route=approval_route,
+            status=GradeCorrectionRequest.Status.APPROVED,
+            justification="Legacy approved correction request.",
+            reviewed_by_user=reviewer,
+            reviewed_at=reviewed_at,
+        )
+        step = GradeCorrectionApprovalStep.objects.create(
+            correction_request=correction,
+            step_order=1,
+            approver_role=step_role or self.cao_role,
+            approver_label="Legacy approver",
+            status=GradeCorrectionApprovalStep.Status.APPROVED,
+            reviewed_by_user=reviewer,
+            reviewed_at=reviewed_at,
+        )
+        item = GradeCorrectionRequestItem.objects.create(
+            correction_request=correction,
+            requested_action=requested_action,
+            student=self.student1,
+            grade_activity=(
+                self.activity
+                if requested_action == GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE
+                else None
+            ),
+            old_value="30",
+            new_value="45",
+        )
+        window = GradeCorrectionUnlockWindow.objects.create(
+            correction_request=correction,
+            offering=self.offering,
+            template_period=self.period,
+            start_at=timezone.now() - timedelta(minutes=5),
+            end_at=timezone.now() + timedelta(hours=1),
+            is_active=True,
+            is_consumed=False,
+        )
+        return correction, step, item, window
+
+    def _approved_configured_request_with_window(self):
+        """Create a legitimate approved request without auto-applying its score."""
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Configured approved correction for governance regression coverage.",
+            items=[
+                *self._correction_item(value="45"),
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_STATUS,
+                    "student_id": self.student1.id,
+                    "new_value": "REVIEWED",
+                },
+            ],
+        )
+        return GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Approved through the configured route.",
+        )
+
+    def _set_correction_lifecycle(self, *, deadline_at, is_locked=True, submission_status=GradeSubmission.Status.SUBMITTED):
+        GradeSubmission.objects.filter(
+            offering=self.offering,
+            template_period=self.period,
+        ).update(status=submission_status)
+        self.correction_lock.deadline_at = deadline_at
+        self.correction_lock.is_locked = is_locked
+        self.correction_lock.save(update_fields=["deadline_at", "is_locked", "updated_at"])
+
+    def _grant_faculty_correction_access(self):
+        faculty_access, _ = Permission.objects.get_or_create(
+            code="faculty_portal.access",
+            defaults={"module": "faculty_portal", "action": "access"},
+        )
+        corrections_create, _ = Permission.objects.get_or_create(
+            code="corrections.create",
+            defaults={"module": "corrections", "action": "create"},
+        )
+        RolePermission.objects.get_or_create(role=self.faculty_role, permission=faculty_access)
+        RolePermission.objects.get_or_create(role=self.faculty_role, permission=corrections_create)
+        FacultyAssignment.objects.filter(
+            offering=self.offering,
+            faculty_user=self.faculty_user,
+        ).update(
+            accepted_at=timezone.now(),
+            accepted_by=self.faculty_user,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            responded_at=timezone.now(),
+        )
+        self.faculty_user.privacy_consent_version = getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03")
+        self.faculty_user.privacy_consent_at = timezone.now()
+        self.faculty_user.save(update_fields=["privacy_consent_version", "privacy_consent_at", "updated_at"])
+
+    def test_correction_route_uses_exact_faculty_role_department_not_offering_department(self):
+        college = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="COL",
+            name="College",
+        )
+        information_systems = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="IS",
+            name="Information Systems",
+        )
+        self.offering.department = college
+        self.offering.save(update_fields=["department", "updated_at"])
+        self.faculty_user.user_roles.filter(role=self.faculty_role).update(department=information_systems)
+        self.route_rule.faculty_department = information_systems
+        self.route_rule.save(update_fields=["faculty_department", "updated_at"])
+        area_role = Role.objects.create(code="AREA_CHAIR", name="Area Chairman")
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=1,
+            approver_role=area_role,
+            approver_label="Area Chairman",
+            requires_same_department=True,
+        )
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=2,
+            approver_role=self.cao_role,
+            approver_label="Chief Academic Officer",
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Route by the assigned faculty department.",
+            items=self._correction_item(),
+        )
+
+        self.assertEqual(correction.faculty_department_id, information_systems.id)
+        self.assertEqual(correction.approval_route_id, self.route_rule.id)
+        self.assertEqual(
+            list(correction.approval_steps.order_by("step_order").values_list("approver_role__code", flat=True)),
+            ["AREA_CHAIR", "CAO"],
+        )
+
+    def test_campus_admin_assignment_does_not_override_faculty_department_route(self):
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="BA",
+            name="Business Administration",
+        )
+        campus_admin = Role.objects.create(code="CAMPUS_ADMIN", name="Campus Admin")
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=campus_admin,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=other_department,
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Faculty role must remain authoritative.",
+            items=self._correction_item(),
+        )
+
+        self.assertEqual(correction.faculty_department_id, self.department.id)
+        self.assertEqual(correction.approval_route_id, self.route_rule.id)
+
+    def test_missing_or_unrelated_route_fails_closed_without_partial_request(self):
+        unrelated_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="BA",
+            name="Business Administration",
+        )
+        self.route_rule.faculty_department = unrelated_department
+        self.route_rule.save(update_fields=["faculty_department", "updated_at"])
+        before_count = GradeCorrectionRequest.objects.count()
+
+        with self.assertRaisesMessage(ValidationError, "No valid Correction Governance approval route"):
+            GradingGovernanceService.create_correction_request(
+                user=self.faculty_user,
+                offering=self.offering,
+                template_period=self.period,
+                justification="No inferred CAO route is allowed.",
+                items=self._correction_item(),
+            )
+
+        self.assertEqual(GradeCorrectionRequest.objects.count(), before_count)
+
+    def test_explicit_tenant_default_route_remains_available(self):
+        unrelated_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="BA",
+            name="Business Administration",
+        )
+        self.route_rule.faculty_department = unrelated_department
+        self.route_rule.save(update_fields=["faculty_department", "updated_at"])
+        default_route = CorrectionApprovalRouteRule.objects.create(
+            tenant=self.tenant,
+            faculty_department=None,
+            route_mode=CorrectionApprovalRouteRule.RouteMode.DIRECT_TO_FINAL,
+            step1_role=self.cao_role,
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Configured tenant default is permitted.",
+            items=self._correction_item(),
+        )
+
+        self.assertEqual(correction.approval_route_id, default_route.id)
+
+    def test_multiple_faculty_departments_fail_closed(self):
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="BA",
+            name="Business Administration",
+        )
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=self.faculty_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=other_department,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "multiple active FACULTY home/mother departments"):
+            GradingGovernanceService.create_correction_request(
+                user=self.faculty_user,
+                offering=self.offering,
+                template_period=self.period,
+                justification="Ambiguous faculty governance must stop filing.",
+                items=self._correction_item(),
+            )
+        self.assertEqual(GradeCorrectionRequest.objects.count(), 0)
+
+    def test_missing_faculty_department_does_not_fall_back_to_tenant_default_route(self):
+        other_campus = Campus.objects.create(tenant=self.tenant, code="CUBAO", name="Cubao")
+        other_department = Department.objects.create(
+            tenant=self.tenant, campus=other_campus, code="IS", name="Information Systems"
+        )
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=self.faculty_role,
+            tenant=self.tenant,
+            campus=other_campus,
+            department=other_department,
+        )
+        self.faculty_user.user_roles.filter(role=self.faculty_role, campus=self.campus).update(department=None)
+        default_route = CorrectionApprovalRouteRule.objects.create(
+            tenant=self.tenant,
+            faculty_department=None,
+            route_mode=CorrectionApprovalRouteRule.RouteMode.DIRECT_TO_FINAL,
+            step1_role=self.cao_role,
+        )
+        before_requests = GradeCorrectionRequest.objects.count()
+        before_steps = GradeCorrectionApprovalStep.objects.count()
+
+        with self.assertRaisesMessage(ValidationError, "no active FACULTY home/mother department"):
+            GradingGovernanceService.create_correction_request(
+                user=self.faculty_user,
+                offering=self.offering,
+                template_period=self.period,
+                justification="Missing faculty governance scope must fail closed.",
+                items=self._correction_item(),
+            )
+
+        self.assertIsNotNone(default_route)
+        self.assertEqual(GradeCorrectionRequest.objects.count(), before_requests)
+        self.assertEqual(GradeCorrectionApprovalStep.objects.count(), before_steps)
+
+    def test_home_department_is_selected_per_exact_campus_for_same_faculty(self):
+        fairview = Campus.objects.create(tenant=self.tenant, code="FAIRVIEW", name="Fairview")
+        cubao = Campus.objects.create(tenant=self.tenant, code="CUBAO", name="Cubao")
+        fairview_is = Department.objects.create(tenant=self.tenant, campus=fairview, code="IS", name="Information Systems")
+        cubao_is = Department.objects.create(tenant=self.tenant, campus=cubao, code="IS", name="Information Systems")
+        UserRole.objects.create(user=self.faculty_user, role=self.faculty_role, tenant=self.tenant, campus=fairview, department=fairview_is)
+        UserRole.objects.create(user=self.faculty_user, role=self.faculty_role, tenant=self.tenant, campus=cubao, department=cubao_is)
+
+        fairview_home = GradingGovernanceService.resolve_correction_scope_department(
+            user=self.faculty_user, tenant_id=self.tenant.id, offering=SimpleNamespace(tenant_id=self.tenant.id, campus_id=fairview.id)
+        )
+        cubao_home = GradingGovernanceService.resolve_correction_scope_department(
+            user=self.faculty_user, tenant_id=self.tenant.id, offering=SimpleNamespace(tenant_id=self.tenant.id, campus_id=cubao.id)
+        )
+
+        self.assertEqual(fairview_home.id, fairview_is.id)
+        self.assertEqual(cubao_home.id, cubao_is.id)
+
+    def test_home_department_is_selected_per_exact_campus_for_different_academic_areas(self):
+        taytay = Campus.objects.create(tenant=self.tenant, code="TAYTAY", name="Taytay")
+        cubao = Campus.objects.create(tenant=self.tenant, code="CUBAO", name="Cubao")
+        taytay_ba = Department.objects.create(tenant=self.tenant, campus=taytay, code="BA", name="Business Administration")
+        cubao_bsa = Department.objects.create(tenant=self.tenant, campus=cubao, code="BSA", name="Accountancy")
+        UserRole.objects.create(user=self.faculty_user, role=self.faculty_role, tenant=self.tenant, campus=taytay, department=taytay_ba)
+        UserRole.objects.create(user=self.faculty_user, role=self.faculty_role, tenant=self.tenant, campus=cubao, department=cubao_bsa)
+
+        self.assertEqual(
+            GradingGovernanceService.resolve_correction_scope_department(
+                user=self.faculty_user, tenant_id=self.tenant.id, offering=SimpleNamespace(tenant_id=self.tenant.id, campus_id=taytay.id)
+            ).id,
+            taytay_ba.id,
+        )
+        self.assertEqual(
+            GradingGovernanceService.resolve_correction_scope_department(
+                user=self.faculty_user, tenant_id=self.tenant.id, offering=SimpleNamespace(tenant_id=self.tenant.id, campus_id=cubao.id)
+            ).id,
+            cubao_bsa.id,
+        )
+
+    def test_duplicate_faculty_role_cannot_create_home_department_ambiguity(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                UserRole.objects.create(
+                    user=self.faculty_user,
+                    role=self.faculty_role,
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    department=self.department,
+                )
+        home_department = GradingGovernanceService.resolve_correction_scope_department(
+            user=self.faculty_user,
+            tenant_id=self.tenant.id,
+            offering=self.offering,
+        )
+        self.assertEqual(home_department.id, self.department.id)
+
+    def test_pending_request_without_current_step_cannot_be_reviewed_or_finalized(self):
+        malformed = GradeCorrectionRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.faculty_user,
+            initiated_by_user=self.faculty_user,
+            faculty_department=self.department,
+            approval_route=self.route_rule,
+            status=GradeCorrectionRequest.Status.PENDING,
+            justification="Malformed legacy request with no approval step.",
+        )
+
+        can_review, pending_step, reason = GradingGovernanceService.can_user_review_correction_request(
+            request_obj=malformed,
+            user=self.reviewer_user,
+        )
+        self.assertFalse(can_review)
+        self.assertIsNone(pending_step)
+        self.assertIn("approval steps do not match", reason)
+        with self.assertRaisesMessage(ValidationError, "approval steps do not match"):
+            GradingGovernanceService.review_correction_request(
+                request_obj=malformed,
+                reviewer=self.reviewer_user,
+                approved=True,
+            )
+        malformed.refresh_from_db()
+        self.assertEqual(malformed.status, GradeCorrectionRequest.Status.PENDING)
+        self.assertFalse(hasattr(malformed, "unlock_window"))
+
+    def test_active_policy_scope_key_enforces_canonical_uniqueness_and_keeps_inactive_history(self):
+        active = CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+        self.assertTrue(active.active_scope_key)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CorrectionPetitionWindowPolicy.objects.create(
+                    tenant=self.tenant,
+                    campus=self.campus,
+                    academic_year=self.academic_year,
+                    term=self.term,
+                    grading_period=self.period,
+                    policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.CLOSED,
+                    is_active=True,
+                )
+        inactive = CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.CLOSED,
+            is_active=False,
+        )
+        self.assertIsNone(inactive.active_scope_key)
+
+    def test_active_scope_key_is_fixed_length_deterministic_digest(self):
+        longest_identifier = 9223372036854775807
+        key = CorrectionPetitionWindowPolicy.build_active_scope_key(
+            tenant_id=longest_identifier,
+            campus_id=longest_identifier,
+            academic_year_id=longest_identifier,
+            term_id=longest_identifier,
+            canonical_period_key="P" * 120,
+            is_active=True,
+        )
+        equivalent_key = CorrectionPetitionWindowPolicy.build_active_scope_key(
+            tenant_id=longest_identifier,
+            campus_id=longest_identifier,
+            academic_year_id=longest_identifier,
+            term_id=longest_identifier,
+            canonical_period_key="P" * 120,
+            is_active=True,
+        )
+        distinct_key = CorrectionPetitionWindowPolicy.build_active_scope_key(
+            tenant_id=longest_identifier,
+            campus_id=None,
+            academic_year_id=longest_identifier,
+            term_id=longest_identifier,
+            canonical_period_key="P" * 120,
+            is_active=True,
+        )
+        field = CorrectionPetitionWindowPolicy._meta.get_field("active_scope_key")
+        self.assertEqual(len(key), 64)
+        self.assertEqual(key, equivalent_key)
+        self.assertNotEqual(key, distinct_key)
+        self.assertEqual(field.max_length, CorrectionPetitionWindowPolicy.ACTIVE_SCOPE_KEY_MAX_LENGTH)
+
+    def test_correction_period_normalization_uses_only_exact_standard_aliases(self):
+        migration_0034 = __import__(
+            "apps.grading.migrations.0034_correctionpetitionwindowpolicy_canonical_period",
+            fromlist=["_canonical_period_key"],
+        )
+        standard = {
+            "PRELIM": "PRELIM",
+            "MIDTERM": "MIDTERM",
+            "PRE-FINAL": "PREFINAL",
+            "PRE FINAL": "PREFINAL",
+            "PREFINAL": "PREFINAL",
+            "FINAL": "FINAL",
+            "Final Exam": "FINAL",
+        }
+        custom = {
+            "MIDTERM-REMEDIAL": "MIDTERMREMEDIAL",
+            "PRELIMINARY": "PRELIMINARY",
+            "POST-FINAL": "POSTFINAL",
+            "PREFI-SPECIAL": "PREFISPECIAL",
+            "FINAL-RETAKE": "FINALRETAKE",
+        }
+        for source, expected in {**standard, **custom}.items():
+            self.assertEqual(GradingGovernanceService._normalize_period_key(source), expected)
+            self.assertEqual(migration_0034._canonical_period_key(source), expected)
+
+        base_scope = dict(
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            academic_year_id=self.academic_year.id,
+            term_id=self.term.id,
+            is_active=True,
+        )
+        self.assertNotEqual(
+            CorrectionPetitionWindowPolicy.build_active_scope_key(
+                canonical_period_key=custom["MIDTERM-REMEDIAL"], **base_scope
+            ),
+            CorrectionPetitionWindowPolicy.build_active_scope_key(
+                canonical_period_key=standard["MIDTERM"], **base_scope
+            ),
+        )
+
+    def test_policy_name_fallback_stores_longest_supported_canonical_identity(self):
+        longest_name = "P" * 120
+        period = GradingTemplatePeriod.objects.create(
+            template=self.template,
+            code="",
+            name=longest_name,
+            sequence_no=2,
+        )
+        policy = CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+
+        self.assertEqual(policy.canonical_period_key, longest_name)
+        self.assertEqual(len(policy.canonical_period_key), 120)
+        self.assertEqual(len(policy.active_scope_key), 64)
+        self.assertEqual(
+            CorrectionPetitionWindowPolicy._meta.get_field("canonical_period_key").max_length,
+            120,
+        )
+
+    def test_approved_null_route_window_cannot_unlock_encode_close_or_rewrite_history(self):
+        correction, step, item, window = self._legacy_approved_request_with_window()
+        original_step = {
+            "status": step.status,
+            "approver_role_id": step.approver_role_id,
+            "reviewed_by_user_id": step.reviewed_by_user_id,
+            "reviewed_at": step.reviewed_at,
+        }
+
+        self.assertIsNone(
+            GradingGovernanceService.get_active_unlock_window(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+        with self.assertRaisesMessage(ValidationError, "locked by academic governance"):
+            GradingGovernanceService.assert_encoding_allowed(
+                offering=self.offering,
+                template_period=self.period,
+                student_id=self.student1.id,
+                activity_id=self.activity.id,
+                requested_action=GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+            )
+        with self.assertRaisesMessage(ValidationError, "locked by academic governance"):
+            FacultyGradingService.upsert_activity_scores(
+                user=self.faculty_user,
+                activity=self.activity,
+                score_payload=[{"student_id": self.student1.id, "raw_score": Decimal("45.00")}],
+            )
+        with self.assertRaisesMessage(ValidationError, "no configured approval route snapshot"):
+            GradingGovernanceService.close_correction_window(request_obj=correction, actor=self.faculty_user)
+
+        correction.refresh_from_db()
+        step.refresh_from_db()
+        item.refresh_from_db()
+        window.refresh_from_db()
+        self.assertEqual(correction.status, GradeCorrectionRequest.Status.APPROVED)
+        self.assertIsNone(correction.approval_route_id)
+        self.assertEqual(
+            {
+                "status": step.status,
+                "approver_role_id": step.approver_role_id,
+                "reviewed_by_user_id": step.reviewed_by_user_id,
+                "reviewed_at": step.reviewed_at,
+            },
+            original_step,
+        )
+        self.assertTrue(item.is_active)
+        self.assertTrue(window.is_active)
+        self.assertFalse(window.is_consumed)
+        self.assertEqual(
+            StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True).raw_score,
+            Decimal("30.00"),
+        )
+
+    def test_approved_null_route_finalize_denied_without_grade_mutation(self):
+        correction, step, _item, window = self._legacy_approved_request_with_window(
+            requested_action=GradeCorrectionRequestItem.RequestedAction.UPDATE_STATUS,
+        )
+        self._grant_faculty_correction_access()
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse(
+                "faculty_portal:period_correction_finalize",
+                args=[self.offering.id, self.period.id, correction.id],
+            ),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No active correction window to finalize.")
+        self.assertFalse(
+            StudentPeriodGrade.objects.filter(offering=self.offering, template_period=self.period).exists()
+        )
+        self.assertFalse(StudentFinalGrade.objects.filter(offering=self.offering).exists())
+        correction.refresh_from_db()
+        step.refresh_from_db()
+        window.refresh_from_db()
+        self.assertEqual(correction.status, GradeCorrectionRequest.Status.APPROVED)
+        self.assertEqual(step.status, GradeCorrectionApprovalStep.Status.APPROVED)
+        self.assertTrue(window.is_active)
+        self.assertFalse(window.is_consumed)
+
+    def test_approved_malformed_configured_snapshot_cannot_authorize_window(self):
+        correction, _step, _item, _window = self._legacy_approved_request_with_window(
+            approval_route=self.route_rule,
+            step_role=self.cao_role,
+        )
+
+        is_valid, reason = GradingGovernanceService.get_approved_correction_governance_state(
+            request_obj=correction
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("approval steps do not match", reason)
+        self.assertIsNone(
+            GradingGovernanceService.get_active_unlock_window(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+
+    def test_approved_cross_campus_snapshot_cannot_unlock_encode_or_finalize(self):
+        correction = self._approved_configured_request_with_window()
+        other_campus = Campus.objects.create(tenant=self.tenant, code="OTHER", name="Other Campus")
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="OTHER-CS",
+            name="Other Computer Studies",
+        )
+        correction.faculty_department = other_department
+        correction.save(update_fields=["faculty_department", "updated_at"])
+
+        is_valid, reason = GradingGovernanceService.get_approved_correction_governance_state(
+            request_obj=correction
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("outside the offering scope", reason)
+        self.assertIsNone(
+            GradingGovernanceService.get_active_unlock_window(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+        with self.assertRaisesMessage(ValidationError, "locked by academic governance"):
+            GradingGovernanceService.assert_encoding_allowed(
+                offering=self.offering,
+                template_period=self.period,
+                student_id=self.student1.id,
+                activity_id=self.activity.id,
+                requested_action=GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+            )
+        with self.assertRaisesMessage(ValidationError, "outside the offering scope"):
+            GradingGovernanceService.close_correction_window(request_obj=correction)
+        self._grant_faculty_correction_access()
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse(
+                "faculty_portal:period_correction_finalize",
+                args=[self.offering.id, self.period.id, correction.id],
+            ),
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No active correction window to finalize.")
+        self.assertFalse(
+            StudentPeriodGrade.objects.filter(offering=self.offering, template_period=self.period).exists()
+        )
+        self.assertFalse(StudentFinalGrade.objects.filter(offering=self.offering).exists())
+        self.assertEqual(
+            StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True).raw_score,
+            Decimal("30.00"),
+        )
+
+    def test_approved_same_campus_wrong_home_snapshot_fails_closed(self):
+        correction = self._approved_configured_request_with_window()
+        wrong_home = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="BA",
+            name="Business Administration",
+        )
+        correction.faculty_department = wrong_home
+        correction.save(update_fields=["faculty_department", "updated_at"])
+
+        is_valid, reason = GradingGovernanceService.get_approved_correction_governance_state(
+            request_obj=correction
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("no longer matches", reason)
+        self.assertIsNone(
+            GradingGovernanceService.get_active_unlock_window(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+
+    def test_approved_cross_tenant_or_inactive_snapshot_fails_closed(self):
+        correction = self._approved_configured_request_with_window()
+        other_tenant = Tenant.objects.create(code="OTHER", name="Other Tenant")
+        other_campus = Campus.objects.create(tenant=other_tenant, code="OTHER", name="Other Campus")
+        other_department = Department.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            code="CS",
+            name="Computer Studies",
+        )
+        correction.faculty_department = other_department
+        correction.save(update_fields=["faculty_department", "updated_at"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        correction.faculty_department = self.department
+        correction.save(update_fields=["faculty_department", "updated_at"])
+        self.department.is_active = False
+        self.department.save(update_fields=["is_active", "updated_at"])
+        is_valid, reason = GradingGovernanceService.get_approved_correction_governance_state(
+            request_obj=correction
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("inactive or outside", reason)
+
+    def test_approved_snapshot_fails_closed_when_current_home_is_missing_or_ambiguous(self):
+        correction = self._approved_configured_request_with_window()
+        faculty_home_role = UserRole.objects.get(
+            user=self.faculty_user,
+            role=self.faculty_role,
+            campus=self.campus,
+            department=self.department,
+        )
+        faculty_home_role.is_active = False
+        faculty_home_role.save(update_fields=["is_active"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        faculty_home_role.is_active = True
+        faculty_home_role.save(update_fields=["is_active"])
+        alternate_home = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="BSA",
+            name="Accountancy",
+        )
+        UserRole.objects.create(
+            user=self.faculty_user,
+            role=self.faculty_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=alternate_home,
+        )
+        is_valid, reason = GradingGovernanceService.get_approved_correction_governance_state(
+            request_obj=correction
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("multiple active FACULTY", reason)
+
+    def test_auto_lapse_skips_malformed_approved_history_and_lapses_valid_history(self):
+        valid = self._approved_configured_request_with_window()
+        valid_window = valid.unlock_window
+        invalid, _step, _item, invalid_window = self._legacy_approved_request_with_window()
+        elapsed = timezone.now() - timedelta(minutes=1)
+        invalid_window.end_at = elapsed
+        invalid_window.save(update_fields=["end_at", "updated_at"])
+        valid_window.end_at = elapsed
+        valid_window.save(update_fields=["end_at", "updated_at"])
+
+        result = GradingGovernanceService.auto_lapse_expired_correction_windows(at=timezone.now())
+        self.assertEqual(result["count"], 1)
+        invalid.refresh_from_db()
+        invalid_window.refresh_from_db()
+        valid.refresh_from_db()
+        valid_window.refresh_from_db()
+        self.assertEqual(invalid.status, GradeCorrectionRequest.Status.APPROVED)
+        self.assertTrue(invalid_window.is_active)
+        self.assertFalse(invalid_window.is_consumed)
+        self.assertEqual(valid.status, GradeCorrectionRequest.Status.LAPSED)
+        self.assertFalse(valid_window.is_active)
+        self.assertTrue(valid_window.is_consumed)
+
+    def test_approved_history_with_reviewer_never_in_configured_role_cannot_unlock_or_encode(self):
+        correction = self._approved_configured_request_with_window()
+        step = correction.approval_steps.get()
+        step.reviewed_by_user = self.cao_user
+        step.save(update_fields=["reviewed_by_user", "updated_at"])
+        correction.reviewed_by_user = self.cao_user
+        correction.save(update_fields=["reviewed_by_user", "updated_at"])
+
+        is_valid, reason = GradingGovernanceService.get_approved_correction_governance_state(
+            request_obj=correction
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("reviewer authority", reason)
+        self.assertIsNone(
+            GradingGovernanceService.get_active_unlock_window(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+        with self.assertRaisesMessage(ValidationError, "locked by academic governance"):
+            GradingGovernanceService.assert_encoding_allowed(
+                offering=self.offering,
+                template_period=self.period,
+                student_id=self.student1.id,
+                activity_id=self.activity.id,
+                requested_action=GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+            )
+
+    def test_auto_lapse_skips_history_with_unverified_reviewer_authority(self):
+        correction = self._approved_configured_request_with_window()
+        step = correction.approval_steps.get()
+        step.reviewed_by_user = self.cao_user
+        step.save(update_fields=["reviewed_by_user", "updated_at"])
+        correction.reviewed_by_user = self.cao_user
+        correction.save(update_fields=["reviewed_by_user", "updated_at"])
+        window = correction.unlock_window
+        window.end_at = timezone.now() - timedelta(minutes=1)
+        window.save(update_fields=["end_at", "updated_at"])
+
+        result = GradingGovernanceService.auto_lapse_expired_correction_windows(at=timezone.now())
+        self.assertEqual(result["count"], 0)
+        correction.refresh_from_db()
+        window.refresh_from_db()
+        self.assertEqual(correction.status, GradeCorrectionRequest.Status.APPROVED)
+        self.assertTrue(window.is_active)
+        self.assertFalse(window.is_consumed)
+
+    def test_approved_history_fails_closed_when_audited_reviewer_scope_is_wrong(self):
+        correction = self._approved_configured_request_with_window()
+        step = correction.approval_steps.get()
+        audit = AuditLog.objects.get(
+            action="CORRECTION_APPROVAL_REVIEWED",
+            entity_type="GradeCorrectionApprovalStep",
+            entity_id=str(step.id),
+        )
+        evidence = dict(audit.metadata_json["reviewer_authority"])
+        evidence["campus_id"] = Campus.objects.create(
+            tenant=self.tenant,
+            code="OTHER",
+            name="Other Campus",
+        ).id
+        audit.metadata_json = {**audit.metadata_json, "reviewer_authority": evidence}
+        audit.save(update_fields=["metadata_json"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+        evidence["campus_id"] = self.campus.id
+        evidence["scope_covers_faculty_department"] = False
+        audit.metadata_json = {**audit.metadata_json, "reviewer_authority": evidence}
+        audit.save(update_fields=["metadata_json"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+    def test_approval_authority_snapshot_binds_exact_request_step_and_audit_event(self):
+        correction = self._approved_configured_request_with_window()
+        step = correction.approval_steps.get()
+        snapshot = GradeCorrectionApprovalAuthoritySnapshot.objects.get(approval_step=step)
+
+        self.assertEqual(snapshot.correction_request_id, correction.id)
+        self.assertEqual(snapshot.step_order, step.step_order)
+        self.assertEqual(snapshot.reviewer_user_id, step.reviewed_by_user_id)
+        self.assertEqual(snapshot.configured_approver_role_id, step.approver_role_id)
+        self.assertEqual(snapshot.approval_route_id, correction.approval_route_id)
+        self.assertEqual(snapshot.tenant_id, correction.tenant_id)
+        self.assertEqual(snapshot.campus_id, correction.campus_id)
+        self.assertEqual(snapshot.faculty_department_id, correction.faculty_department_id)
+        self.assertEqual(snapshot.decided_at, step.reviewed_at)
+        self.assertTrue(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        with self.assertRaisesMessage(ValidationError, "snapshots are immutable"):
+            GradeCorrectionApprovalAuthoritySnapshot.objects.filter(pk=snapshot.pk).update(step_order=2)
+        snapshot.step_order = 2
+        with self.assertRaisesMessage(ValidationError, "snapshots are immutable"):
+            snapshot.save()
+
+    def test_approved_history_fails_closed_for_wrong_audit_request_or_step_binding(self):
+        correction = self._approved_configured_request_with_window()
+        step = correction.approval_steps.get()
+        audit = GradeCorrectionApprovalAuthoritySnapshot.objects.get(
+            approval_step=step
+        ).approval_audit_log
+        after_data = dict(audit.after_json)
+
+        after_data["correction_request_id"] = correction.id + 1000
+        audit.after_json = after_data
+        audit.save(update_fields=["after_json"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        after_data["correction_request_id"] = correction.id
+        after_data["approval_step_id"] = step.id + 1000
+        audit.after_json = after_data
+        audit.save(update_fields=["after_json"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        after_data["approval_step_id"] = step.id
+        after_data["step_order"] = step.step_order + 1
+        audit.after_json = after_data
+        audit.save(update_fields=["after_json"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+    def test_approved_history_fails_closed_for_wrong_audit_actor_role_scope_or_timestamp(self):
+        correction = self._approved_configured_request_with_window()
+        step = correction.approval_steps.get()
+        audit = GradeCorrectionApprovalAuthoritySnapshot.objects.get(
+            approval_step=step
+        ).approval_audit_log
+
+        audit.actor_user = self.cao_user
+        audit.save(update_fields=["actor_user"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        audit.actor_user = self.reviewer_user
+        after_data = dict(audit.after_json)
+        after_data["approver_role_id"] = self.cao_role.id
+        audit.after_json = after_data
+        audit.save(update_fields=["actor_user", "after_json"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        other_tenant = Tenant.objects.create(code="AUDIT-TENANT", name="Audit Tenant")
+        other_campus = Campus.objects.create(tenant=other_tenant, code="AUDIT", name="Audit Campus")
+        audit.tenant = other_tenant
+        audit.campus = other_campus
+        audit.save(update_fields=["tenant", "campus"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        audit.tenant = self.tenant
+        audit.campus = self.campus
+        after_data["approver_role_id"] = step.approver_role_id
+        after_data["campus_id"] = Campus.objects.create(
+            tenant=self.tenant,
+            code="AUDIT-OTHER",
+            name="Audit Other Campus",
+        ).id
+        audit.after_json = after_data
+        audit.save(update_fields=["tenant", "campus", "after_json"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        after_data["campus_id"] = self.campus.id
+        after_data["faculty_department_id"] = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="AUDIT-BA",
+            name="Audit Business Administration",
+        ).id
+        audit.after_json = after_data
+        audit.save(update_fields=["after_json"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+        after_data["faculty_department_id"] = self.department.id
+        after_data["reviewed_at"] = (step.reviewed_at + timedelta(seconds=1)).isoformat()
+        audit.after_json = after_data
+        audit.save(update_fields=["after_json"])
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+    def test_fabricated_or_missing_audit_event_cannot_replace_bound_snapshot_evidence(self):
+        correction = self._approved_configured_request_with_window()
+        step = correction.approval_steps.get()
+        snapshot = GradeCorrectionApprovalAuthoritySnapshot.objects.get(approval_step=step)
+        audit = snapshot.approval_audit_log
+        after_data = {**audit.after_json, "correction_request_id": correction.id + 1000}
+        audit.after_json = after_data
+        audit.save(update_fields=["after_json"])
+        AuditLog.objects.create(
+            actor_user=self.reviewer_user,
+            portal="ADMIN",
+            action="CORRECTION_APPROVAL_REVIEWED",
+            entity_type="GradeCorrectionApprovalStep",
+            entity_id=str(step.id),
+            tenant=self.tenant,
+            campus=self.campus,
+            after_json={**audit.after_json, "correction_request_id": correction.id},
+            metadata_json={"reviewer_authority": dict(audit.metadata_json["reviewer_authority"])},
+        )
+
+        self.assertFalse(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+        self.assertFalse(
+            GradingGovernanceService._correction_approval_audit_matches(
+                audit_row=None,
+                snapshot=snapshot,
+                request_obj=correction,
+                step=step,
+            )
+        )
+        with self.assertRaisesMessage(ValidationError, "snapshots are immutable"):
+            GradeCorrectionApprovalAuthoritySnapshot.objects.filter(pk=snapshot.pk).update(
+                approval_audit_log_id=audit.id + 1
+            )
+
+    def test_snapshotted_authority_survives_later_reviewer_scope_reassignment(self):
+        correction = self._approved_configured_request_with_window()
+        reviewer_assignment = UserRole.objects.get(
+            user=self.reviewer_user,
+            role=self.reviewer_role,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        other_campus = Campus.objects.create(tenant=self.tenant, code="OTHER", name="Other Campus")
+        other_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=other_campus,
+            code="BA",
+            name="Business Administration",
+        )
+        reviewer_assignment.campus = other_campus
+        reviewer_assignment.department = other_department
+        reviewer_assignment.save(update_fields=["campus", "department"])
+
+        self.assertTrue(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+
+    def test_approved_history_fails_closed_for_on_behalf_self_approval(self):
+        correction = self._approved_configured_request_with_window()
+        correction.request_source = GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF
+        correction.initiated_by_user = self.reviewer_user
+        correction.save(update_fields=["request_source", "initiated_by_user", "updated_at"])
+
+        is_valid, reason = GradingGovernanceService.get_approved_correction_governance_state(
+            request_obj=correction
+        )
+        self.assertFalse(is_valid)
+        self.assertIn("self-approval", reason)
+
+    def test_audited_historical_reviewer_authority_survives_later_role_deactivation(self):
+        correction = self._approved_configured_request_with_window()
+        reviewer_assignment = UserRole.objects.get(
+            user=self.reviewer_user,
+            role=self.reviewer_role,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        reviewer_assignment.is_active = False
+        reviewer_assignment.save(update_fields=["is_active"])
+
+        self.assertTrue(
+            GradingGovernanceService.get_approved_correction_governance_state(request_obj=correction)[0]
+        )
+        self.assertIsNotNone(
+            GradingGovernanceService.get_active_unlock_window(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+
+    def test_auto_lapse_skips_expired_approved_request_with_wrong_home_snapshot(self):
+        correction = self._approved_configured_request_with_window()
+        wrong_home = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            code="BA",
+            name="Business Administration",
+        )
+        correction.faculty_department = wrong_home
+        correction.save(update_fields=["faculty_department", "updated_at"])
+        window = correction.unlock_window
+        window.end_at = timezone.now() - timedelta(minutes=1)
+        window.save(update_fields=["end_at", "updated_at"])
+
+        result = GradingGovernanceService.auto_lapse_expired_correction_windows(at=timezone.now())
+        self.assertEqual(result["count"], 0)
+        correction.refresh_from_db()
+        window.refresh_from_db()
+        self.assertEqual(correction.status, GradeCorrectionRequest.Status.APPROVED)
+        self.assertTrue(window.is_active)
+        self.assertFalse(window.is_consumed)
+
+    def test_valid_configured_approved_request_allows_encoding_and_finalize(self):
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Valid mixed correction follows the configured route.",
+            items=[
+                *self._correction_item(value="45"),
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_STATUS,
+                    "student_id": self.student1.id,
+                    "new_value": "REVIEWED",
+                },
+            ],
+        )
+        correction = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Approved through configured route.",
+        )
+
+        self.assertEqual(correction.status, GradeCorrectionRequest.Status.APPROVED)
+        self.assertEqual(
+            GradingGovernanceService.get_active_unlock_window(
+                offering=self.offering,
+                template_period=self.period,
+            ).correction_request_id,
+            correction.id,
+        )
+        self.assertTrue(
+            GradingGovernanceService.assert_encoding_allowed(
+                offering=self.offering,
+                template_period=self.period,
+                student_id=self.student1.id,
+                activity_id=self.activity.id,
+                requested_action=GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+            )
+        )
+
+        self._grant_faculty_correction_access()
+        self.client.force_login(self.faculty_user)
+        response = self.client.post(
+            reverse(
+                "faculty_portal:period_correction_finalize",
+                args=[self.offering.id, self.period.id, correction.id],
+            ),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Correction finalized and period scope re-locked.")
+        correction.refresh_from_db()
+        correction.unlock_window.refresh_from_db()
+        self.assertEqual(correction.status, GradeCorrectionRequest.Status.CLOSED)
+        self.assertTrue(correction.unlock_window.is_consumed)
+        self.assertTrue(
+            StudentPeriodGrade.objects.filter(
+                offering=self.offering,
+                template_period=self.period,
+                student=self.student1,
+                is_finalized=True,
+            ).exists()
+        )
+        self.assertTrue(
+            StudentFinalGrade.objects.filter(
+                offering=self.offering,
+                student=self.student1,
+                is_submitted=True,
+            ).exists()
+        )
+
+    def test_untouched_synthetic_pending_route_is_reconciled_but_acted_route_is_not(self):
+        synthetic = GradeCorrectionRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.faculty_user,
+            initiated_by_user=self.faculty_user,
+            faculty_department=None,
+            approval_route=None,
+            status=GradeCorrectionRequest.Status.PENDING,
+            justification="Legacy synthetic route.",
+        )
+        synthetic_step = GradeCorrectionApprovalStep.objects.create(
+            correction_request=synthetic,
+            step_order=1,
+            approver_role=self.cao_role,
+            approver_label="Synthetic CAO",
+            status=GradeCorrectionApprovalStep.Status.PENDING,
+        )
+
+        self.assertTrue(GradingGovernanceService.reconcile_pending_correction_route(request_obj=synthetic))
+        synthetic.refresh_from_db()
+        self.assertEqual(synthetic.faculty_department_id, self.department.id)
+        self.assertEqual(synthetic.approval_route_id, self.route_rule.id)
+        self.assertFalse(GradeCorrectionApprovalStep.objects.filter(id=synthetic_step.id).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(action="RECONCILE_CORRECTION_ROUTE", entity_id=str(synthetic.id)).exists()
+        )
+        can_review, pending_step, reason = GradingGovernanceService.can_user_review_correction_request(
+            request_obj=synthetic,
+            user=self.reviewer_user,
+        )
+        self.assertTrue(can_review)
+        self.assertIsNotNone(pending_step)
+        self.assertIsNone(reason)
+        self.assertFalse(GradingGovernanceService.reconcile_pending_correction_route(request_obj=synthetic))
+
+        acted = GradeCorrectionRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.faculty_user,
+            initiated_by_user=self.faculty_user,
+            approval_route=None,
+            status=GradeCorrectionRequest.Status.PENDING,
+            justification="Acted synthetic route.",
+        )
+        acted_step = GradeCorrectionApprovalStep.objects.create(
+            correction_request=acted,
+            step_order=1,
+            approver_role=self.cao_role,
+            approver_label="Synthetic CAO",
+            status=GradeCorrectionApprovalStep.Status.APPROVED,
+        )
+        self.assertFalse(GradingGovernanceService.reconcile_pending_correction_route(request_obj=acted))
+        acted.refresh_from_db()
+        acted_step.refresh_from_db()
+        self.assertIsNone(acted.approval_route_id)
+        self.assertEqual(acted_step.approver_label, "Synthetic CAO")
+
+        request_level_acted = GradeCorrectionRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.faculty_user,
+            initiated_by_user=self.faculty_user,
+            approval_route=None,
+            status=GradeCorrectionRequest.Status.PENDING,
+            justification="Legacy request-level action evidence.",
+            reviewed_by_user=self.reviewer_user,
+            reviewed_at=timezone.now(),
+            review_remarks="Do not rewrite this history.",
+        )
+        GradeCorrectionApprovalStep.objects.create(
+            correction_request=request_level_acted,
+            step_order=1,
+            approver_role=self.cao_role,
+            approver_label="Synthetic CAO",
+            status=GradeCorrectionApprovalStep.Status.PENDING,
+        )
+        self.assertFalse(GradingGovernanceService.reconcile_pending_correction_route(request_obj=request_level_acted))
+
+    def test_acted_null_route_synthetic_request_cannot_review_unlock_or_write_scores(self):
+        review_permission, _ = Permission.objects.get_or_create(
+            code="corrections.review",
+            defaults={"module": "corrections", "action": "review"},
+        )
+        RolePermission.objects.get_or_create(role=self.reviewer_role, permission=review_permission)
+        synthetic = GradeCorrectionRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.faculty_user,
+            initiated_by_user=self.faculty_user,
+            approval_route=None,
+            status=GradeCorrectionRequest.Status.PENDING,
+            justification="Acted legacy synthetic route must remain audit-only.",
+            reviewed_by_user=self.cao_user,
+            reviewed_at=timezone.now(),
+        )
+        GradeCorrectionApprovalStep.objects.create(
+            correction_request=synthetic,
+            step_order=1,
+            approver_role=self.reviewer_role,
+            approver_label="Synthetic reviewer",
+            status=GradeCorrectionApprovalStep.Status.PENDING,
+        )
+        GradeCorrectionRequestItem.objects.create(
+            correction_request=synthetic,
+            requested_action=GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+            student=self.student1,
+            grade_activity=self.activity,
+            old_value="30",
+            new_value="45",
+        )
+
+        can_review, pending_step, reason = GradingGovernanceService.can_user_review_correction_request(
+            request_obj=synthetic,
+            user=self.reviewer_user,
+        )
+        self.assertFalse(can_review)
+        self.assertIsNone(pending_step)
+        self.assertIn("no configured approval route snapshot", reason)
+        with self.assertRaisesMessage(ValidationError, "no configured approval route snapshot"):
+            GradingGovernanceService.review_correction_request(
+                request_obj=synthetic,
+                reviewer=self.reviewer_user,
+                approved=True,
+            )
+        synthetic.refresh_from_db()
+        self.assertEqual(synthetic.status, GradeCorrectionRequest.Status.PENDING)
+        self.assertFalse(GradeCorrectionUnlockWindow.objects.filter(correction_request=synthetic).exists())
+        self.assertEqual(
+            StudentActivityScore.objects.get(activity=self.activity, student=self.student1, is_active=True).raw_score,
+            Decimal("30.00"),
+        )
+
+    def test_inactive_configured_step_role_cannot_authorize_review_even_with_review_permission(self):
+        review_permission, _ = Permission.objects.get_or_create(
+            code="corrections.review",
+            defaults={"module": "corrections", "action": "review"},
+        )
+        RolePermission.objects.get_or_create(role=self.reviewer_role, permission=review_permission)
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="The route role is later deactivated.",
+            items=self._correction_item(),
+        )
+        self.reviewer_role.is_active = False
+        self.reviewer_role.save(update_fields=["is_active", "updated_at"])
+
+        can_review, pending_step, reason = GradingGovernanceService.can_user_review_correction_request(
+            request_obj=correction,
+            user=self.reviewer_user,
+        )
+        self.assertFalse(can_review)
+        self.assertIsNone(pending_step)
+        self.assertIn("inactive or invalid approver role", reason)
+
+    def test_published_canonical_period_resolver_deduplicates_and_rejects_forged_period(self):
+        duplicate_template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="TEMP2",
+            name="Duplicate Prelim Template",
+            is_published=True,
+        )
+        duplicate_prelim = GradingTemplatePeriod.objects.create(
+            template=duplicate_template,
+            code="PRE-FINAL",
+            name="Pre Final",
+            sequence_no=3,
+        )
+        unpublished_template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="DRAFT",
+            name="Draft Template",
+            is_published=False,
+        )
+        GradingTemplatePeriod.objects.create(
+            template=unpublished_template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+        )
+        second_prelim = GradingTemplatePeriod.objects.create(
+            template=duplicate_template,
+            code="PRELIM",
+            name="Prelim",
+            sequence_no=1,
+        )
+
+        configurable_periods = GradingGovernanceService.eligible_configurable_correction_periods(tenant_id=self.tenant.id)
+        self.assertEqual(
+            [GradingGovernanceService.canonical_correction_period_key(period) for period in configurable_periods],
+            ["PRELIM"],
+        )
+        self.assertEqual(
+            [period.id for period in GradingGovernanceService.eligible_correction_periods_for_offering(offering=self.offering)],
+            [self.period.id],
+        )
+        with self.assertRaisesMessage(ValidationError, "not an eligible published grading period"):
+            GradingGovernanceService.create_correction_request(
+                user=self.faculty_user,
+                offering=self.offering,
+                template_period=second_prelim,
+                justification="Forged template period.",
+                items=self._correction_item(),
+            )
+        self.assertNotEqual(duplicate_prelim.id, second_prelim.id)
+
+    def test_policy_resolution_uses_canonical_period_and_broad_scope(self):
+        alias_template = GradingTemplate.objects.create(
+            tenant=self.tenant,
+            code="ALIAS",
+            name="Alias Template",
+            is_published=True,
+        )
+        alias_period = GradingTemplatePeriod.objects.create(
+            template=alias_template,
+            code="PRE-FINAL",
+            name="Pre Final",
+            sequence_no=3,
+        )
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=None,
+            academic_year=None,
+            term=None,
+            grading_period=alias_period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.CLOSED,
+            is_active=True,
+        )
+        self.period.code = "PREFINAL"
+        self.period.save(update_fields=["code", "updated_at"])
+        self.correction_lock.period_code = "PREFINAL"
+        self.correction_lock.save(update_fields=["period_code", "updated_at"])
+
+        state = GradingGovernanceService.get_correction_petition_window_state(
+            offering=self.offering,
+            template_period=self.period,
+        )
+
+        self.assertFalse(state["is_allowed"])
+        self.assertEqual(state["policy"].id, CorrectionPetitionWindowPolicy.objects.get(grading_period=alias_period).id)
+
+    def test_correction_lifecycle_rejects_before_deadline_and_unlocked_gradebooks(self):
+        self._set_correction_lifecycle(deadline_at=timezone.now() + timedelta(hours=1), is_locked=False)
+        state = GradingGovernanceService.get_correction_request_lifecycle_state(
+            offering=self.offering,
+            template_period=self.period,
+        )
+        self.assertFalse(state["is_allowed"])
+        self.assertTrue(
+            GradingGovernanceService.can_faculty_self_reopen_before_deadline(
+                offering=self.offering,
+                template_period=self.period,
+            )
+        )
+        with self.assertRaisesMessage(ValidationError, "become available after the submission deadline"):
+            GradingGovernanceService.create_correction_request(
+                user=self.faculty_user,
+                offering=self.offering,
+                template_period=self.period,
+                justification="Too early.",
+                items=self._correction_item(),
+            )
+
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=False)
+        state = GradingGovernanceService.get_correction_request_lifecycle_state(
+            offering=self.offering,
+            template_period=self.period,
+        )
+        self.assertFalse(state["is_allowed"])
+
+    def test_period_corrections_direct_get_and_post_are_denied_before_deadline(self):
+        self._grant_faculty_correction_access()
+        self._set_correction_lifecycle(deadline_at=timezone.now() + timedelta(hours=1), is_locked=False)
+        self.client.force_login(self.faculty_user)
+        url = reverse("faculty_portal:period_corrections", args=[self.offering.id, self.period.id])
+
+        get_response = self.client.get(url, follow=True)
+        post_response = self.client.post(
+            url,
+            {
+                "students": [self.student1.id],
+                "grade_activities": [self.activity.id],
+                "correction_payload": (
+                    f'[{{"student_id":"{self.student1.id}","grade_activity_id":"{self.activity.id}","new_value":"41"}}]'
+                ),
+                "justification": "Must be denied before the deadline.",
+            },
+            follow=True,
+        )
+
+        expected_message = "Grade correction requests become available after the submission deadline once this grading period is locked."
+        self.assertContains(get_response, expected_message)
+        self.assertContains(post_response, expected_message)
+        self.assertEqual(GradeCorrectionRequest.objects.count(), 0)
 
 
 class FinalGradeFormulaTests(TestCase):
