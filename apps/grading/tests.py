@@ -3,7 +3,9 @@ from decimal import Decimal
 from importlib import import_module
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from cryptography.exceptions import InvalidTag
 from django.conf import settings
 from django.core import mail
 from django.core.exceptions import ValidationError
@@ -14,6 +16,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from PIL import Image
+from reportlab.platypus import Paragraph as ReportLabParagraph
 from apps.accounts.models import User
 from apps.accounts.models import UserSignatureUsageLog
 from apps.accounts.services import UserSignatureService
@@ -1990,9 +1993,13 @@ class CorrectionWorkflowTests(TestCase):
             review_remarks="Approved with signature.",
         )
 
-        pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
+        with patch("apps.grading.reporting.Paragraph", wraps=ReportLabParagraph) as paragraph:
+            pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
 
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertFalse(
+            any("No stored signature on file." in call.args[0] for call in paragraph.call_args_list)
+        )
         self.assertEqual(
             UserSignatureUsageLog.objects.filter(
                 document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
@@ -2004,6 +2011,125 @@ class CorrectionWorkflowTests(TestCase):
         self.reviewer_user.signature_credential.refresh_from_db()
         self.assertIsNotNone(self.faculty_user.signature_credential.last_used_at)
         self.assertIsNotNone(self.reviewer_user.signature_credential.last_used_at)
+
+    def test_official_correction_report_uses_fallback_for_invalid_signature_tag(self):
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+
+        buffer = BytesIO()
+        Image.new("RGBA", (180, 60), (120, 10, 10, 255)).save(buffer, format="PNG")
+        credential = UserSignatureService.store_signature(
+            user=self.reviewer_user,
+            uploaded_file=SimpleUploadedFile(
+                "reviewer-signature.png",
+                buffer.getvalue(),
+                content_type="image/png",
+            ),
+            actor=self.reviewer_user,
+        )
+        credential.encrypted_blob = credential.encrypted_blob[:-1] + bytes([credential.encrypted_blob[-1] ^ 1])
+        credential.save(update_fields=["encrypted_blob"])
+        with self.assertRaises(InvalidTag):
+            UserSignatureService.decrypt_signature_bytes(credential=credential)
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Gracefully render a report when an old signature cannot decrypt.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "45",
+                }
+            ],
+        )
+        closed_request = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Approved with an unavailable stored signature.",
+        )
+
+        with self.assertLogs("teachermateplus.system", level="WARNING") as logs:
+            with patch("apps.grading.reporting.Paragraph", wraps=ReportLabParagraph) as paragraph:
+                pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertTrue(
+            any("No stored signature on file." in call.args[0] for call in paragraph.call_args_list)
+        )
+        self.assertIn(f"user_id={self.reviewer_user.id}", logs.output[0])
+        self.assertIn(f"credential_id={credential.id}", logs.output[0])
+        self.assertEqual(
+            UserSignatureUsageLog.objects.filter(
+                user=self.reviewer_user,
+                document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
+            ).count(),
+            0,
+        )
+
+    def test_official_correction_report_keeps_fallback_without_signature(self):
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Render the existing no-signature fallback.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "45",
+                }
+            ],
+        )
+        closed_request = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Approved without stored signatures.",
+        )
+
+        with patch("apps.grading.reporting.Paragraph", wraps=ReportLabParagraph) as paragraph:
+            pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(
+            sum("No stored signature on file." in call.args[0] for call in paragraph.call_args_list),
+            2,
+        )
+        self.assertEqual(
+            UserSignatureUsageLog.objects.filter(
+                document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
+            ).count(),
+            0,
+        )
 
     def test_correction_submission_notification_emails_configured_roles(self):
         SystemSettingService.set(
