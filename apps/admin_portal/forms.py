@@ -282,6 +282,15 @@ def _department_with_campus_label(obj):
     return f"{campus_label} | {department_label}" if campus_label else department_label
 
 
+def _correction_governance_department_label(obj):
+    campus = getattr(obj, "campus", None)
+    campus_code = (getattr(campus, "code", "") or "").strip()
+    code = (getattr(obj, "code", "") or "").strip()
+    name = (getattr(obj, "name", "") or "").strip()
+    department_label = f"{code} - {name}" if code and name else code or name or str(obj)
+    return f"{campus_code} — {department_label}" if campus_code else department_label
+
+
 def _offering_label(obj):
     course_label = _course_label(getattr(obj, "course", None))
     section_label = _section_label(getattr(obj, "section", None))
@@ -3285,6 +3294,7 @@ class CorrectionApprovalRouteRuleForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if department_queryset is not None:
             self.fields["faculty_department"].queryset = department_queryset
+        self.fields["faculty_department"].label_from_instance = _correction_governance_department_label
         if role_queryset is not None:
             self.fields["step_1_role"].queryset = role_queryset
             self.fields["step_2_role"].queryset = role_queryset
