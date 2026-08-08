@@ -8,9 +8,11 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 
 from apps.academics.models import CourseOffering, FacultyAssignment
+from apps.accounts.models import User
+from apps.auditlog.models import AuditLog
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.core.services.scope import ScopeService
 from apps.core.services.features import FeatureSettingsService
@@ -25,6 +27,7 @@ from apps.grading.models import (
     CorrectionPetitionWindowPolicy,
     CourseBaseValueOverride,
     CourseTemplateAssignment,
+    GradeCorrectionApprovalAuthoritySnapshot,
     GradeCorrectionApprovalStep,
     GradeCorrectionRequestItem,
     GradeCorrectionRequest,
@@ -50,6 +53,7 @@ from apps.grading.models import (
     StudentPeriodGrade,
 )
 from apps.rbac.models import Role, UserRole
+from apps.tenants.models import Department
 
 
 class CourseOfferingSafetyService:
@@ -2430,15 +2434,113 @@ class GradingGovernanceService:
     @staticmethod
     def _normalize_period_key(value: str | None) -> str:
         raw = (value or "").strip().upper().replace("-", "").replace("_", "").replace(" ", "")
-        if "PREFINAL" in raw or "PREFI" in raw:
-            return "PREFINAL"
-        if "MIDTERM" in raw:
-            return "MIDTERM"
-        if raw == "FINAL" or raw.endswith("FINAL") or "FINALEXAM" in raw:
-            return "FINAL"
-        if "PRELIM" in raw:
-            return "PRELIM"
-        return raw
+        # Correction-policy identities are deliberately exact.  A custom
+        # period such as MIDTERM-REMEDIAL must not inherit MIDTERM governance.
+        standard_aliases = {
+            "PRELIM": "PRELIM",
+            "PRELIMEXAM": "PRELIM",
+            "MIDTERM": "MIDTERM",
+            "MIDTERMEXAM": "MIDTERM",
+            "PREFINAL": "PREFINAL",
+            "FINAL": "FINAL",
+            "FINALEXAM": "FINAL",
+        }
+        return standard_aliases.get(raw, raw)
+
+    CORRECTION_PERIOD_ORDER = {
+        "PRELIM": 1,
+        "MIDTERM": 2,
+        "PREFINAL": 3,
+        "FINAL": 4,
+    }
+
+    @classmethod
+    def canonical_correction_period_key(cls, template_period: GradingTemplatePeriod | None) -> str:
+        """Return the stable logical identity used by correction governance."""
+        if not template_period:
+            return ""
+        return cls._normalize_period_key(template_period.code or template_period.name)
+
+    @classmethod
+    def _correction_period_sort_key(cls, template_period: GradingTemplatePeriod):
+        key = cls.canonical_correction_period_key(template_period)
+        return (
+            cls.CORRECTION_PERIOD_ORDER.get(key, 999),
+            template_period.sequence_no,
+            key,
+            template_period.name or "",
+            template_period.id,
+        )
+
+    @classmethod
+    def eligible_correction_periods_for_offering(cls, *, offering):
+        """Resolve the single published template actually applicable to an offering.
+
+        This intentionally returns physical template periods only after collapsing
+        them by canonical logical-period identity.  A second PRELIM-like row is
+        therefore never silently treated as another correction-governance period.
+        """
+        template = FacultyGradingService.resolve_template_for_offering(offering)
+        if (
+            template.tenant_id != offering.tenant_id
+            or not template.is_active
+            or not template.is_published
+        ):
+            return []
+        periods = list(
+            template.periods.filter(is_active=True)
+            .select_related("template")
+            .order_by("sequence_no", "id")
+        )
+        canonical_periods = {}
+        for period in periods:
+            key = cls.canonical_correction_period_key(period)
+            if not key:
+                continue
+            canonical_periods.setdefault(key, period)
+        return sorted(canonical_periods.values(), key=cls._correction_period_sort_key)
+
+    @classmethod
+    def eligible_configurable_correction_periods(
+        cls, *, tenant_id: int, campus_id: int | None = None, academic_year_id: int | None = None, term_id: int | None = None
+    ):
+        """Return logical periods actually applicable to at least one scoped offering."""
+        offering_qs = CourseOffering.objects.filter(tenant_id=tenant_id, is_active=True)
+        if campus_id:
+            offering_qs = offering_qs.filter(campus_id=campus_id)
+        if academic_year_id:
+            offering_qs = offering_qs.filter(academic_year_id=academic_year_id)
+        if term_id:
+            offering_qs = offering_qs.filter(term_id=term_id)
+        periods = []
+        seen_period_ids = set()
+        for offering in offering_qs.select_related("course", "academic_year", "term"):
+            try:
+                applicable = cls.eligible_correction_periods_for_offering(offering=offering)
+            except ValidationError:
+                continue
+            for period in applicable:
+                if period.id not in seen_period_ids:
+                    seen_period_ids.add(period.id)
+                    periods.append(period)
+        canonical_periods = {}
+        for period in periods:
+            key = cls.canonical_correction_period_key(period)
+            if not key:
+                continue
+            canonical_periods.setdefault(key, period)
+        return sorted(canonical_periods.values(), key=cls._correction_period_sort_key)
+
+    @classmethod
+    def assert_correction_period_eligible(cls, *, offering, template_period: GradingTemplatePeriod):
+        eligible_period_ids = {
+            period.id for period in cls.eligible_correction_periods_for_offering(offering=offering)
+        }
+        if template_period.id not in eligible_period_ids:
+            raise ValidationError(
+                "The selected grading period is not an eligible published grading period for this offering."
+            )
+        return True
 
     @classmethod
     def get_correction_mode(cls, *, tenant_id: int | None):
@@ -2463,31 +2565,69 @@ class GradingGovernanceService:
         cls,
         *,
         tenant_id: int,
-        academic_year_id: int,
-        term_id: int,
-        grading_period_id: int,
+        academic_year_id: int | None,
+        term_id: int | None,
+        canonical_period_key: str,
         campus_id: int | None = None,
     ):
+        if not canonical_period_key:
+            return None
         base_qs = (
             CorrectionPetitionWindowPolicy.objects.filter(
                 tenant_id=tenant_id,
-                academic_year_id=academic_year_id,
-                term_id=term_id,
-                grading_period_id=grading_period_id,
+                canonical_period_key=canonical_period_key,
                 is_active=True,
             )
+            .filter(Q(academic_year_id=academic_year_id) | Q(academic_year__isnull=True))
+            .filter(Q(term_id=term_id) | Q(term__isnull=True))
             .select_related("tenant", "campus", "academic_year", "term", "grading_period")
-            .order_by("-updated_at", "-created_at", "-id")
         )
-        if campus_id:
-            campus_policy = base_qs.filter(campus_id=campus_id).first()
-            if campus_policy:
-                return campus_policy
-        return base_qs.filter(campus__isnull=True).first()
+
+        # Campus-specific policy remains the authoritative override. Within a
+        # campus/tenant layer, prefer the most specific AY/term scope.
+        campus_layers = [campus_id, None] if campus_id else [None]
+        for candidate_campus_id in campus_layers:
+            policies = list(
+                base_qs.filter(campus_id=candidate_campus_id).order_by("-updated_at", "-created_at", "-id")
+            )
+            if not policies:
+                continue
+            policies.sort(
+                key=lambda policy: (
+                    1 if policy.academic_year_id else 0,
+                    1 if policy.term_id else 0,
+                    policy.updated_at,
+                    policy.created_at,
+                    policy.id,
+                ),
+                reverse=True,
+            )
+            top = policies[0]
+            top_scope = (top.academic_year_id, top.term_id)
+            if sum(1 for policy in policies if (policy.academic_year_id, policy.term_id) == top_scope) > 1:
+                raise ValidationError(
+                    "Multiple active Correction Governance petition-window policies match this scope."
+                )
+            return top
+        return None
 
     @classmethod
     def get_correction_petition_window_state(cls, *, offering, template_period: GradingTemplatePeriod, at=None):
         now = at or timezone.now()
+        try:
+            cls.assert_correction_period_eligible(offering=offering, template_period=template_period)
+        except ValidationError as exc:
+            return {
+                "is_allowed": False,
+                "is_configured": False,
+                "policy": None,
+                "policy_mode": None,
+                "policy_mode_label": "Unavailable",
+                "deadline_at": None,
+                "notice": None,
+                "status_label": "Correction period is unavailable.",
+                "message": "; ".join(exc.messages),
+            }
         if not cls.is_system_correction_enabled(tenant_id=offering.tenant_id):
             return {
                 "is_allowed": False,
@@ -2504,13 +2644,26 @@ class GradingGovernanceService:
                 ),
             }
 
-        policy = cls.get_active_correction_petition_policy(
-            tenant_id=offering.tenant_id,
-            academic_year_id=offering.academic_year_id,
-            term_id=offering.term_id,
-            grading_period_id=template_period.id,
-            campus_id=offering.campus_id,
-        )
+        try:
+            policy = cls.get_active_correction_petition_policy(
+                tenant_id=offering.tenant_id,
+                academic_year_id=offering.academic_year_id,
+                term_id=offering.term_id,
+                canonical_period_key=cls.canonical_correction_period_key(template_period),
+                campus_id=offering.campus_id,
+            )
+        except ValidationError as exc:
+            return {
+                "is_allowed": False,
+                "is_configured": True,
+                "policy": None,
+                "policy_mode": None,
+                "policy_mode_label": "Configuration Error",
+                "deadline_at": None,
+                "notice": None,
+                "status_label": "Correction petition configuration is ambiguous.",
+                "message": "; ".join(exc.messages),
+            }
         if not policy:
             return {
                 "is_allowed": True,
@@ -2601,90 +2754,228 @@ class GradingGovernanceService:
             raise ValidationError(state["message"])
         return state
 
-    @staticmethod
-    def resolve_requesting_faculty_department(*, user, tenant_id: int | None):
-        department = getattr(user, "default_department", None)
-        if not department:
-            return None
-        if tenant_id and getattr(department, "tenant_id", None) != tenant_id:
-            return None
-        if hasattr(department, "is_active") and not department.is_active:
-            return None
-        return department
+    @classmethod
+    def get_correction_request_filing_state(cls, *, offering, template_period: GradingTemplatePeriod, at=None):
+        """Return the single authoritative filing decision used by service and UI.
+
+        A correction petition is available only when both the post-deadline
+        gradebook lifecycle and the applicable petition-window policy allow it.
+        Keeping the two underlying states in the response lets callers present
+        the specific reason without duplicating date or policy logic.
+        """
+        lifecycle_state = cls.get_correction_request_lifecycle_state(
+            offering=offering,
+            template_period=template_period,
+            at=at,
+        )
+        petition_window_state = cls.get_correction_petition_window_state(
+            offering=offering,
+            template_period=template_period,
+            at=at,
+        )
+        is_allowed = bool(lifecycle_state["is_allowed"] and petition_window_state["is_allowed"])
+        return {
+            "is_allowed": is_allowed,
+            "message": (
+                "Grade correction requests are available for this locked grading period."
+                if is_allowed
+                else lifecycle_state["message"]
+                if not lifecycle_state["is_allowed"]
+                else petition_window_state["message"]
+            ),
+            "lifecycle_state": lifecycle_state,
+            "petition_window_state": petition_window_state,
+        }
+
+    @classmethod
+    def get_correction_request_lifecycle_state(cls, *, offering, template_period: GradingTemplatePeriod, at=None):
+        """Return the authoritative lifecycle gate for filing a new petition.
+
+        A previous submit click alone is insufficient.  The applicable deadline
+        must have passed under the project's existing ``now > deadline``
+        convention, the submitted gradebook must be locked, and it cannot be
+        inside a legitimate editable/reopen window.
+        """
+        now = at or timezone.now()
+        try:
+            cls.assert_correction_period_eligible(offering=offering, template_period=template_period)
+        except ValidationError as exc:
+            return {
+                "is_allowed": False,
+                "message": "; ".join(exc.messages),
+                "deadline_at": None,
+                "is_post_deadline": False,
+                "is_submitted": False,
+                "is_locked": False,
+                "is_editable": False,
+            }
+
+        submission = cls.get_submission(offering=offering, template_period=template_period)
+        is_submitted = bool(submission and submission.status == GradeSubmission.Status.SUBMITTED)
+        deadline_at = cls.resolve_submission_deadline(offering=offering, template_period=template_period)
+        is_post_deadline = bool(deadline_at and now > deadline_at)
+        is_locked = cls.is_locked(offering=offering, template_period=template_period)
+        has_reopen_window = bool(
+            cls.get_active_approved_reopen_request(offering=offering, template_period=template_period)
+        )
+        has_correction_window = cls.has_active_unlock_window(
+            offering=offering,
+            template_period=template_period,
+            at=now,
+        )
+        is_editable = bool(
+            has_reopen_window
+            or has_correction_window
+            or (submission and submission.status == GradeSubmission.Status.REOPENED)
+            or not is_locked
+        )
+        is_allowed = bool(is_submitted and is_post_deadline and is_locked and not is_editable)
+        if is_allowed:
+            message = "Grade correction requests are available for this locked grading period."
+        else:
+            message = (
+                "Grade correction requests become available after the submission deadline "
+                "once this grading period is locked."
+            )
+        return {
+            "is_allowed": is_allowed,
+            "message": message,
+            "deadline_at": deadline_at,
+            "is_post_deadline": is_post_deadline,
+            "is_submitted": is_submitted,
+            "is_locked": is_locked,
+            "is_editable": is_editable,
+        }
+
+    @classmethod
+    def assert_correction_request_lifecycle_allowed(cls, *, offering, template_period: GradingTemplatePeriod, at=None):
+        state = cls.get_correction_request_lifecycle_state(
+            offering=offering,
+            template_period=template_period,
+            at=at,
+        )
+        if not state["is_allowed"]:
+            raise ValidationError(state["message"])
+        return state
 
     @classmethod
     def resolve_correction_scope_department(cls, *, user, tenant_id: int | None, offering=None):
-        candidates = []
-        if offering:
-            candidates.extend(
-                [
-                    getattr(offering, "department", None),
-                    getattr(getattr(offering, "course", None), "department", None),
-                    getattr(getattr(offering, "section", None), "department", None),
-                    getattr(getattr(offering, "program", None), "department", None),
-                ]
-            )
-        candidates.append(cls.resolve_requesting_faculty_department(user=user, tenant_id=tenant_id))
+        """Resolve the official home/mother department for the offering campus.
 
-        seen_ids = set()
-        for department in candidates:
-            if not department:
-                continue
-            if department.id in seen_ids:
-                continue
-            seen_ids.add(department.id)
-            if tenant_id and getattr(department, "tenant_id", None) != tenant_id:
-                continue
-            if hasattr(department, "is_active") and not department.is_active:
-                continue
-            return department
-        return None
+        Course/section/program ownership and a user's default department are not
+        faculty governance scope.  FacultyAssignment identifies teaching
+        responsibility, but does not contain a department mapping that could
+        disambiguate multiple FACULTY role assignments, so ambiguity must fail
+        closed.
+        """
+        if not tenant_id or not offering or offering.tenant_id != tenant_id or not offering.campus_id:
+            return None
+        assignments = list(
+            UserRole.objects.filter(
+                user=user,
+                role__code="FACULTY",
+                role__is_active=True,
+                tenant_id=tenant_id,
+                campus_id=offering.campus_id,
+                department__isnull=False,
+                department__is_active=True,
+                department__tenant_id=tenant_id,
+                department__campus_id=offering.campus_id,
+                is_active=True,
+            )
+            .select_related("department")
+            .order_by("department_id", "id")
+        )
+        departments = {assignment.department_id: assignment.department for assignment in assignments}
+        if len(departments) > 1:
+            raise ValidationError(
+                "Correction Governance configuration error: multiple active FACULTY home/mother departments "
+                "are configured for this faculty member and campus. Configure exactly one official home department."
+            )
+        return next(iter(departments.values()), None)
+
+    @classmethod
+    def _safe_correction_department_ancestor_ids(cls, *, faculty_department_id: int, tenant_id: int):
+        """Return only valid active same-campus ancestors for correction routing.
+
+        Department validation is not enough here: legacy/imported rows can have
+        malformed parent pointers.  A bad parent terminates traversal; a cycle
+        is a configuration error and must not fall through to a default route.
+        """
+        current = Department.objects.filter(
+            id=faculty_department_id,
+            tenant_id=tenant_id,
+            is_active=True,
+        ).only("id", "tenant_id", "campus_id", "parent_id", "is_active").first()
+        if not current:
+            raise ValidationError("Correction Governance configuration error: faculty department is invalid or inactive.")
+
+        campus_id = current.campus_id
+        ancestor_ids = []
+        visited_ids = set()
+        while current:
+            if current.id in visited_ids:
+                raise ValidationError("Correction Governance configuration error: faculty department hierarchy contains a cycle.")
+            visited_ids.add(current.id)
+            ancestor_ids.append(current.id)
+            if not current.parent_id:
+                break
+            parent = Department.objects.filter(
+                id=current.parent_id,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                is_active=True,
+            ).only("id", "tenant_id", "campus_id", "parent_id", "is_active").first()
+            if not parent:
+                # The current department remains valid, but no malformed or
+                # inactive ancestor may influence a route decision.
+                break
+            current = parent
+        return ancestor_ids, campus_id
 
     @classmethod
     def resolve_correction_route_rule(cls, *, tenant_id: int, faculty_department_id: int | None):
-        dept_rule = None
-        if faculty_department_id:
-            department_ids = ScopeService.department_ancestor_ids(faculty_department_id, include_self=True)
-            dept_rule = (
-                CorrectionApprovalRouteRule.objects.filter(
-                    tenant_id=tenant_id,
-                    faculty_department_id__in=department_ids,
-                    is_active=True,
-                )
-                .select_related("step1_role", "final_role", "faculty_department")
-                .order_by("id")
+        if not faculty_department_id:
+            # Tenant-default routing is never a substitute for an unresolved
+            # FACULTY governance department.
+            return None
+
+        department_ids, campus_id = cls._safe_correction_department_ancestor_ids(
+            faculty_department_id=faculty_department_id,
+            tenant_id=tenant_id,
+        )
+        department_rules = list(
+            CorrectionApprovalRouteRule.objects.filter(
+                tenant_id=tenant_id,
+                faculty_department_id__in=department_ids,
+                is_active=True,
+                faculty_department__tenant_id=tenant_id,
+                faculty_department__campus_id=campus_id,
+                faculty_department__is_active=True,
             )
-            dept_rule_by_department = {row.faculty_department_id: row for row in dept_rule}
-            for department_id in department_ids:
-                if department_id in dept_rule_by_department:
-                    return dept_rule_by_department[department_id]
-        if dept_rule:
-            return dept_rule
-        default_rule = (
+            .select_related("step1_role", "final_role", "faculty_department")
+            .order_by("id")
+        )
+        dept_rule_by_department = {row.faculty_department_id: row for row in department_rules}
+        for department_id in department_ids:
+            if department_id in dept_rule_by_department:
+                return dept_rule_by_department[department_id]
+
+        default_rules = list(
             CorrectionApprovalRouteRule.objects.filter(
                 tenant_id=tenant_id,
                 faculty_department__isnull=True,
                 is_active=True,
             )
             .select_related("step1_role", "final_role", "faculty_department")
-            .first()
-        )
-        if default_rule:
-            return default_rule
-
-        # Backward-safe fallback:
-        # if exactly one active route exists for this tenant, use it even when
-        # faculty department context is missing/incomplete.
-        active_routes = list(
-            CorrectionApprovalRouteRule.objects.filter(
-                tenant_id=tenant_id,
-                is_active=True,
-            )
-            .select_related("step1_role", "final_role", "faculty_department")
             .order_by("id")
         )
-        if len(active_routes) == 1:
-            return active_routes[0]
+        if len(default_rules) == 1:
+            return default_rules[0]
+        if len(default_rules) > 1:
+            raise ValidationError(
+                "Correction Governance configuration error: multiple active tenant-default approval routes are configured."
+            )
         return None
 
     @classmethod
@@ -2727,41 +3018,448 @@ class GradingGovernanceService:
         return steps
 
     @classmethod
+    def _get_configured_correction_route_snapshot(cls, *, request_obj: GradeCorrectionRequest):
+        """Resolve and structurally validate a request's configured route snapshot."""
+        if not request_obj.approval_route_id:
+            return False, [], "Correction Governance state error: this request has no configured approval route snapshot."
+        if not request_obj.faculty_department_id:
+            return False, [], "Correction Governance state error: this request has no configured faculty department."
+
+        route_rule = (
+            CorrectionApprovalRouteRule.objects.filter(
+                id=request_obj.approval_route_id,
+                tenant_id=request_obj.tenant_id,
+                is_active=True,
+            )
+            .select_related("faculty_department", "step1_role", "final_role")
+            .first()
+        )
+        if not route_rule:
+            return False, [], "Correction Governance state error: the configured approval route is inactive or invalid."
+
+        try:
+            resolved_route = cls.resolve_correction_route_rule(
+                tenant_id=request_obj.tenant_id,
+                faculty_department_id=request_obj.faculty_department_id,
+            )
+            configured_steps = cls._build_correction_route_steps(route_rule=route_rule)
+        except ValidationError as exc:
+            return False, [], "; ".join(exc.messages)
+        if not resolved_route or resolved_route.id != route_rule.id:
+            return False, [], "Correction Governance state error: the request route no longer matches its configured faculty scope."
+        if not configured_steps or any(not step["role"].is_active for step in configured_steps):
+            return False, [], "Correction Governance state error: the configured approval route has an inactive or invalid approver role."
+
+        snapshot_steps = list(
+            request_obj.approval_steps.select_related("approver_role").order_by("step_order", "id")
+        )
+        expected_signature = [
+            (step["step_order"], step["role"].id, step["requires_same_department"])
+            for step in configured_steps
+        ]
+        actual_signature = [
+            (step.step_order, step.approver_role_id, step.requires_same_department)
+            for step in snapshot_steps
+        ]
+        if actual_signature != expected_signature:
+            return False, [], "Correction Governance state error: approval steps do not match the configured route snapshot."
+        return True, snapshot_steps, None
+
+    @classmethod
+    def get_correction_approval_snapshot_state(cls, *, request_obj: GradeCorrectionRequest):
+        """Validate that a pending request still has a configured route snapshot.
+
+        Approval-step rows deliberately retain a snapshot, but a legacy
+        synthetic snapshot is not governance.  The request route must still be
+        active and resolvable for its recorded faculty home department, and the
+        persisted steps must be the exact configured, contiguous sequence.
+        """
+        snapshot_valid, snapshot_steps, snapshot_reason = cls._get_configured_correction_route_snapshot(
+            request_obj=request_obj
+        )
+        if not snapshot_valid:
+            return False, None, snapshot_reason
+
+        pending_steps = [step for step in snapshot_steps if step.status == GradeCorrectionApprovalStep.Status.PENDING]
+        if not pending_steps:
+            return False, None, "Correction Governance state error: the configured route has no current pending approval step."
+        pending_step = pending_steps[0]
+        pending_index = snapshot_steps.index(pending_step)
+        for index, step in enumerate(snapshot_steps):
+            if index < pending_index:
+                if (
+                    step.status != GradeCorrectionApprovalStep.Status.APPROVED
+                    or not step.reviewed_by_user_id
+                    or not step.reviewed_at
+                ):
+                    return False, None, "Correction Governance state error: required prior approval steps are not approved in sequence."
+            elif index == pending_index:
+                if step.reviewed_by_user_id or step.reviewed_at or (step.review_remarks or "").strip():
+                    return False, None, "Correction Governance state error: the current pending approval step has acted history."
+            elif (
+                step.status != GradeCorrectionApprovalStep.Status.PENDING
+                or step.reviewed_by_user_id
+                or step.reviewed_at
+                or (step.review_remarks or "").strip()
+            ):
+                return False, None, "Correction Governance state error: approval steps are malformed or skipped."
+        return True, pending_step, None
+
+    @classmethod
+    def _build_correction_reviewer_authority_evidence(cls, *, user, request_obj, step, decided_at):
+        """Capture the auditable, decision-time authority used for one review.
+
+        ``UserRole`` deliberately has no deactivation or scope-history fields.
+        Its current row cannot establish a past approval after a later role
+        reassignment.  The same values are persisted in a dedicated protected
+        snapshot; this audit payload is corroboration, never sole authority.
+        """
+        base = {
+            "version": "correction-reviewer-authority-v1",
+            "reviewer_id": user.id,
+            "correction_request_id": request_obj.id,
+            "approval_step_id": step.id,
+            "step_order": step.step_order,
+            "approver_role_id": step.approver_role_id,
+            "approver_role_code": step.approver_role.code,
+            "approval_route_id": request_obj.approval_route_id,
+            "requires_same_department": bool(step.requires_same_department),
+            "tenant_id": request_obj.tenant_id,
+            "campus_id": request_obj.campus_id,
+            "faculty_department_id": request_obj.faculty_department_id,
+            "decided_at": decided_at.isoformat(),
+        }
+        if user.is_superuser:
+            return {**base, "authorization_type": "SUPERUSER", "superuser": True}
+
+        scoped_assignments = UserRole.objects.filter(
+            user=user,
+            role__is_active=True,
+            is_active=True,
+        ).filter(
+            Q(tenant_id=request_obj.tenant_id) | Q(tenant__isnull=True)
+        ).filter(
+            Q(campus_id=request_obj.campus_id) | Q(campus__isnull=True)
+        )
+        super_admin_assignment = scoped_assignments.filter(role__code="SUPER_ADMIN").first()
+        if super_admin_assignment:
+            return {
+                **base,
+                "authorization_type": "SUPER_ADMIN_ROLE",
+                "role_assignment_id": super_admin_assignment.id,
+                "role_assignment_role_id": super_admin_assignment.role_id,
+                "role_assignment_role_code": "SUPER_ADMIN",
+                "role_assignment_tenant_id": super_admin_assignment.tenant_id,
+                "role_assignment_campus_id": super_admin_assignment.campus_id,
+                "role_assignment_department_id": super_admin_assignment.department_id,
+                "role_assignment_assigned_at": super_admin_assignment.assigned_at.isoformat(),
+            }
+
+        role_assignments = scoped_assignments.filter(role_id=step.approver_role_id).select_related("department")
+        for assignment in role_assignments:
+            effective_department_id = assignment.department_id
+            if assignment.department_id:
+                scope_covers = bool(
+                    request_obj.faculty_department_id
+                    and ScopeService.department_scope_covers(assignment.department_id, request_obj.faculty_department_id)
+                )
+            elif step.requires_same_department:
+                effective_department_id = getattr(user, "default_department_id", None)
+                scope_covers = bool(
+                    effective_department_id
+                    and request_obj.faculty_department_id
+                    and ScopeService.department_scope_covers(effective_department_id, request_obj.faculty_department_id)
+                )
+            else:
+                scope_covers = True
+            if scope_covers:
+                return {
+                    **base,
+                    "authorization_type": "APPROVER_ROLE",
+                "role_assignment_id": assignment.id,
+                "role_assignment_role_id": assignment.role_id,
+                "role_assignment_role_code": assignment.role.code,
+                "role_assignment_tenant_id": assignment.tenant_id,
+                    "role_assignment_campus_id": assignment.campus_id,
+                    "role_assignment_department_id": assignment.department_id,
+                    "role_assignment_assigned_at": assignment.assigned_at.isoformat(),
+                    "effective_department_id": effective_department_id,
+                    "scope_covers_faculty_department": True,
+                }
+        # ``can_user_review_correction_request`` has already rejected this
+        # state.  Keep an explicit non-authority record if callers ever change
+        # that ordering, rather than fabricating an eligible snapshot.
+        return {**base, "authorization_type": "UNVERIFIED"}
+
+    @classmethod
+    def _create_correction_approval_authority_snapshot(
+        cls, *, user, request_obj, step, decided_at, evidence, audit_row
+    ):
+        """Persist authority in the approval transaction; no legacy backfill."""
+        return GradeCorrectionApprovalAuthoritySnapshot.objects.create(
+            approval_step=step,
+            correction_request=request_obj,
+            approval_audit_log=audit_row,
+            step_order=step.step_order,
+            reviewer_user=user,
+            configured_approver_role_id=step.approver_role_id,
+            configured_approver_role_code=step.approver_role.code,
+            approval_route_id=request_obj.approval_route_id,
+            tenant_id=request_obj.tenant_id,
+            campus_id=request_obj.campus_id,
+            faculty_department_id=request_obj.faculty_department_id,
+            requires_same_department=bool(step.requires_same_department),
+            authorization_type=evidence["authorization_type"],
+            authority_assignment_id=evidence.get("role_assignment_id"),
+            authority_role_id=evidence.get("role_assignment_role_id"),
+            authority_role_code=evidence.get("role_assignment_role_code"),
+            authority_assignment_assigned_at=parse_datetime(evidence.get("role_assignment_assigned_at") or ""),
+            authority_tenant_id=evidence.get("role_assignment_tenant_id"),
+            authority_campus_id=evidence.get("role_assignment_campus_id"),
+            authority_department_id=evidence.get("role_assignment_department_id"),
+            effective_department_id=evidence.get("effective_department_id"),
+            scope_covers_faculty_department=bool(evidence.get("scope_covers_faculty_department")),
+            decided_at=decided_at,
+        )
+
+    @staticmethod
+    def _correction_approval_audit_matches(*, audit_row, snapshot, request_obj, step):
+        """Bind the retained audit event to exactly one protected snapshot."""
+        if not audit_row or (
+            audit_row.action != "CORRECTION_APPROVAL_REVIEWED"
+            or audit_row.entity_type != "GradeCorrectionApprovalStep"
+            or audit_row.entity_id != str(step.id)
+            or audit_row.actor_user_id != step.reviewed_by_user_id
+            or audit_row.tenant_id != request_obj.tenant_id
+            or audit_row.campus_id != request_obj.campus_id
+        ):
+            return False
+        after_data = audit_row.after_json or {}
+        required_after = {
+            "correction_request_id": request_obj.id,
+            "approval_step_id": step.id,
+            "step_order": step.step_order,
+            "approver_role_id": step.approver_role_id,
+            "approval_route_id": request_obj.approval_route_id,
+            "tenant_id": request_obj.tenant_id,
+            "campus_id": request_obj.campus_id,
+            "faculty_department_id": request_obj.faculty_department_id,
+            "requires_same_department": bool(step.requires_same_department),
+            "status": GradeCorrectionApprovalStep.Status.APPROVED,
+            "reviewed_by_user_id": step.reviewed_by_user_id,
+        }
+        if any(after_data.get(key) != value for key, value in required_after.items()):
+            return False
+        if parse_datetime(after_data.get("reviewed_at") or "") != step.reviewed_at:
+            return False
+        evidence = (audit_row.metadata_json or {}).get("reviewer_authority")
+        required_evidence = {
+            "version": "correction-reviewer-authority-v1",
+            "reviewer_id": snapshot.reviewer_user_id,
+            "correction_request_id": snapshot.correction_request_id,
+            "approval_step_id": snapshot.approval_step_id,
+            "step_order": snapshot.step_order,
+            "approver_role_id": snapshot.configured_approver_role_id,
+            "approver_role_code": snapshot.configured_approver_role_code,
+            "approval_route_id": snapshot.approval_route_id,
+            "tenant_id": snapshot.tenant_id,
+            "campus_id": snapshot.campus_id,
+            "faculty_department_id": snapshot.faculty_department_id,
+            "requires_same_department": snapshot.requires_same_department,
+            "authorization_type": snapshot.authorization_type,
+        }
+        if not isinstance(evidence, dict) or any(evidence.get(key) != value for key, value in required_evidence.items()):
+            return False
+        if parse_datetime(evidence.get("decided_at") or "") != snapshot.decided_at:
+            return False
+        return (
+            evidence.get("role_assignment_id") == snapshot.authority_assignment_id
+            and evidence.get("role_assignment_role_id") == snapshot.authority_role_id
+            and evidence.get("role_assignment_role_code") == snapshot.authority_role_code
+            and parse_datetime(evidence.get("role_assignment_assigned_at") or "")
+            == snapshot.authority_assignment_assigned_at
+            and evidence.get("role_assignment_tenant_id") == snapshot.authority_tenant_id
+            and evidence.get("role_assignment_campus_id") == snapshot.authority_campus_id
+            and evidence.get("role_assignment_department_id") == snapshot.authority_department_id
+            and evidence.get("effective_department_id") == snapshot.effective_department_id
+            and bool(evidence.get("scope_covers_faculty_department"))
+            == snapshot.scope_covers_faculty_department
+        )
+
+    @classmethod
+    def _has_valid_historical_reviewer_authority(cls, *, request_obj, step):
+        """Require immutable approval-time evidence and its exact audit binding."""
+        try:
+            snapshot = GradeCorrectionApprovalAuthoritySnapshot.objects.select_related(
+                "approval_audit_log"
+            ).get(approval_step_id=step.id)
+        except GradeCorrectionApprovalAuthoritySnapshot.DoesNotExist:
+            return None
+        if (
+            snapshot.correction_request_id != request_obj.id
+            or snapshot.step_order != step.step_order
+            or snapshot.reviewer_user_id != step.reviewed_by_user_id
+            or snapshot.configured_approver_role_id != step.approver_role_id
+            or snapshot.approval_route_id != request_obj.approval_route_id
+            or snapshot.tenant_id != request_obj.tenant_id
+            or snapshot.campus_id != request_obj.campus_id
+            or snapshot.faculty_department_id != request_obj.faculty_department_id
+            or snapshot.requires_same_department != bool(step.requires_same_department)
+            or snapshot.decided_at != step.reviewed_at
+        ):
+            return None
+        if snapshot.authorization_type == GradeCorrectionApprovalAuthoritySnapshot.AuthorizationType.SUPERUSER:
+            snapshot_is_authorized = (
+                not snapshot.authority_assignment_id
+                and not snapshot.authority_role_id
+                and not snapshot.authority_tenant_id
+                and not snapshot.authority_campus_id
+                and not snapshot.authority_department_id
+                and not snapshot.effective_department_id
+                and not snapshot.authority_role_code
+                and not snapshot.scope_covers_faculty_department
+            )
+        elif snapshot.authorization_type == GradeCorrectionApprovalAuthoritySnapshot.AuthorizationType.SUPER_ADMIN_ROLE:
+            snapshot_is_authorized = (
+                bool(snapshot.authority_assignment_id)
+                and bool(snapshot.authority_role_id)
+                and snapshot.authority_role_code == "SUPER_ADMIN"
+                and bool(snapshot.authority_assignment_assigned_at)
+                and snapshot.authority_tenant_id in (None, request_obj.tenant_id)
+                and snapshot.authority_campus_id in (None, request_obj.campus_id)
+            )
+        elif snapshot.authorization_type == GradeCorrectionApprovalAuthoritySnapshot.AuthorizationType.APPROVER_ROLE:
+            snapshot_is_authorized = (
+                bool(snapshot.authority_assignment_id)
+                and snapshot.authority_role_id == step.approver_role_id
+                and snapshot.authority_role_code == snapshot.configured_approver_role_code
+                and bool(snapshot.authority_assignment_assigned_at)
+                and snapshot.authority_tenant_id in (None, request_obj.tenant_id)
+                and snapshot.authority_campus_id in (None, request_obj.campus_id)
+                and snapshot.scope_covers_faculty_department
+                and (
+                    not step.requires_same_department
+                    or bool(snapshot.effective_department_id)
+                )
+            )
+        else:
+            snapshot_is_authorized = False
+        if not snapshot_is_authorized:
+            return None
+        if not cls._correction_approval_audit_matches(
+            audit_row=snapshot.approval_audit_log,
+            snapshot=snapshot,
+            request_obj=request_obj,
+            step=step,
+        ):
+            return None
+        return snapshot
+
+    @classmethod
+    def get_approved_correction_governance_state(cls, *, request_obj: GradeCorrectionRequest):
+        """Return whether an approved request is authoritative for correction writes.
+
+        This is the shared fail-closed decision used by unlock, encoding,
+        recomputation/finalization, and window-closing paths.  Legacy history is
+        inspected only; malformed or synthetic rows are never repaired here.
+        """
+        if request_obj.status != GradeCorrectionRequest.Status.APPROVED:
+            return False, "Correction Governance state error: this correction request is not approved."
+        offering = CourseOffering.objects.filter(pk=request_obj.offering_id).only(
+            "id", "tenant_id", "campus_id"
+        ).first()
+        if not offering or not offering.campus_id:
+            return False, "Correction Governance state error: the correction request target offering is invalid."
+        if request_obj.tenant_id != offering.tenant_id or request_obj.campus_id != offering.campus_id:
+            return False, "Correction Governance state error: the correction request does not match its target offering scope."
+        snapshot_department = Department.objects.filter(
+            id=request_obj.faculty_department_id,
+            tenant_id=offering.tenant_id,
+            campus_id=offering.campus_id,
+            is_active=True,
+        ).only("id").first()
+        if not snapshot_department:
+            return False, "Correction Governance state error: the snapshotted faculty department is inactive or outside the offering scope."
+        try:
+            current_home_department = cls.resolve_correction_scope_department(
+                user=request_obj.requested_by_user,
+                tenant_id=offering.tenant_id,
+                offering=offering,
+            )
+        except ValidationError as exc:
+            return False, "; ".join(exc.messages)
+        if not current_home_department:
+            return False, "Correction Governance state error: no active FACULTY home/mother department applies to this faculty member and campus."
+        if current_home_department.id != snapshot_department.id:
+            return False, "Correction Governance state error: the snapshotted faculty department no longer matches the faculty member's current home/mother department for the offering campus."
+        snapshot_valid, snapshot_steps, snapshot_reason = cls._get_configured_correction_route_snapshot(
+            request_obj=request_obj
+        )
+        if not snapshot_valid:
+            return False, snapshot_reason
+        if not request_obj.reviewed_by_user_id or not request_obj.reviewed_at:
+            return False, "Correction Governance state error: the approved request has no valid final review history."
+
+        previous_reviewed_at = None
+        for step in snapshot_steps:
+            if (
+                step.status != GradeCorrectionApprovalStep.Status.APPROVED
+                or not step.reviewed_by_user_id
+                or not step.reviewed_at
+            ):
+                return False, "Correction Governance state error: all configured approval steps were not completed."
+            if not User.objects.filter(pk=step.reviewed_by_user_id).exists():
+                return False, "Correction Governance state error: an approved reviewer's user record is missing."
+            if previous_reviewed_at and step.reviewed_at < previous_reviewed_at:
+                return False, "Correction Governance state error: configured approval steps were not completed in order."
+            authority_evidence = cls._has_valid_historical_reviewer_authority(request_obj=request_obj, step=step)
+            if not authority_evidence:
+                return False, (
+                    "Correction Governance state error: approved reviewer authority is missing or invalid "
+                    "for a configured approval step."
+                )
+            if (
+                request_obj.request_source == GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF
+                and request_obj.initiated_by_user_id == step.reviewed_by_user_id
+                and authority_evidence.authorization_type
+                != GradeCorrectionApprovalAuthoritySnapshot.AuthorizationType.SUPERUSER
+            ):
+                return False, "Correction Governance state error: approval history violates the correction self-approval rule."
+            previous_reviewed_at = step.reviewed_at
+
+        final_step = snapshot_steps[-1]
+        if (
+            request_obj.reviewed_by_user_id != final_step.reviewed_by_user_id
+            or request_obj.reviewed_at != final_step.reviewed_at
+        ):
+            return False, "Correction Governance state error: final approval history does not match the configured final step."
+        return True, None
+
+    @classmethod
     def initialize_correction_route(cls, *, request_obj: GradeCorrectionRequest):
         faculty_department = cls.resolve_correction_scope_department(
             user=request_obj.requested_by_user,
             tenant_id=request_obj.tenant_id,
             offering=request_obj.offering,
         )
-        faculty_department_id = faculty_department.id if faculty_department else None
+        if not faculty_department:
+            raise ValidationError(
+                "Correction Governance configuration error: no active FACULTY home/mother department applies to this faculty member and campus."
+            )
+        faculty_department_id = faculty_department.id
         route_rule = cls.resolve_correction_route_rule(
             tenant_id=request_obj.tenant_id,
             faculty_department_id=faculty_department_id,
         )
-        if route_rule:
-            steps = cls._build_correction_route_steps(route_rule=route_rule)
-        else:
-            fallback_role_codes = ["CAO", "REGISTRAR", "COLLEGE_DEAN", "DEAN", "CAMPUS_ADMIN", "TENANT_ADMIN"]
-            fallback_role = None
-            for role_code in fallback_role_codes:
-                role_candidate = Role.objects.filter(code=role_code, is_active=True).first()
-                if role_candidate:
-                    fallback_role = role_candidate
-                    break
-            if not fallback_role:
-                raise ValidationError(
-                    "No active correction route is configured and no fallback approver role was found."
-                )
-            steps = [
-                {
-                    "step_order": 1,
-                    "role": fallback_role,
-                    "label": fallback_role.name or fallback_role.code,
-                    "requires_same_department": False,
-                }
-            ]
+        if not route_rule:
+            scope_label = faculty_department.name if faculty_department else "this faculty member"
+            raise ValidationError(
+                "No valid Correction Governance approval route is configured for the faculty department "
+                f"({scope_label})."
+            )
+        steps = cls._build_correction_route_steps(route_rule=route_rule)
         request_obj.faculty_department_id = faculty_department_id
-        request_obj.approval_route_id = route_rule.id if route_rule else None
+        request_obj.approval_route_id = route_rule.id
         request_obj.save(update_fields=["faculty_department", "approval_route", "updated_at"])
 
         step_rows = [
@@ -2780,30 +3478,64 @@ class GradingGovernanceService:
     @classmethod
     @transaction.atomic
     def reconcile_pending_correction_route(cls, *, request_obj: GradeCorrectionRequest):
+        request_obj = (
+            GradeCorrectionRequest.objects.select_for_update()
+            .select_related("tenant", "campus", "offering", "requested_by_user")
+            .get(pk=request_obj.pk)
+        )
         if request_obj.status != GradeCorrectionRequest.Status.PENDING:
             return False
         if request_obj.approval_route_id:
             return False
+        if (
+            request_obj.reviewed_by_user_id
+            or request_obj.reviewed_at
+            or (request_obj.review_remarks or "").strip()
+        ):
+            return False
         if request_obj.approval_steps.exclude(status=GradeCorrectionApprovalStep.Status.PENDING).exists():
             return False
+        if request_obj.approval_steps.filter(
+            Q(reviewed_by_user__isnull=False) | Q(reviewed_at__isnull=False) | Q(review_remarks__isnull=False)
+        ).exists():
+            return False
+        original_faculty_department_id = request_obj.faculty_department_id
 
-        faculty_department = cls.resolve_correction_scope_department(
-            user=request_obj.requested_by_user,
-            tenant_id=request_obj.tenant_id,
-            offering=request_obj.offering,
-        )
-        faculty_department_id = faculty_department.id if faculty_department else None
-        route_rule = cls.resolve_correction_route_rule(
-            tenant_id=request_obj.tenant_id,
-            faculty_department_id=faculty_department_id,
-        )
+        try:
+            faculty_department = cls.resolve_correction_scope_department(
+                user=request_obj.requested_by_user,
+                tenant_id=request_obj.tenant_id,
+                offering=request_obj.offering,
+            )
+        except ValidationError:
+            return False
+        if not faculty_department:
+            return False
+        faculty_department_id = faculty_department.id
+        try:
+            route_rule = cls.resolve_correction_route_rule(
+                tenant_id=request_obj.tenant_id,
+                faculty_department_id=faculty_department_id,
+            )
+        except ValidationError:
+            return False
         if not route_rule:
             return False
 
         expected_steps = cls._build_correction_route_steps(route_rule=route_rule)
         current_steps = list(
-            request_obj.approval_steps.order_by("step_order").values(
-                "step_order", "approver_role_id", "requires_same_department"
+            request_obj.approval_steps.order_by("step_order", "id").values(
+                "id",
+                "step_order",
+                "approver_role_id",
+                "approver_label",
+                "requires_same_department",
+                "status",
+                "reviewed_by_user_id",
+                "reviewed_at",
+                "review_remarks",
+                "created_at",
+                "updated_at",
             )
         )
         expected_signature = [
@@ -2814,24 +3546,49 @@ class GradingGovernanceService:
             }
             for step in expected_steps
         ]
-        if current_steps != expected_signature:
-            request_obj.approval_steps.all().delete()
-            GradeCorrectionApprovalStep.objects.bulk_create(
-                [
-                    GradeCorrectionApprovalStep(
-                        correction_request=request_obj,
-                        step_order=step["step_order"],
-                        approver_role_id=step["role"].id,
-                        approver_label=step["label"],
-                        requires_same_department=step["requires_same_department"],
-                        status=GradeCorrectionApprovalStep.Status.PENDING,
-                    )
-                    for step in expected_steps
-                ]
-            )
+        # approval_route_id is null, so these untouched pending rows are the
+        # legacy synthetic fallback snapshot. Replace only those rows with the
+        # configured route snapshot; acted rows were rejected above.
+        request_obj.approval_steps.all().delete()
+        GradeCorrectionApprovalStep.objects.bulk_create(
+            [
+                GradeCorrectionApprovalStep(
+                    correction_request=request_obj,
+                    step_order=step["step_order"],
+                    approver_role_id=step["role"].id,
+                    approver_label=step["label"],
+                    requires_same_department=step["requires_same_department"],
+                    status=GradeCorrectionApprovalStep.Status.PENDING,
+                )
+                for step in expected_steps
+            ]
+        )
         request_obj.faculty_department_id = faculty_department_id
         request_obj.approval_route_id = route_rule.id
         request_obj.save(update_fields=["faculty_department", "approval_route", "updated_at"])
+        AuditService.log_event(
+            action="RECONCILE_CORRECTION_ROUTE",
+            portal="SYSTEM",
+            entity_type="GradeCorrectionRequest",
+            entity_id=request_obj.id,
+            actor=None,
+            tenant=request_obj.tenant,
+            campus=request_obj.campus,
+            before_data={
+                "approval_route_id": None,
+                "faculty_department_id": original_faculty_department_id,
+                "approval_steps": current_steps,
+            },
+            after_data={
+                "approval_route_id": route_rule.id,
+                "faculty_department_id": faculty_department_id,
+                "approval_steps": expected_signature,
+            },
+            metadata={
+                "reason": "UNTOUCHED_SYNTHETIC_FALLBACK_RECONCILIATION",
+                "acted_steps_present": False,
+            },
+        )
         return True
 
     @staticmethod
@@ -2845,11 +3602,14 @@ class GradingGovernanceService:
 
     @staticmethod
     def _user_has_role_for_correction_step(*, user, request_obj: GradeCorrectionRequest, step: GradeCorrectionApprovalStep):
+        if not step.approver_role_id or not step.approver_role.is_active:
+            return False
         if user.is_superuser:
             return True
         if UserRole.objects.filter(
             user=user,
             role__code="SUPER_ADMIN",
+            role__is_active=True,
             is_active=True,
         ).filter(
             Q(tenant_id=request_obj.tenant_id) | Q(tenant__isnull=True)
@@ -2860,6 +3620,7 @@ class GradingGovernanceService:
         role_assignments = UserRole.objects.filter(
             user=user,
             role_id=step.approver_role_id,
+            role__is_active=True,
             is_active=True,
         ).filter(
             Q(tenant_id=request_obj.tenant_id) | Q(tenant__isnull=True)
@@ -2885,10 +3646,15 @@ class GradingGovernanceService:
 
     @classmethod
     def can_user_review_correction_request(cls, *, request_obj: GradeCorrectionRequest, user):
-        pending_step = cls.get_pending_correction_step(request_obj=request_obj)
-        if not pending_step:
-            # Legacy request created before route-matrix rollout.
-            return True, None, None
+        snapshot_valid, pending_step, snapshot_reason = cls.get_correction_approval_snapshot_state(
+            request_obj=request_obj
+        )
+        if not snapshot_valid:
+            return (
+                False,
+                None,
+                snapshot_reason,
+            )
         if (
             request_obj.request_source == GradeCorrectionRequest.RequestSource.ADMIN_ON_BEHALF
             and request_obj.initiated_by_user_id == getattr(user, "id", None)
@@ -3715,7 +4481,9 @@ class GradingGovernanceService:
     def auto_lapse_expired_correction_windows(cls, *, at=None, dry_run: bool = False):
         now = at or timezone.now()
         due_windows = list(
-            GradeCorrectionUnlockWindow.objects.select_related("correction_request", "offering", "template_period")
+            GradeCorrectionUnlockWindow.objects.select_for_update().select_related(
+                "correction_request", "offering", "template_period"
+            )
             .filter(
                 is_active=True,
                 is_consumed=False,
@@ -3728,6 +4496,13 @@ class GradingGovernanceService:
         rows = []
         for window in due_windows:
             request_obj = window.correction_request
+            governance_valid, _governance_reason = cls.get_approved_correction_governance_state(
+                request_obj=request_obj
+            )
+            if not governance_valid:
+                # Legacy/malformed approved history is audit evidence, not an
+                # authority for automated lifecycle mutation.
+                continue
             rows.append(
                 {
                     "window_id": window.id,
@@ -3899,7 +4674,7 @@ class GradingGovernanceService:
     def get_active_unlock_window(cls, *, offering, template_period: GradingTemplatePeriod, at=None):
         now = at or timezone.now()
         cls.auto_lapse_expired_correction_windows(at=now)
-        return (
+        windows = (
             GradeCorrectionUnlockWindow.objects.select_related("correction_request")
             .filter(
                 offering_id=offering.id,
@@ -3911,8 +4686,14 @@ class GradingGovernanceService:
                 correction_request__status=GradeCorrectionRequest.Status.APPROVED,
             )
             .order_by("-created_at")
-            .first()
         )
+        for window in windows:
+            is_valid, _reason = cls.get_approved_correction_governance_state(
+                request_obj=window.correction_request
+            )
+            if is_valid:
+                return window
+        return None
 
     @classmethod
     def has_active_unlock_window(cls, *, offering, template_period: GradingTemplatePeriod, at=None):
@@ -4562,8 +5343,8 @@ class GradingGovernanceService:
                 "Correction requests are disabled by tenant policy (MANUAL_ONLY). "
                 "Please follow the manual approval process and ask authorized admin to reopen."
             )
-        if not cls.is_submitted(offering=offering, template_period=template_period):
-            raise ValidationError("Correction requests are allowed only after period submission.")
+        cls.assert_correction_period_eligible(offering=offering, template_period=template_period)
+        cls.assert_correction_request_lifecycle_allowed(offering=offering, template_period=template_period)
         cls.assert_correction_petition_allowed(offering=offering, template_period=template_period)
         normalized_items = cls._normalize_correction_items(
             offering=offering,
@@ -4649,6 +5430,46 @@ class GradingGovernanceService:
                     "updated_at",
                 ]
             )
+            authority_evidence = cls._build_correction_reviewer_authority_evidence(
+                user=reviewer,
+                request_obj=request_obj,
+                step=pending_step,
+                decided_at=now,
+            )
+            audit_row = AuditService.log_event(
+                action="CORRECTION_APPROVAL_REVIEWED",
+                portal="ADMIN",
+                entity_type="GradeCorrectionApprovalStep",
+                entity_id=pending_step.id,
+                actor=reviewer,
+                tenant=request_obj.tenant,
+                campus=request_obj.campus,
+                after_data={
+                    "correction_request_id": request_obj.id,
+                    "approval_step_id": pending_step.id,
+                    "step_order": pending_step.step_order,
+                    "approver_role_id": pending_step.approver_role_id,
+                    "approval_route_id": request_obj.approval_route_id,
+                    "tenant_id": request_obj.tenant_id,
+                    "campus_id": request_obj.campus_id,
+                    "faculty_department_id": request_obj.faculty_department_id,
+                    "requires_same_department": bool(pending_step.requires_same_department),
+                    "status": pending_step.status,
+                    "reviewed_by_user_id": pending_step.reviewed_by_user_id,
+                    "reviewed_at": pending_step.reviewed_at,
+                },
+                metadata={
+                    "reviewer_authority": authority_evidence
+                },
+            )
+            cls._create_correction_approval_authority_snapshot(
+                user=reviewer,
+                request_obj=request_obj,
+                step=pending_step,
+                decided_at=now,
+                evidence=authority_evidence,
+                audit_row=audit_row,
+            )
 
         if approved and not is_final_step:
             request_obj.reviewed_by_user = reviewer
@@ -4719,6 +5540,18 @@ class GradingGovernanceService:
     @classmethod
     @transaction.atomic
     def close_correction_window(cls, *, request_obj: GradeCorrectionRequest, actor=None):
+        request_obj = (
+            GradeCorrectionRequest.objects.select_for_update()
+            .select_related("unlock_window")
+            .get(pk=request_obj.pk)
+        )
+        governance_valid, governance_reason = cls.get_approved_correction_governance_state(
+            request_obj=request_obj
+        )
+        if not governance_valid:
+            raise ValidationError(
+                governance_reason or "Correction Governance state error: this correction approval is invalid."
+            )
         window = getattr(request_obj, "unlock_window", None)
         now = timezone.now()
         if window and window.is_active and not window.is_consumed:

@@ -62,8 +62,8 @@
   </div>
 </div>
 
-{% if selected_offering and selected_period and not is_submitted %}
-<div class="alert alert-warning">This grading period has not been submitted yet. On-behalf correction petitions are allowed only after submission.</div>
+{% if selected_offering and selected_period and correction_filing_state and not correction_filing_state.is_allowed %}
+<div class="alert alert-warning">{{ correction_filing_state.message }}</div>
 {% endif %}
 
 {% if can_file and form %}

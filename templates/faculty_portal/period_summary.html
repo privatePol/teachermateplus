@@ -379,7 +379,7 @@
       rel="noopener"
     >Print Periodic Grades</a>
     {% endif %}
-    {% if "corrections.create" in effective_permissions and system_correction_enabled %}
+    {% if "corrections.create" in effective_permissions and system_correction_enabled and can_access_corrections %}
       <a class="btn btn-sm btn-outline-warning" href="{% url 'faculty_portal:period_corrections' offering.id period.id %}">Correction Requests</a>
     {% endif %}
   </div>
