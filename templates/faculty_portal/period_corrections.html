@@ -316,7 +316,7 @@
           {% for e in form.justification.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
         </div>
         <div class="col-md-8">
-          <label class="form-label">Attachment (optional)</label>
+          <label class="form-label" id="correction-attachment-label" for="{{ form.attachment.id_for_label }}">Attachment (optional)</label>
           {{ form.attachment }}
           {% for e in form.attachment.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
         </div>
@@ -351,6 +351,7 @@
     const applyAllCheckbox = document.getElementById("{{ form.apply_to_all_students.id_for_label }}");
     const activityInputs = Array.from(document.querySelectorAll('input[name="{{ form.grade_activities.html_name }}"]'));
     const gridSections = document.getElementById("correction-grid-sections");
+    const attachmentLabel = document.getElementById("correction-attachment-label");
     const correctionForm = payloadField ? payloadField.closest("form") : null;
 
     if (!payloadField || !studentSelect || !applyAllCheckbox || !gridSections || !correctionForm) {
@@ -384,6 +385,19 @@
 
     function selectedActivityIds() {
       return activityInputs.filter((input) => input.checked).map((input) => input.value);
+    }
+
+    function syncAttachmentRequirement() {
+      if (!attachmentLabel) {
+        return;
+      }
+      const hasExamCorrection = selectedActivityIds().some((activityId) => {
+        const activity = activityMap.get(String(activityId));
+        return activity && activity.is_exam_component;
+      });
+      attachmentLabel.textContent = hasExamCorrection
+        ? "Attachment (required for examination corrections)"
+        : "Attachment (optional)";
     }
 
     function syncPayloadFromGrid() {
@@ -588,7 +602,10 @@
       renderGrid();
     });
     studentSelect.addEventListener("change", renderGrid);
-    activityInputs.forEach((input) => input.addEventListener("change", renderGrid));
+    activityInputs.forEach((input) => input.addEventListener("change", () => {
+      syncAttachmentRequirement();
+      renderGrid();
+    }));
     correctionForm.addEventListener("submit", (event) => {
       syncPayloadFromGrid();
       if (!validateCorrectionInputs()) {
@@ -597,6 +614,7 @@
     });
 
     studentSelect.disabled = applyAllCheckbox.checked;
+    syncAttachmentRequirement();
     renderGrid();
   })();
 </script>

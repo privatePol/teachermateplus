@@ -292,6 +292,19 @@ class GradeCorrectionRequestForm(forms.Form):
         if not selected_activities:
             self.add_error("grade_activities", "Select at least one grading item for correction.")
 
+        if (
+            selected_activities
+            and any(
+                bool(getattr(activity.template_component, "is_exam_component", False))
+                for activity in selected_activities
+            )
+            and not cleaned.get("attachment")
+        ):
+            self.add_error(
+                "attachment",
+                "An attachment is required when requesting a correction to an examination score.",
+            )
+
         try:
             payload_rows = json.loads(payload_raw)
         except json.JSONDecodeError:

@@ -325,6 +325,238 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(form.cleaned_data["items"][0]["old_value"], "30")
         self.assertEqual(form.cleaned_data["items"][0]["new_value"], "35")
 
+    def _create_correction_activity(self, *, code, title, is_exam_component=False):
+        component = self.component
+        if is_exam_component:
+            component = GradingTemplateComponent.objects.create(
+                template_period=self.period,
+                code=code,
+                name=title,
+                weight_percentage=Decimal("100.00"),
+                sort_order=2,
+                is_exam_component=True,
+            )
+        return GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=component,
+            title=title,
+            total_score=Decimal("50.00"),
+            created_by_user=self.faculty_user,
+        )
+
+    def _correction_request_form(self, *, activities, attachment=None):
+        activity_ids = [activity.id for activity in activities]
+        payload = ",".join(
+            (
+                f'{{"student_id":"{self.student1.id}","grade_activity_id":"{activity.id}",'
+                '"new_value":"35"}'
+            )
+            for activity in activities
+        )
+        return GradeCorrectionRequestForm(
+            data={
+                "students": [self.student1.id],
+                "grade_activities": activity_ids,
+                "correction_payload": f"[{payload}]",
+                "justification": "Correction evidence is attached when required.",
+            },
+            files={"attachment": attachment} if attachment else None,
+            student_queryset=Student.objects.filter(id=self.student1.id),
+            activity_queryset=GradeActivity.objects.filter(id__in=activity_ids),
+            score_lookup={(self.student1.id, activity.id): "30" for activity in activities},
+        )
+
+    def test_prelim_exam_correction_requires_attachment(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="PRE_EXAM", title="Prelim Exam", is_exam_component=True)]
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_midterm_exam_correction_requires_attachment(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="MID_EXAM", title="Midterm Exam", is_exam_component=True)]
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_final_exam_correction_requires_attachment(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="FINAL_EXAM", title="Final Exam", is_exam_component=True)]
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_exam_correction_accepts_valid_attachment(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="EXAM_EVIDENCE", title="Prelim Exam", is_exam_component=True)],
+            attachment=SimpleUploadedFile("evidence.pdf", b"%PDF-1.4\nexam evidence", content_type="application/pdf"),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["attachment_validation"].content_type, "application/pdf")
+
+    def test_quiz_only_correction_does_not_require_attachment(self):
+        form = self._correction_request_form(activities=[self.activity])
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_activity_only_correction_does_not_require_attachment(self):
+        activity = self._create_correction_activity(code="ACTIVITY", title="Activity 1")
+        form = self._correction_request_form(activities=[activity])
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_mixed_exam_and_non_exam_correction_requires_attachment(self):
+        exam_activity = self._create_correction_activity(code="MIXED_EXAM", title="Midterm Exam", is_exam_component=True)
+        form = self._correction_request_form(activities=[self.activity, exam_activity])
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_correction_attachment_security_validation_is_preserved(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="SECURITY_EXAM", title="Final Exam", is_exam_component=True)],
+            attachment=SimpleUploadedFile("evidence.txt", b"not an approved evidence file", content_type="text/plain"),
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("must be PDF, PNG, JPG, or JPEG", str(form.errors))
+
+    def _send_step_approval_notification(self, *, role, user, approver_label):
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=1,
+            approver_role=role,
+            approver_label=approver_label,
+            requires_same_department=role.code == "AREA_CHAIR",
+        )
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Notify the configured approval step.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "35",
+                }
+            ],
+        )
+        pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
+        result = CorrectionNotificationService.send_correction_step_approval_notifications(
+            request_obj=correction,
+            step=pending_step,
+        )
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(result["recipients"], [user.email])
+        return mail.outbox[0], correction
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_area_chair_step_notification_uses_standard_card_email(self):
+        area_role = Role.objects.create(code="AREA_CHAIR", name="Area Chairman")
+        area_user = User.objects.create_user(
+            username="area-email",
+            email="area-email@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        UserRole.objects.create(
+            user=area_user,
+            role=area_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+
+        message, _correction = self._send_step_approval_notification(
+            role=area_role,
+            user=area_user,
+            approver_label="Area Chairman",
+        )
+
+        self.assertEqual(len(message.alternatives), 1)
+        self.assertIn('alt="NCBA"', message.alternatives[0].content)
+        self.assertIn("Awaiting Area Chairman Review", message.alternatives[0].content)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_college_dean_step_notification_uses_standard_card_email(self):
+        message, _correction = self._send_step_approval_notification(
+            role=self.reviewer_role,
+            user=self.reviewer_user,
+            approver_label="College Dean",
+        )
+
+        self.assertEqual(len(message.alternatives), 1)
+        self.assertIn("Awaiting College Dean Review", message.alternatives[0].content)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_cao_step_notification_uses_standard_card_email(self):
+        message, _correction = self._send_step_approval_notification(
+            role=self.cao_role,
+            user=self.cao_user,
+            approver_label="Chief Academic Officer",
+        )
+
+        self.assertEqual(len(message.alternatives), 1)
+        self.assertIn("Awaiting Chief Academic Officer Review", message.alternatives[0].content)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_step_notification_card_includes_required_correction_request_details(self):
+        message, correction = self._send_step_approval_notification(
+            role=self.reviewer_role,
+            user=self.reviewer_user,
+            approver_label="College Dean",
+        )
+        html_body = message.alternatives[0].content
+
+        self.assertIn(f"CGR-{correction.id:06d}", html_body)
+        self.assertIn("Awaiting College Dean Review", html_body)
+        self.assertIn(self.faculty_user.full_name or self.faculty_user.username, html_body)
+        self.assertIn(self.course.title, html_body)
+        self.assertIn(self.section.name, html_body)
+        self.assertIn(self.period.name, html_body)
+        self.assertIn(self.campus.name, html_body)
+        self.assertIn("College Dean", html_body)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_step_notification_card_keeps_ncba_confidentiality_footer(self):
+        message, _correction = self._send_step_approval_notification(
+            role=self.reviewer_role,
+            user=self.reviewer_user,
+            approver_label="College Dean",
+        )
+
+        self.assertIn("NCBA confidentiality notice", message.alternatives[0].content)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_step_notification_keeps_plain_text_fallback(self):
+        message, correction = self._send_step_approval_notification(
+            role=self.reviewer_role,
+            user=self.reviewer_user,
+            approver_label="College Dean",
+        )
+
+        self.assertIn(f"CGR-{correction.id:06d}", message.body)
+        self.assertIn("Awaiting College Dean Review", message.body)
+        self.assertIn("NCBA confidentiality notice", message.body)
+
     def test_on_behalf_correction_can_be_created_for_inactive_faculty(self):
         self.faculty_user.is_active = False
         self.faculty_user.save(update_fields=["is_active"])

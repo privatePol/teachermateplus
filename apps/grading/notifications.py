@@ -150,22 +150,13 @@ class CorrectionNotificationService:
         )
 
     @classmethod
-    def send_correction_submission_approval_notifications(cls, *, request_obj: GradeCorrectionRequest):
-        if not FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=request_obj.tenant_id):
-            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "feature_disabled"}
-
-        recipients = cls._role_recipient_rows(request_obj=request_obj)
-        if not recipients:
-            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_matching_role_recipients"}
-
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
-        subject = format_email_subject(cls.SUBJECT_MESSAGE)
+    def _correction_approval_context(cls, *, request_obj: GradeCorrectionRequest, approver_label: str):
         petitioner_name = (
             getattr(request_obj.requested_by_user, "full_name", None)
             or request_obj.requested_by_user.get_full_name()
             or request_obj.requested_by_user.username
         )
-        context_base = {
+        return {
             "school_name": cls.SCHOOL_NAME,
             "subject_message": cls.SUBJECT_MESSAGE,
             "campus_name": request_obj.campus.name,
@@ -175,35 +166,56 @@ class CorrectionNotificationService:
             "reference_no": f"CGR-{request_obj.id:06d}",
             "submitted_at": timezone.localtime(request_obj.created_at),
             "petitioner_name": petitioner_name,
+            "current_approval_step": approver_label,
+            "current_action": f"Awaiting {approver_label} Review",
         }
+
+    @classmethod
+    def _build_correction_approval_message(cls, *, request_obj: GradeCorrectionRequest, recipient_email: str, approver_label: str):
+        context = cls._correction_approval_context(
+            request_obj=request_obj,
+            approver_label=approver_label,
+        )
+        message = EmailMultiAlternatives(
+            subject=format_email_subject(cls.SUBJECT_MESSAGE),
+            body="",
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local"),
+            to=[recipient_email],
+        )
+        logo_context = cls._logo_context()
+        context.update(logo_context)
+        attach_logo_for_src(
+            message,
+            src=logo_context["email_logo_src"],
+            filename="ncba-logo.png",
+            cid="ncba-logo",
+            configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
+        )
+        message.body = render_to_string("grading/emails/correction_submission_notification.txt", context)
+        message.attach_alternative(
+            render_to_string("grading/emails/correction_submission_notification.html", context),
+            "text/html",
+        )
+        return message
+
+    @classmethod
+    def send_correction_submission_approval_notifications(cls, *, request_obj: GradeCorrectionRequest):
+        if not FeatureSettingsService.is_correction_submission_approval_email_enabled(tenant_id=request_obj.tenant_id):
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "feature_disabled"}
+
+        recipients = cls._role_recipient_rows(request_obj=request_obj)
+        if not recipients:
+            return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_matching_role_recipients"}
 
         sent = 0
         errors = []
         notified_emails = []
         for recipient in recipients:
-            context = {
-                **context_base,
-                "recipient_role_name": recipient["role"].name,
-            }
-            message = EmailMultiAlternatives(
-                subject=subject,
-                body="",
-                from_email=from_email,
-                to=[recipient["email"]],
+            message = cls._build_correction_approval_message(
+                request_obj=request_obj,
+                recipient_email=recipient["email"],
+                approver_label=recipient["role"].name or recipient["role"].code,
             )
-            logo_context = cls._logo_context()
-            context.update(logo_context)
-            attach_logo_for_src(
-                message,
-                src=logo_context["email_logo_src"],
-                filename="ncba-logo.png",
-                cid="ncba-logo",
-                configured_path=getattr(settings, "EMAIL_SCHOOL_LOGO_PATH", ""),
-            )
-            text_body = render_to_string("grading/emails/correction_submission_notification.txt", context)
-            html_body = render_to_string("grading/emails/correction_submission_notification.html", context)
-            message.body = text_body
-            message.attach_alternative(html_body, "text/html")
             try:
                 result = message.send(fail_silently=False)
             except Exception as exc:  # pragma: no cover - defensive branch for SMTP/runtime failures
@@ -240,30 +252,14 @@ class CorrectionNotificationService:
         if not recipients:
             return {"attempted": 0, "sent": 0, "errors": [], "recipients": [], "reason": "no_matching_step_recipients"}
 
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@teachermateplus.local")
-        subject = format_email_subject(cls.SUBJECT_MESSAGE)
-        petitioner_name = (
-            getattr(request_obj.requested_by_user, "full_name", None)
-            or request_obj.requested_by_user.get_full_name()
-            or request_obj.requested_by_user.username
-        )
         sent = 0
         errors = []
         notified_emails = []
         for recipient in recipients:
-            text_body = (
-                f"Petition for Correction of Grades CGR-{request_obj.id:06d} is awaiting "
-                f"{step.approver_label or recipient['role'].name or recipient['role'].code} review.\n\n"
-                f"Petitioner: {petitioner_name}\n"
-                f"Course: {request_obj.offering.course.title}\n"
-                f"Section: {request_obj.offering.section.name or request_obj.offering.section.code}\n"
-                f"Period: {request_obj.template_period.name or request_obj.template_period.code}\n"
-            )
-            message = EmailMultiAlternatives(
-                subject=subject,
-                body=text_body,
-                from_email=from_email,
-                to=[recipient["email"]],
+            message = cls._build_correction_approval_message(
+                request_obj=request_obj,
+                recipient_email=recipient["email"],
+                approver_label=step.approver_label or recipient["role"].name or recipient["role"].code,
             )
             try:
                 result = message.send(fail_silently=False)
