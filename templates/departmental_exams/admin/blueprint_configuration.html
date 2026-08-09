@@ -1,0 +1,20 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<header class="de-exam-hero"><div><h1>Stage 6 Blueprint</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div></header>
+{% include "departmental_exams/admin/_stage6_readiness.html" %}
+<div class="card de-exam-card"><div class="card-body">
+  <h2 class="h5">Structure</h2>
+  <p class="text-muted">Configurators manage structure and aggregate readiness only. Submitted question text, choices, answers, placements, and scenario text are not loaded on this page.</p>
+  <form method="post">{% csrf_token %}
+    {{ form.non_field_errors }}{{ form.expected_revision }}
+    <div class="mb-3"><label class="form-label" for="{{ form.mode.id_for_label }}">Section mode</label>{{ form.mode }}{{ form.mode.errors }}</div>
+    {{ section_formset.management_form }}{{ section_formset.non_form_errors }}
+    <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Title</th><th>Instructions</th><th>Order</th><th>Exact quota</th><th>Remove</th></tr></thead><tbody>
+      {% for section_form in section_formset %}<tr><td>{{ section_form.id }}{{ section_form.title }}{{ section_form.title.errors }}</td><td>{{ section_form.instructions }}{{ section_form.instructions.errors }}</td><td>{{ section_form.display_order }}{{ section_form.display_order.errors }}</td><td>{{ section_form.item_quota }}{{ section_form.item_quota.errors }}</td><td>{{ section_form.DELETE }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    <button class="btn btn-primary" type="submit">Save blueprint structure</button>
+    <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:assigned_course_examinations' %}">Back</a>
+  </form>
+</div></div>
+{% endblock %}

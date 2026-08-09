@@ -563,3 +563,296 @@ class QuestionImportRow(TimeStampedModel):
             )
         ]
         indexes = [models.Index(fields=["batch", "row_number"], name="idx_de_batch_row")]
+
+
+class BlockedContributionResolution(TimeStampedModel):
+    """Immutable acceptance of one exact Blocked Draft evidence state."""
+
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="blocked_exam_contribution_resolutions",
+    )
+    cycle_course = models.ForeignKey(
+        CycleCourse,
+        on_delete=models.PROTECT,
+        related_name="blocked_contribution_resolutions",
+    )
+    contribution = models.ForeignKey(
+        FacultyContribution,
+        on_delete=models.PROTECT,
+        related_name="blocked_resolution_events",
+    )
+    reason = models.TextField(max_length=500)
+    resolved_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="resolved_blocked_exam_contributions",
+    )
+    resolved_at = models.DateTimeField(default=timezone.now)
+    contribution_revision_snapshot = models.PositiveIntegerField()
+    roster_revision_snapshot = models.PositiveIntegerField()
+    blocked_at_snapshot = models.DateTimeField()
+    source_evidence_sha256 = models.CharField(max_length=64)
+
+    class Meta:
+        db_table = "departmental_exam_blocked_resolutions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "contribution",
+                    "blocked_at_snapshot",
+                    "contribution_revision_snapshot",
+                ],
+                name="uq_de_block_resolution_state",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    contribution_revision_snapshot__gte=1,
+                    roster_revision_snapshot__gte=1,
+                ),
+                name="ck_de_block_resolution_revisions",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["cycle_course", "roster_revision_snapshot"],
+                name="idx_de_block_resolution_roster",
+            )
+        ]
+
+    def clean(self):
+        reason = (self.reason or "").strip()
+        if not 10 <= len(reason) <= 500:
+            raise ValidationError({"reason": "Reason must be from 10 to 500 characters."})
+        if self.contribution_id:
+            if self.cycle_course_id != self.contribution.cycle_course_id:
+                raise ValidationError("Resolution must match the contribution course.")
+            if self.tenant_id != self.contribution.cycle_course.cycle.tenant_id:
+                raise ValidationError("Resolution must match the contribution tenant.")
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Blocked contribution resolution evidence is immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Blocked contribution resolution evidence is immutable.")
+
+
+class ExamBlueprint(TimeStampedModel):
+    class Mode(models.TextChoices):
+        NO_SECTIONS = "NO_SECTIONS", "No Sections"
+        USE_SECTIONS = "USE_SECTIONS", "Use Sections"
+
+    cycle_course = models.OneToOneField(
+        CycleCourse,
+        on_delete=models.PROTECT,
+        related_name="exam_blueprint",
+    )
+    mode = models.CharField(
+        max_length=12,
+        choices=Mode.choices,
+        default=Mode.NO_SECTIONS,
+    )
+    revision = models.PositiveIntegerField(default=1)
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="created_exam_blueprints",
+    )
+    updated_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="updated_exam_blueprints",
+    )
+
+    class Meta:
+        db_table = "departmental_exam_blueprints"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1),
+                name="ck_de_blueprint_revision",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["mode", "updated_at"], name="idx_de_blueprint_mode")
+        ]
+
+
+class ExamSection(TimeStampedModel):
+    blueprint = models.ForeignKey(
+        ExamBlueprint,
+        on_delete=models.PROTECT,
+        related_name="sections",
+    )
+    title = models.CharField(max_length=200)
+    instructions = models.TextField(max_length=2000, blank=True)
+    display_order = models.PositiveSmallIntegerField()
+    item_quota = models.PositiveSmallIntegerField()
+
+    class Meta:
+        db_table = "departmental_exam_sections"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["blueprint", "display_order"],
+                name="uq_de_section_blueprint_order",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(display_order__gte=1, item_quota__gte=1),
+                name="ck_de_section_positive_values",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["blueprint", "display_order"],
+                name="idx_de_section_order",
+            )
+        ]
+
+    def clean(self):
+        if not (self.title or "").strip():
+            raise ValidationError({"title": "Section title is required."})
+        if self.blueprint_id and self.blueprint.mode != ExamBlueprint.Mode.USE_SECTIONS:
+            raise ValidationError("Explicit sections require Use Sections mode.")
+
+
+class QuestionBlueprintPlacement(TimeStampedModel):
+    blueprint = models.ForeignKey(
+        ExamBlueprint,
+        on_delete=models.PROTECT,
+        related_name="question_placements",
+    )
+    question = models.OneToOneField(
+        Question,
+        on_delete=models.PROTECT,
+        related_name="blueprint_placement",
+    )
+    section = models.ForeignKey(
+        ExamSection,
+        on_delete=models.PROTECT,
+        related_name="question_placements",
+    )
+    placed_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="exam_question_placements",
+    )
+    revision = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        db_table = "departmental_exam_question_placements"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1),
+                name="ck_de_placement_revision",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["blueprint", "section"],
+                name="idx_de_placement_section",
+            )
+        ]
+
+    def clean(self):
+        if self.blueprint_id and self.section_id and self.section.blueprint_id != self.blueprint_id:
+            raise ValidationError("Placement section must belong to the same blueprint.")
+        if self.blueprint_id and self.question_id:
+            if self.question.contribution.cycle_course_id != self.blueprint.cycle_course_id:
+                raise ValidationError("Placement question must belong to the same course examination.")
+            if self.question.contribution.status != FacultyContribution.Status.SUBMITTED:
+                raise ValidationError("Only Submitted questions may be classified.")
+
+
+class ExamScenario(TimeStampedModel):
+    blueprint = models.ForeignKey(
+        ExamBlueprint,
+        on_delete=models.PROTECT,
+        related_name="scenarios",
+    )
+    section = models.ForeignKey(
+        ExamSection,
+        on_delete=models.PROTECT,
+        related_name="scenarios",
+        null=True,
+        blank=True,
+    )
+    title = models.CharField(max_length=200, blank=True)
+    stimulus = models.TextField(max_length=5000)
+    revision = models.PositiveIntegerField(default=1)
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="created_exam_scenarios",
+    )
+    updated_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="updated_exam_scenarios",
+    )
+
+    class Meta:
+        db_table = "departmental_exam_scenarios"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1),
+                name="ck_de_scenario_revision",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["blueprint", "section"],
+                name="idx_de_scenario_section",
+            )
+        ]
+
+    def clean(self):
+        if not (self.stimulus or "").strip():
+            raise ValidationError({"stimulus": "Scenario text is required."})
+        if self.blueprint_id:
+            if self.blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS:
+                if not self.section_id or self.section.blueprint_id != self.blueprint_id:
+                    raise ValidationError("Use Sections scenarios require a section in the same blueprint.")
+            elif self.section_id is not None:
+                raise ValidationError("No Sections scenarios use the implicit section.")
+
+
+class ExamScenarioMember(TimeStampedModel):
+    scenario = models.ForeignKey(
+        ExamScenario,
+        on_delete=models.CASCADE,
+        related_name="members",
+    )
+    question = models.OneToOneField(
+        Question,
+        on_delete=models.PROTECT,
+        related_name="exam_scenario_membership",
+    )
+    position = models.PositiveSmallIntegerField()
+
+    class Meta:
+        db_table = "departmental_exam_scenario_members"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scenario", "position"],
+                name="uq_de_scenario_member_position",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(position__gte=1),
+                name="ck_de_scenario_member_position",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["scenario", "position"],
+                name="idx_de_scenario_member_order",
+            )
+        ]
+
+    def clean(self):
+        if self.scenario_id and self.question_id:
+            if self.question.contribution.cycle_course_id != self.scenario.blueprint.cycle_course_id:
+                raise ValidationError("Scenario questions must belong to the same course examination.")
+            if self.question.contribution.status != FacultyContribution.Status.SUBMITTED:
+                raise ValidationError("Only Submitted questions may belong to scenarios.")

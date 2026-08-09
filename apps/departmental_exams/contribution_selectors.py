@@ -78,7 +78,7 @@ class ContributionMonitoringSelector:
         visible_ids = configurer.values("pk").union(reviewer.values("pk"))
         contributions = (
             FacultyContribution.objects.select_related("faculty_user")
-            .prefetch_related("eligibility_sources")
+            .prefetch_related("eligibility_sources", "blocked_resolution_events")
             .annotate(saved_question_count=Count("questions"))
             .order_by("faculty_user__last_name", "faculty_user__first_name", "id")
         )

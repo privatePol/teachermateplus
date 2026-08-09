@@ -1769,7 +1769,17 @@ class CourseExamConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def close_contribution(cls, *, cycle_course_id, tenant_id, user, expected_revision, reason, request=None):
+    def close_contribution(
+        cls,
+        *,
+        cycle_course_id,
+        tenant_id,
+        user,
+        expected_revision,
+        expected_roster_revision,
+        reason,
+        request=None,
+    ):
         parent, configuration = cls._lock_parent_and_configuration(cycle_course_id=cycle_course_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
         cls._require_active_responsible_department(parent)
@@ -1779,12 +1789,75 @@ class CourseExamConfigurationService:
         if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED:
             return configuration, False
         cls._require_revision(configuration, expected_revision)
+        if configuration.contributor_roster_revision != expected_roster_revision:
+            raise CourseExamConfigurationConflict(
+                "The contributor roster changed after the page was loaded."
+            )
         if configuration.workflow_status != CourseExamConfiguration.WorkflowStatus.OPEN:
             raise ValidationError("Only an open contribution can be closed.")
         reason = (reason or "").strip()
         if not 10 <= len(reason) <= 500:
             raise ValidationError("Reason must be from 10 to 500 characters.")
-        cls._require_no_activity(parent)
+        if (
+            configuration.final_item_count is None
+            or not 50 <= configuration.final_item_count <= 75
+            or configuration.questions_required_per_faculty is None
+            or not 50 <= configuration.questions_required_per_faculty <= 75
+            or not (configuration.coverage or "").strip()
+            or configuration.contribution_deadline is None
+            or (
+                configuration.easy_percent,
+                configuration.moderate_percent,
+                configuration.difficult_percent,
+            )
+            != (30, 50, 20)
+        ):
+            raise ValidationError("The course configuration is not valid for contribution close.")
+        # Parent-first locks serialize Close with roster, contribution, and
+        # question writers. Submitted content is inspected but never changed.
+        from .blueprint_services import ContributorRosterReadinessService
+        from .models import FacultyContributionEligibilitySource
+
+        list(
+            FacultyContribution.objects.select_for_update()
+            .filter(cycle_course=parent)
+            .order_by("id")
+        )
+        list(
+            FacultyContributionEligibilitySource.objects.select_for_update()
+            .filter(contribution__cycle_course=parent)
+            .order_by("id")
+        )
+        roster = ContributorRosterReadinessService.evaluate(
+            cycle_course=parent, configuration=configuration
+        )
+        if not roster.current:
+            raise CourseExamConfigurationConflict(
+                "The contributor roster is stale. Synchronize it explicitly before closing contribution."
+            )
+        if roster.incomplete_active_count:
+            raise ValidationError(
+                f"{roster.incomplete_active_count} currently required Active contributor(s) must submit before close."
+            )
+        if roster.unresolved_blocked_count:
+            raise ValidationError(
+                f"{roster.unresolved_blocked_count} Blocked Draft contribution(s) require explicit resolution before close."
+            )
+        # Re-read the complete live and persisted evidence immediately before
+        # closure. The configuration lock serializes roster synchronization;
+        # the evidence hashes detect an assignment/eligibility drift observed
+        # during this close transaction.
+        confirmed_roster = ContributorRosterReadinessService.evaluate(
+            cycle_course=parent, configuration=configuration
+        )
+        if (
+            not confirmed_roster.current
+            or confirmed_roster.boundary_sha256 != roster.boundary_sha256
+            or confirmed_roster.live_sha256 != roster.live_sha256
+        ):
+            raise CourseExamConfigurationConflict(
+                "The contributor roster changed while contribution close was being validated."
+            )
         before = cls._configuration_payload(configuration)
         configuration.workflow_status = CourseExamConfiguration.WorkflowStatus.CLOSED
         configuration.closed_at = timezone.now()
@@ -1803,6 +1876,12 @@ class CourseExamConfigurationService:
                 "close_reason_length": len(reason),
                 "expected_revision": expected_revision,
                 "resulting_revision": configuration.revision,
+                "required_active_contributors": roster.required_active_count,
+                "submitted_required_contributors": roster.submitted_required_count,
+                "resolved_blocked_drafts": roster.blocked_draft_count,
+                "roster_revision": configuration.contributor_roster_revision,
+                "roster_boundary_sha256": roster.boundary_sha256,
+                "live_roster_validation_sha256": roster.live_sha256,
             },
         )
         return configuration, True

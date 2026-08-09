@@ -137,6 +137,7 @@ class CAOAuthorizationRouteTests(Stage4TestCase):
                 tenant_id=self.tenant.id,
                 user=self.configurer,
                 expected_revision=configuration.revision,
+                expected_roster_revision=configuration.contributor_roster_revision,
                 reason="Administrative closure requested by the department",
             ),
             lambda: CourseExamConfigurationService.reopen_contribution(
@@ -369,6 +370,7 @@ class CAOAuthorizationRouteTests(Stage4TestCase):
                     tenant_id=self.tenant.id,
                     user=self.configurer,
                     expected_revision=open_configuration.revision,
+                    expected_roster_revision=open_configuration.contributor_roster_revision,
                     reason="Closed cycle must reject a course close mutation",
                 ),
             ),

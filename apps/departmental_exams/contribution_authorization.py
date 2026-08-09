@@ -68,7 +68,9 @@ class ContributorEligibilityService:
         return queryset
 
     @staticmethod
-    def _structurally_valid(*, assignment, cycle_course, configuration):
+    def _structurally_valid(
+        *, assignment, cycle_course, configuration, allow_closed_contribution=False
+    ):
         cycle = cycle_course.cycle
         offering = assignment.offering
         return bool(
@@ -93,7 +95,15 @@ class ContributorEligibilityService:
             and cycle_course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
             and cycle.status == cycle.Status.OPEN
             and configuration is not None
-            and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN
+            and configuration.workflow_status
+            in (
+                (
+                    CourseExamConfiguration.WorkflowStatus.OPEN,
+                    CourseExamConfiguration.WorkflowStatus.CLOSED,
+                )
+                if allow_closed_contribution
+                else (CourseExamConfiguration.WorkflowStatus.OPEN,)
+            )
             and FeatureSettingsService.is_departmental_exam_builder_enabled(
                 tenant_id=cycle.tenant_id
             )
@@ -136,7 +146,13 @@ class ContributorEligibilityService:
         return (role_keys | allows) - denies
 
     @classmethod
-    def source_inventory(cls, *, cycle_course, faculty_user_id=None):
+    def source_inventory(
+        cls,
+        *,
+        cycle_course,
+        faculty_user_id=None,
+        allow_closed_contribution=False,
+    ):
         configuration = getattr(cycle_course, "configuration", None)
         assignments = tuple(
             cls._linked_assignments(
@@ -152,6 +168,7 @@ class ContributorEligibilityService:
                 assignment=assignment,
                 cycle_course=cycle_course,
                 configuration=configuration,
+                allow_closed_contribution=allow_closed_contribution,
             )
             and (
                 assignment.faculty_user_id,

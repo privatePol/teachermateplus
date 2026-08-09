@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import faculty_views, monitoring_views, views
+from . import faculty_views, monitoring_views, stage6_views, views
 
 app_name = "departmental_exams"
 
@@ -96,4 +96,10 @@ urlpatterns = [
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/contribution/close/", views.course_contribution_close_view, name="course_contribution_close"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/contribution/reopen/", views.course_contribution_reopen_view, name="course_contribution_reopen"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/configuration/revert/", views.course_configuration_revert_view, name="course_configuration_revert"),
+    path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/blueprint/", stage6_views.blueprint_configuration_view, name="blueprint_configuration"),
+    path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/blueprint/review/", stage6_views.blueprint_review_view, name="blueprint_review"),
+    path("admin-portal/departmental-exams/contributions/<int:contribution_id>/resolve-blocked/", stage6_views.blocked_contribution_resolve_view, name="blocked_contribution_resolve"),
+    path("admin-portal/departmental-exams/questions/<int:question_id>/placement/", stage6_views.question_placement_view, name="question_placement"),
+    path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/scenarios/save/", stage6_views.scenario_save_view, name="scenario_save"),
+    path("admin-portal/departmental-exams/scenarios/<int:scenario_id>/delete/", stage6_views.scenario_delete_view, name="scenario_delete"),
 ]

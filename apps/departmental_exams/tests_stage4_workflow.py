@@ -3,6 +3,7 @@
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+from .contribution_services import ContributionRosterService
 from .models import CourseExamConfiguration, ExaminationCycle
 from .services import (
     CourseExamConfigurationReadinessService,
@@ -110,7 +111,13 @@ class CAOHistoricalImmutabilityTests(Stage4TestCase):
         parent = self.make_course(cycle=cycle)
         configuration = self.make_configuration(parent, quota=75, final_count=60, opened_at=timezone.now(), workflow=CourseExamConfiguration.WorkflowStatus.OPEN)
         sources = (configuration.questions_required_per_faculty_source, configuration.final_item_count_source)
-        configuration, _ = CourseExamConfigurationService.close_contribution(cycle_course_id=parent.id, tenant_id=self.tenant.id, user=self.configurer, expected_revision=configuration.revision, reason="Administrative closure before contribution begins")
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        configuration.refresh_from_db()
+        configuration, _ = CourseExamConfigurationService.close_contribution(cycle_course_id=parent.id, tenant_id=self.tenant.id, user=self.configurer, expected_revision=configuration.revision, expected_roster_revision=configuration.contributor_roster_revision, reason="Administrative closure before contribution begins")
         configuration, _ = CourseExamConfigurationService.reopen_contribution(cycle_course_id=parent.id, tenant_id=self.tenant.id, user=self.configurer, expected_revision=configuration.revision)
         self.assertEqual((configuration.questions_required_per_faculty, configuration.final_item_count), (75, 60))
         self.assertEqual((configuration.questions_required_per_faculty_source, configuration.final_item_count_source), sources)

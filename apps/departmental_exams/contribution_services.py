@@ -118,6 +118,7 @@ class ContributionRosterService:
             .filter(cycle_course=cycle_course)
             .order_by("id")
         )
+        preexisting_contribution_ids = {item.id for item in contributions}
         contributions_by_user = {item.faculty_user_id: item for item in contributions}
         creates = []
         for faculty_user_id, eligible_ids in eligible_ids_by_user.items():
@@ -181,6 +182,7 @@ class ContributionRosterService:
             assignments = assignments_by_user.get(contribution.faculty_user_id, [])
             eligible_ids = eligible_ids_by_user.get(contribution.faculty_user_id, set())
             seen_ids = set()
+            material_evidence_changed = False
             for assignment in assignments:
                 seen_ids.add(assignment.id)
                 current = assignment.id in eligible_ids
@@ -198,6 +200,7 @@ class ContributionRosterService:
                             invalidated_at=None if current else now,
                         )
                     )
+                    material_evidence_changed = True
                     continue
                 changed = False
                 if source.assignment_id != assignment.id:
@@ -207,6 +210,7 @@ class ContributionRosterService:
                     source.is_current = current
                     source.invalidated_at = None if current else now
                     changed = True
+                    material_evidence_changed = True
                 if changed:
                     source_updates.append(source)
 
@@ -219,6 +223,7 @@ class ContributionRosterService:
                     source.is_current = False
                     source.invalidated_at = now
                     source_updates.append(source)
+                    material_evidence_changed = True
 
             eligible_assignments = sorted(
                 (item for item in assignments if item.id in eligible_ids),
@@ -236,13 +241,16 @@ class ContributionRosterService:
                     rebinds.append((contribution.id, contribution.source_assignment_id, primary.id))
                     contribution.source_assignment = primary
                     changed_fields.append("source_assignment")
+                    material_evidence_changed = True
                 if contribution.source_campus_id != primary.campus_id:
                     contribution.source_campus_id = primary.campus_id
                     changed_fields.append("source_campus")
+                    material_evidence_changed = True
             if contribution.roster_status != desired_status:
                 contribution.roster_status = desired_status
                 contribution.roster_blocked_at = None if eligible_assignments else now
                 changed_fields.extend(["roster_status", "roster_blocked_at"])
+                material_evidence_changed = True
                 if desired_status == FacultyContribution.RosterStatus.ACTIVE:
                     activated += 1
                 else:
@@ -250,9 +258,18 @@ class ContributionRosterService:
             elif desired_status == FacultyContribution.RosterStatus.ACTIVE and contribution.roster_blocked_at is not None:
                 contribution.roster_blocked_at = None
                 changed_fields.append("roster_blocked_at")
+                material_evidence_changed = True
             elif desired_status == FacultyContribution.RosterStatus.BLOCKED and contribution.roster_blocked_at is None:
                 contribution.roster_blocked_at = now
                 changed_fields.append("roster_blocked_at")
+                material_evidence_changed = True
+            if (
+                material_evidence_changed
+                and contribution.id in preexisting_contribution_ids
+                and desired_status == FacultyContribution.RosterStatus.BLOCKED
+            ):
+                contribution.revision += 1
+                changed_fields.append("revision")
             if changed_fields:
                 contribution_updates.append(contribution)
 
@@ -269,7 +286,14 @@ class ContributionRosterService:
         if contribution_updates:
             FacultyContribution.objects.bulk_update(
                 contribution_updates,
-                ["source_assignment", "source_campus", "roster_status", "roster_blocked_at", "updated_at"],
+                [
+                    "source_assignment",
+                    "source_campus",
+                    "roster_status",
+                    "roster_blocked_at",
+                    "revision",
+                    "updated_at",
+                ],
                 batch_size=cls.BATCH_SIZE,
             )
 

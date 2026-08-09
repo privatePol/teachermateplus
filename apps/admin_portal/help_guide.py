@@ -20,9 +20,12 @@ ADMIN_HELP_SECTIONS = [
                     {"name": "Initialize Roster", "does": "Creates one contribution per grouped course and eligible faculty, preserving every concrete assignment/campus source.", "when": "Use this explicit POST for a course that was already Open before Stage 5; future Open transitions initialize automatically.", "avoid": "Do not use roster actions as a manual authorization bypass.", "result": "Valid sources create Active Drafts; an empty result is still recorded as initialized.", "editable": "The action is idempotent and never deletes contribution history."},
                     {"name": "Synchronize Roster", "does": "Reevaluates active users, tenants, campuses, offerings, accepted assignments, exact Faculty Portal permission, and direct denies source by source.", "when": "Use it after official teaching-assignment changes.", "avoid": "Do not expect one denied campus to invalidate an independently authorized campus source.", "result": "Drafts become Blocked only after the final qualifying source is lost and may reactivate when a valid source returns; Submitted records remain historical.", "editable": "Sources are marked current or invalid and retained as history."},
                     {"name": "Monitor Completion", "does": "Shows contributor identity, quota, saved count, progress, workflow/roster status, deadline, overdue state, and valid/invalid source counts.", "when": "Use it for operational follow-up within your exact responsible-department or assigned-reviewer scope.", "avoid": "Question text, choices, answers, fingerprints, and import previews are intentionally unavailable.", "result": "You receive aggregate progress only.", "editable": "Monitoring is read-only."},
+                    {"name": "Resolve Blocked Draft", "does": "Records an immutable reason, resolver, time, contribution revision, roster revision, blocked episode, and source-evidence snapshot for one current Blocked Draft.", "when": "Use it only after explicit operational review of a contributor who is no longer currently required.", "avoid": "Resolution does not submit, delete, transfer, or make Draft questions eligible, and a later Active episode requires Final Submission again.", "result": "The exact current blocked episode can satisfy contribution-close readiness while its evidence remains current.", "editable": "Resolution evidence is immutable; a later blocked episode receives a separate event."},
+                    {"name": "Stage 6 Blueprint", "does": "Configures No Sections or exact ordered sections and displays aggregate campus, difficulty, section, contributor, scenario, and two-set feasibility readiness.", "when": "Use it after contribution is Closed.", "avoid": "Configurator pages never display Submitted question content or confidential scenario text.", "result": "The course is READY only when every hard margin and atomic scenario constraint is feasible.", "editable": "Structure is versioned and auditable before the later generation lock."},
+                    {"name": "Confidential Review", "does": "Lets the exact assigned eligible reviewer classify Submitted questions into sections and create textual ordered scenarios.", "when": "Use it after the Configurator saves the Stage 6 blueprint.", "avoid": "Do not copy question, answer, scenario, or potential-set content into broad monitoring or audit metadata.", "result": "Placements and scenarios remain separate overlays; Submitted questions are unchanged.", "editable": "Reviewer overlay changes are audited during the approved pre-lock lifecycle."},
                 ],
                 "avoid": "Do not request or copy confidential question content through administrative monitoring.",
-                "next_step": "Arrange the separately authorized hourly production scheduler for purge_expired_question_import_previews before deployment.",
+                "next_step": "After aggregate readiness is READY, proceed only through the separately authorized Stage 6B/6C generator and approval gates. Generation progress, idempotency, locking, and persisted Set A/Set B remain intentionally deferred.",
             }
         ],
     },
@@ -188,7 +191,7 @@ ADMIN_HELP_SECTIONS = [
     {
         "code": "departmental-exam-builder",
         "title": "Departmental Exam Builder",
-        "summary": "Create examination cycles, control Included or Exempt courses, and configure the current Stage 4 course-readiness workflow.",
+        "summary": "Create examination cycles, manage faculty contribution, and prepare the Stage 6A readiness blueprint without generating Set A or Set B.",
         "topics": [
             {
                 "code": "departmental-exam-course-control",
@@ -210,7 +213,8 @@ ADMIN_HELP_SECTIONS = [
                     "Use Restore to Included only while the cycle is Draft when an exemption must be reversed. Restore preserves the saved configuration, does not use the Exempt-only faculty contribution or question blocker, and revalidates the reviewer assignment.",
                     "On Configure Examination Cycle, authorized cycle managers may set independent 50-75 count defaults, a cycle-wide contribution deadline, and contributor instructions. Review the confirmation page, then use Apply defaults; its short-lived signed POST submits directly to the apply action without putting instructions or reasons in links.",
                     "On Course Examination Configuration, authorized exact-responsibility users may inherit each cycle default or set an intentional course override, then record coverage and optional instructions. Effective values show DEFAULT, OVERRIDE, or NOT CONFIGURED. Removing a deadline override restores the cycle deadline, or NOT CONFIGURED when the cycle has none.",
-                    "Use the Draft/Open/Closed controls only for the current Stage 4 readiness lifecycle. First opening preserves the historical configuration snapshot, and a Closed governing cycle hides and denies every configuration/default mutation. These controls do not create faculty contributions, questions, official questionnaires, answer keys, or exports.",
+                    "Use the contribution Close POST only after the explicit roster is current, every currently required Active contributor is Submitted, and every Blocked Draft has current immutable resolution evidence. Close preserves all Submitted questions and prevents later normal Stage 5 mutation.",
+                    "After contribution is Closed, use Stage 6 Blueprint for No Sections or exact ordered section quotas. The assigned reviewer uses Confidential Review for question placements and textual atomic scenarios. Aggregate readiness applies fixed campus and 30/50/20 difficulty Hamilton margins plus exact section margins without persisting selected questions.",
                 ],
                 "check_first": [
                     "Confirm the selected tenant and the responsible department campus.",
@@ -236,7 +240,7 @@ ADMIN_HELP_SECTIONS = [
                     },
                 ],
                 "avoid": "Do not confuse Included with a separate action. New cycle courses start Included; Restore is the only reverse of Exempt.",
-                "next_step": "Review readiness, the source of each count, and the audit entry. Faculty contribution/question work is a future Stage 5 workflow and is not available from this guide.",
+                "next_step": "Review aggregate Stage 6A readiness. Actual Generate/Regenerate, Set A/Set B persistence, preview, approval/lock, PDFs, Pair Codes, and QR remain later gated stages.",
             },
         ],
     },

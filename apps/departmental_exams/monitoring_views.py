@@ -13,6 +13,10 @@ from apps.core.decorators import portal_required
 from .contribution_forms import RosterActionForm
 from .contribution_selectors import ContributionMonitoringSelector
 from .contribution_services import ContributionRosterService
+from .blueprint_services import (
+    contribution_source_evidence,
+    resolution_matches_episode,
+)
 from .models import CycleCourse
 from .services import DepartmentalExamAuthorizationService
 
@@ -94,6 +98,19 @@ def contributor_monitoring_view(request):
                 and configuration.contribution_deadline
                 and contribution.status == contribution.Status.DRAFT
                 and configuration.contribution_deadline <= timezone.now()
+            )
+            contribution.blocked_resolution_valid = bool(
+                configuration
+                and contribution.status == contribution.Status.DRAFT
+                and contribution.roster_status == contribution.RosterStatus.BLOCKED
+                and any(
+                    resolution_matches_episode(
+                        resolution=resolution,
+                        contribution=contribution,
+                        source_hash=contribution_source_evidence(contribution),
+                    )
+                    for resolution in contribution.blocked_resolution_events.all()
+                )
             )
         course.can_configure = course.pk in configurer_ids
     return render(

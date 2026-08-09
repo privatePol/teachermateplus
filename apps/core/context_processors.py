@@ -43,10 +43,16 @@ _DEPARTMENTAL_EXAM_ACTIVE_ROUTES = {
             "departmental_exams:course_contribution_close",
             "departmental_exams:course_contribution_reopen",
             "departmental_exams:course_configuration_revert",
+            "departmental_exams:blueprint_configuration",
+            "departmental_exams:blueprint_review",
+            "departmental_exams:question_placement",
+            "departmental_exams:scenario_save",
+            "departmental_exams:scenario_delete",
         },
         "DE_EXAM_CONTRIBUTOR_MONITORING": {
             "departmental_exams:contributor_monitoring",
             "departmental_exams:roster_action",
+            "departmental_exams:blocked_contribution_resolve",
         },
     },
 }

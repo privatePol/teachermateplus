@@ -430,6 +430,7 @@ def assigned_course_examinations_view(request):
         )
     )
     configurer_ids = set(configurer_courses.values_list("id", flat=True))
+    reviewer_ids = set(reviewer_courses.values_list("id", flat=True))
     courses = list(
         _with_downstream_activity_flags(
             base_courses.filter(
@@ -442,6 +443,10 @@ def assigned_course_examinations_view(request):
     for course in courses:
         _prepare_cycle_course_campus_display(course)
         course.can_administer = course.id in configurer_ids
+        course.can_review = bool(
+            course.id in reviewer_ids
+            and course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+        )
         course.readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
             cycle_course=course, configuration=getattr(course, "configuration", None), user=request.user
         )
@@ -483,6 +488,21 @@ def _course_action_flags(*, parent, configuration, readiness):
         and CourseExamDefaultTrackingPolicy.has_downstream_activity(parent)
     )
     open_blockers = set(readiness["blockers"]) - {"Closed"}
+    close_ready = False
+    if (
+        configuration
+        and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN
+    ):
+        from .blueprint_services import ContributorRosterReadinessService
+
+        roster = ContributorRosterReadinessService.evaluate(
+            cycle_course=parent, configuration=configuration
+        )
+        close_ready = bool(
+            roster.current
+            and not roster.incomplete_active_count
+            and not roster.unresolved_blocked_count
+        )
     return {
         "can_save_draft": mutable
         and parent.cycle.status in (ExaminationCycle.Status.DRAFT, ExaminationCycle.Status.OPEN)
@@ -499,7 +519,7 @@ def _course_action_flags(*, parent, configuration, readiness):
             and configuration
             and parent.cycle.status == ExaminationCycle.Status.OPEN
             and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN
-            and not has_activity
+            and close_ready
         ),
         "can_reopen": bool(
             mutable
@@ -546,7 +566,15 @@ def course_configuration_view(request, cycle_course_id):
         else:
             messages.success(request, "Course examination configuration saved." if changed else "Course examination configuration is unchanged.")
             return redirect("departmental_exams:course_configuration", cycle_course_id=parent.id)
-    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "action_flags": action_flags, "form": form}, status=status)
+    close_form = CourseContributionCloseForm(
+        initial={
+            "expected_revision": configuration.revision if configuration else 0,
+            "expected_roster_revision": (
+                configuration.contributor_roster_revision if configuration else 0
+            ),
+        }
+    )
+    return render(request, "departmental_exams/admin/course_configuration.html", {"cycle_course": parent, "configuration": configuration, "readiness": readiness, "action_flags": action_flags, "form": form, "close_form": close_form}, status=status)
 
 
 @portal_required("ADMIN")
@@ -581,10 +609,21 @@ def _course_contribution_transition_view(request, cycle_course_id, *, action):
     action_flags = _course_action_flags(
         parent=parent, configuration=configuration, readiness=readiness
     )
-    if not action_flags[f"can_{action}"]:
+    close_lifecycle_available = bool(
+        action == "close"
+        and parent.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+        and parent.cycle.status == ExaminationCycle.Status.OPEN
+        and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN
+    )
+    if not action_flags[f"can_{action}"] and not close_lifecycle_available:
         raise Http404("This course contribution action is not available in its current lifecycle state.")
     form_class = {"open": CourseContributionOpenForm, "close": CourseContributionCloseForm, "reopen": CourseContributionReopenForm, "revert": CourseExamConfigurationRevertForm}[action]
-    form = form_class(request.POST or None, initial={"expected_revision": configuration.revision})
+    transition_initial = {"expected_revision": configuration.revision}
+    if action == "close":
+        transition_initial["expected_roster_revision"] = (
+            configuration.contributor_roster_revision
+        )
+    form = form_class(request.POST or None, initial=transition_initial)
     status = 200
     if request.method == "POST" and form.is_valid():
         try:
@@ -592,7 +631,7 @@ def _course_contribution_transition_view(request, cycle_course_id, *, action):
                 method = CourseExamConfigurationService.open_for_contribution if action == "open" else CourseExamConfigurationService.reopen_contribution
                 configuration, changed = method(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], request=request)
             elif action == "close":
-                configuration, changed = CourseExamConfigurationService.close_contribution(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], reason=form.cleaned_data["reason"], request=request)
+                configuration, changed = CourseExamConfigurationService.close_contribution(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], expected_roster_revision=form.cleaned_data["expected_roster_revision"], reason=form.cleaned_data["reason"], request=request)
             else:
                 configuration, changed = CourseExamConfigurationService.revert_unpublished_configuration(cycle_course_id=parent.id, tenant_id=tenant_id, user=request.user, expected_revision=form.cleaned_data["expected_revision"], reason=form.cleaned_data["reason"], request=request)
         except CourseExamConfigurationConflict as exc:
@@ -612,7 +651,7 @@ def course_contribution_open_view(request, cycle_course_id):
 
 
 @portal_required("ADMIN")
-@require_http_methods(["GET", "POST"])
+@require_http_methods(["POST"])
 def course_contribution_close_view(request, cycle_course_id):
     return _course_contribution_transition_view(request, cycle_course_id, action="close")
 

@@ -1,0 +1,6 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<h1 class="h3">Stage 6 request could not be completed</h1>
+<div class="alert alert-warning">{{ error_message }}</div>
+<a class="btn btn-outline-secondary" href="{% url 'departmental_exams:assigned_course_examinations' %}">Return to Assigned Course Examinations</a>
+{% endblock %}

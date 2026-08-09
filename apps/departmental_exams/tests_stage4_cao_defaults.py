@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.auditlog.models import AuditLog
 
+from .contribution_services import ContributionRosterService
 from .models import CourseExamConfiguration, CycleCourse, ExaminationCycle
 from .services import (
     CourseExamConfigurationConflict,
@@ -514,12 +515,19 @@ class CAOCourseOverrideTests(Stage4TestCase):
             opened_at=timezone.now(),
         )
         close_reason = "Confidential closure rationale for the department."
+        ContributionRosterService.initialize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        configuration.refresh_from_db()
         with patch("apps.departmental_exams.services.AuditService.log_event") as audit:
             configuration, changed = CourseExamConfigurationService.close_contribution(
                 cycle_course_id=parent.id,
                 tenant_id=self.tenant.id,
                 user=self.configurer,
                 expected_revision=configuration.revision,
+                expected_roster_revision=configuration.contributor_roster_revision,
                 reason=close_reason,
             )
         self.assertTrue(changed)

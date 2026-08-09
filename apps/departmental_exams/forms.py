@@ -342,7 +342,7 @@ class _ReasonedConfigurationActionForm(_ConfigurationActionForm):
 
 
 class CourseContributionCloseForm(_ReasonedConfigurationActionForm):
-    pass
+    expected_roster_revision = forms.IntegerField(widget=forms.HiddenInput)
 
 
 class CourseExamConfigurationRevertForm(_ReasonedConfigurationActionForm):
