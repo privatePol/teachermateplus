@@ -92,3 +92,33 @@ class ScenarioForm(forms.Form):
 
 class ScenarioDeleteForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=1)
+
+
+class GenerationRequestForm(forms.Form):
+    expected_current_revision = forms.IntegerField(
+        min_value=0,
+        widget=forms.HiddenInput,
+    )
+    input_fingerprint = forms.RegexField(
+        regex=r"^[0-9a-f]{64}$",
+        widget=forms.HiddenInput,
+    )
+    request_token = forms.CharField(
+        min_length=32,
+        max_length=200,
+        widget=forms.HiddenInput,
+    )
+
+
+class RegenerationRequestForm(GenerationRequestForm):
+    reason = forms.CharField(
+        min_length=10,
+        max_length=500,
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "class": "form-control",
+                "placeholder": "Explain why a new immutable revision is required.",
+            }
+        ),
+    )

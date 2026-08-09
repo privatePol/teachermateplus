@@ -209,3 +209,60 @@ class Stage6MigrationTests(TransactionTestCase):
             contribution_revision_snapshot=5,
         )
         self.assertEqual(Resolution.objects.count(), 2)
+
+
+class Stage6BGenerationMigrationTests(TransactionTestCase):
+    migrate_from = ("departmental_exams", "0008_stage6_blueprint_constraints")
+    migrate_to = ("departmental_exams", "0009_stage6b_generation_output")
+
+    def setUp(self):
+        super().setUp()
+        self.executor = MigrationExecutor(connection)
+        self.executor.migrate(self._state(self.migrate_from))
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
+    def _state(self, departmental_target):
+        return [
+            departmental_target if app_label == "departmental_exams" else node
+            for node in self.executor.loader.graph.leaf_nodes()
+            for app_label, _name in [node]
+        ]
+
+    def test_0009_is_additive_without_data_operation_and_has_bounded_names(self):
+        migration = import_module(
+            "apps.departmental_exams.migrations.0009_stage6b_generation_output"
+        )
+        self.assertIn(self.migrate_from, migration.Migration.dependencies)
+        self.assertNotIn(
+            "RunPython",
+            [operation.__class__.__name__ for operation in migration.Migration.operations],
+        )
+        self.assertEqual(
+            [operation.name for operation in migration.Migration.operations],
+            ["ExamGenerationRevision", "GeneratedExamSet", "GeneratedExamItem"],
+        )
+        names = []
+        for operation in migration.Migration.operations:
+            names.extend(index.name for index in operation.options.get("indexes", ()))
+            names.extend(
+                constraint.name
+                for constraint in operation.options.get("constraints", ())
+            )
+        self.assertTrue(names)
+        self.assertTrue(all(len(name) <= 64 for name in names))
+
+    def test_forward_creates_empty_generation_tables(self):
+        self.executor = MigrationExecutor(connection)
+        target = self._state(self.migrate_to)
+        self.executor.migrate(target)
+        apps = self.executor.loader.project_state(target).apps
+        Revision = apps.get_model("departmental_exams", "ExamGenerationRevision")
+        GeneratedSet = apps.get_model("departmental_exams", "GeneratedExamSet")
+        GeneratedItem = apps.get_model("departmental_exams", "GeneratedExamItem")
+        self.assertEqual(Revision.objects.count(), 0)
+        self.assertEqual(GeneratedSet.objects.count(), 0)
+        self.assertEqual(GeneratedItem.objects.count(), 0)

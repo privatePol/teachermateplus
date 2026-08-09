@@ -1,0 +1,42 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<header class="de-exam-hero">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+    <div><span class="badge text-bg-warning text-dark mb-2">CONFIDENTIAL GENERATED OUTPUT</span><h1>Generation revision #{{ revision.revision_number }}</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div>
+    <div class="text-end"><span class="badge {% if revision.status == 'GENERATED' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ revision.get_status_display }}</span><div class="small mt-2">{{ revision.generated_at|date:"M j, Y g:i A" }}</div></div>
+  </div>
+</header>
+
+<nav class="de-generation-set-nav d-flex flex-wrap gap-2 mb-3" aria-label="Generated set navigation">
+  {% for generated_set in generated_sets %}<a class="btn {% if generated_set.set_code == 'A' %}btn-success{% else %}btn-warning{% endif %}" href="#set-{{ generated_set.set_code|lower }}">Set {{ generated_set.set_code }}</a>{% endfor %}
+  <a class="btn btn-outline-secondary ms-md-auto" href="{% url 'departmental_exams:generation_workspace' cycle_course.id %}">Generation workspace</a>
+</nav>
+
+<div class="row g-3 mb-3">
+  <div class="col-sm-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Items per set</span><strong>{{ revision.final_item_count_snapshot }}</strong></div></div>
+  <div class="col-sm-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Minimum overlap</span><strong>{{ revision.minimum_overlap }}</strong></div></div>
+  <div class="col-sm-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Contributors represented</span><strong>{{ revision.contributors_represented }}</strong></div></div>
+  <div class="col-sm-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Algorithm</span><strong class="fs-6">{{ revision.algorithm_version }}</strong></div></div>
+</div>
+
+<div class="alert alert-warning"><strong>Confidential:</strong> This page includes immutable question, choice, correct-answer, and scenario snapshots. Do not copy content into general monitoring, logs, or audit notes.</div>
+
+{% for generated_set in generated_sets %}
+<section id="set-{{ generated_set.set_code|lower }}" class="card de-exam-card mb-4">
+  <div class="card-header bg-white border-0 p-4 pb-0 d-flex flex-wrap justify-content-between align-items-center gap-2"><div><span class="badge {% if generated_set.set_code == 'A' %}text-bg-success{% else %}text-bg-warning{% endif %} mb-2">SET {{ generated_set.set_code }}</span><h2 class="h4 mb-0">Generated questionnaire</h2></div><span class="text-muted">{{ generated_set.item_count }} items</span></div>
+  <div class="card-body p-4">
+    {% for item in generated_set.ordered_items %}
+      {% ifchanged item.section_id_snapshot %}<div class="de-generation-section rounded p-3 mb-3 mt-2"><h3 class="h5 mb-1">{{ item.section_title_snapshot }}</h3>{% if item.section_instructions_snapshot %}<p class="text-muted mb-0">{{ item.section_instructions_snapshot }}</p>{% endif %}</div>{% endifchanged %}
+      {% if item.scenario_id_snapshot and item.scenario_member_position_snapshot == 1 %}<aside class="de-generation-scenario mb-2"><div class="small text-uppercase fw-bold text-warning-emphasis">Scenario{% if item.scenario_title_snapshot %}: {{ item.scenario_title_snapshot }}{% endif %}</div><p class="mb-0 mt-2">{{ item.scenario_stimulus_snapshot }}</p></aside>{% endif %}
+      <article class="de-generation-question mb-3{% if item.scenario_id_snapshot %} ms-md-3{% endif %}">
+        <div class="d-flex flex-wrap justify-content-between gap-2 mb-2"><span class="badge text-bg-light border text-dark">Item {{ item.position }}</span><span class="small text-muted">{{ item.campus_code_snapshot }} &middot; {{ item.get_difficulty_snapshot_display }}{% if item.scenario_id_snapshot %} &middot; Scenario member {{ item.scenario_member_position_snapshot }}{% endif %}</span></div>
+        <p class="fw-semibold mb-2">{{ item.question_text_snapshot }}</p>
+        <ol type="A" class="mb-2">{% for choice in item.choices_snapshot %}<li>{{ choice }}</li>{% endfor %}</ol>
+        <div class="small"><strong>Correct answer:</strong> {{ item.correct_answer_snapshot }} <span class="text-muted ms-2">Source snapshot Q{{ item.source_question_id }} r{{ item.source_question_revision }}</span></div>
+      </article>
+    {% empty %}<div class="de-empty"><h3 class="h5">No generated items</h3><p class="text-muted mb-0">This revision is incomplete and must not be used.</p></div>{% endfor %}
+  </div>
+</section>
+{% empty %}<div class="card de-exam-card"><div class="de-empty"><h2 class="h5">No generated sets</h2><p class="text-muted mb-0">This revision has no output.</p></div></div>{% endfor %}
+{% endblock %}

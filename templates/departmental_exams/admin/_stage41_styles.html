@@ -15,4 +15,18 @@
   .de-effective-row { display: flex; justify-content: space-between; gap: .75rem; padding: .15rem 0; }
   .de-empty { max-width: 760px; margin: 1rem auto; padding: 1.5rem; text-align: center; }
   .de-exam-card .form-control, .de-exam-card .form-select { max-width: 100%; }
+  .de-generation-metric { min-height: 100%; padding: .9rem; border: 1px solid #dce9e1; border-radius: .85rem; background: #f8fbf9; }
+  .de-generation-metric strong { display: block; color: #123d27; font-size: 1.15rem; }
+  .de-generation-set-nav { position: sticky; top: .75rem; z-index: 3; padding: .65rem; border-radius: .85rem; background: rgba(255, 255, 255, .96); box-shadow: 0 8px 22px rgba(18, 52, 31, .1); }
+  .de-generation-section { scroll-margin-top: 5rem; border-left: .3rem solid #198754; }
+  .de-generation-question { border: 1px solid #dce5df; border-radius: .8rem; padding: 1rem; background: #fff; }
+  .de-generation-scenario { border: 1px solid #e7ca75; border-radius: .8rem; padding: .85rem; background: #fff9e8; }
+  .de-generation-busy { display: none; align-items: center; gap: .65rem; color: #173d27; font-weight: 700; }
+  [aria-busy="true"] .de-generation-busy { display: flex; }
+  .de-generation-control-disabled { pointer-events: none; opacity: .55; }
+  @media (max-width: 767.98px) {
+    .de-exam-hero { padding: 1rem; }
+    .de-generation-set-nav { position: static; }
+    .de-generation-question { padding: .8rem; }
+  }
 </style>

@@ -37,6 +37,19 @@ class Stage6Conflict(ValidationError):
     """A stale Stage 6 revision, roster, or lifecycle conflict."""
 
 
+STAGE6_CYCLE_NOT_OPEN_CODE = "CYCLE_NOT_OPEN"
+STAGE6_CYCLE_NOT_OPEN_MESSAGE = "The examination cycle is not open for Stage 6 work."
+
+
+def stage6_cycle_is_open(cycle):
+    return cycle.status == cycle.Status.OPEN
+
+
+def require_stage6_open_cycle(cycle, *, conflict_class=Stage6Conflict):
+    if not stage6_cycle_is_open(cycle):
+        raise conflict_class(STAGE6_CYCLE_NOT_OPEN_MESSAGE)
+
+
 @dataclass(frozen=True)
 class ContributorRosterReadiness:
     current: bool
@@ -436,8 +449,7 @@ class BlueprintMutationService:
     def _require_prelock(*, cycle_course, configuration):
         if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
             raise ValidationError("Only Included course examinations may use a blueprint.")
-        if cycle_course.cycle.status != cycle_course.cycle.Status.OPEN:
-            raise Stage6Conflict("The examination cycle is not open for Stage 6 work.")
+        require_stage6_open_cycle(cycle_course.cycle)
         if (
             configuration is None
             or configuration.workflow_status

@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 
 from django.core.exceptions import ValidationError
 from django.db.models import Prefetch
 
-from .blueprint_services import ContributorRosterReadinessService
+from .blueprint_services import (
+    STAGE6_CYCLE_NOT_OPEN_CODE,
+    STAGE6_CYCLE_NOT_OPEN_MESSAGE,
+    ContributorRosterReadinessService,
+    stage6_cycle_is_open,
+)
 from .contribution_services import QuestionPayloadService
 from .generation_algorithms import (
     AllocationError,
     CAMPUS_WEIGHTS,
+    IdentityBlock,
+    IdentityMember,
     allocate_campuses,
     allocate_difficulties,
     solve_two_set_feasibility,
@@ -28,6 +38,58 @@ from .models import (
 )
 
 
+GENERATION_ALGORITHM_VERSION = "stage6b-v1"
+
+
+def _sha256_json(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class GenerationQuestion:
+    source_id: int
+    source_revision: int
+    source_digest: str
+    contributor_id: int
+    contributor_name: str
+    campus_id: int
+    campus_code: str
+    campus_name: str
+    difficulty: str
+    section_id: int
+    section_title: str
+    section_instructions: str
+    question_text: str
+    choices: tuple[str, str, str, str]
+    correct_answer: str
+    scenario_id: int | None = None
+    scenario_revision: int | None = None
+    scenario_title: str = ""
+    scenario_stimulus: str = ""
+    scenario_member_position: int | None = None
+
+
+@dataclass(frozen=True)
+class GenerationProblem:
+    cycle_course: object
+    configuration: object
+    blueprint: object
+    final_count: int
+    margins: tuple[int, ...]
+    campus_quotas: dict
+    difficulty_quotas: dict
+    section_quotas: dict
+    section_order: tuple[int, ...]
+    questions: dict[int, GenerationQuestion]
+    blocks: tuple[IdentityBlock, ...]
+    input_fingerprint: str
+    configuration_revision: int
+    blueprint_revision: int
+    roster_boundary: str
+    minimum_overlap: int
+
+
 def eligible_submitted_question_pool(*, cycle_course, participating_codes):
     """Return the content-valid Submitted pool without exposing it to aggregate callers."""
     submitted_questions = list(
@@ -35,7 +97,11 @@ def eligible_submitted_question_pool(*, cycle_course, participating_codes):
             contribution__cycle_course=cycle_course,
             contribution__status=FacultyContribution.Status.SUBMITTED,
         )
-        .select_related("contribution__source_campus", "import_batch")
+        .select_related(
+            "contribution__source_campus",
+            "contribution__faculty_user",
+            "import_batch",
+        )
         .order_by("id")
     )
     participating_set = {
@@ -86,6 +152,11 @@ class Stage6ReadinessService:
 
     @classmethod
     def evaluate(cls, *, cycle_course):
+        _problem, report = cls.build_problem(cycle_course=cycle_course)
+        return report
+
+    @classmethod
+    def build_problem(cls, *, cycle_course):
         blockers = []
         shortages = []
         configuration = CourseExamConfiguration.objects.filter(
@@ -93,6 +164,12 @@ class Stage6ReadinessService:
         ).first()
         blueprint = ExamBlueprint.objects.filter(cycle_course=cycle_course).first()
 
+        if not stage6_cycle_is_open(cycle_course.cycle):
+            cls._block(
+                blockers,
+                STAGE6_CYCLE_NOT_OPEN_CODE,
+                STAGE6_CYCLE_NOT_OPEN_MESSAGE,
+            )
         if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
             cls._block(blockers, "NOT_INCLUDED", "The course examination is Exempt.")
         if configuration is None:
@@ -255,7 +332,7 @@ class Stage6ReadinessService:
                 invalid_scenario_count += 1
                 continue
             scenario_question_ids.update(member_ids)
-            valid_scenario_members.append(members)
+            valid_scenario_members.append((scenario, members))
         if invalid_scenario_count:
             cls._block(
                 blockers,
@@ -298,6 +375,9 @@ class Stage6ReadinessService:
             cls._block(blockers, "QUESTION_SHORTAGES", "The eligible Submitted pool has aggregate shortages.")
 
         solver_result = None
+        margins = ()
+        question_vectors = {}
+        identity_blocks = []
         structural_codes = {
             "NOT_INCLUDED",
             "CONFIGURATION_MISSING",
@@ -335,7 +415,7 @@ class Stage6ReadinessService:
                 )
 
             question_vectors = {question.id: vector_for(question) for question in eligible_questions}
-            for members in valid_scenario_members:
+            for _scenario, members in valid_scenario_members:
                 scenario_vectors.append(
                     tuple(
                         sum(question_vectors[member.question_id][position] for member in members)
@@ -371,7 +451,7 @@ class Stage6ReadinessService:
                     "Two equivalent sets cannot satisfy all hard margins and scenario bundles.",
                 )
 
-        return {
+        report = {
             "ready": not blockers,
             "status": "READY" if not blockers else "BLOCKED",
             "blockers": blockers,
@@ -400,3 +480,169 @@ class Stage6ReadinessService:
             "solver_states": solver_result.states_explored if solver_result else 0,
             "solver_limit_hit": solver_result.limit_hit if solver_result else False,
         }
+        problem = None
+        if not blockers and solver_result and solver_result.feasible:
+            section_labels = {section.id: section.title for section in section_rows}
+            section_instructions = {
+                section.id: section.instructions for section in section_rows
+            }
+            section_labels[0] = "Questionnaire"
+            section_instructions[0] = ""
+            scenario_by_question = {}
+            for scenario, members in valid_scenario_members:
+                for member in members:
+                    scenario_by_question[member.question_id] = (scenario, member.position)
+            generation_questions = {}
+            for question in eligible_questions:
+                section_id = (
+                    0
+                    if blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
+                    else placement_by_question[question.id]
+                )
+                scenario_data = scenario_by_question.get(question.id)
+                scenario = scenario_data[0] if scenario_data else None
+                source_digest = _sha256_json(
+                    {
+                        "source_id": question.id,
+                        "revision": question.revision,
+                        "question_text": question.question_text,
+                        "choices": [
+                            question.choice_a,
+                            question.choice_b,
+                            question.choice_c,
+                            question.choice_d,
+                        ],
+                        "correct_answer": question.correct_answer,
+                        "difficulty": question.difficulty,
+                    }
+                )
+                contributor = question.contribution.faculty_user
+                generation_questions[question.id] = GenerationQuestion(
+                    source_id=question.id,
+                    source_revision=question.revision,
+                    source_digest=source_digest,
+                    contributor_id=contributor.id,
+                    contributor_name=contributor.full_name,
+                    campus_id=question.contribution.source_campus_id,
+                    campus_code=question.stage6_campus_code,
+                    campus_name=question.contribution.source_campus.name,
+                    difficulty=question.difficulty,
+                    section_id=section_id,
+                    section_title=section_labels[section_id],
+                    section_instructions=section_instructions[section_id],
+                    question_text=question.question_text,
+                    choices=(
+                        question.choice_a,
+                        question.choice_b,
+                        question.choice_c,
+                        question.choice_d,
+                    ),
+                    correct_answer=question.correct_answer,
+                    scenario_id=scenario.id if scenario else None,
+                    scenario_revision=scenario.revision if scenario else None,
+                    scenario_title=scenario.title if scenario else "",
+                    scenario_stimulus=scenario.stimulus if scenario else "",
+                    scenario_member_position=scenario_data[1] if scenario_data else None,
+                )
+
+            for scenario, members in valid_scenario_members:
+                identity_blocks.append(
+                    IdentityBlock(
+                        block_id=f"scenario:{scenario.id}",
+                        vector=tuple(
+                            sum(
+                                question_vectors[member.question_id][position]
+                                for member in members
+                            )
+                            for position in range(len(margins))
+                        ),
+                        members=tuple(
+                            IdentityMember(
+                                source_id=member.question_id,
+                                contributor_id=generation_questions[
+                                    member.question_id
+                                ].contributor_id,
+                                campus=generation_questions[member.question_id].campus_code,
+                                difficulty=generation_questions[
+                                    member.question_id
+                                ].difficulty,
+                                section_id=generation_questions[
+                                    member.question_id
+                                ].section_id,
+                                member_order=member.position,
+                            )
+                            for member in members
+                        ),
+                    )
+                )
+            for question in eligible_questions:
+                if question.id in scenario_question_ids:
+                    continue
+                data = generation_questions[question.id]
+                identity_blocks.append(
+                    IdentityBlock(
+                        block_id=f"question:{question.id}",
+                        vector=question_vectors[question.id],
+                        members=(
+                            IdentityMember(
+                                source_id=question.id,
+                                contributor_id=data.contributor_id,
+                                campus=data.campus_code,
+                                difficulty=data.difficulty,
+                                section_id=data.section_id,
+                            ),
+                        ),
+                    )
+                )
+            roster_boundary = roster.boundary_sha256 if roster else ""
+            fingerprint_payload = {
+                "algorithm_version": GENERATION_ALGORITHM_VERSION,
+                "tenant_id": cycle_course.cycle.tenant_id,
+                "cycle_id": cycle_course.cycle_id,
+                "cycle_course_id": cycle_course.id,
+                "configuration_revision": configuration.revision,
+                "blueprint_revision": blueprint.revision,
+                "roster_boundary": roster_boundary,
+                "final_count": final_count,
+                "campus_quotas": campus_quotas,
+                "difficulty_quotas": difficulty_quotas,
+                "section_quotas": section_quotas,
+                "questions": [
+                    {
+                        "id": item.source_id,
+                        "revision": item.source_revision,
+                        "digest": item.source_digest,
+                        "contributor_id": item.contributor_id,
+                        "campus": item.campus_code,
+                        "difficulty": item.difficulty,
+                        "section_id": item.section_id,
+                        "scenario_id": item.scenario_id,
+                        "scenario_revision": item.scenario_revision,
+                        "scenario_member_position": item.scenario_member_position,
+                        "scenario_title": item.scenario_title,
+                        "scenario_stimulus": item.scenario_stimulus,
+                    }
+                    for item in sorted(
+                        generation_questions.values(), key=lambda row: row.source_id
+                    )
+                ],
+            }
+            problem = GenerationProblem(
+                cycle_course=cycle_course,
+                configuration=configuration,
+                blueprint=blueprint,
+                final_count=final_count,
+                margins=margins,
+                campus_quotas=dict(campus_quotas),
+                difficulty_quotas=dict(difficulty_quotas),
+                section_quotas=dict(section_quotas),
+                section_order=tuple(section_quotas),
+                questions=generation_questions,
+                blocks=tuple(identity_blocks),
+                input_fingerprint=_sha256_json(fingerprint_payload),
+                configuration_revision=configuration.revision,
+                blueprint_revision=blueprint.revision,
+                roster_boundary=roster_boundary,
+                minimum_overlap=solver_result.minimum_overlap,
+            )
+        return problem, report

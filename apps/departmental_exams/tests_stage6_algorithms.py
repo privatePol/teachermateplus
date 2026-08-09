@@ -2,8 +2,14 @@ from django.test import SimpleTestCase
 
 from .generation_algorithms import (
     AllocationError,
+    IdentityBlock,
+    IdentityMember,
     allocate_campuses,
     allocate_difficulties,
+    confidential_hmac_rank,
+    order_selected_blocks,
+    proportional_campus_difficulty_score,
+    solve_identity_aware_two_sets,
     solve_two_set_feasibility,
 )
 
@@ -141,3 +147,301 @@ class Stage6FeasibilityAlgorithmTests(SimpleTestCase):
         )
         self.assertTrue(result.limit_hit)
         self.assertFalse(result.feasible)
+
+
+class Stage6IdentityAwareSelectionTests(SimpleTestCase):
+    secret = "stage6b-test-secret"
+
+    @staticmethod
+    def block(source_id, contributor_id, *, campus="CUBAO", difficulty="EASY", section=0):
+        return IdentityBlock(
+            block_id=f"question:{source_id}",
+            vector=(1, 1, 1, 1),
+            members=(
+                IdentityMember(
+                    source_id=source_id,
+                    contributor_id=contributor_id,
+                    campus=campus,
+                    difficulty=difficulty,
+                    section_id=section,
+                ),
+            ),
+        )
+
+    def solve(self, blocks, *, total=1, overlap=0, max_states=100_000):
+        return solve_identity_aware_two_sets(
+            margins=(total, total, total, total),
+            blocks=blocks,
+            minimum_overlap=overlap,
+            campus_quotas={"CUBAO": total},
+            difficulty_quotas={"EASY": total},
+            secret=self.secret,
+            hmac_context={"input_fingerprint": "a" * 64},
+            max_states=max_states,
+        )
+
+    def test_zero_overlap_and_candidate_iteration_order_independence(self):
+        blocks = [self.block(1, 1), self.block(2, 2), self.block(3, 3)]
+        first = self.solve(blocks)
+        second = self.solve(list(reversed(blocks)))
+        self.assertTrue(first.feasible)
+        self.assertEqual(first.overlap, 0)
+        self.assertEqual(first, second)
+        self.assertTrue(set(first.set_a_block_ids).isdisjoint(first.set_b_block_ids))
+
+    def test_mathematically_required_overlap_is_exact(self):
+        result = self.solve([self.block(1, 1)], overlap=1)
+        self.assertTrue(result.feasible)
+        self.assertEqual(result.set_a_block_ids, ("question:1",))
+        self.assertEqual(result.set_b_block_ids, ("question:1",))
+        self.assertEqual(result.overlap, 1)
+        self.assertEqual(result.squared_contributor_concentration, 4)
+
+    def test_contributor_representation_then_squared_concentration(self):
+        represented = self.solve(
+            [self.block(1, 1), self.block(2, 1), self.block(3, 2)]
+        )
+        self.assertEqual(represented.contributors_represented, 2)
+
+        balanced = self.solve(
+            [
+                self.block(1, 1),
+                self.block(2, 1),
+                self.block(3, 1),
+                self.block(4, 2),
+                self.block(5, 2),
+            ],
+            total=2,
+        )
+        self.assertTrue(balanced.feasible)
+        self.assertEqual(balanced.contributors_represented, 2)
+        self.assertEqual(balanced.squared_contributor_concentration, 8)
+
+    def test_hard_constraints_and_overlap_override_fairness(self):
+        only_one_contributor = self.solve(
+            [self.block(1, 7), self.block(2, 7)]
+        )
+        self.assertTrue(only_one_contributor.feasible)
+        self.assertEqual(only_one_contributor.contributors_represented, 1)
+        self.assertEqual(only_one_contributor.overlap, 0)
+
+    def test_state_limit_returns_no_unproved_incumbent(self):
+        result = self.solve(
+            [self.block(1, 1), self.block(2, 2)],
+            max_states=1,
+        )
+        self.assertTrue(result.limit_hit)
+        self.assertFalse(result.feasible)
+        self.assertEqual(result.set_a_block_ids, ())
+
+    def test_scenario_is_atomic_contiguous_and_members_count_individually(self):
+        scenario = IdentityBlock(
+            block_id="scenario:8",
+            vector=(2, 2, 2, 2),
+            members=(
+                IdentityMember(1, 10, "CUBAO", "EASY", 0, 1),
+                IdentityMember(2, 11, "CUBAO", "EASY", 0, 2),
+            ),
+        )
+        result = self.solve([scenario], total=2, overlap=2)
+        self.assertTrue(result.feasible)
+        self.assertEqual(result.contributors_represented, 2)
+        self.assertEqual(result.squared_contributor_concentration, 8)
+        ordered = order_selected_blocks(
+            blocks=[scenario],
+            selected_block_ids=result.set_a_block_ids,
+            set_code="A",
+            secret=self.secret,
+            hmac_context={"input_fingerprint": "a" * 64},
+        )
+        self.assertEqual([member.source_id for member in ordered], [1, 2])
+
+    def test_proportional_score_is_exact_integer_and_label_symmetric(self):
+        campus = {"CUBAO": 1, "FAIRVIEW": 1}
+        difficulty = {"EASY": 1, "MODERATE": 1}
+        diagonal = {
+            ("CUBAO", "EASY"): 1,
+            ("CUBAO", "MODERATE"): 0,
+            ("FAIRVIEW", "EASY"): 0,
+            ("FAIRVIEW", "MODERATE"): 1,
+        }
+        score = proportional_campus_difficulty_score(
+            total=2,
+            campus_quotas=campus,
+            difficulty_quotas=difficulty,
+            cell_counts=diagonal,
+        )
+        permuted = proportional_campus_difficulty_score(
+            total=2,
+            campus_quotas={"FAIRVIEW": 1, "CUBAO": 1},
+            difficulty_quotas={"MODERATE": 1, "EASY": 1},
+            cell_counts=diagonal,
+        )
+        self.assertEqual(score, 4)
+        self.assertEqual(score, permuted)
+        self.assertIsInstance(score, int)
+
+    def test_hmac_domain_separation_and_repeated_determinism(self):
+        context = {"candidate": 4, "revision": 2}
+        selection = confidential_hmac_rank(
+            secret=self.secret,
+            domain="departmental-exams.stage6b.selection",
+            context=context,
+        )
+        order_a = confidential_hmac_rank(
+            secret=self.secret,
+            domain="departmental-exams.stage6b.order.set-a",
+            context=context,
+        )
+        order_b = confidential_hmac_rank(
+            secret=self.secret,
+            domain="departmental-exams.stage6b.order.set-b",
+            context=context,
+        )
+        self.assertNotEqual(selection, order_a)
+        self.assertNotEqual(order_a, order_b)
+        self.assertEqual(
+            selection,
+            confidential_hmac_rank(
+                secret=self.secret,
+                domain="departmental-exams.stage6b.selection",
+                context=context,
+            ),
+        )
+
+    def test_a_b_swap_preserves_every_higher_objective(self):
+        blocks = [
+            self.block(1, 1),
+            self.block(2, 1),
+            self.block(3, 2),
+            self.block(4, 3),
+        ]
+        result = self.solve(blocks)
+        contributors = {
+            str(block.block_id): block.members[0].contributor_id for block in blocks
+        }
+
+        def symmetric_metrics(set_a, set_b):
+            appearances = {}
+            for block_id in set_a + set_b:
+                contributor = contributors[block_id]
+                appearances[contributor] = appearances.get(contributor, 0) + 1
+            return (
+                len(set(set_a).intersection(set_b)),
+                len(appearances),
+                sum(value * value for value in appearances.values()),
+                tuple(sorted((len(set_a), len(set_b)))),
+            )
+
+        self.assertEqual(
+            symmetric_metrics(result.set_a_block_ids, result.set_b_block_ids),
+            symmetric_metrics(result.set_b_block_ids, result.set_a_block_ids),
+        )
+        self.assertEqual(result, self.solve(list(reversed(blocks))))
+
+    def test_proportional_balance_overrides_better_contributor_representation(self):
+        campuses = ("CUBAO", "FAIRVIEW")
+        difficulties = ("EASY", "MODERATE")
+
+        def member(source, contributor, campus, difficulty, order=1):
+            return IdentityMember(source, contributor, campus, difficulty, 0, order)
+
+        def vector_for(members):
+            return (
+                len(members),
+                *(sum(row.campus == code for row in members) for code in campuses),
+                *(sum(row.difficulty == code for row in members) for code in difficulties),
+                len(members),
+            )
+
+        blocks = []
+        source = 1
+        for campus in campuses:
+            for difficulty in difficulties:
+                for _copy in range(2):
+                    row = member(source, 1, campus, difficulty)
+                    blocks.append(IdentityBlock(f"question:{source}", vector_for((row,)), (row,)))
+                    source += 1
+        diagonal = (
+            member(source, 2, "CUBAO", "EASY", 1),
+            member(source + 1, 3, "CUBAO", "EASY", 2),
+            member(source + 2, 4, "FAIRVIEW", "MODERATE", 3),
+            member(source + 3, 5, "FAIRVIEW", "MODERATE", 4),
+        )
+        source += 4
+        off_diagonal = (
+            member(source, 6, "CUBAO", "MODERATE", 1),
+            member(source + 1, 7, "CUBAO", "MODERATE", 2),
+            member(source + 2, 8, "FAIRVIEW", "EASY", 3),
+            member(source + 3, 9, "FAIRVIEW", "EASY", 4),
+        )
+        blocks.extend(
+            [
+                IdentityBlock("scenario:1", vector_for(diagonal), diagonal),
+                IdentityBlock("scenario:2", vector_for(off_diagonal), off_diagonal),
+            ]
+        )
+        result = solve_identity_aware_two_sets(
+            margins=(4, 2, 2, 2, 2, 4),
+            blocks=blocks,
+            minimum_overlap=0,
+            campus_quotas={"CUBAO": 2, "FAIRVIEW": 2},
+            difficulty_quotas={"EASY": 2, "MODERATE": 2},
+            secret=self.secret,
+            hmac_context={"input_fingerprint": "b" * 64},
+        )
+        self.assertTrue(result.feasible)
+        self.assertEqual(result.proportional_score, 0)
+        self.assertEqual(result.contributors_represented, 1)
+        self.assertTrue(
+            all(block_id.startswith("question:") for block_id in result.set_a_block_ids)
+        )
+        self.assertTrue(
+            all(block_id.startswith("question:") for block_id in result.set_b_block_ids)
+        )
+
+    def test_representative_150_question_pool_proves_exact_50_item_selection(self):
+        campuses = ("CUBAO", "FAIRVIEW", "TAYTAY")
+        difficulties = ("EASY", "MODERATE", "DIFFICULT")
+        source_difficulties = ["EASY"] * 15 + ["MODERATE"] * 25 + ["DIFFICULT"] * 10
+        blocks = []
+        source = 1
+        for contributor, campus in enumerate(campuses, start=1):
+            for difficulty in source_difficulties:
+                vector = (
+                    1,
+                    *(1 if campus == code else 0 for code in campuses),
+                    *(1 if difficulty == code else 0 for code in difficulties),
+                    1,
+                )
+                blocks.append(
+                    IdentityBlock(
+                        f"question:{source}",
+                        vector,
+                        (IdentityMember(source, contributor, campus, difficulty, 0),),
+                    )
+                )
+                source += 1
+        campus_quotas = allocate_campuses(50, campuses)
+        difficulty_quotas = allocate_difficulties(50)
+        result = solve_identity_aware_two_sets(
+            margins=(
+                50,
+                *(campus_quotas[code] for code in campuses),
+                *(difficulty_quotas[code] for code in difficulties),
+                50,
+            ),
+            blocks=blocks,
+            minimum_overlap=0,
+            campus_quotas=campus_quotas,
+            difficulty_quotas=difficulty_quotas,
+            secret=self.secret,
+            hmac_context={"input_fingerprint": "c" * 64},
+            max_states=500_000,
+        )
+        self.assertTrue(result.feasible)
+        self.assertFalse(result.limit_hit)
+        self.assertEqual(len(result.set_a_block_ids), 50)
+        self.assertEqual(len(result.set_b_block_ids), 50)
+        self.assertTrue(set(result.set_a_block_ids).isdisjoint(result.set_b_block_ids))
+        self.assertLess(result.states_explored, 500_000)

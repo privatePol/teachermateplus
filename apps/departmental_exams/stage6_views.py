@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch
@@ -20,12 +22,18 @@ from .generation_readiness import (
     Stage6ReadinessService,
     eligible_submitted_question_pool,
 )
+from .generation_services import (
+    ExamGenerationService,
+    GenerationConflict,
+    GenerationLimitExceeded,
+)
 from .models import (
     CourseExamConfiguration,
     CycleCourse,
     ExamBlueprint,
     ExamScenario,
     ExamScenarioMember,
+    GeneratedExamSet,
 )
 from .services import DepartmentalExamAuthorizationService
 from .stage6_forms import (
@@ -35,6 +43,8 @@ from .stage6_forms import (
     QuestionPlacementForm,
     ScenarioDeleteForm,
     ScenarioForm,
+    GenerationRequestForm,
+    RegenerationRequestForm,
 )
 
 
@@ -372,3 +382,135 @@ def scenario_delete_view(request, scenario_id):
         return _error(request, status=400, message=" ".join(exc.messages))
     messages.success(request, "Scenario deleted.")
     return redirect("departmental_exams:blueprint_review", cycle_course_id=course_id)
+
+
+def _generation_form_initial(*, problem, current):
+    return {
+        "expected_current_revision": current.revision_number if current else 0,
+        "input_fingerprint": problem.input_fingerprint if problem else "",
+        "request_token": secrets.token_urlsafe(32),
+    }
+
+
+@portal_required("ADMIN")
+@require_GET
+def generation_workspace_view(request, cycle_course_id):
+    tenant_id = _tenant_id(request)
+    course = _course(tenant_id, cycle_course_id)
+    DepartmentalExamAuthorizationService.require_course_responsibility(
+        user=request.user,
+        cycle_course=course,
+    )
+    problem, readiness = Stage6ReadinessService.build_problem(cycle_course=course)
+    current = ExamGenerationService.current_for_course(cycle_course=course)
+    initial = _generation_form_initial(problem=problem, current=current)
+    return render(
+        request,
+        "departmental_exams/admin/generation_workspace.html",
+        {
+            "cycle_course": course,
+            "readiness": readiness,
+            "problem": problem,
+            "current_revision": current,
+            "generation_form": GenerationRequestForm(initial=initial),
+            "regeneration_form": RegenerationRequestForm(initial=initial),
+        },
+    )
+
+
+def _generation_post(request, *, cycle_course_id, regeneration):
+    tenant_id = _tenant_id(request)
+    course = _course(tenant_id, cycle_course_id)
+    DepartmentalExamAuthorizationService.require_course_responsibility(
+        user=request.user,
+        cycle_course=course,
+    )
+    form_class = RegenerationRequestForm if regeneration else GenerationRequestForm
+    form = form_class(request.POST)
+    if not form.is_valid():
+        return _error(
+            request,
+            status=400,
+            message="The generation request is malformed. Refresh the workspace and try again.",
+        )
+    try:
+        outcome = ExamGenerationService.generate(
+            cycle_course_id=course.id,
+            tenant_id=tenant_id,
+            actor=request.user,
+            expected_current_revision=form.cleaned_data["expected_current_revision"],
+            expected_input_fingerprint=form.cleaned_data["input_fingerprint"],
+            request_token=form.cleaned_data["request_token"],
+            regeneration=regeneration,
+            regeneration_reason=form.cleaned_data.get("reason", ""),
+            request=request,
+        )
+    except (GenerationConflict, GenerationLimitExceeded) as exc:
+        return _error(request, status=409, message=" ".join(exc.messages))
+    except ValidationError as exc:
+        return _error(request, status=400, message=" ".join(exc.messages))
+    messages.success(
+        request,
+        (
+            "The existing generation revision was reused for this request."
+            if outcome.reused
+            else "Set A and Set B were generated atomically."
+        ),
+    )
+    return redirect(
+        "departmental_exams:generated_revision_detail",
+        revision_id=outcome.revision.id,
+    )
+
+
+@portal_required("ADMIN")
+@require_POST
+def generate_exam_view(request, cycle_course_id):
+    return _generation_post(
+        request,
+        cycle_course_id=cycle_course_id,
+        regeneration=False,
+    )
+
+
+@portal_required("ADMIN")
+@require_POST
+def regenerate_exam_view(request, cycle_course_id):
+    return _generation_post(
+        request,
+        cycle_course_id=cycle_course_id,
+        regeneration=True,
+    )
+
+
+@portal_required("ADMIN")
+@require_GET
+def generated_revision_detail_view(request, revision_id):
+    tenant_id = _tenant_id(request)
+    revision = ExamGenerationService.revision_for_tenant(
+        revision_id=revision_id,
+        tenant_id=tenant_id,
+    )
+    DepartmentalExamAuthorizationService.require_course_responsibility(
+        user=request.user,
+        cycle_course=revision.cycle_course,
+    )
+    generated_sets = list(
+        GeneratedExamSet.objects.filter(generation_revision=revision)
+        .prefetch_related("items")
+        .order_by("set_code")
+    )
+    for generated_set in generated_sets:
+        generated_set.ordered_items = sorted(
+            generated_set.items.all(),
+            key=lambda item: item.position,
+        )
+    return render(
+        request,
+        "departmental_exams/admin/generated_revision_detail.html",
+        {
+            "revision": revision,
+            "cycle_course": revision.cycle_course,
+            "generated_sets": generated_sets,
+        },
+    )

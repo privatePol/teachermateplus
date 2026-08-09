@@ -856,3 +856,304 @@ class ExamScenarioMember(TimeStampedModel):
                 raise ValidationError("Scenario questions must belong to the same course examination.")
             if self.question.contribution.status != FacultyContribution.Status.SUBMITTED:
                 raise ValidationError("Only Submitted questions may belong to scenarios.")
+
+
+class ExamGenerationRevision(TimeStampedModel):
+    _IMMUTABLE_FIELDS = (
+        "cycle_course_id",
+        "revision_number",
+        "source_input_fingerprint",
+        "algorithm_version",
+        "generated_at",
+        "generated_by_id",
+        "configuration_revision_snapshot",
+        "blueprint_revision_snapshot",
+        "roster_boundary_snapshot",
+        "final_item_count_snapshot",
+        "request_token_digest",
+        "supersedes_id",
+        "regeneration_reason",
+        "minimum_overlap",
+        "proportional_score",
+        "contributors_represented",
+        "squared_contributor_concentration",
+    )
+    class Status(models.TextChoices):
+        GENERATED = "GENERATED", "Generated"
+        SUPERSEDED = "SUPERSEDED", "Superseded"
+
+    cycle_course = models.ForeignKey(
+        CycleCourse,
+        on_delete=models.PROTECT,
+        related_name="generation_revisions",
+    )
+    revision_number = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.GENERATED,
+    )
+    # MariaDB permits multiple NULL values in a composite unique constraint.
+    # Current rows use 1; superseded rows use NULL.
+    current_marker = models.PositiveSmallIntegerField(null=True, blank=True, default=1)
+    source_input_fingerprint = models.CharField(max_length=64)
+    algorithm_version = models.CharField(max_length=64)
+    generated_at = models.DateTimeField(default=timezone.now)
+    generated_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="generated_departmental_exams",
+    )
+    configuration_revision_snapshot = models.PositiveIntegerField()
+    blueprint_revision_snapshot = models.PositiveIntegerField()
+    roster_boundary_snapshot = models.CharField(max_length=64)
+    final_item_count_snapshot = models.PositiveSmallIntegerField()
+    request_token_digest = models.CharField(max_length=64)
+    supersedes = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        related_name="superseded_by",
+        null=True,
+        blank=True,
+    )
+    regeneration_reason = models.TextField(max_length=500, blank=True)
+    minimum_overlap = models.PositiveSmallIntegerField()
+    proportional_score = models.PositiveBigIntegerField()
+    contributors_represented = models.PositiveSmallIntegerField()
+    squared_contributor_concentration = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = "departmental_exam_generation_revisions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cycle_course", "revision_number"],
+                name="uq_de_gen_course_revision",
+            ),
+            models.UniqueConstraint(
+                fields=["cycle_course", "current_marker"],
+                name="uq_de_gen_course_current",
+            ),
+            models.UniqueConstraint(
+                fields=["cycle_course", "request_token_digest"],
+                name="uq_de_gen_course_token",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    revision_number__gte=1,
+                    configuration_revision_snapshot__gte=1,
+                    blueprint_revision_snapshot__gte=1,
+                    final_item_count_snapshot__gte=1,
+                ),
+                name="ck_de_gen_positive_values",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status="GENERATED", current_marker=1)
+                    | models.Q(status="SUPERSEDED", current_marker__isnull=True)
+                ),
+                name="ck_de_gen_current_status",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["cycle_course", "-revision_number"],
+                name="idx_de_gen_course_revision",
+            ),
+            models.Index(
+                fields=["source_input_fingerprint"],
+                name="idx_de_gen_fingerprint",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "status", "current_marker", *self._IMMUTABLE_FIELDS
+            ).first()
+            if previous is not None:
+                if any(
+                    previous[field] != getattr(self, field)
+                    for field in self._IMMUTABLE_FIELDS
+                ):
+                    raise ValidationError("Generation revision snapshots are immutable.")
+                transition = (
+                    previous["status"],
+                    previous["current_marker"],
+                    self.status,
+                    self.current_marker,
+                )
+                if transition not in {
+                    (self.Status.GENERATED, 1, self.Status.GENERATED, 1),
+                    (self.Status.GENERATED, 1, self.Status.SUPERSEDED, None),
+                    (self.Status.SUPERSEDED, None, self.Status.SUPERSEDED, None),
+                }:
+                    raise ValidationError("Generation revision lifecycle transition is invalid.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Generation revisions are immutable historical records.")
+
+
+class GeneratedExamSet(TimeStampedModel):
+    class SetCode(models.TextChoices):
+        A = "A", "Set A"
+        B = "B", "Set B"
+
+    generation_revision = models.ForeignKey(
+        ExamGenerationRevision,
+        on_delete=models.PROTECT,
+        related_name="generated_sets",
+    )
+    set_code = models.CharField(max_length=1, choices=SetCode.choices)
+    campus_quotas_snapshot = models.JSONField(default=dict)
+    difficulty_quotas_snapshot = models.JSONField(default=dict)
+    section_quotas_snapshot = models.JSONField(default=dict)
+    item_count = models.PositiveSmallIntegerField()
+
+    class Meta:
+        db_table = "departmental_exam_generated_sets"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["generation_revision", "set_code"],
+                name="uq_de_gen_set_code",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(set_code__in=["A", "B"], item_count__gte=1),
+                name="ck_de_gen_set_values",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["generation_revision", "set_code"],
+                name="idx_de_gen_set_code",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Generated examination set snapshots are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Generated examination set snapshots are immutable.")
+
+
+class GeneratedExamItem(TimeStampedModel):
+    generated_set = models.ForeignKey(
+        GeneratedExamSet,
+        on_delete=models.PROTECT,
+        related_name="items",
+    )
+    position = models.PositiveSmallIntegerField()
+    source_question = models.ForeignKey(
+        Question,
+        on_delete=models.PROTECT,
+        related_name="generated_exam_items",
+    )
+    source_question_revision = models.PositiveIntegerField()
+    source_question_digest = models.CharField(max_length=64)
+    source_contributor = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="generated_exam_item_snapshots",
+    )
+    source_contributor_id_snapshot = models.PositiveBigIntegerField()
+    source_contributor_name_snapshot = models.CharField(max_length=255)
+    source_campus = models.ForeignKey(
+        "tenants.Campus",
+        on_delete=models.PROTECT,
+        related_name="generated_exam_item_snapshots",
+    )
+    campus_code_snapshot = models.CharField(max_length=30)
+    campus_name_snapshot = models.CharField(max_length=120)
+    difficulty_snapshot = models.CharField(max_length=10, choices=Question.Difficulty.choices)
+    source_section = models.ForeignKey(
+        ExamSection,
+        on_delete=models.PROTECT,
+        related_name="generated_exam_item_snapshots",
+        null=True,
+        blank=True,
+    )
+    section_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    section_title_snapshot = models.CharField(max_length=200)
+    section_instructions_snapshot = models.TextField(max_length=2000, blank=True)
+    question_text_snapshot = models.TextField(max_length=5000)
+    choices_snapshot = models.JSONField(default=list)
+    correct_answer_snapshot = models.CharField(
+        max_length=1,
+        choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")],
+    )
+    source_scenario = models.ForeignKey(
+        ExamScenario,
+        on_delete=models.PROTECT,
+        related_name="generated_exam_item_snapshots",
+        null=True,
+        blank=True,
+    )
+    scenario_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    scenario_revision_snapshot = models.PositiveIntegerField(null=True, blank=True)
+    scenario_title_snapshot = models.CharField(max_length=200, blank=True)
+    scenario_stimulus_snapshot = models.TextField(max_length=5000, blank=True)
+    scenario_member_position_snapshot = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        db_table = "departmental_exam_generated_items"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["generated_set", "position"],
+                name="uq_de_gen_item_position",
+            ),
+            models.UniqueConstraint(
+                fields=["generated_set", "source_question"],
+                name="uq_de_gen_item_source",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    position__gte=1,
+                    source_question_revision__gte=1,
+                    correct_answer_snapshot__in=["A", "B", "C", "D"],
+                    difficulty_snapshot__in=["EASY", "MODERATE", "DIFFICULT"],
+                ),
+                name="ck_de_gen_item_values",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        source_scenario__isnull=True,
+                        scenario_id_snapshot__isnull=True,
+                        scenario_revision_snapshot__isnull=True,
+                        scenario_member_position_snapshot__isnull=True,
+                        scenario_title_snapshot="",
+                        scenario_stimulus_snapshot="",
+                    )
+                    | models.Q(
+                        source_scenario__isnull=False,
+                        scenario_id_snapshot__isnull=False,
+                        scenario_revision_snapshot__gte=1,
+                        scenario_member_position_snapshot__gte=1,
+                    )
+                ),
+                name="ck_de_gen_item_scenario",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["generated_set", "position"],
+                name="idx_de_gen_item_position",
+            ),
+            models.Index(
+                fields=["source_question"],
+                name="idx_de_gen_item_source",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Generated examination item snapshots are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Generated examination item snapshots are immutable.")

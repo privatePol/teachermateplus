@@ -102,4 +102,8 @@ urlpatterns = [
     path("admin-portal/departmental-exams/questions/<int:question_id>/placement/", stage6_views.question_placement_view, name="question_placement"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/scenarios/save/", stage6_views.scenario_save_view, name="scenario_save"),
     path("admin-portal/departmental-exams/scenarios/<int:scenario_id>/delete/", stage6_views.scenario_delete_view, name="scenario_delete"),
+    path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/generation/", stage6_views.generation_workspace_view, name="generation_workspace"),
+    path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/generation/generate/", stage6_views.generate_exam_view, name="generate_exam"),
+    path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/generation/regenerate/", stage6_views.regenerate_exam_view, name="regenerate_exam"),
+    path("admin-portal/departmental-exams/generations/<int:revision_id>/", stage6_views.generated_revision_detail_view, name="generated_revision_detail"),
 ]

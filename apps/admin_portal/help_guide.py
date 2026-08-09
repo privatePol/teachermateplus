@@ -23,9 +23,10 @@ ADMIN_HELP_SECTIONS = [
                     {"name": "Resolve Blocked Draft", "does": "Records an immutable reason, resolver, time, contribution revision, roster revision, blocked episode, and source-evidence snapshot for one current Blocked Draft.", "when": "Use it only after explicit operational review of a contributor who is no longer currently required.", "avoid": "Resolution does not submit, delete, transfer, or make Draft questions eligible, and a later Active episode requires Final Submission again.", "result": "The exact current blocked episode can satisfy contribution-close readiness while its evidence remains current.", "editable": "Resolution evidence is immutable; a later blocked episode receives a separate event."},
                     {"name": "Stage 6 Blueprint", "does": "Configures No Sections or exact ordered sections and displays aggregate campus, difficulty, section, contributor, scenario, and two-set feasibility readiness.", "when": "Use it after contribution is Closed.", "avoid": "Configurator pages never display Submitted question content or confidential scenario text.", "result": "The course is READY only when every hard margin and atomic scenario constraint is feasible.", "editable": "Structure is versioned and auditable before the later generation lock."},
                     {"name": "Confidential Review", "does": "Lets the exact assigned eligible reviewer classify Submitted questions into sections and create textual ordered scenarios.", "when": "Use it after the Configurator saves the Stage 6 blueprint.", "avoid": "Do not copy question, answer, scenario, or potential-set content into broad monitoring or audit metadata.", "result": "Placements and scenarios remain separate overlays; Submitted questions are unchanged.", "editable": "Reviewer overlay changes are audited during the approved pre-lock lifecycle."},
+                    {"name": "Generate Sets", "does": "Atomically creates confidential immutable Set A and Set B snapshots from the exact READY input fingerprint and current generation revision.", "when": "Use it only as the assigned eligible reviewer after aggregate readiness is READY.", "avoid": "Do not navigate away while the indeterminate generation message is active, and do not copy generated question or answer content into broad records.", "result": "Both sets persist together with exact quotas, minimum overlap, proportional balance, and soft contributor balancing; stale requests fail with a conflict and duplicate tokens reuse the existing result.", "editable": "Regenerate requires a confidential reason and supersedes rather than rewrites the prior revision. Approval and lock are not yet available."},
                 ],
                 "avoid": "Do not request or copy confidential question content through administrative monitoring.",
-                "next_step": "After aggregate readiness is READY, proceed only through the separately authorized Stage 6B/6C generator and approval gates. Generation progress, idempotency, locking, and persisted Set A/Set B remain intentionally deferred.",
+                "next_step": "After aggregate readiness is READY, the assigned reviewer may use Generate Sets. Review the immutable Set A and Set B revision; Approve/Lock remains a separately gated Stage 6C workflow.",
             }
         ],
     },
@@ -191,7 +192,7 @@ ADMIN_HELP_SECTIONS = [
     {
         "code": "departmental-exam-builder",
         "title": "Departmental Exam Builder",
-        "summary": "Create examination cycles, manage faculty contribution, and prepare the Stage 6A readiness blueprint without generating Set A or Set B.",
+        "summary": "Create examination cycles, manage faculty contribution, prepare Stage 6 readiness, and generate confidential immutable Set A and Set B revisions.",
         "topics": [
             {
                 "code": "departmental-exam-course-control",
@@ -215,6 +216,7 @@ ADMIN_HELP_SECTIONS = [
                     "On Course Examination Configuration, authorized exact-responsibility users may inherit each cycle default or set an intentional course override, then record coverage and optional instructions. Effective values show DEFAULT, OVERRIDE, or NOT CONFIGURED. Removing a deadline override restores the cycle deadline, or NOT CONFIGURED when the cycle has none.",
                     "Use the contribution Close POST only after the explicit roster is current, every currently required Active contributor is Submitted, and every Blocked Draft has current immutable resolution evidence. Close preserves all Submitted questions and prevents later normal Stage 5 mutation.",
                     "After contribution is Closed, use Stage 6 Blueprint for No Sections or exact ordered section quotas. The assigned reviewer uses Confidential Review for question placements and textual atomic scenarios. Aggregate readiness applies fixed campus and 30/50/20 difficulty Hamilton margins plus exact section margins without persisting selected questions.",
+                    "When aggregate readiness is READY, the assigned reviewer opens Generate Sets. Generate persists Set A and Set B atomically; Regenerate requires a reason and preserves the superseded revision. The busy indicator is indeterminate and browser-side only, while server locks, idempotency, and stale-input checks remain authoritative.",
                 ],
                 "check_first": [
                     "Confirm the selected tenant and the responsible department campus.",
@@ -240,7 +242,7 @@ ADMIN_HELP_SECTIONS = [
                     },
                 ],
                 "avoid": "Do not confuse Included with a separate action. New cycle courses start Included; Restore is the only reverse of Exempt.",
-                "next_step": "Review aggregate Stage 6A readiness. Actual Generate/Regenerate, Set A/Set B persistence, preview, approval/lock, PDFs, Pair Codes, and QR remain later gated stages.",
+                "next_step": "Review the generated immutable Set A and Set B revision. Approval/lock, PDFs, Pair Codes, and QR remain later gated stages.",
             },
         ],
     },
