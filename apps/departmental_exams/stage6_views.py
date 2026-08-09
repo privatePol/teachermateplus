@@ -18,6 +18,7 @@ from .blueprint_services import (
     ScenarioMutationService,
     Stage6Conflict,
 )
+from .approval_services import ApprovalConflict, ExamApprovalLockService
 from .generation_readiness import (
     Stage6ReadinessService,
     eligible_submitted_question_pool,
@@ -34,6 +35,7 @@ from .models import (
     ExamScenario,
     ExamScenarioMember,
     GeneratedExamSet,
+    ExamGenerationRevision,
 )
 from .services import DepartmentalExamAuthorizationService
 from .stage6_forms import (
@@ -45,6 +47,7 @@ from .stage6_forms import (
     ScenarioForm,
     GenerationRequestForm,
     RegenerationRequestForm,
+    ApproveAndLockForm,
 )
 
 
@@ -88,6 +91,11 @@ def blueprint_configuration_view(request, cycle_course_id):
         user=request.user, cycle_course=course
     )
     blueprint = getattr(course, "exam_blueprint", None)
+    current_revision = ExamGenerationService.current_for_course(cycle_course=course)
+    is_locked = bool(
+        current_revision
+        and current_revision.status == ExamGenerationRevision.Status.LOCKED
+    )
     existing_sections = list(
         blueprint.sections.order_by("display_order", "id") if blueprint else ()
     )
@@ -162,6 +170,7 @@ def blueprint_configuration_view(request, cycle_course_id):
             "form": form,
             "section_formset": section_formset,
             "readiness": readiness,
+            "locked_revision": current_revision if is_locked else None,
         },
         status=status,
     )
@@ -177,12 +186,18 @@ def blueprint_review_view(request, cycle_course_id):
     )
     blueprint = getattr(course, "exam_blueprint", None)
     configuration = getattr(course, "configuration", None)
+    current_revision = ExamGenerationService.current_for_course(cycle_course=course)
+    is_locked = bool(
+        current_revision
+        and current_revision.status == ExamGenerationRevision.Status.LOCKED
+    )
     can_edit = bool(
         blueprint
         and configuration
         and configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED
         and course.cycle.status == course.cycle.Status.OPEN
         and course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+        and not is_locked
     )
     questions = []
     scenarios = []
@@ -255,6 +270,7 @@ def blueprint_review_view(request, cycle_course_id):
                 initial={"expected_revision": 0},
             ) if blueprint else None,
             "readiness": readiness,
+            "locked_revision": current_revision if is_locked else None,
         },
     )
 
@@ -403,6 +419,9 @@ def generation_workspace_view(request, cycle_course_id):
     )
     problem, readiness = Stage6ReadinessService.build_problem(cycle_course=course)
     current = ExamGenerationService.current_for_course(cycle_course=course)
+    is_locked = bool(
+        current and current.status == ExamGenerationRevision.Status.LOCKED
+    )
     initial = _generation_form_initial(problem=problem, current=current)
     return render(
         request,
@@ -414,6 +433,7 @@ def generation_workspace_view(request, cycle_course_id):
             "current_revision": current,
             "generation_form": GenerationRequestForm(initial=initial),
             "regeneration_form": RegenerationRequestForm(initial=initial),
+            "is_locked": is_locked,
         },
     )
 
@@ -505,6 +525,16 @@ def generated_revision_detail_view(request, revision_id):
             generated_set.items.all(),
             key=lambda item: item.position,
         )
+    history = list(
+        ExamGenerationRevision.objects.filter(cycle_course=revision.cycle_course)
+        .select_related("generated_by", "locked_by", "supersedes")
+        .order_by("-revision_number")
+    )
+    is_current_generated = bool(
+        revision.current_marker == 1
+        and revision.status == ExamGenerationRevision.Status.GENERATED
+        and revision.cycle_course.cycle.status == revision.cycle_course.cycle.Status.OPEN
+    )
     return render(
         request,
         "departmental_exams/admin/generated_revision_detail.html",
@@ -512,5 +542,57 @@ def generated_revision_detail_view(request, revision_id):
             "revision": revision,
             "cycle_course": revision.cycle_course,
             "generated_sets": generated_sets,
+            "revision_history": history,
+            "approve_form": (
+                ApproveAndLockForm(
+                    initial={
+                        "expected_revision_number": revision.revision_number,
+                        "expected_source_input_fingerprint": revision.source_input_fingerprint,
+                    }
+                )
+                if is_current_generated
+                else None
+            ),
         },
+    )
+
+
+@portal_required("ADMIN")
+@require_POST
+def approve_and_lock_view(request, revision_id):
+    form = ApproveAndLockForm(request.POST)
+    if not form.is_valid():
+        return _error(
+            request,
+            status=400,
+            message="Every approval acknowledgement is required.",
+        )
+    try:
+        outcome = ExamApprovalLockService.approve_and_lock(
+            revision_id=revision_id,
+            tenant_id=_tenant_id(request),
+            actor=request.user,
+            expected_revision_number=form.cleaned_data["expected_revision_number"],
+            expected_source_input_fingerprint=form.cleaned_data[
+                "expected_source_input_fingerprint"
+            ],
+            request=request,
+        )
+    except (Http404, PermissionDenied):
+        raise
+    except ApprovalConflict as exc:
+        return _error(request, status=409, message=" ".join(exc.messages))
+    except ValidationError as exc:
+        return _error(request, status=400, message=" ".join(exc.messages))
+    messages.success(
+        request,
+        (
+            "The already locked final examination was reused."
+            if outcome.reused
+            else "The final examination was approved and permanently locked."
+        ),
+    )
+    return redirect(
+        "departmental_exams:generated_revision_detail",
+        revision_id=outcome.revision.id,
     )

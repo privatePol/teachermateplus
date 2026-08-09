@@ -3,28 +3,29 @@
 {% include "departmental_exams/admin/_stage41_styles.html" %}
 <header class="de-exam-hero">
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
-    <div><span class="badge text-bg-warning text-dark mb-2">CONFIDENTIAL GENERATED OUTPUT</span><h1>Generation revision #{{ revision.revision_number }}</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div>
-    <div class="text-end"><span class="badge {% if revision.status == 'GENERATED' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ revision.get_status_display }}</span><div class="small mt-2">{{ revision.generated_at|date:"M j, Y g:i A" }}</div></div>
+    <div><span class="badge {% if revision.status == 'LOCKED' %}text-bg-dark{% else %}text-bg-warning text-dark{% endif %} mb-2">{% if revision.status == 'LOCKED' %}LOCKED FINAL EXAMINATION{% else %}CONFIDENTIAL GENERATED OUTPUT{% endif %}</span><h1>Generation revision #{{ revision.revision_number }}</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div>
+    <div class="text-end"><span class="badge {% if revision.status == 'LOCKED' %}text-bg-dark{% elif revision.status == 'GENERATED' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ revision.get_status_display }}</span><div class="small mt-2">Generated {{ revision.generated_at|date:"M j, Y g:i A" }} by {{ revision.generated_by.full_name }}</div>{% if revision.status == 'LOCKED' %}<div class="small mt-1">Approved &amp; Locked {{ revision.locked_at|date:"M j, Y g:i A" }} by {{ revision.locked_by.full_name }}</div>{% endif %}</div>
   </div>
 </header>
 
+{% if revision.status == 'LOCKED' %}<div class="de-locked-panel mb-3" role="status"><span class="badge text-bg-light text-dark mb-2">LOCKED</span><h2 class="h5">This is the permanent final examination.</h2><p class="mb-0">Set A, Set B, their ordering, correct answers, sections, and scenario snapshots cannot be changed or regenerated. This page renders only the approved snapshots.</p></div>{% endif %}
+
 <nav class="de-generation-set-nav d-flex flex-wrap gap-2 mb-3" aria-label="Generated set navigation">
   {% for generated_set in generated_sets %}<a class="btn {% if generated_set.set_code == 'A' %}btn-success{% else %}btn-warning{% endif %}" href="#set-{{ generated_set.set_code|lower }}">Set {{ generated_set.set_code }}</a>{% endfor %}
-  <a class="btn btn-outline-secondary ms-md-auto" href="{% url 'departmental_exams:generation_workspace' cycle_course.id %}">Generation workspace</a>
+  {% if revision.status == 'GENERATED' and revision.current_marker == 1 %}<a class="btn btn-outline-warning ms-md-auto" data-approval-conflict href="{% url 'departmental_exams:generation_workspace' cycle_course.id %}#generation-actions">Regenerate</a>{% else %}<a class="btn btn-outline-secondary ms-md-auto" href="{% url 'departmental_exams:assigned_course_examinations' %}">Assigned examinations</a>{% endif %}
 </nav>
 
 <div class="row g-3 mb-3">
-  <div class="col-sm-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Items per set</span><strong>{{ revision.final_item_count_snapshot }}</strong></div></div>
-  <div class="col-sm-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Minimum overlap</span><strong>{{ revision.minimum_overlap }}</strong></div></div>
-  <div class="col-sm-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Contributors represented</span><strong>{{ revision.contributors_represented }}</strong></div></div>
-  <div class="col-sm-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Algorithm</span><strong class="fs-6">{{ revision.algorithm_version }}</strong></div></div>
+  <div class="col-sm-6 col-lg-4"><div class="de-generation-metric"><span class="small text-muted">Items per set</span><strong>{{ revision.final_item_count_snapshot }}</strong></div></div>
+  <div class="col-sm-6 col-lg-4"><div class="de-generation-metric"><span class="small text-muted">Exact overlap</span><strong>{{ revision.minimum_overlap }}</strong></div></div>
+  <div class="col-sm-6 col-lg-4"><div class="de-generation-metric"><span class="small text-muted">Algorithm</span><strong class="fs-6">{{ revision.algorithm_version }}</strong></div></div>
 </div>
 
 <div class="alert alert-warning"><strong>Confidential:</strong> This page includes immutable question, choice, correct-answer, and scenario snapshots. Do not copy content into general monitoring, logs, or audit notes.</div>
 
 {% for generated_set in generated_sets %}
 <section id="set-{{ generated_set.set_code|lower }}" class="card de-exam-card mb-4">
-  <div class="card-header bg-white border-0 p-4 pb-0 d-flex flex-wrap justify-content-between align-items-center gap-2"><div><span class="badge {% if generated_set.set_code == 'A' %}text-bg-success{% else %}text-bg-warning{% endif %} mb-2">SET {{ generated_set.set_code }}</span><h2 class="h4 mb-0">Generated questionnaire</h2></div><span class="text-muted">{{ generated_set.item_count }} items</span></div>
+  <div class="card-header bg-white border-0 p-4 pb-0 d-flex flex-wrap justify-content-between align-items-center gap-2"><div><span class="badge {% if generated_set.set_code == 'A' %}text-bg-success{% else %}text-bg-warning{% endif %} mb-2">SET {{ generated_set.set_code }}</span><h2 class="h4 mb-0">Final snapshot questionnaire</h2></div><span class="text-muted">{{ generated_set.item_count }} items</span></div>
   <div class="card-body p-4">
     {% for item in generated_set.ordered_items %}
       {% ifchanged item.section_id_snapshot %}<div class="de-generation-section rounded p-3 mb-3 mt-2"><h3 class="h5 mb-1">{{ item.section_title_snapshot }}</h3>{% if item.section_instructions_snapshot %}<p class="text-muted mb-0">{{ item.section_instructions_snapshot }}</p>{% endif %}</div>{% endifchanged %}
@@ -38,5 +39,55 @@
     {% empty %}<div class="de-empty"><h3 class="h5">No generated items</h3><p class="text-muted mb-0">This revision is incomplete and must not be used.</p></div>{% endfor %}
   </div>
 </section>
-{% empty %}<div class="card de-exam-card"><div class="de-empty"><h2 class="h5">No generated sets</h2><p class="text-muted mb-0">This revision has no output.</p></div></div>{% endfor %}
+{% empty %}<div class="card de-exam-card mb-3"><div class="de-empty"><h2 class="h5">No generated sets</h2><p class="text-muted mb-0">This revision has no output.</p></div></div>{% endfor %}
+
+{% if approve_form %}
+<section class="card de-exam-card mb-4" id="approve-lock">
+  <div class="card-body p-4">
+    <div class="alert alert-danger"><h2 class="h5">Approve &amp; Lock is irreversible</h2><p class="mb-0">Approval and final lock are one atomic action. There is no unlock, unapprove, or replacement revision after success.</p></div>
+    <form method="post" action="{% url 'departmental_exams:approve_and_lock' revision.id %}" data-approve-lock-form aria-busy="false">
+      {% csrf_token %}{{ approve_form.expected_revision_number }}{{ approve_form.expected_source_input_fingerprint }}
+      <fieldset class="de-approval-checklist mb-3"><legend class="h6">Required approval checklist</legend>{% for field in approve_form.visible_fields %}<div class="form-check de-approval-check">{{ field }}<label class="form-check-label fw-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field.errors }}</div>{% endfor %}</fieldset>
+      <div class="de-generation-busy mb-3" data-approval-busy><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Approving and locking the final examination...</span></div>
+      <button class="btn btn-danger btn-lg" type="submit" data-approve-lock-submit><i class="bi bi-lock-fill me-1" aria-hidden="true"></i>Approve &amp; Lock</button>
+    </form>
+  </div>
+</section>
+{% endif %}
+
+<section class="card de-exam-card mb-3">
+  <div class="card-body p-4"><h2 class="h5">Confidential revision history</h2><p class="text-muted">Newest first. Regeneration reasons remain visible only to the currently authorized reviewer on this confidential page.</p><div class="row g-3">
+    {% for item in revision_history %}<div class="col-12"><article class="card de-history-card{% if item.current_marker == 1 %} is-current{% endif %}{% if item.status == 'LOCKED' %} is-locked{% endif %}"><div class="card-body d-flex flex-wrap justify-content-between gap-3"><div><div class="d-flex flex-wrap align-items-center gap-2"><h3 class="h6 mb-0">Revision #{{ item.revision_number }}</h3><span class="badge {% if item.status == 'LOCKED' %}text-bg-dark{% elif item.status == 'GENERATED' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ item.get_status_display }}</span>{% if item.current_marker == 1 %}<span class="badge text-bg-light border text-dark">Current / Final</span>{% endif %}</div><div class="small text-muted mt-2">Generated {{ item.generated_at|date:"M j, Y g:i A" }} by {{ item.generated_by.full_name }}{% if item.supersedes_id %} &middot; Supersedes revision #{{ item.supersedes.revision_number }}{% endif %}</div>{% if item.regeneration_reason %}<p class="mb-0 mt-2"><strong>Regeneration reason:</strong> {{ item.regeneration_reason }}</p>{% endif %}</div>{% if item.status == 'LOCKED' %}<div class="small text-end"><strong>Approved &amp; Locked</strong><br>{{ item.locked_at|date:"M j, Y g:i A" }}<br>{{ item.locked_by.full_name }}</div>{% endif %}</div></article></div>{% endfor %}
+  </div></div>
+</section>
+
+{% if approve_form %}<script>
+(function () {
+  const form = document.querySelector('[data-approve-lock-form]');
+  if (!form) return;
+  const submitButton = form.querySelector('[data-approve-lock-submit]');
+  const conflictingControls = document.querySelectorAll('[data-approval-conflict]');
+  function resetApprovalState() {
+    form.dataset.submitted = '';
+    form.setAttribute('aria-busy', 'false');
+    submitButton.disabled = false;
+    conflictingControls.forEach(function (control) { control.classList.remove('de-generation-control-disabled'); control.removeAttribute('aria-disabled'); control.removeAttribute('tabindex'); });
+  }
+  conflictingControls.forEach(function (control) {
+    control.addEventListener('click', function (event) {
+      if (form.dataset.submitted === 'true') { event.preventDefault(); event.stopImmediatePropagation(); }
+    });
+  });
+  form.addEventListener('submit', function (event) {
+    if (form.dataset.submitted === 'true') { event.preventDefault(); return; }
+    if (!window.confirm('Approve and permanently lock this final examination? This action cannot be undone.')) { event.preventDefault(); return; }
+    form.dataset.submitted = 'true';
+    form.setAttribute('aria-busy', 'true');
+    submitButton.disabled = true;
+    conflictingControls.forEach(function (control) { control.classList.add('de-generation-control-disabled'); control.setAttribute('aria-disabled', 'true'); control.setAttribute('tabindex', '-1'); });
+  });
+  window.addEventListener('pageshow', resetApprovalState);
+  window.addEventListener('load', resetApprovalState);
+})();
+</script>{% endif %}
 {% endblock %}

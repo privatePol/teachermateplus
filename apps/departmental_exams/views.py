@@ -36,6 +36,7 @@ from .models import (
     CycleCourseOffering,
     ExaminationCycle,
     FacultyContribution,
+    ExamGenerationRevision,
     Question,
 )
 from .services import (
@@ -412,7 +413,7 @@ def assigned_course_examinations_view(request):
             "reviewer",
             "configuration",
         )
-        .prefetch_related("offering_snapshots__campus")
+        .prefetch_related("offering_snapshots__campus", "generation_revisions")
     )
     configurer_courses = (
         DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
@@ -446,6 +447,15 @@ def assigned_course_examinations_view(request):
         course.can_review = bool(
             course.id in reviewer_ids
             and course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+        )
+        course.locked_revision = next(
+            (
+                revision
+                for revision in course.generation_revisions.all()
+                if revision.current_marker == 1
+                and revision.status == ExamGenerationRevision.Status.LOCKED
+            ),
+            None,
         )
         course.readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
             cycle_course=course, configuration=getattr(course, "configuration", None), user=request.user

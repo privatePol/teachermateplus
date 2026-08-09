@@ -106,4 +106,5 @@ urlpatterns = [
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/generation/generate/", stage6_views.generate_exam_view, name="generate_exam"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/generation/regenerate/", stage6_views.regenerate_exam_view, name="regenerate_exam"),
     path("admin-portal/departmental-exams/generations/<int:revision_id>/", stage6_views.generated_revision_detail_view, name="generated_revision_detail"),
+    path("admin-portal/departmental-exams/generations/<int:revision_id>/approve-lock/", stage6_views.approve_and_lock_view, name="approve_and_lock"),
 ]

@@ -881,6 +881,7 @@ class ExamGenerationRevision(TimeStampedModel):
     class Status(models.TextChoices):
         GENERATED = "GENERATED", "Generated"
         SUPERSEDED = "SUPERSEDED", "Superseded"
+        LOCKED = "LOCKED", "Locked"
 
     cycle_course = models.ForeignKey(
         CycleCourse,
@@ -921,6 +922,19 @@ class ExamGenerationRevision(TimeStampedModel):
     proportional_score = models.PositiveBigIntegerField()
     contributors_represented = models.PositiveSmallIntegerField()
     squared_contributor_concentration = models.PositiveIntegerField()
+    locked_at = models.DateTimeField(null=True, blank=True)
+    locked_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="locked_departmental_exams",
+    )
+    approval_attestation_version = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+    )
 
     class Meta:
         db_table = "departmental_exam_generation_revisions"
@@ -948,8 +962,29 @@ class ExamGenerationRevision(TimeStampedModel):
             ),
             models.CheckConstraint(
                 condition=(
-                    models.Q(status="GENERATED", current_marker=1)
-                    | models.Q(status="SUPERSEDED", current_marker__isnull=True)
+                    models.Q(
+                        status="GENERATED",
+                        current_marker=1,
+                        current_marker__isnull=False,
+                        locked_at__isnull=True,
+                        locked_by__isnull=True,
+                        approval_attestation_version="",
+                    )
+                    | models.Q(
+                        status="SUPERSEDED",
+                        current_marker__isnull=True,
+                        locked_at__isnull=True,
+                        locked_by__isnull=True,
+                        approval_attestation_version="",
+                    )
+                    | models.Q(
+                        status="LOCKED",
+                        current_marker=1,
+                        current_marker__isnull=False,
+                        locked_at__isnull=False,
+                        locked_by__isnull=False,
+                    )
+                    & ~models.Q(approval_attestation_version="")
                 ),
                 name="ck_de_gen_current_status",
             ),
@@ -968,7 +1003,12 @@ class ExamGenerationRevision(TimeStampedModel):
     def save(self, *args, **kwargs):
         if self.pk:
             previous = type(self).objects.filter(pk=self.pk).values(
-                "status", "current_marker", *self._IMMUTABLE_FIELDS
+                "status",
+                "current_marker",
+                "locked_at",
+                "locked_by_id",
+                "approval_attestation_version",
+                *self._IMMUTABLE_FIELDS,
             ).first()
             if previous is not None:
                 if any(
@@ -976,18 +1016,39 @@ class ExamGenerationRevision(TimeStampedModel):
                     for field in self._IMMUTABLE_FIELDS
                 ):
                     raise ValidationError("Generation revision snapshots are immutable.")
-                transition = (
-                    previous["status"],
-                    previous["current_marker"],
-                    self.status,
-                    self.current_marker,
-                )
-                if transition not in {
-                    (self.Status.GENERATED, 1, self.Status.GENERATED, 1),
-                    (self.Status.GENERATED, 1, self.Status.SUPERSEDED, None),
-                    (self.Status.SUPERSEDED, None, self.Status.SUPERSEDED, None),
-                }:
+                before_state = (previous["status"], previous["current_marker"])
+                after_state = (self.status, self.current_marker)
+                allowed = {
+                    (self.Status.GENERATED, 1): {
+                        (self.Status.GENERATED, 1),
+                        (self.Status.SUPERSEDED, None),
+                        (self.Status.LOCKED, 1),
+                    },
+                    (self.Status.SUPERSEDED, None): {
+                        (self.Status.SUPERSEDED, None),
+                    },
+                    (self.Status.LOCKED, 1): {(self.Status.LOCKED, 1)},
+                }
+                if after_state not in allowed.get(before_state, set()):
                     raise ValidationError("Generation revision lifecycle transition is invalid.")
+                lock_before = (
+                    previous["locked_at"],
+                    previous["locked_by_id"],
+                    previous["approval_attestation_version"],
+                )
+                lock_after = (
+                    self.locked_at,
+                    self.locked_by_id,
+                    self.approval_attestation_version,
+                )
+                if before_state == (self.Status.GENERATED, 1) and after_state == (
+                    self.Status.LOCKED,
+                    1,
+                ):
+                    if not all(lock_after):
+                        raise ValidationError("Approve & Lock metadata is incomplete.")
+                elif lock_before != lock_after:
+                    raise ValidationError("Approve & Lock metadata is immutable.")
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):

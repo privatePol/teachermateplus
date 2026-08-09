@@ -20,6 +20,7 @@ from .generation_algorithms import (
 )
 from .generation_readiness import GENERATION_ALGORITHM_VERSION, Stage6ReadinessService
 from .models import (
+    BlockedContributionResolution,
     CycleCourse,
     ExamBlueprint,
     ExamGenerationRevision,
@@ -104,6 +105,11 @@ class ExamGenerationService:
             .order_by("id")
         )
         list(
+            BlockedContributionResolution.objects.select_for_update()
+            .filter(cycle_course=course)
+            .order_by("id")
+        )
+        list(
             Question.objects.select_for_update()
             .filter(contribution__cycle_course=course)
             .order_by("id")
@@ -185,6 +191,14 @@ class ExamGenerationService:
         DepartmentalExamAuthorizationService.require_course_responsibility(
             user=actor,
             cycle_course=course,
+        )
+        from .final_lock import FinalExamLockPolicy
+
+        # Final lock rejection precedes request-token reuse so no old browser
+        # token can make Generate or Regenerate appear successful after lock.
+        FinalExamLockPolicy.require_not_locked(
+            course,
+            conflict_class=GenerationConflict,
         )
         require_stage6_open_cycle(cycle, conflict_class=GenerationConflict)
         duplicate = next(
@@ -445,7 +459,7 @@ class ExamGenerationService:
                 cycle_course=cycle_course,
                 current_marker=1,
             )
-            .select_related("generated_by")
+            .select_related("generated_by", "locked_by")
             .first()
         )
 
@@ -457,6 +471,7 @@ class ExamGenerationService:
                 "cycle_course__course",
                 "cycle_course__responsible_department",
                 "generated_by",
+                "locked_by",
             )
             .filter(pk=revision_id, cycle_course__cycle__tenant_id=tenant_id)
             .first()

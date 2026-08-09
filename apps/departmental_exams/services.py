@@ -1496,6 +1496,9 @@ class CourseExamConfigurationService:
     def _lock_parent_and_configuration(cls, *, cycle_course_id, tenant_id):
         parent = CycleCourseInclusionService.lock_included_cycle_course(cycle_course_id=cycle_course_id, tenant_id=tenant_id)
         configuration = CourseExamConfiguration.objects.select_for_update().filter(cycle_course=parent).first()
+        from .final_lock import FinalExamLockPolicy
+
+        FinalExamLockPolicy.require_not_locked(parent)
         return parent, configuration
 
     @staticmethod

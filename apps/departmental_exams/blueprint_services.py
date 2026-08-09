@@ -16,6 +16,7 @@ from apps.core.services.audit import AuditService
 from .contribution_authorization import ContributorEligibilityService
 from .contribution_services import QuestionPayloadService, Stage5LockService
 from .generation_algorithms import CAMPUS_WEIGHTS
+from .final_lock import FinalExamLockPolicy
 from .models import (
     BlockedContributionResolution,
     CourseExamConfiguration,
@@ -447,6 +448,7 @@ class BlockedContributionResolutionService:
 class BlueprintMutationService:
     @staticmethod
     def _require_prelock(*, cycle_course, configuration):
+        FinalExamLockPolicy.require_not_locked(cycle_course)
         if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
             raise ValidationError("Only Included course examinations may use a blueprint.")
         require_stage6_open_cycle(cycle_course.cycle)

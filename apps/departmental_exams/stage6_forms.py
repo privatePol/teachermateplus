@@ -122,3 +122,34 @@ class RegenerationRequestForm(GenerationRequestForm):
             }
         ),
     )
+
+
+class ApproveAndLockForm(forms.Form):
+    expected_revision_number = forms.IntegerField(
+        min_value=1,
+        widget=forms.HiddenInput,
+    )
+    expected_source_input_fingerprint = forms.RegexField(
+        regex=r"^[0-9a-f]{64}$",
+        widget=forms.HiddenInput,
+    )
+    set_a_reviewed = forms.BooleanField(
+        label="I reviewed Set A in full.",
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )
+    set_b_reviewed = forms.BooleanField(
+        label="I reviewed Set B in full.",
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )
+    answer_keys_reviewed = forms.BooleanField(
+        label="I reviewed the correct answers and answer keys.",
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )
+    sections_scenarios_reviewed = forms.BooleanField(
+        label="I reviewed sections and scenarios where applicable.",
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )
+    permanent_lock_acknowledged = forms.BooleanField(
+        label="I understand approval and lock are permanent.",
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )

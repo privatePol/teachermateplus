@@ -24,6 +24,12 @@
   .de-generation-busy { display: none; align-items: center; gap: .65rem; color: #173d27; font-weight: 700; }
   [aria-busy="true"] .de-generation-busy { display: flex; }
   .de-generation-control-disabled { pointer-events: none; opacity: .55; }
+  .de-locked-panel { padding: 1.15rem; border: 1px solid #44505c; border-radius: 1rem; color: #fff; background: linear-gradient(135deg, #1f2933, #384451); box-shadow: 0 14px 28px rgba(24, 31, 38, .18); }
+  .de-approval-checklist { display: grid; gap: .7rem; }
+  .de-approval-check { padding: .8rem .9rem; border: 1px solid #d7e2dc; border-radius: .75rem; background: #fbfdfc; }
+  .de-history-card { border-left: .25rem solid #adb5bd; }
+  .de-history-card.is-current { border-left-color: #198754; }
+  .de-history-card.is-locked { border-left-color: #212529; background: #f5f6f7; }
   @media (max-width: 767.98px) {
     .de-exam-hero { padding: 1rem; }
     .de-generation-set-nav { position: static; }
