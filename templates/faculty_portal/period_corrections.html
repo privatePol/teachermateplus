@@ -203,8 +203,26 @@
     {% else %}
     <form method="post" enctype="multipart/form-data" novalidate>
       {% csrf_token %}
-      {% if form.non_field_errors %}
-      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% if form.errors %}
+      <div id="correction-validation-summary" class="alert alert-danger border border-danger" role="alert" tabindex="-1">
+        <strong>Your correction request could not be submitted.</strong>
+        <div class="mt-1">Please resolve the following issue{% if form.errors|length != 1 %}s{% endif %} and try again:</div>
+        <ul class="mb-0 mt-2">
+          {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+          {% for field in form.visible_fields %}
+            {% for error in field.errors %}<li>{{ field.label }}: {{ error }}</li>{% endfor %}
+          {% endfor %}
+        </ul>
+      </div>
+      <script>
+        window.requestAnimationFrame(() => {
+          const validationSummary = document.getElementById("correction-validation-summary");
+          if (validationSummary) {
+            validationSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+            validationSummary.focus({ preventScroll: true });
+          }
+        });
+      </script>
       {% endif %}
       <div class="alert alert-warning border mb-3">
         <strong>Important:</strong> To avoid confusion and missing entries, follow this order when preparing a correction request.
@@ -391,12 +409,12 @@
       if (!attachmentLabel) {
         return;
       }
-      const hasExamCorrection = selectedActivityIds().some((activityId) => {
+      const requiresAttachment = selectedActivityIds().some((activityId) => {
         const activity = activityMap.get(String(activityId));
-        return activity && activity.is_exam_component;
+        return activity && (activity.is_exam_component || activity.is_quiz_activity);
       });
-      attachmentLabel.textContent = hasExamCorrection
-        ? "Attachment (required for examination corrections)"
+      attachmentLabel.textContent = requiresAttachment
+        ? "Attachment (required for quiz and examination corrections)"
         : "Attachment (optional)";
     }
 

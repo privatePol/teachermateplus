@@ -7105,6 +7105,7 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                 "title": activity.title,
                 "component_name": activity.template_component.name,
                 "is_exam_component": FacultyGradingService.is_exam_component(activity.template_component),
+                "is_quiz_activity": FacultyGradingService.is_quiz_activity(activity),
                 "subcomponent_name": activity.template_subcomponent.name if activity.template_subcomponent else "-",
                 "detail_name": activity.template_detail.name if activity.template_detail else "-",
                 "detail_weight": (

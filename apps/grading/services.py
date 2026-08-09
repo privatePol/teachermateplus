@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from collections import defaultdict
 from datetime import timedelta
+import re
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -5687,6 +5688,25 @@ class FacultyGradingService:
     @staticmethod
     def is_exam_component(component: GradingTemplateComponent) -> bool:
         return bool(getattr(component, "is_exam_component", False))
+
+    @staticmethod
+    def _is_quiz_template_code(code: str | None) -> bool:
+        """Recognize the quiz category from structured template codes, never activity titles."""
+        code_tokens = set(re.split(r"[^A-Z0-9]+", str(code or "").upper()))
+        return bool({"QUIZ", "QUIZZES"} & code_tokens)
+
+    @classmethod
+    def is_quiz_activity(cls, activity: GradeActivity) -> bool:
+        """Return whether any configured template level classifies an activity as a quiz."""
+        return any(
+            cls._is_quiz_template_code(getattr(template_row, "code", None))
+            for template_row in (
+                getattr(activity, "template_component", None),
+                getattr(activity, "template_subcomponent", None),
+                getattr(activity, "template_detail", None),
+            )
+            if template_row is not None
+        )
 
     @classmethod
     def resolve_template_for_offering_trace(cls, offering):

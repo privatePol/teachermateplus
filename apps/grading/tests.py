@@ -214,6 +214,13 @@ class CorrectionWorkflowTests(TestCase):
             weight_percentage=Decimal("100.00"),
             sort_order=1,
         )
+        self.quiz_subcomponent = GradingTemplateSubcomponent.objects.create(
+            template_component=self.component,
+            code="PRELIM-QUIZZES",
+            name="Quizzes",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
         CourseTemplateAssignment.objects.create(
             course=self.course,
             grading_template=self.template,
@@ -263,6 +270,7 @@ class CorrectionWorkflowTests(TestCase):
             offering=self.offering,
             template_period=self.period,
             template_component=self.component,
+            template_subcomponent=self.quiz_subcomponent,
             title="Quiz 1",
             total_score=Decimal("50.00"),
             created_by_user=self.faculty_user,
@@ -310,6 +318,11 @@ class CorrectionWorkflowTests(TestCase):
                     f'{{"student_id":"{self.student2.id}","grade_activity_id":"{self.activity.id}","new_value":"40"}}]'
                 ),
                 "justification": "Requested correction for quiz scores.",
+            },
+            files={
+                "attachment": SimpleUploadedFile(
+                    "quiz-evidence.pdf", b"%PDF-1.4\nquiz evidence", content_type="application/pdf"
+                )
             },
             student_queryset=Student.objects.filter(id__in=[self.student1.id, self.student2.id]),
             activity_queryset=GradeActivity.objects.filter(id=self.activity.id),
@@ -369,6 +382,21 @@ class CorrectionWorkflowTests(TestCase):
             score_lookup={(self.student1.id, activity.id): "30" for activity in activities},
         )
 
+    def _prepare_correction_filing_page(self):
+        self._grant_faculty_correction_access()
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=True)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+        self.client.force_login(self.faculty_user)
+        return reverse("faculty_portal:period_corrections", args=[self.offering.id, self.period.id])
+
     def test_prelim_exam_correction_requires_attachment(self):
         form = self._correction_request_form(
             activities=[self._create_correction_activity(code="PRE_EXAM", title="Prelim Exam", is_exam_component=True)]
@@ -402,10 +430,20 @@ class CorrectionWorkflowTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["attachment_validation"].content_type, "application/pdf")
 
-    def test_quiz_only_correction_does_not_require_attachment(self):
+    def test_quiz_only_correction_requires_attachment(self):
         form = self._correction_request_form(activities=[self.activity])
 
+        self.assertFalse(form.is_valid())
+        self.assertIn("quiz or examination score", str(form.errors))
+
+    def test_quiz_only_correction_accepts_valid_attachment(self):
+        form = self._correction_request_form(
+            activities=[self.activity],
+            attachment=SimpleUploadedFile("quiz-evidence.pdf", b"%PDF-1.4\nquiz evidence", content_type="application/pdf"),
+        )
+
         self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["attachment_validation"].content_type, "application/pdf")
 
     def test_activity_only_correction_does_not_require_attachment(self):
         activity = self._create_correction_activity(code="ACTIVITY", title="Activity 1")
@@ -415,7 +453,15 @@ class CorrectionWorkflowTests(TestCase):
 
     def test_mixed_exam_and_non_exam_correction_requires_attachment(self):
         exam_activity = self._create_correction_activity(code="MIXED_EXAM", title="Midterm Exam", is_exam_component=True)
-        form = self._correction_request_form(activities=[self.activity, exam_activity])
+        non_exam_activity = self._create_correction_activity(code="ACTIVITY", title="Activity 1")
+        form = self._correction_request_form(activities=[non_exam_activity, exam_activity])
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_mixed_quiz_and_non_exam_correction_requires_attachment(self):
+        non_exam_activity = self._create_correction_activity(code="ACTIVITY", title="Activity 1")
+        form = self._correction_request_form(activities=[self.activity, non_exam_activity])
 
         self.assertFalse(form.is_valid())
         self.assertIn("attachment is required", str(form.errors))
@@ -428,6 +474,51 @@ class CorrectionWorkflowTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("must be PDF, PNG, JPG, or JPEG", str(form.errors))
+
+    def test_invalid_correction_post_renders_focusable_validation_summary(self):
+        url = self._prepare_correction_filing_page()
+
+        response = self.client.post(
+            url,
+            {
+                "students": [self.student1.id],
+                "grade_activities": [self.activity.id],
+                "correction_payload": (
+                    f'[{{"student_id":"{self.student1.id}","grade_activity_id":"{self.activity.id}","new_value":"35"}}]'
+                ),
+                "justification": "Quiz correction without evidence.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["correction_activities"][0]["is_quiz_activity"])
+        self.assertContains(response, 'id="correction-validation-summary"')
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'tabindex="-1"')
+        self.assertContains(response, "An attachment is required when requesting a correction to a quiz or examination score.")
+        self.assertContains(response, "scrollIntoView")
+        self.assertContains(response, "validationSummary.focus")
+        self.assertContains(response, "Attachment (required for quiz and examination corrections)")
+
+    def test_successful_correction_page_does_not_render_validation_summary(self):
+        non_exam_activity = self._create_correction_activity(code="ACTIVITY", title="Activity 1")
+        url = self._prepare_correction_filing_page()
+
+        response = self.client.post(
+            url,
+            {
+                "students": [self.student1.id],
+                "grade_activities": [non_exam_activity.id],
+                "correction_payload": (
+                    f'[{{"student_id":"{self.student1.id}","grade_activity_id":"{non_exam_activity.id}","new_value":"35"}}]'
+                ),
+                "justification": "Activity correction without attachment.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        follow_up = self.client.get(url)
+        self.assertNotContains(follow_up, 'id="correction-validation-summary"')
 
     def _send_step_approval_notification(self, *, role, user, approver_label):
         SystemSettingService.set(
