@@ -957,9 +957,7 @@ def _period_edit_state(offering, period):
         "system_correction_enabled": system_correction_enabled,
         "correction_lifecycle_state": correction_filing_state["lifecycle_state"],
         "correction_filing_state": correction_filing_state,
-        "can_access_corrections": bool(
-            system_correction_enabled and correction_filing_state["is_allowed"] and not scope_state["read_only"]
-        ),
+        "can_access_corrections": bool(system_correction_enabled and correction_filing_state["is_allowed"]),
     }
 
 
@@ -4018,7 +4016,6 @@ def offering_periods_view(request, offering_id: int):
         can_access_corrections = bool(
             GradingGovernanceService.is_system_correction_enabled(tenant_id=offering.tenant_id)
             and correction_filing_state["is_allowed"]
-            and not offering.faculty_is_read_only
         )
         active_approved_reopen_request = GradingGovernanceService.get_active_approved_reopen_request(
             offering=offering,
@@ -7107,6 +7104,8 @@ def period_corrections_view(request, offering_id: int, period_id: int):
                 "label": _correction_activity_label(activity),
                 "title": activity.title,
                 "component_name": activity.template_component.name,
+                "is_exam_component": FacultyGradingService.is_exam_component(activity.template_component),
+                "is_quiz_activity": FacultyGradingService.is_quiz_activity(activity),
                 "subcomponent_name": activity.template_subcomponent.name if activity.template_subcomponent else "-",
                 "detail_name": activity.template_detail.name if activity.template_detail else "-",
                 "detail_weight": (

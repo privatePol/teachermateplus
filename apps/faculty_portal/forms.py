@@ -14,6 +14,7 @@ from apps.grading.models import (
     GradingTemplateDetail,
     GradingTemplateSubcomponent,
 )
+from apps.grading.services import FacultyGradingService
 from apps.notifications.models import FacultyMemo
 from apps.students.models import Student
 from apps.faculty_portal.models import FacultyFeedback
@@ -291,6 +292,17 @@ class GradeCorrectionRequestForm(forms.Form):
             self.add_error("students", "Select at least one student or choose Entire Class.")
         if not selected_activities:
             self.add_error("grade_activities", "Select at least one grading item for correction.")
+
+        requires_attachment = selected_activities and any(
+            FacultyGradingService.is_exam_component(activity.template_component)
+            or FacultyGradingService.is_quiz_activity(activity)
+            for activity in selected_activities
+        )
+        if requires_attachment and not cleaned.get("attachment"):
+            self.add_error(
+                "attachment",
+                "An attachment is required when requesting a correction to a quiz or examination score.",
+            )
 
         try:
             payload_rows = json.loads(payload_raw)

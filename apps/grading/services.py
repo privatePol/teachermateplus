@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from collections import defaultdict
 from datetime import timedelta
+import re
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -2822,6 +2823,20 @@ class GradingGovernanceService:
             offering=offering,
             template_period=template_period,
             at=now,
+        )
+        is_auto_closed_after_deadline = cls.is_auto_closed_after_deadline(
+            offering=offering,
+            template_period=template_period,
+            now=now,
+        )
+        # A submitted gradebook becomes read-only after its deadline even when
+        # no physical lock row has been flipped.  Keep this predicate aligned
+        # with the Faculty Portal's deadline auto-close governance, while the
+        # editable-window checks below continue to exclude active unlocks.
+        is_locked = bool(
+            is_locked
+            or is_auto_closed_after_deadline
+            or (is_submitted and is_post_deadline)
         )
         is_editable = bool(
             has_reopen_window
@@ -5673,6 +5688,25 @@ class FacultyGradingService:
     @staticmethod
     def is_exam_component(component: GradingTemplateComponent) -> bool:
         return bool(getattr(component, "is_exam_component", False))
+
+    @staticmethod
+    def _is_quiz_template_code(code: str | None) -> bool:
+        """Recognize the quiz category from structured template codes, never activity titles."""
+        code_tokens = set(re.split(r"[^A-Z0-9]+", str(code or "").upper()))
+        return bool({"QUIZ", "QUIZZES"} & code_tokens)
+
+    @classmethod
+    def is_quiz_activity(cls, activity: GradeActivity) -> bool:
+        """Return whether any configured template level classifies an activity as a quiz."""
+        return any(
+            cls._is_quiz_template_code(getattr(template_row, "code", None))
+            for template_row in (
+                getattr(activity, "template_component", None),
+                getattr(activity, "template_subcomponent", None),
+                getattr(activity, "template_detail", None),
+            )
+            if template_row is not None
+        )
 
     @classmethod
     def resolve_template_for_offering_trace(cls, offering):

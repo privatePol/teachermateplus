@@ -5,9 +5,11 @@ from decimal import Decimal, InvalidOperation
 import base64
 import hashlib
 from io import BytesIO
+import logging
 from pathlib import Path
 from urllib.parse import urlencode
 
+from cryptography.exceptions import InvalidTag
 from django.conf import settings
 from django.db import models
 from django.urls import reverse
@@ -37,6 +39,9 @@ from apps.grading.models import (
 )
 from apps.grading.services import FacultyGradingService
 from apps.grading.tabulation import DetailedTabulationSheetGridService
+
+
+logger = logging.getLogger("teachermateplus.system")
 
 
 class InstitutionalReportPdfConfig:
@@ -383,21 +388,30 @@ class CorrectionOfficialReportService:
         panel_rows = []
         credential = UserSignatureService.get_active_credential(user=user) if user else None
         if credential and credential.has_signature:
-            signature_bytes = UserSignatureService.decrypt_signature_bytes(credential=credential)
-            image_stream = BytesIO(signature_bytes)
-            max_width = 42 * mm
-            max_height = 14 * mm
-            width_ratio = max_width / max(float(credential.image_width or 1), 1.0)
-            height_ratio = max_height / max(float(credential.image_height or 1), 1.0)
-            scale = min(width_ratio, height_ratio)
-            signature_image = Image(
-                image_stream,
-                width=max(float(credential.image_width or 1) * scale, 12),
-                height=max(float(credential.image_height or 1) * scale, 6),
-            )
-            signature_image.hAlign = "LEFT"
-            panel_rows.append([signature_image])
-            usage_collector.append(usage_kwargs)
+            try:
+                signature_bytes = UserSignatureService.decrypt_signature_bytes(credential=credential)
+            except InvalidTag:
+                logger.warning(
+                    "Unable to decrypt stored signature; rendering report without signature. user_id=%s credential_id=%s",
+                    user.pk,
+                    credential.pk,
+                )
+                panel_rows.append([Paragraph("<i>No stored signature on file.</i>", styles["SmallBody"])])
+            else:
+                image_stream = BytesIO(signature_bytes)
+                max_width = 42 * mm
+                max_height = 14 * mm
+                width_ratio = max_width / max(float(credential.image_width or 1), 1.0)
+                height_ratio = max_height / max(float(credential.image_height or 1), 1.0)
+                scale = min(width_ratio, height_ratio)
+                signature_image = Image(
+                    image_stream,
+                    width=max(float(credential.image_width or 1) * scale, 12),
+                    height=max(float(credential.image_height or 1) * scale, 6),
+                )
+                signature_image.hAlign = "LEFT"
+                panel_rows.append([signature_image])
+                usage_collector.append(usage_kwargs)
         else:
             panel_rows.append([Paragraph("<i>No stored signature on file.</i>", styles["SmallBody"])])
 

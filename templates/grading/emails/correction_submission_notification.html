@@ -42,6 +42,14 @@
           <td style="padding:10px 12px; border:1px solid #dcecdf;">{{ reference_no }}</td>
         </tr>
         <tr>
+          <td style="padding:10px 12px; border:1px solid #dcecdf; background:#f6fbf7; font-weight:700;">Current Action</td>
+          <td style="padding:10px 12px; border:1px solid #dcecdf;">{{ current_action|default:"Awaiting approval review" }}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 12px; border:1px solid #dcecdf; background:#f6fbf7; font-weight:700;">Current Approval Step</td>
+          <td style="padding:10px 12px; border:1px solid #dcecdf;">{{ current_approval_step|default:"Approval review" }}</td>
+        </tr>
+        <tr>
           <td style="padding:10px 12px; border:1px solid #dcecdf; background:#f6fbf7; font-weight:700;">Campus</td>
           <td style="padding:10px 12px; border:1px solid #dcecdf;">{{ campus_name }}</td>
         </tr>
@@ -59,9 +67,12 @@
         </tr>
       </table>
 
-      <div style="font-size:13px; line-height:1.7; color:#3a5f49;">
-        Please sign in to TeacherMate+ to review the petition in the correction approval queue.
-      </div>
+       <div style="font-size:13px; line-height:1.7; color:#3a5f49;">
+         Please sign in to TeacherMate+ to review the petition in the correction approval queue.
+       </div>
+       <div style="margin-top:18px; padding-top:14px; border-top:1px solid #dcecdf; font-size:11px; line-height:1.6; color:#5f7467;">
+         <strong>NCBA confidentiality notice:</strong> This email contains internal academic workflow information for its intended recipient. Do not forward or disclose it without authorization.
+       </div>
       </div>
     </div>
   </div>

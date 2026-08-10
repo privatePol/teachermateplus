@@ -3,7 +3,9 @@ from decimal import Decimal
 from importlib import import_module
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from cryptography.exceptions import InvalidTag
 from django.conf import settings
 from django.core import mail
 from django.core.exceptions import ValidationError
@@ -14,10 +16,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from PIL import Image
+from reportlab.platypus import Paragraph as ReportLabParagraph
 from apps.accounts.models import User
 from apps.accounts.models import UserSignatureUsageLog
 from apps.accounts.services import UserSignatureService
 from apps.academics.models import AcademicYear, Course, CourseOffering, FacultyAssignment, Section, Term
+from apps.academics.services import AcademicGovernanceService
 from apps.attendance.models import AttendanceRecord, AttendanceSession
 from apps.auditlog.models import AuditLog
 from apps.enrollment.models import Enrollment
@@ -38,6 +42,7 @@ from apps.grading.models import (
     GradeCorrectionUnlockWindow,
     GradeEncodingControl,
     GradeSubmission,
+    GradeSubmissionReopenRequest,
     GradingPeriodLock,
     GradingTemplate,
     GradingTemplateComponent,
@@ -209,6 +214,13 @@ class CorrectionWorkflowTests(TestCase):
             weight_percentage=Decimal("100.00"),
             sort_order=1,
         )
+        self.quiz_subcomponent = GradingTemplateSubcomponent.objects.create(
+            template_component=self.component,
+            code="PRELIM-QUIZZES",
+            name="Quizzes",
+            weight_percentage=Decimal("100.00"),
+            sort_order=1,
+        )
         CourseTemplateAssignment.objects.create(
             course=self.course,
             grading_template=self.template,
@@ -258,6 +270,7 @@ class CorrectionWorkflowTests(TestCase):
             offering=self.offering,
             template_period=self.period,
             template_component=self.component,
+            template_subcomponent=self.quiz_subcomponent,
             title="Quiz 1",
             total_score=Decimal("50.00"),
             created_by_user=self.faculty_user,
@@ -306,6 +319,11 @@ class CorrectionWorkflowTests(TestCase):
                 ),
                 "justification": "Requested correction for quiz scores.",
             },
+            files={
+                "attachment": SimpleUploadedFile(
+                    "quiz-evidence.pdf", b"%PDF-1.4\nquiz evidence", content_type="application/pdf"
+                )
+            },
             student_queryset=Student.objects.filter(id__in=[self.student1.id, self.student2.id]),
             activity_queryset=GradeActivity.objects.filter(id=self.activity.id),
             score_lookup={
@@ -319,6 +337,316 @@ class CorrectionWorkflowTests(TestCase):
         self.assertEqual(len(form.cleaned_data["items"]), 2)
         self.assertEqual(form.cleaned_data["items"][0]["old_value"], "30")
         self.assertEqual(form.cleaned_data["items"][0]["new_value"], "35")
+
+    def _create_correction_activity(self, *, code, title, is_exam_component=False):
+        component = self.component
+        if is_exam_component:
+            component = GradingTemplateComponent.objects.create(
+                template_period=self.period,
+                code=code,
+                name=title,
+                weight_percentage=Decimal("100.00"),
+                sort_order=2,
+                is_exam_component=True,
+            )
+        return GradeActivity.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            offering=self.offering,
+            template_period=self.period,
+            template_component=component,
+            title=title,
+            total_score=Decimal("50.00"),
+            created_by_user=self.faculty_user,
+        )
+
+    def _correction_request_form(self, *, activities, attachment=None):
+        activity_ids = [activity.id for activity in activities]
+        payload = ",".join(
+            (
+                f'{{"student_id":"{self.student1.id}","grade_activity_id":"{activity.id}",'
+                '"new_value":"35"}'
+            )
+            for activity in activities
+        )
+        return GradeCorrectionRequestForm(
+            data={
+                "students": [self.student1.id],
+                "grade_activities": activity_ids,
+                "correction_payload": f"[{payload}]",
+                "justification": "Correction evidence is attached when required.",
+            },
+            files={"attachment": attachment} if attachment else None,
+            student_queryset=Student.objects.filter(id=self.student1.id),
+            activity_queryset=GradeActivity.objects.filter(id__in=activity_ids),
+            score_lookup={(self.student1.id, activity.id): "30" for activity in activities},
+        )
+
+    def _prepare_correction_filing_page(self):
+        self._grant_faculty_correction_access()
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=True)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+        self.client.force_login(self.faculty_user)
+        return reverse("faculty_portal:period_corrections", args=[self.offering.id, self.period.id])
+
+    def test_prelim_exam_correction_requires_attachment(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="PRE_EXAM", title="Prelim Exam", is_exam_component=True)]
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_midterm_exam_correction_requires_attachment(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="MID_EXAM", title="Midterm Exam", is_exam_component=True)]
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_final_exam_correction_requires_attachment(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="FINAL_EXAM", title="Final Exam", is_exam_component=True)]
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_exam_correction_accepts_valid_attachment(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="EXAM_EVIDENCE", title="Prelim Exam", is_exam_component=True)],
+            attachment=SimpleUploadedFile("evidence.pdf", b"%PDF-1.4\nexam evidence", content_type="application/pdf"),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["attachment_validation"].content_type, "application/pdf")
+
+    def test_quiz_only_correction_requires_attachment(self):
+        form = self._correction_request_form(activities=[self.activity])
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("quiz or examination score", str(form.errors))
+
+    def test_quiz_only_correction_accepts_valid_attachment(self):
+        form = self._correction_request_form(
+            activities=[self.activity],
+            attachment=SimpleUploadedFile("quiz-evidence.pdf", b"%PDF-1.4\nquiz evidence", content_type="application/pdf"),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["attachment_validation"].content_type, "application/pdf")
+
+    def test_activity_only_correction_does_not_require_attachment(self):
+        activity = self._create_correction_activity(code="ACTIVITY", title="Activity 1")
+        form = self._correction_request_form(activities=[activity])
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_mixed_exam_and_non_exam_correction_requires_attachment(self):
+        exam_activity = self._create_correction_activity(code="MIXED_EXAM", title="Midterm Exam", is_exam_component=True)
+        non_exam_activity = self._create_correction_activity(code="ACTIVITY", title="Activity 1")
+        form = self._correction_request_form(activities=[non_exam_activity, exam_activity])
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_mixed_quiz_and_non_exam_correction_requires_attachment(self):
+        non_exam_activity = self._create_correction_activity(code="ACTIVITY", title="Activity 1")
+        form = self._correction_request_form(activities=[self.activity, non_exam_activity])
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("attachment is required", str(form.errors))
+
+    def test_correction_attachment_security_validation_is_preserved(self):
+        form = self._correction_request_form(
+            activities=[self._create_correction_activity(code="SECURITY_EXAM", title="Final Exam", is_exam_component=True)],
+            attachment=SimpleUploadedFile("evidence.txt", b"not an approved evidence file", content_type="text/plain"),
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("must be PDF, PNG, JPG, or JPEG", str(form.errors))
+
+    def test_invalid_correction_post_renders_focusable_validation_summary(self):
+        url = self._prepare_correction_filing_page()
+
+        response = self.client.post(
+            url,
+            {
+                "students": [self.student1.id],
+                "grade_activities": [self.activity.id],
+                "correction_payload": (
+                    f'[{{"student_id":"{self.student1.id}","grade_activity_id":"{self.activity.id}","new_value":"35"}}]'
+                ),
+                "justification": "Quiz correction without evidence.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["correction_activities"][0]["is_quiz_activity"])
+        self.assertContains(response, 'id="correction-validation-summary"')
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'tabindex="-1"')
+        self.assertContains(response, "An attachment is required when requesting a correction to a quiz or examination score.")
+        self.assertContains(response, "scrollIntoView")
+        self.assertContains(response, "validationSummary.focus")
+        self.assertContains(response, "Attachment (required for quiz and examination corrections)")
+
+    def test_successful_correction_page_does_not_render_validation_summary(self):
+        non_exam_activity = self._create_correction_activity(code="ACTIVITY", title="Activity 1")
+        url = self._prepare_correction_filing_page()
+
+        response = self.client.post(
+            url,
+            {
+                "students": [self.student1.id],
+                "grade_activities": [non_exam_activity.id],
+                "correction_payload": (
+                    f'[{{"student_id":"{self.student1.id}","grade_activity_id":"{non_exam_activity.id}","new_value":"35"}}]'
+                ),
+                "justification": "Activity correction without attachment.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        follow_up = self.client.get(url)
+        self.assertNotContains(follow_up, 'id="correction-validation-summary"')
+
+    def _send_step_approval_notification(self, *, role, user, approver_label):
+        SystemSettingService.set(
+            FeatureSettingsService.CORRECTION_SUBMISSION_APPROVAL_EMAIL_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        CorrectionApprovalRouteStep.objects.create(
+            route_rule=self.route_rule,
+            step_order=1,
+            approver_role=role,
+            approver_label=approver_label,
+            requires_same_department=role.code == "AREA_CHAIR",
+        )
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Notify the configured approval step.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "35",
+                }
+            ],
+        )
+        pending_step = GradingGovernanceService.get_pending_correction_step(request_obj=correction)
+        result = CorrectionNotificationService.send_correction_step_approval_notifications(
+            request_obj=correction,
+            step=pending_step,
+        )
+        self.assertEqual(result["sent"], 1)
+        self.assertEqual(result["recipients"], [user.email])
+        return mail.outbox[0], correction
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_area_chair_step_notification_uses_standard_card_email(self):
+        area_role = Role.objects.create(code="AREA_CHAIR", name="Area Chairman")
+        area_user = User.objects.create_user(
+            username="area-email",
+            email="area-email@example.com",
+            password="testpass123",
+            default_tenant=self.tenant,
+            default_campus=self.campus,
+            default_department=self.department,
+        )
+        UserRole.objects.create(
+            user=area_user,
+            role=area_role,
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+        )
+
+        message, _correction = self._send_step_approval_notification(
+            role=area_role,
+            user=area_user,
+            approver_label="Area Chairman",
+        )
+
+        self.assertEqual(len(message.alternatives), 1)
+        self.assertIn('alt="NCBA"', message.alternatives[0].content)
+        self.assertIn("Awaiting Area Chairman Review", message.alternatives[0].content)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_college_dean_step_notification_uses_standard_card_email(self):
+        message, _correction = self._send_step_approval_notification(
+            role=self.reviewer_role,
+            user=self.reviewer_user,
+            approver_label="College Dean",
+        )
+
+        self.assertEqual(len(message.alternatives), 1)
+        self.assertIn("Awaiting College Dean Review", message.alternatives[0].content)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_cao_step_notification_uses_standard_card_email(self):
+        message, _correction = self._send_step_approval_notification(
+            role=self.cao_role,
+            user=self.cao_user,
+            approver_label="Chief Academic Officer",
+        )
+
+        self.assertEqual(len(message.alternatives), 1)
+        self.assertIn("Awaiting Chief Academic Officer Review", message.alternatives[0].content)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_step_notification_card_includes_required_correction_request_details(self):
+        message, correction = self._send_step_approval_notification(
+            role=self.reviewer_role,
+            user=self.reviewer_user,
+            approver_label="College Dean",
+        )
+        html_body = message.alternatives[0].content
+
+        self.assertIn(f"CGR-{correction.id:06d}", html_body)
+        self.assertIn("Awaiting College Dean Review", html_body)
+        self.assertIn(self.faculty_user.full_name or self.faculty_user.username, html_body)
+        self.assertIn(self.course.title, html_body)
+        self.assertIn(self.section.name, html_body)
+        self.assertIn(self.period.name, html_body)
+        self.assertIn(self.campus.name, html_body)
+        self.assertIn("College Dean", html_body)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_step_notification_card_keeps_ncba_confidentiality_footer(self):
+        message, _correction = self._send_step_approval_notification(
+            role=self.reviewer_role,
+            user=self.reviewer_user,
+            approver_label="College Dean",
+        )
+
+        self.assertIn("NCBA confidentiality notice", message.alternatives[0].content)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_step_notification_keeps_plain_text_fallback(self):
+        message, correction = self._send_step_approval_notification(
+            role=self.reviewer_role,
+            user=self.reviewer_user,
+            approver_label="College Dean",
+        )
+
+        self.assertIn(f"CGR-{correction.id:06d}", message.body)
+        self.assertIn("Awaiting College Dean Review", message.body)
+        self.assertIn("NCBA confidentiality notice", message.body)
 
     def test_on_behalf_correction_can_be_created_for_inactive_faculty(self):
         self.faculty_user.is_active = False
@@ -1988,9 +2316,13 @@ class CorrectionWorkflowTests(TestCase):
             review_remarks="Approved with signature.",
         )
 
-        pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
+        with patch("apps.grading.reporting.Paragraph", wraps=ReportLabParagraph) as paragraph:
+            pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
 
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertFalse(
+            any("No stored signature on file." in call.args[0] for call in paragraph.call_args_list)
+        )
         self.assertEqual(
             UserSignatureUsageLog.objects.filter(
                 document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
@@ -2002,6 +2334,125 @@ class CorrectionWorkflowTests(TestCase):
         self.reviewer_user.signature_credential.refresh_from_db()
         self.assertIsNotNone(self.faculty_user.signature_credential.last_used_at)
         self.assertIsNotNone(self.reviewer_user.signature_credential.last_used_at)
+
+    def test_official_correction_report_uses_fallback_for_invalid_signature_tag(self):
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+
+        buffer = BytesIO()
+        Image.new("RGBA", (180, 60), (120, 10, 10, 255)).save(buffer, format="PNG")
+        credential = UserSignatureService.store_signature(
+            user=self.reviewer_user,
+            uploaded_file=SimpleUploadedFile(
+                "reviewer-signature.png",
+                buffer.getvalue(),
+                content_type="image/png",
+            ),
+            actor=self.reviewer_user,
+        )
+        credential.encrypted_blob = credential.encrypted_blob[:-1] + bytes([credential.encrypted_blob[-1] ^ 1])
+        credential.save(update_fields=["encrypted_blob"])
+        with self.assertRaises(InvalidTag):
+            UserSignatureService.decrypt_signature_bytes(credential=credential)
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Gracefully render a report when an old signature cannot decrypt.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "45",
+                }
+            ],
+        )
+        closed_request = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Approved with an unavailable stored signature.",
+        )
+
+        with self.assertLogs("teachermateplus.system", level="WARNING") as logs:
+            with patch("apps.grading.reporting.Paragraph", wraps=ReportLabParagraph) as paragraph:
+                pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertTrue(
+            any("No stored signature on file." in call.args[0] for call in paragraph.call_args_list)
+        )
+        self.assertIn(f"user_id={self.reviewer_user.id}", logs.output[0])
+        self.assertIn(f"credential_id={credential.id}", logs.output[0])
+        self.assertEqual(
+            UserSignatureUsageLog.objects.filter(
+                user=self.reviewer_user,
+                document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
+            ).count(),
+            0,
+        )
+
+    def test_official_correction_report_keeps_fallback_without_signature(self):
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        SystemSettingService.set(
+            FeatureSettingsService.USER_SIGNATURES_CORRECTION_REPORT_ENABLED_KEY,
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+
+        correction = GradingGovernanceService.create_correction_request(
+            user=self.faculty_user,
+            offering=self.offering,
+            template_period=self.period,
+            justification="Render the existing no-signature fallback.",
+            items=[
+                {
+                    "requested_action": GradeCorrectionRequestItem.RequestedAction.UPDATE_SCORE,
+                    "student_id": self.student1.id,
+                    "grade_activity_id": self.activity.id,
+                    "new_value": "45",
+                }
+            ],
+        )
+        closed_request = GradingGovernanceService.review_correction_request(
+            request_obj=correction,
+            reviewer=self.reviewer_user,
+            approved=True,
+            review_remarks="Approved without stored signatures.",
+        )
+
+        with patch("apps.grading.reporting.Paragraph", wraps=ReportLabParagraph) as paragraph:
+            pdf_bytes = CorrectionOfficialReportService.build_pdf_bytes(request_obj=closed_request)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(
+            sum("No stored signature on file." in call.args[0] for call in paragraph.call_args_list),
+            2,
+        )
+        self.assertEqual(
+            UserSignatureUsageLog.objects.filter(
+                document_type=UserSignatureUsageLog.DocumentType.CORRECTION_OFFICIAL_REPORT,
+            ).count(),
+            0,
+        )
 
     def test_correction_submission_notification_emails_configured_roles(self):
         SystemSettingService.set(
@@ -2268,6 +2719,29 @@ class CorrectionWorkflowTests(TestCase):
         self.faculty_user.privacy_consent_version = getattr(settings, "PRIVACY_CONSENT_VERSION", "2026-03")
         self.faculty_user.privacy_consent_at = timezone.now()
         self.faculty_user.save(update_fields=["privacy_consent_version", "privacy_consent_at", "updated_at"])
+
+    def _set_offering_outside_active_scope(self):
+        active_academic_year = AcademicYear.objects.create(
+            tenant=self.tenant,
+            code="2026-2027",
+            name="AY 2026-2027",
+            start_date=date(2026, 6, 1),
+            end_date=date(2027, 5, 31),
+        )
+        active_term = Term.objects.create(
+            tenant=self.tenant,
+            academic_year=active_academic_year,
+            code="1ST",
+            name="First Term",
+            sequence_no=1,
+            start_date=date(2026, 6, 1),
+            end_date=date(2026, 10, 31),
+        )
+        AcademicGovernanceService.set_active_scope(
+            tenant_id=self.tenant.id,
+            academic_year=active_academic_year,
+            term=active_term,
+        )
 
     def test_correction_route_uses_exact_faculty_role_department_not_offering_department(self):
         college = Department.objects.create(
@@ -3564,7 +4038,34 @@ class CorrectionWorkflowTests(TestCase):
         self.assertFalse(state["is_allowed"])
         self.assertEqual(state["policy"].id, CorrectionPetitionWindowPolicy.objects.get(grading_period=alias_period).id)
 
-    def test_correction_lifecycle_rejects_before_deadline_and_unlocked_gradebooks(self):
+    def test_correction_lifecycle_allows_submitted_post_deadline_read_only_gradebook_without_physical_lock(self):
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=False)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+
+        lifecycle_state = GradingGovernanceService.get_correction_request_lifecycle_state(
+            offering=self.offering,
+            template_period=self.period,
+        )
+        filing_state = GradingGovernanceService.get_correction_request_filing_state(
+            offering=self.offering,
+            template_period=self.period,
+        )
+
+        self.assertTrue(lifecycle_state["is_submitted"])
+        self.assertTrue(lifecycle_state["is_post_deadline"])
+        self.assertTrue(lifecycle_state["is_locked"])
+        self.assertFalse(lifecycle_state["is_editable"])
+        self.assertTrue(filing_state["is_allowed"])
+
+    def test_correction_lifecycle_denies_before_deadline(self):
         self._set_correction_lifecycle(deadline_at=timezone.now() + timedelta(hours=1), is_locked=False)
         state = GradingGovernanceService.get_correction_request_lifecycle_state(
             offering=self.offering,
@@ -3586,12 +4087,127 @@ class CorrectionWorkflowTests(TestCase):
                 items=self._correction_item(),
             )
 
-        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=False)
+    def test_correction_lifecycle_denies_active_reopen_window_after_deadline(self):
+        self._set_correction_lifecycle(
+            deadline_at=timezone.now() - timedelta(hours=1),
+            is_locked=False,
+            submission_status=GradeSubmission.Status.REOPENED,
+        )
+        submission = GradingGovernanceService.get_submission(
+            offering=self.offering,
+            template_period=self.period,
+        )
+        GradeSubmissionReopenRequest.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            submission=submission,
+            offering=self.offering,
+            template_period=self.period,
+            requested_by_user=self.faculty_user,
+            status=GradeSubmissionReopenRequest.Status.APPROVED,
+            justification="Approved deadline reopen.",
+            reviewed_by_user=self.reviewer_user,
+            reviewed_at=timezone.now(),
+        )
+
         state = GradingGovernanceService.get_correction_request_lifecycle_state(
             offering=self.offering,
             template_period=self.period,
         )
         self.assertFalse(state["is_allowed"])
+        self.assertTrue(state["is_editable"])
+
+    def test_correction_filing_denies_closed_petition_window(self):
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=False)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.CLOSED,
+            is_active=True,
+        )
+
+        filing_state = GradingGovernanceService.get_correction_request_filing_state(
+            offering=self.offering,
+            template_period=self.period,
+        )
+
+        self.assertTrue(filing_state["lifecycle_state"]["is_allowed"])
+        self.assertFalse(filing_state["petition_window_state"]["is_allowed"])
+        self.assertFalse(filing_state["is_allowed"])
+
+    def test_correction_request_is_visible_after_deadline_for_read_only_offering_with_open_petition_window(self):
+        self._grant_faculty_correction_access()
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=True)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.DAYS_AFTER_PERIOD_END,
+            allowed_days_after_period_end=5,
+            is_active=True,
+        )
+        self._set_offering_outside_active_scope()
+        self.client.force_login(self.faculty_user)
+
+        summary_response = self.client.get(
+            reverse("faculty_portal:period_summary", args=[self.offering.id, self.period.id])
+        )
+        periods_response = self.client.get(reverse("faculty_portal:offering_periods", args=[self.offering.id]))
+
+        self.assertEqual(summary_response.status_code, 200)
+        self.assertTrue(summary_response.context["offering"].faculty_is_read_only)
+        self.assertTrue(summary_response.context["can_access_corrections"])
+        self.assertContains(summary_response, "Correction Requests")
+        self.assertEqual(periods_response.status_code, 200)
+        self.assertTrue(periods_response.context["period_cards"][0]["is_read_only_class"])
+        self.assertTrue(periods_response.context["period_cards"][0]["can_access_corrections"])
+        self.assertContains(periods_response, 'aria-label="Corrections"')
+
+    def test_correction_request_is_hidden_before_deadline_while_self_reopen_is_available(self):
+        self._grant_faculty_correction_access()
+        self._set_correction_lifecycle(deadline_at=timezone.now() + timedelta(hours=1), is_locked=False)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.OPEN_ANYTIME,
+            is_active=True,
+        )
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(reverse("faculty_portal:period_summary", args=[self.offering.id, self.period.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["can_self_reopen"])
+        self.assertFalse(response.context["can_access_corrections"])
+        self.assertNotContains(response, "Correction Requests")
+
+    def test_correction_request_is_hidden_when_petition_window_is_closed(self):
+        self._grant_faculty_correction_access()
+        self._set_correction_lifecycle(deadline_at=timezone.now() - timedelta(hours=1), is_locked=True)
+        CorrectionPetitionWindowPolicy.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            academic_year=self.academic_year,
+            term=self.term,
+            grading_period=self.period,
+            policy_mode=CorrectionPetitionWindowPolicy.PolicyMode.CLOSED,
+            is_active=True,
+        )
+        self.client.force_login(self.faculty_user)
+
+        response = self.client.get(reverse("faculty_portal:period_summary", args=[self.offering.id, self.period.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["can_access_corrections"])
+        self.assertNotContains(response, "Correction Requests")
 
     def test_period_corrections_direct_get_and_post_are_denied_before_deadline(self):
         self._grant_faculty_correction_access()

@@ -162,7 +162,13 @@
           <tbody>
             {% for row in routes %}
               <tr>
-                <td>{{ row.faculty_department.code|default:"(Tenant Default)" }}</td>
+                <td>
+                  {% if row.faculty_department %}
+                    {{ row.faculty_department.campus.code }} — {{ row.faculty_department.code }} - {{ row.faculty_department.name }}
+                  {% else %}
+                    (Tenant Default)
+                  {% endif %}
+                </td>
                 <td>
                   {% for step in row.ordered_steps.all %}
                     {% if step.is_active %}

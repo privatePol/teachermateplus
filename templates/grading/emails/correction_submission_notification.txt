@@ -6,9 +6,13 @@ There is a petition for correction of grades awaiting your approval in TeacherMa
 
 Petitioner: {{ petitioner_name }}
 Reference No.: {{ reference_no }}
+Current Action: {{ current_action|default:"Awaiting approval review" }}
+Current Approval Step: {{ current_approval_step|default:"Approval review" }}
 Campus: {{ campus_name }}
 Course / Section: {{ course_title }} / {{ section_name }}
 Period: {{ period_name }}
 Submitted At: {{ submitted_at|date:"Y-m-d H:i" }}
 
 Please sign in to TeacherMate+ to review the petition in the correction approval queue.
+
+NCBA confidentiality notice: This email contains internal academic workflow information for its intended recipient. Do not forward or disclose it without authorization.

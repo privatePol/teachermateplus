@@ -4313,7 +4313,7 @@ def correction_governance_settings_view(request):
 
     routes = (
         CorrectionApprovalRouteRule.objects.filter(tenant_id=tenant_id)
-        .select_related("faculty_department", "step1_role", "final_role")
+        .select_related("faculty_department", "faculty_department__campus", "step1_role", "final_role")
         .prefetch_related("ordered_steps", "ordered_steps__approver_role")
         .order_by("faculty_department__name", "id")
     )

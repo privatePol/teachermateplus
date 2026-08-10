@@ -203,8 +203,26 @@
     {% else %}
     <form method="post" enctype="multipart/form-data" novalidate>
       {% csrf_token %}
-      {% if form.non_field_errors %}
-      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% if form.errors %}
+      <div id="correction-validation-summary" class="alert alert-danger border border-danger" role="alert" tabindex="-1">
+        <strong>Your correction request could not be submitted.</strong>
+        <div class="mt-1">Please resolve the following issue{% if form.errors|length != 1 %}s{% endif %} and try again:</div>
+        <ul class="mb-0 mt-2">
+          {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+          {% for field in form.visible_fields %}
+            {% for error in field.errors %}<li>{{ field.label }}: {{ error }}</li>{% endfor %}
+          {% endfor %}
+        </ul>
+      </div>
+      <script>
+        window.requestAnimationFrame(() => {
+          const validationSummary = document.getElementById("correction-validation-summary");
+          if (validationSummary) {
+            validationSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+            validationSummary.focus({ preventScroll: true });
+          }
+        });
+      </script>
       {% endif %}
       <div class="alert alert-warning border mb-3">
         <strong>Important:</strong> To avoid confusion and missing entries, follow this order when preparing a correction request.
@@ -316,7 +334,7 @@
           {% for e in form.justification.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
         </div>
         <div class="col-md-8">
-          <label class="form-label">Attachment (optional)</label>
+          <label class="form-label" id="correction-attachment-label" for="{{ form.attachment.id_for_label }}">Attachment (optional)</label>
           {{ form.attachment }}
           {% for e in form.attachment.errors %}<div class="small text-danger">{{ e }}</div>{% endfor %}
         </div>
@@ -351,6 +369,7 @@
     const applyAllCheckbox = document.getElementById("{{ form.apply_to_all_students.id_for_label }}");
     const activityInputs = Array.from(document.querySelectorAll('input[name="{{ form.grade_activities.html_name }}"]'));
     const gridSections = document.getElementById("correction-grid-sections");
+    const attachmentLabel = document.getElementById("correction-attachment-label");
     const correctionForm = payloadField ? payloadField.closest("form") : null;
 
     if (!payloadField || !studentSelect || !applyAllCheckbox || !gridSections || !correctionForm) {
@@ -384,6 +403,19 @@
 
     function selectedActivityIds() {
       return activityInputs.filter((input) => input.checked).map((input) => input.value);
+    }
+
+    function syncAttachmentRequirement() {
+      if (!attachmentLabel) {
+        return;
+      }
+      const requiresAttachment = selectedActivityIds().some((activityId) => {
+        const activity = activityMap.get(String(activityId));
+        return activity && (activity.is_exam_component || activity.is_quiz_activity);
+      });
+      attachmentLabel.textContent = requiresAttachment
+        ? "Attachment (required for quiz and examination corrections)"
+        : "Attachment (optional)";
     }
 
     function syncPayloadFromGrid() {
@@ -588,7 +620,10 @@
       renderGrid();
     });
     studentSelect.addEventListener("change", renderGrid);
-    activityInputs.forEach((input) => input.addEventListener("change", renderGrid));
+    activityInputs.forEach((input) => input.addEventListener("change", () => {
+      syncAttachmentRequirement();
+      renderGrid();
+    }));
     correctionForm.addEventListener("submit", (event) => {
       syncPayloadFromGrid();
       if (!validateCorrectionInputs()) {
@@ -597,6 +632,7 @@
     });
 
     studentSelect.disabled = applyAllCheckbox.checked;
+    syncAttachmentRequirement();
     renderGrid();
   })();
 </script>
