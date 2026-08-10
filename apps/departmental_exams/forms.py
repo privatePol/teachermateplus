@@ -1,14 +1,16 @@
 from django import forms
 from django.utils.dateparse import parse_datetime
 
+from apps.admin_portal.course_exam_department import configure_exam_department_field
+from apps.accounts.models import User
+from apps.tenants.models import Department
+
 from .models import (
     CourseExamConfiguration,
     CycleCourse,
     ExaminationCycle,
     normalize_contribution_deadline_to_minute,
 )
-from apps.tenants.models import Department
-from apps.accounts.models import User
 
 
 _STALE_FORM_STATE_ERROR = (
@@ -40,6 +42,10 @@ class CycleCourseAdministrationForm(forms.Form):
                 reviewer_queryset if reviewer_queryset is not None else User.objects.none()
             )
             self.fields["reviewer"].initial = cycle_course.reviewer_id
+        configure_exam_department_field(
+            self.fields["responsible_department"],
+            self.fields["responsible_department"].queryset,
+        )
         self.fields["responsible_department"].widget.attrs["class"] = "form-select"
         self.fields["reviewer"].widget.attrs["class"] = "form-select"
 

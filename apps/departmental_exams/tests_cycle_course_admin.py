@@ -460,6 +460,80 @@ class CycleCourseAdministrationTests(TestCase):
         self.assertEqual(cycle_course.responsible_department_id, self.department_a.id)
         self.assertEqual(cycle_course.reviewer_id, reviewer.id)
 
+    def test_responsible_department_choices_are_campus_qualified_and_reviewer_loads_after_save(self):
+        duplicate_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=self.campus_b,
+            code=self.department_a.code,
+            name=self.department_a.name,
+        )
+        reviewer = self._reviewer(
+            username="campus-b-reviewer", department=duplicate_department
+        )
+        _, cycle_course = self._grouped_course()
+        url = reverse("departmental_exams:cycle_course_administration", args=[cycle_course.id])
+
+        self.client.force_login(self.admin)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        field = response.context["form"].fields["responsible_department"]
+        self.assertEqual(field.widget.attrs["class"], "form-select")
+        choices = {
+            department.instance.id: label
+            for department, label in field.choices
+            if getattr(department, "instance", None) is not None
+        }
+        self.assertEqual(
+            choices[self.department_a.id], "BUS — Business — A"
+        )
+        self.assertEqual(
+            choices[duplicate_department.id], "BUS — Business — B"
+        )
+        self.assertNotEqual(self.department_a.id, duplicate_department.id)
+        self.assertContains(response, 'value="{}"'.format(self.department_a.id))
+        self.assertContains(response, 'value="{}"'.format(duplicate_department.id))
+        self.assertNotIn(reviewer.id, response.context["form"].fields["reviewer"].queryset.values_list("id", flat=True))
+
+        response = self.client.post(
+            url,
+            {"responsible_department": duplicate_department.id},
+        )
+        self.assertRedirects(response, url)
+        cycle_course.refresh_from_db()
+        self.assertEqual(cycle_course.responsible_department_id, duplicate_department.id)
+
+        response = self.client.get(url)
+        reviewer_ids = set(
+            response.context["form"].fields["reviewer"].queryset.values_list(
+                "id", flat=True
+            )
+        )
+        self.assertIn(reviewer.id, reviewer_ids)
+        self.assertContains(response, "BUS — Business — B")
+
+        response = self.client.post(
+            url,
+            {
+                "responsible_department": duplicate_department.id,
+                "reviewer_id": reviewer.id,
+            },
+        )
+        self.assertRedirects(response, url)
+        cycle_course.refresh_from_db()
+        self.assertEqual(cycle_course.reviewer_id, reviewer.id)
+
+    def test_assigned_course_examinations_render_exam_blueprint_label(self):
+        self._grouped_course()
+        self.client.force_login(self.admin)
+
+        response = self.client.get(
+            reverse("departmental_exams:assigned_course_examinations")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Exam Blueprint")
+        self.assertNotContains(response, "Stage 6 Blueprint")
+
     def test_cycle_form_rejects_cross_tenant_term(self):
         form = ExaminationCycleForm(
             data={
