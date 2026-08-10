@@ -1568,6 +1568,8 @@ class BulkImportService:
 
         normalized = {
             "offering_id": offering.id if offering else None,
+            "tenant_id": offering.tenant_id if offering else None,
+            "campus_id": offering.campus_id if offering else None,
             "faculty_user_id": faculty_user.id if faculty_user else None,
             "is_primary": bool(is_primary),
             "is_active": True,
@@ -2290,11 +2292,27 @@ class BulkImportService:
         return "CourseOffering", row
 
     @classmethod
-    def _create_faculty_assignment(cls, normalized: dict):
+    def _create_faculty_assignment(cls, normalized: dict, *, confirmation_runtime=None):
+        offering = (
+            CourseOffering.objects.select_for_update()
+            .filter(id=normalized["offering_id"])
+            .first()
+        )
+        if offering is None or not offering.is_active:
+            raise ValidationError("Offering is inactive or no longer available for this import.")
+        if (
+            normalized.get("tenant_id") != offering.tenant_id
+            or normalized.get("campus_id") != offering.campus_id
+        ):
+            raise ValidationError("Offering scope changed after preview; upload and validate the file again.")
+        if confirmation_runtime is not None and not cls._allowed_offerings_for_runtime(
+            confirmation_runtime
+        ).filter(id=offering.id).exists():
+            raise ValidationError("Offering is inactive or outside the current authorized scope.")
         row = FacultyAssignment.objects.create(
-            offering_id=normalized["offering_id"],
-            tenant_id=normalized.get("tenant_id"),
-            campus_id=normalized.get("campus_id"),
+            offering=offering,
+            tenant_id=offering.tenant_id,
+            campus_id=offering.campus_id,
             faculty_user_id=normalized["faculty_user_id"],
             is_primary=bool(normalized.get("is_primary", False)),
             is_active=bool(normalized.get("is_active", True)),
@@ -2435,6 +2453,14 @@ class BulkImportService:
             "students_by_id": students_by_id,
             "existing_enrollment_keys": existing_enrollment_keys,
         }
+
+    @classmethod
+    def _build_faculty_assignment_confirmation_runtime(cls, *, actor, request, batch):
+        runtime_request = request
+        if runtime_request is None:
+            stored_scope = ((batch.metadata_json or {}).get("scope") or {})
+            runtime_request = SimpleNamespace(scope=stored_scope)
+        return cls._build_runtime(user=actor, request=runtime_request)
 
     @classmethod
     def _resolve_or_create_enrollment_student(
@@ -2641,7 +2667,10 @@ class BulkImportService:
         if import_type == ImportBatch.ImportType.COURSE_OFFERINGS:
             return cls._create_course_offering(normalized)
         if import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS:
-            return cls._create_faculty_assignment(normalized)
+            return cls._create_faculty_assignment(
+                normalized,
+                confirmation_runtime=confirmation_runtime,
+            )
         if import_type == ImportBatch.ImportType.ENROLLMENT:
             return cls._create_enrollment(
                 normalized,
@@ -2699,6 +2728,13 @@ class BulkImportService:
                 request=request,
                 batch=batch,
             )
+        faculty_assignment_confirmation_runtime = None
+        if batch.import_type == ImportBatch.ImportType.FACULTY_ASSIGNMENTS:
+            faculty_assignment_confirmation_runtime = cls._build_faculty_assignment_confirmation_runtime(
+                actor=actor,
+                request=request,
+                batch=batch,
+            )
 
         imported_count = 0
         failed_count = 0
@@ -2720,7 +2756,10 @@ class BulkImportService:
                             batch.import_type,
                             normalized,
                             actor=actor,
-                            confirmation_runtime=enrollment_confirmation_runtime,
+                            confirmation_runtime=(
+                                enrollment_confirmation_runtime
+                                or faculty_assignment_confirmation_runtime
+                            ),
                         )
                     if not faculty_user_import:
                         cls._audit_import_row_write(

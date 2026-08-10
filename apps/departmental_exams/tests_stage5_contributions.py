@@ -12,7 +12,7 @@ from apps.auditlog.models import AuditLog
 from apps.rbac.models import Permission, UserPermission
 from apps.core.services.permissions import PermissionService
 from apps.core.services.settings import SystemSettingService
-from apps.tenants.models import Program
+from apps.tenants.models import Campus, Department, Program, Tenant
 
 from .contribution_authorization import (
     ContributionConflict,
@@ -78,6 +78,40 @@ class Stage5FixtureMixin:
             is_active=True,
         )
 
+    def add_grouped_offering(self, parent, *, campus, department, slug, tenant=None):
+        tenant = tenant or parent.cycle.tenant
+        program = Program.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            code=f"S5-{slug}",
+            name=f"Stage 5 {slug}",
+        )
+        section = Section.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            code=f"S5-{slug}",
+            name=f"Stage 5 {slug}",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            academic_year=parent.cycle.academic_year,
+            term=parent.cycle.term,
+            course=parent.course,
+            section=section,
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=parent,
+            offering=offering,
+            campus=campus,
+        )
+        return offering
+
     def initialize(self, parent):
         return ContributionRosterService.initialize(
             cycle_course_id=parent.id,
@@ -133,6 +167,198 @@ class Stage5EligibilityRosterTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(contribution.configuration_revision_snapshot, configuration.revision)
         self.assertEqual(contribution.roster_status, "ACTIVE")
         self.assertEqual(contribution.eligibility_sources.count(), 1)
+
+    def test_effective_scope_accepts_legacy_nulls_and_rejects_partial_or_mismatch(self):
+        parent, _configuration = self.make_stage5_course()
+        faculty = self.make_faculty("effective-scope-faculty")
+        assignment = self.make_assignment(parent, faculty)
+
+        self.assertTrue(
+            ContributorEligibilityService.source_is_eligible(
+                assignment=assignment,
+                cycle_course=parent,
+            )
+        )
+
+        assignment.tenant = None
+        assignment.campus = None
+        assignment.save(update_fields=["tenant", "campus", "updated_at"])
+        self.assertTrue(
+            ContributorEligibilityService.source_is_eligible(
+                assignment=assignment,
+                cycle_course=parent,
+            )
+        )
+
+        invalid_scopes = (
+            (None, self.campus),
+            (self.tenant, None),
+            (self.tenant, self.other_campus),
+        )
+        for tenant, campus in invalid_scopes:
+            with self.subTest(tenant=tenant, campus=campus):
+                assignment.tenant = tenant
+                assignment.campus = campus
+                assignment.save(update_fields=["tenant", "campus", "updated_at"])
+                self.assertFalse(
+                    ContributorEligibilityService.source_is_eligible(
+                        assignment=assignment,
+                        cycle_course=parent,
+                    )
+                )
+
+    def test_cross_tenant_offering_is_rejected_even_with_exact_direct_allow(self):
+        parent, _configuration = self.make_stage5_course()
+        faculty = self.make_faculty("cross-tenant-faculty")
+        other_tenant = Tenant.objects.create(code="S5-OTHER", name="Stage 5 Other")
+        other_campus = Campus.objects.create(
+            tenant=other_tenant,
+            code="S5-OTHER",
+            name="Stage 5 Other",
+        )
+        other_department = Department.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            code="S5-OTHER",
+            name="Stage 5 Other",
+        )
+        offering = self.add_grouped_offering(
+            parent,
+            campus=other_campus,
+            department=other_department,
+            tenant=other_tenant,
+            slug="CROSS-TENANT",
+        )
+        assignment = FacultyAssignment.objects.create(
+            tenant=other_tenant,
+            campus=other_campus,
+            offering=offering,
+            faculty_user=faculty,
+            response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+            accepted_by=self.admin,
+            is_active=True,
+        )
+        UserPermission.objects.create(
+            user=faculty,
+            permission=Permission.objects.get(code="faculty_portal.access"),
+            tenant=other_tenant,
+            campus=other_campus,
+            grant_type=UserPermission.GrantType.ALLOW,
+        )
+
+        self.assertFalse(
+            ContributorEligibilityService.source_is_eligible(
+                assignment=assignment,
+                cycle_course=parent,
+            )
+        )
+        self.assertNotIn(
+            assignment,
+            ContributorEligibilityService.source_inventory(
+                cycle_course=parent
+            ).eligible_sources,
+        )
+
+    def test_wrong_cycle_course_offering_campus_is_not_linked(self):
+        parent, _configuration = self.make_stage5_course()
+        faculty = self.make_faculty("wrong-snapshot-campus-faculty")
+        assignment = self.make_assignment(parent, faculty)
+        parent.offering_snapshots.update(campus=self.other_campus)
+
+        inventory = ContributorEligibilityService.source_inventory(cycle_course=parent)
+
+        self.assertNotIn(assignment, inventory.all_sources)
+        self.assertEqual(inventory.eligible_sources, ())
+
+    def test_exact_direct_deny_overrides_legacy_effective_scope(self):
+        parent, _configuration = self.make_stage5_course()
+        faculty = self.make_faculty("legacy-direct-deny-faculty")
+        assignment = self.make_assignment(parent, faculty)
+        assignment.tenant = None
+        assignment.campus = None
+        assignment.save(update_fields=["tenant", "campus", "updated_at"])
+        UserPermission.objects.create(
+            user=faculty,
+            permission=Permission.objects.get(code="faculty_portal.access"),
+            tenant=self.tenant,
+            campus=self.campus,
+            grant_type=UserPermission.GrantType.DENY,
+        )
+
+        self.assertFalse(
+            ContributorEligibilityService.source_inventory(
+                cycle_course=parent
+            ).eligible_sources
+        )
+        self.assertFalse(
+            ContributorEligibilityService.has_any_eligible_source(
+                user=faculty,
+                tenant_id=self.tenant.id,
+            )
+        )
+
+    def test_legacy_grouped_sources_create_one_contribution_with_two_sources(self):
+        parent, _configuration = self.make_stage5_course()
+        faculty = self.make_faculty("legacy-grouped-faculty")
+        first = self.make_assignment(parent, faculty)
+        first.tenant = None
+        first.campus = None
+        first.save(update_fields=["tenant", "campus", "updated_at"])
+        second_offering = self.add_grouped_offering(
+            parent,
+            campus=self.campus,
+            department=self.department,
+            slug="LEGACY-SECOND",
+        )
+        second = self.make_assignment(parent, faculty, offering=second_offering)
+        second.tenant = None
+        second.campus = None
+        second.save(update_fields=["tenant", "campus", "updated_at"])
+
+        result = self.initialize(parent)
+
+        contribution = FacultyContribution.objects.get(faculty_user=faculty)
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(FacultyContribution.objects.filter(faculty_user=faculty).count(), 1)
+        self.assertEqual(contribution.source_assignment_id, min(first.id, second.id))
+        self.assertEqual(contribution.source_campus_id, self.campus.id)
+        self.assertEqual(
+            set(
+                contribution.eligibility_sources.filter(is_current=True).values_list(
+                    "assignment_id_snapshot",
+                    flat=True,
+                )
+            ),
+            {first.id, second.id},
+        )
+        self.assertFalse(
+            contribution.eligibility_sources.exclude(
+                tenant_id_snapshot=self.tenant.id,
+                campus_id_snapshot=self.campus.id,
+            ).exists()
+        )
+
+    def test_synchronize_discovers_new_legacy_null_scoped_assignment(self):
+        parent, _configuration = self.make_stage5_course()
+        faculty = self.make_faculty("legacy-sync-faculty")
+        self.initialize(parent)
+        assignment = self.make_assignment(parent, faculty)
+        assignment.tenant = None
+        assignment.campus = None
+        assignment.save(update_fields=["tenant", "campus", "updated_at"])
+
+        result = ContributionRosterService.synchronize(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+
+        contribution = FacultyContribution.objects.get(faculty_user=faculty)
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(contribution.source_assignment, assignment)
+        self.assertEqual(contribution.source_campus_id, self.campus.id)
+        self.assertEqual(contribution.eligibility_sources.filter(is_current=True).count(), 1)
 
     def test_duplicate_sections_do_not_duplicate_grouped_contribution(self):
         parent, _configuration = self.make_stage5_course()

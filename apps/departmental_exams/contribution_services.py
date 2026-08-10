@@ -137,7 +137,7 @@ class ContributionRosterService:
                     cycle_course=cycle_course,
                     faculty_user_id=faculty_user_id,
                     source_assignment=primary,
-                    source_campus_id=primary.campus_id,
+                    source_campus_id=ContributorEligibilityService._effective_scope(primary)[1],
                     quota_snapshot=quota,
                     configuration_revision_snapshot=configuration.revision,
                     revision=1,
@@ -237,13 +237,14 @@ class ContributionRosterService:
             changed_fields = []
             if eligible_assignments:
                 primary = eligible_assignments[0]
+                primary_scope = ContributorEligibilityService._effective_scope(primary)
                 if contribution.source_assignment_id != primary.id:
                     rebinds.append((contribution.id, contribution.source_assignment_id, primary.id))
                     contribution.source_assignment = primary
                     changed_fields.append("source_assignment")
                     material_evidence_changed = True
-                if contribution.source_campus_id != primary.campus_id:
-                    contribution.source_campus_id = primary.campus_id
+                if contribution.source_campus_id != primary_scope[1]:
+                    contribution.source_campus_id = primary_scope[1]
                     changed_fields.append("source_campus")
                     material_evidence_changed = True
             if contribution.roster_status != desired_status:

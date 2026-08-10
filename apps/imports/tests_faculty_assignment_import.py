@@ -179,6 +179,8 @@ class FacultyAssignmentImportStatusTests(TestCase):
             offering=self.offering,
             faculty_user=self.active_faculty,
         )
+        self.assertEqual(assignment.tenant, self.offering.tenant)
+        self.assertEqual(assignment.campus, self.offering.campus)
         self.assertTrue(assignment.is_active)
         self.assertTrue(assignment.is_primary)
         self.assertTrue(
@@ -186,6 +188,72 @@ class FacultyAssignmentImportStatusTests(TestCase):
                 action="CREATE",
                 entity_type="FacultyAssignment",
                 entity_id=str(assignment.id),
+            ).exists()
+        )
+
+    def test_confirmation_rejects_offering_scope_drift_without_assignment_or_success_audit(self):
+        batch = self._upload(self._row(self.active_faculty.username))
+        staged_row = batch.rows.get()
+        self.assertEqual(
+            (staged_row.normalized_data_json["tenant_id"], staged_row.normalized_data_json["campus_id"]),
+            (self.tenant.id, self.campus.id),
+        )
+
+        alternate_campus = Campus.objects.create(tenant=self.tenant, code="ALTERNATE", name="Alternate")
+        alternate_department = Department.objects.create(
+            tenant=self.tenant,
+            campus=alternate_campus,
+            code="ALT-COLLEGE",
+            name="Alternate College",
+        )
+        alternate_program = Program.objects.create(
+            tenant=self.tenant,
+            campus=alternate_campus,
+            department=alternate_department,
+            code="BSALT",
+            name="Bachelor of Alternate Studies",
+        )
+        alternate_course = Course.objects.create(
+            tenant=self.tenant,
+            campus=alternate_campus,
+            department=alternate_department,
+            code="ALT101",
+            title="Introduction to Alternate Studies",
+        )
+        alternate_section = Section.objects.create(
+            tenant=self.tenant,
+            campus=alternate_campus,
+            department=alternate_department,
+            program=alternate_program,
+            code="BSALT-1A",
+            name="BSALT 1A",
+        )
+        self.offering.campus = alternate_campus
+        self.offering.department = alternate_department
+        self.offering.program = alternate_program
+        self.offering.course = alternate_course
+        self.offering.section = alternate_section
+        self.offering.save(
+            update_fields=["campus", "department", "program", "course", "section", "updated_at"]
+        )
+
+        confirmed = BulkImportService.confirm_batch(batch=batch, actor=self.actor)
+
+        staged_row.refresh_from_db()
+        self.assertEqual(confirmed.status, ImportBatch.Status.CONFIRM_FAILED)
+        self.assertEqual((confirmed.imported_rows, confirmed.invalid_rows), (0, 1))
+        self.assertEqual(staged_row.row_status, ImportBatchRow.RowStatus.ERROR)
+        self.assertIn("Offering scope changed after preview", " ".join(staged_row.errors_json or []))
+        self.assertFalse(
+            FacultyAssignment.objects.filter(
+                offering=self.offering,
+                faculty_user=self.active_faculty,
+            ).exists()
+        )
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="CREATE",
+                entity_type="FacultyAssignment",
             ).exists()
         )
 

@@ -17,7 +17,7 @@ from apps.auditlog.models import AuditLog
 from apps.rbac.models import Permission, UserPermission, UserRole
 from apps.tenants.models import Program
 
-from .contribution_services import QuestionMutationService
+from .contribution_services import ContributionRosterService, QuestionMutationService
 from .csv_import import QuestionCSVImportService
 from .models import (
     CycleCourseOffering,
@@ -872,6 +872,39 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
             for node in group["items"]
         ]
         self.assertIn("DE_EXAM_FACULTY_CONTRIBUTIONS", codes)
+
+    def test_legacy_null_scoped_assignment_exposes_navigation_and_synchronized_list(self):
+        self.contribution.delete()
+        self.assignment.tenant = None
+        self.assignment.campus = None
+        self.assignment.save(update_fields=["tenant", "campus", "updated_at"])
+
+        eligible_without_roster = self.client.get(
+            reverse("departmental_exams:contribution_list")
+        )
+        self.assertEqual(eligible_without_roster.status_code, 200)
+        self.assertContains(eligible_without_roster, "No contribution roster record is available yet")
+        self.assertIn(
+            "DE_EXAM_FACULTY_CONTRIBUTIONS",
+            [
+                node["item"].code
+                for group in eligible_without_roster.context["portal_menu"]
+                for node in group["items"]
+            ],
+        )
+
+        result = ContributionRosterService.synchronize(
+            cycle_course_id=self.parent.id,
+            tenant_id=self.tenant.id,
+            actor=self.configurer,
+        )
+        self.assertEqual(result["created"], 1)
+        contribution = FacultyContribution.objects.get(faculty_user=self.faculty)
+
+        synchronized = self.client.get(reverse("departmental_exams:contribution_list"))
+        self.assertEqual(synchronized.status_code, 200)
+        self.assertContains(synchronized, self.parent.course.code)
+        self.assertContains(synchronized, f"0 / {contribution.quota_snapshot}")
 
     def test_bootstrap_forms_render_bound_errors_checkboxes_and_csrf(self):
         create_url = reverse(

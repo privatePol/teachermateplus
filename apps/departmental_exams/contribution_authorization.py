@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Exists, F, OuterRef, Q
+from django.db.models import F
 from django.utils import timezone
 
 from apps.academics.models import CourseOffering, FacultyAssignment
@@ -43,6 +43,17 @@ class ContributorEligibilityService:
     PORTAL_PERMISSION = "faculty_portal.access"
 
     @staticmethod
+    def _effective_scope(assignment):
+        """Return the exact assignment scope, including the approved legacy fallback."""
+        assignment_scope = (assignment.tenant_id, assignment.campus_id)
+        offering_scope = (assignment.offering.tenant_id, assignment.offering.campus_id)
+        if assignment_scope == (None, None):
+            return offering_scope
+        if None in assignment_scope or assignment_scope != offering_scope:
+            return None
+        return assignment_scope
+
+    @staticmethod
     def _linked_assignments(*, cycle_course, faculty_user_id=None):
         queryset = (
             FacultyAssignment.objects.filter(
@@ -73,15 +84,12 @@ class ContributorEligibilityService:
     ):
         cycle = cycle_course.cycle
         offering = assignment.offering
+        effective_scope = ContributorEligibilityService._effective_scope(assignment)
         return bool(
             assignment.faculty_user.is_active
             and cycle.tenant.is_active
-            and assignment.tenant_id is not None
-            and assignment.campus_id is not None
-            and assignment.tenant_id == cycle.tenant_id
-            and assignment.tenant_id == offering.tenant_id
-            and assignment.campus_id == offering.campus_id
-            and assignment.campus.is_active
+            and effective_scope is not None
+            and effective_scope[0] == cycle.tenant_id
             and offering.tenant.is_active
             and offering.campus.is_active
             and offering.is_active
@@ -112,11 +120,16 @@ class ContributorEligibilityService:
     @classmethod
     def _bulk_allowed_keys(cls, assignments):
         assignments = tuple(assignments)
-        if not assignments:
+        scoped_assignments = []
+        for item in assignments:
+            effective_scope = cls._effective_scope(item)
+            if effective_scope is not None:
+                scoped_assignments.append((item, effective_scope))
+        if not scoped_assignments:
             return set()
-        user_ids = {item.faculty_user_id for item in assignments}
-        tenant_ids = {item.tenant_id for item in assignments if item.tenant_id is not None}
-        campus_ids = {item.campus_id for item in assignments if item.campus_id is not None}
+        user_ids = {item.faculty_user_id for item, _scope in scoped_assignments}
+        tenant_ids = {scope[0] for _item, scope in scoped_assignments}
+        campus_ids = {scope[1] for _item, scope in scoped_assignments}
         role_keys = set(
             UserRole.objects.filter(
                 user_id__in=user_ids,
@@ -161,23 +174,21 @@ class ContributorEligibilityService:
             )
         )
         allowed_keys = cls._bulk_allowed_keys(assignments)
-        eligible = tuple(
-            assignment
-            for assignment in assignments
-            if cls._structurally_valid(
-                assignment=assignment,
-                cycle_course=cycle_course,
-                configuration=configuration,
-                allow_closed_contribution=allow_closed_contribution,
-            )
-            and (
-                assignment.faculty_user_id,
-                assignment.tenant_id,
-                assignment.campus_id,
-            )
-            in allowed_keys
-        )
-        return SourceInventory(all_sources=assignments, eligible_sources=eligible)
+        eligible = []
+        for assignment in assignments:
+            effective_scope = cls._effective_scope(assignment)
+            if (
+                effective_scope is not None
+                and cls._structurally_valid(
+                    assignment=assignment,
+                    cycle_course=cycle_course,
+                    configuration=configuration,
+                    allow_closed_contribution=allow_closed_contribution,
+                )
+                and (assignment.faculty_user_id, *effective_scope) in allowed_keys
+            ):
+                eligible.append(assignment)
+        return SourceInventory(all_sources=assignments, eligible_sources=tuple(eligible))
 
     @classmethod
     def source_is_eligible(cls, *, assignment, cycle_course):
@@ -188,13 +199,14 @@ class ContributorEligibilityService:
             configuration=configuration,
         ):
             return False
-        if assignment.tenant_id is None or assignment.campus_id is None:
+        effective_scope = cls._effective_scope(assignment)
+        if effective_scope is None:
             return False
         return PermissionService.has_assigned_permission(
             assignment.faculty_user,
             cls.PORTAL_PERMISSION,
-            tenant_id=assignment.tenant_id,
-            campus_id=assignment.campus_id,
+            tenant_id=effective_scope[0],
+            campus_id=effective_scope[1],
             exact_scope=True,
         )
 
@@ -203,59 +215,43 @@ class ContributorEligibilityService:
         """Bounded set-based counterpart for Faculty navigation visibility."""
         if not user or not user.is_authenticated or not user.is_active or not tenant_id:
             return False
-        role_permission = UserRole.objects.filter(
-            user=user,
-            is_active=True,
-            role__is_active=True,
-            tenant_id=OuterRef("tenant_id"),
-            campus_id=OuterRef("campus_id"),
-            role__role_permissions__permission__code=cls.PORTAL_PERMISSION,
-            role__role_permissions__permission__is_active=True,
-        )
-        direct = UserPermission.objects.filter(
-            user=user,
-            permission__code=cls.PORTAL_PERMISSION,
-            permission__is_active=True,
-            tenant_id=OuterRef("tenant_id"),
-            campus_id=OuterRef("campus_id"),
-        )
-        return (
+        assignments = tuple(
             FacultyAssignment.objects.filter(
                 faculty_user=user,
                 faculty_user__is_active=True,
-                tenant_id=tenant_id,
-                tenant__is_active=True,
-                campus__is_active=True,
                 is_active=True,
                 response_status=FacultyAssignment.ResponseStatus.ACCEPTED,
                 accepted_at__isnull=False,
-                offering__tenant_id=F("tenant_id"),
-                offering__campus_id=F("campus_id"),
+                offering__tenant_id=tenant_id,
                 offering__tenant__is_active=True,
                 offering__campus__is_active=True,
                 offering__is_active=True,
                 offering__status=CourseOffering.Status.OPEN,
                 offering__exam_cycle_snapshots__campus_id=F("offering__campus_id"),
                 offering__exam_cycle_snapshots__cycle_course__course_id=F("offering__course_id"),
-                offering__exam_cycle_snapshots__cycle_course__cycle__tenant_id=F("tenant_id"),
+                offering__exam_cycle_snapshots__cycle_course__cycle__tenant_id=F("offering__tenant_id"),
                 offering__exam_cycle_snapshots__cycle_course__cycle__academic_year_id=F("offering__academic_year_id"),
                 offering__exam_cycle_snapshots__cycle_course__cycle__term_id=F("offering__term_id"),
                 offering__exam_cycle_snapshots__cycle_course__cycle__status="OPEN",
                 offering__exam_cycle_snapshots__cycle_course__inclusion_status="INCLUDED",
                 offering__exam_cycle_snapshots__cycle_course__configuration__workflow_status="OPEN",
             )
-            .annotate(
-                has_role_permission=Exists(role_permission),
-                has_direct_allow=Exists(
-                    direct.filter(grant_type=UserPermission.GrantType.ALLOW)
-                ),
-                has_direct_deny=Exists(
-                    direct.filter(grant_type=UserPermission.GrantType.DENY)
-                ),
+            .select_related(
+                "tenant",
+                "campus",
+                "offering",
+                "offering__tenant",
+                "offering__campus",
             )
-            .filter(has_direct_deny=False)
-            .filter(Q(has_role_permission=True) | Q(has_direct_allow=True))
-            .exists()
+            .distinct()
+        )
+        allowed_keys = cls._bulk_allowed_keys(assignments)
+        return any(
+            effective_scope is not None
+            and effective_scope[0] == tenant_id
+            and (assignment.faculty_user_id, *effective_scope) in allowed_keys
+            for assignment in assignments
+            for effective_scope in (cls._effective_scope(assignment),)
         )
 
     @classmethod
@@ -283,8 +279,7 @@ class ContributionAuthorizationService:
             (
                 assignment.id,
                 assignment.offering_id,
-                assignment.tenant_id,
-                assignment.campus_id,
+                *ContributorEligibilityService._effective_scope(assignment),
             )
             for assignment in inventory.eligible_sources
         }
