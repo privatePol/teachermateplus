@@ -95,9 +95,9 @@ def contributor_monitoring_view(request):
             configuration = getattr(course, "configuration", None)
             contribution.is_overdue = bool(
                 configuration
-                and configuration.contribution_deadline
+                and configuration.active_contribution_deadline
                 and contribution.status == contribution.Status.DRAFT
-                and configuration.contribution_deadline <= timezone.now()
+                and configuration.active_contribution_deadline <= timezone.now()
             )
             contribution.blocked_resolution_valid = bool(
                 configuration

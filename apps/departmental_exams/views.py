@@ -99,6 +99,7 @@ def _cycle_defaults_confirmation_token(*, request, cycle, tenant_id, cleaned_dat
             "tenant_id": tenant_id,
             "cycle_id": cycle.id,
             "expected_updated_at": cleaned_data["expected_updated_at"],
+            "processing_mode": cleaned_data["processing_mode"],
             "default_questions_required_per_faculty": cleaned_data[
                 "default_questions_required_per_faculty"
             ],
@@ -134,6 +135,7 @@ def _load_cycle_defaults_confirmation(*, request, cycle, tenant_id):
         "tenant_id",
         "cycle_id",
         "expected_updated_at",
+        "processing_mode",
         "default_questions_required_per_faculty",
         "default_final_item_count",
         "default_contribution_deadline",
@@ -204,6 +206,27 @@ def cycle_configuration_view(request, cycle_id):
     can_view_course_examinations = cycle.id in _visible_cycle_ids_for_user(
         user=request.user, tenant_id=tenant_id
     )
+    automatic_courses = list(
+        CycleCourse.objects.filter(
+            cycle=cycle,
+            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+        ).prefetch_related("offering_snapshots")
+    )
+    can_manage_automatic_generation = bool(
+        cycle.processing_mode
+        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        and automatic_courses
+        and all(
+            DepartmentalExamAuthorizationService.has_automatic_course_permission(
+                user=request.user,
+                cycle_course=course,
+                permissions=(
+                    DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+                ),
+            )
+            for course in automatic_courses
+        )
+    )
     form = ExaminationCycleConfigurationForm(request.POST or None, instance=cycle, initial={"expected_updated_at": ExaminationCycleConfigurationService.transition_token(cycle)})
     status = 200
     if request.method == "POST" and not lifecycle_flags["can_edit_cycle_configuration"]:
@@ -223,7 +246,7 @@ def cycle_configuration_view(request, cycle_id):
             "departmental_exams/admin/cycle_defaults_confirm.html",
             {"cycle": cycle, "form": confirmation_form},
         )
-    return render(request, "departmental_exams/admin/cycle_configuration.html", {"cycle": cycle, "form": form, "lifecycle_flags": lifecycle_flags, "can_view_course_examinations": can_view_course_examinations}, status=status)
+    return render(request, "departmental_exams/admin/cycle_configuration.html", {"cycle": cycle, "form": form, "lifecycle_flags": lifecycle_flags, "can_view_course_examinations": can_view_course_examinations, "can_manage_automatic_generation": can_manage_automatic_generation}, status=status)
 
 
 @portal_required("ADMIN")
@@ -268,6 +291,7 @@ def cycle_apply_defaults_view(request, cycle_id):
                 default_contribution_deadline=confirmation_state[
                     "default_contribution_deadline"
                 ],
+                processing_mode=confirmation_state["processing_mode"],
                 contributor_instructions=confirmation_state["contributor_instructions"],
                 reason=confirmation_state["reason"],
                 request=request,
@@ -432,11 +456,38 @@ def assigned_course_examinations_view(request):
     )
     configurer_ids = set(configurer_courses.values_list("id", flat=True))
     reviewer_ids = set(reviewer_courses.values_list("id", flat=True))
+    automatic_courses = list(
+        base_courses.filter(
+            cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+        )
+    )
+    automatic_permissions = (
+        DepartmentalExamAuthorizationService.automatic_permission_map(
+            user=request.user,
+            courses=automatic_courses,
+            permissions=(
+                DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
+                DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+            ),
+        )
+    )
+    automatic_ids = {
+        course_id
+        for course_id, codes in automatic_permissions.items()
+        if DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION in codes
+    }
+    automatic_manage_ids = {
+        course_id
+        for course_id, codes in automatic_permissions.items()
+        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION in codes
+    }
     courses = list(
         _with_downstream_activity_flags(
             base_courses.filter(
                 Q(id__in=configurer_courses.values("id"))
                 | Q(id__in=reviewer_courses.values("id"))
+                | Q(id__in=automatic_ids)
             ).distinct()
         )
         .order_by("-cycle__created_at", "course__code")
@@ -446,7 +497,22 @@ def assigned_course_examinations_view(request):
         course.can_administer = course.id in configurer_ids
         course.can_review = bool(
             course.id in reviewer_ids
+            and course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
             and course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+        )
+        course.can_manage_generation = bool(
+            course.id in automatic_manage_ids
+        )
+        course.can_view_generation = course.id in automatic_ids
+        course.current_generated_revision = next(
+            (
+                revision
+                for revision in course.generation_revisions.all()
+                if revision.current_marker == 1
+                and revision.status == ExamGenerationRevision.Status.GENERATED
+            ),
+            None,
         )
         course.locked_revision = next(
             (

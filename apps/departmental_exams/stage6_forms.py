@@ -124,6 +124,21 @@ class RegenerationRequestForm(GenerationRequestForm):
     )
 
 
+class AutomaticRegenerationRequestForm(GenerationRequestForm):
+    reason = forms.CharField(
+        required=False,
+        max_length=500,
+        label="Optional note",
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "class": "form-control",
+                "placeholder": "Optional operational note for the audit trail.",
+            }
+        ),
+    )
+
+
 class ApproveAndLockForm(forms.Form):
     expected_revision_number = forms.IntegerField(
         min_value=1,

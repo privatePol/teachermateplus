@@ -24,6 +24,7 @@ from .models import (
     CycleCourse,
     ExamBlueprint,
     ExamGenerationRevision,
+    ExaminationCycle,
     ExamScenario,
     ExamScenarioMember,
     ExamSection,
@@ -133,7 +134,13 @@ class ExamGenerationService:
         course = revision.cycle_course
         AuditService.log_event(
             action=action,
-            portal="ADMIN",
+            portal=(
+                "SYSTEM"
+                if actor is None
+                and revision.generation_trigger
+                == ExamGenerationRevision.GenerationTrigger.AUTOMATIC
+                else "ADMIN"
+            ),
             entity_type="ExamGenerationRevision",
             entity_id=revision.id,
             actor=actor,
@@ -156,6 +163,7 @@ class ExamGenerationService:
                     revision.squared_contributor_concentration
                 ),
                 "source_input_fingerprint": revision.source_input_fingerprint,
+                "generation_trigger": revision.generation_trigger,
                 **(metadata or {}),
             },
             request=request,
@@ -174,24 +182,52 @@ class ExamGenerationService:
         request_token,
         regeneration=False,
         regeneration_reason="",
+        generation_trigger=ExamGenerationRevision.GenerationTrigger.MANUAL,
         request=None,
         max_states=None,
     ):
         token_digest = cls.request_token_digest(request_token)
         reason = " ".join((regeneration_reason or "").split())
-        if regeneration and not 10 <= len(reason) <= 500:
-            raise ValidationError("A regeneration reason of 10 to 500 characters is required.")
-        if not regeneration and reason:
-            raise ValidationError("A reason is accepted only for regeneration.")
+        if len(reason) > 500:
+            raise ValidationError("A regeneration note cannot exceed 500 characters.")
+        if generation_trigger not in ExamGenerationRevision.GenerationTrigger.values:
+            raise ValidationError("The generation trigger is invalid.")
 
         cycle, course, configuration, blueprint, revisions = cls._lock_generation_inputs(
             cycle_course_id=cycle_course_id,
             tenant_id=tenant_id,
         )
-        DepartmentalExamAuthorizationService.require_course_responsibility(
-            user=actor,
-            cycle_course=course,
+        automatic_system_run = (
+            generation_trigger
+            == ExamGenerationRevision.GenerationTrigger.AUTOMATIC
         )
+        automatic_mode = (
+            cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        )
+        if automatic_system_run:
+            if actor is not None or regeneration or not automatic_mode or reason:
+                raise GenerationConflict("Automatic generation attribution is invalid.")
+        elif automatic_mode:
+            DepartmentalExamAuthorizationService.require_generation_management(
+                user=actor,
+                cycle_course=course,
+            )
+            if not regeneration:
+                raise GenerationConflict(
+                    "Automatic-mode first generation is performed by deadline processing."
+                )
+        else:
+            DepartmentalExamAuthorizationService.require_course_responsibility(
+                user=actor,
+                cycle_course=course,
+            )
+            if regeneration and not 10 <= len(reason) <= 500:
+                raise ValidationError(
+                    "A regeneration reason of 10 to 500 characters is required."
+                )
+        if not regeneration and reason:
+            raise ValidationError("A note is accepted only for regeneration.")
         from .final_lock import FinalExamLockPolicy
 
         # Final lock rejection precedes request-token reuse so no old browser
@@ -275,6 +311,9 @@ class ExamGenerationService:
             raise GenerationConflict("The authoritative minimum overlap was not preserved.")
         cls._validate_selection(problem=problem, selection=selection)
 
+        predecessor = current
+        if predecessor is None and automatic_mode and revisions:
+            predecessor = max(revisions, key=lambda row: row.revision_number)
         if current is not None:
             current.status = ExamGenerationRevision.Status.SUPERSEDED
             current.current_marker = None
@@ -288,12 +327,13 @@ class ExamGenerationService:
             algorithm_version=GENERATION_ALGORITHM_VERSION,
             generated_at=timezone.now(),
             generated_by=actor,
+            generation_trigger=generation_trigger,
             configuration_revision_snapshot=problem.configuration_revision,
             blueprint_revision_snapshot=problem.blueprint_revision,
             roster_boundary_snapshot=problem.roster_boundary,
             final_item_count_snapshot=problem.final_count,
             request_token_digest=token_digest,
-            supersedes=current,
+            supersedes=predecessor,
             regeneration_reason=reason,
             minimum_overlap=selection.overlap,
             proportional_score=selection.proportional_score,

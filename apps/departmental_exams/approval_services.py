@@ -6,7 +6,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
@@ -18,6 +18,7 @@ from .generation_readiness import GENERATION_ALGORITHM_VERSION, Stage6ReadinessS
 from .generation_services import ExamGenerationService
 from .models import (
     ExamGenerationRevision,
+    ExaminationCycle,
     GeneratedExamItem,
     GeneratedExamSet,
 )
@@ -338,6 +339,13 @@ class ExamApprovalLockService:
                 tenant_id=tenant_id,
             )
         )
+        if (
+            cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            raise PermissionDenied(
+                "Automatic-mode generations do not use Approve & Lock."
+            )
         current = ExamGenerationService._current_revision(revisions)
         target = next((row for row in revisions if row.id == revision_id), None)
         if target is None:

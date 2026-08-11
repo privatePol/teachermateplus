@@ -19,6 +19,10 @@ from .blueprint_services import (
     Stage6Conflict,
 )
 from .approval_services import ApprovalConflict, ExamApprovalLockService
+from .automatic_workflow import (
+    AutomaticContributionReopenService,
+    AutomaticGenerationSummaryService,
+)
 from .generation_readiness import (
     Stage6ReadinessService,
     eligible_submitted_question_pool,
@@ -36,8 +40,13 @@ from .models import (
     ExamScenarioMember,
     GeneratedExamSet,
     ExamGenerationRevision,
+    ExaminationCycle,
 )
-from .services import DepartmentalExamAuthorizationService
+from .forms import AutomaticContributionReopenForm
+from .services import (
+    CourseExamConfigurationConflict,
+    DepartmentalExamAuthorizationService,
+)
 from .stage6_forms import (
     BlockedContributionResolutionForm,
     BlueprintForm,
@@ -47,6 +56,7 @@ from .stage6_forms import (
     ScenarioForm,
     GenerationRequestForm,
     RegenerationRequestForm,
+    AutomaticRegenerationRequestForm,
     ApproveAndLockForm,
 )
 
@@ -87,7 +97,7 @@ def _error(request, *, status, message):
 def blueprint_configuration_view(request, cycle_course_id):
     tenant_id = _tenant_id(request)
     course = _course(tenant_id, cycle_course_id)
-    DepartmentalExamAuthorizationService.require_configure_cycle_course(
+    DepartmentalExamAuthorizationService.require_blueprint_structure_management(
         user=request.user, cycle_course=course
     )
     blueprint = getattr(course, "exam_blueprint", None)
@@ -95,6 +105,13 @@ def blueprint_configuration_view(request, cycle_course_id):
     is_locked = bool(
         current_revision
         and current_revision.status == ExamGenerationRevision.Status.LOCKED
+    )
+    has_current_automatic_generation = bool(
+        course.cycle.processing_mode
+        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        and current_revision
+        and current_revision.current_marker == 1
+        and current_revision.status == ExamGenerationRevision.Status.GENERATED
     )
     existing_sections = list(
         blueprint.sections.order_by("display_order", "id") if blueprint else ()
@@ -171,6 +188,7 @@ def blueprint_configuration_view(request, cycle_course_id):
             "section_formset": section_formset,
             "readiness": readiness,
             "locked_revision": current_revision if is_locked else None,
+            "has_current_automatic_generation": has_current_automatic_generation,
         },
         status=status,
     )
@@ -181,7 +199,7 @@ def blueprint_configuration_view(request, cycle_course_id):
 def blueprint_review_view(request, cycle_course_id):
     tenant_id = _tenant_id(request)
     course = _course(tenant_id, cycle_course_id)
-    DepartmentalExamAuthorizationService.require_course_responsibility(
+    DepartmentalExamAuthorizationService.require_generation_input_management(
         user=request.user, cycle_course=course
     )
     blueprint = getattr(course, "exam_blueprint", None)
@@ -198,6 +216,12 @@ def blueprint_review_view(request, cycle_course_id):
         and course.cycle.status == course.cycle.Status.OPEN
         and course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
         and not is_locked
+        and not (
+            course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            and current_revision
+            and current_revision.current_marker == 1
+        )
     )
     questions = []
     scenarios = []
@@ -344,7 +368,7 @@ def question_placement_view(request, question_id):
 def scenario_save_view(request, cycle_course_id):
     tenant_id = _tenant_id(request)
     course = _course(tenant_id, cycle_course_id)
-    DepartmentalExamAuthorizationService.require_course_responsibility(
+    DepartmentalExamAuthorizationService.require_generation_input_management(
         user=request.user, cycle_course=course
     )
     blueprint = getattr(course, "exam_blueprint", None)
@@ -413,10 +437,20 @@ def _generation_form_initial(*, problem, current):
 def generation_workspace_view(request, cycle_course_id):
     tenant_id = _tenant_id(request)
     course = _course(tenant_id, cycle_course_id)
-    DepartmentalExamAuthorizationService.require_course_responsibility(
-        user=request.user,
-        cycle_course=course,
+    automatic_mode = (
+        course.cycle.processing_mode
+        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
     )
+    if automatic_mode:
+        DepartmentalExamAuthorizationService.require_generation_management(
+            user=request.user,
+            cycle_course=course,
+        )
+    else:
+        DepartmentalExamAuthorizationService.require_course_responsibility(
+            user=request.user,
+            cycle_course=course,
+        )
     problem, readiness = Stage6ReadinessService.build_problem(cycle_course=course)
     current = ExamGenerationService.current_for_course(cycle_course=course)
     is_locked = bool(
@@ -431,9 +465,16 @@ def generation_workspace_view(request, cycle_course_id):
             "readiness": readiness,
             "problem": problem,
             "current_revision": current,
-            "generation_form": GenerationRequestForm(initial=initial),
-            "regeneration_form": RegenerationRequestForm(initial=initial),
+            "generation_form": (
+                None if automatic_mode else GenerationRequestForm(initial=initial)
+            ),
+            "regeneration_form": (
+                AutomaticRegenerationRequestForm(initial=initial)
+                if automatic_mode
+                else RegenerationRequestForm(initial=initial)
+            ),
             "is_locked": is_locked,
+            "automatic_mode": automatic_mode,
         },
     )
 
@@ -441,11 +482,31 @@ def generation_workspace_view(request, cycle_course_id):
 def _generation_post(request, *, cycle_course_id, regeneration):
     tenant_id = _tenant_id(request)
     course = _course(tenant_id, cycle_course_id)
-    DepartmentalExamAuthorizationService.require_course_responsibility(
-        user=request.user,
-        cycle_course=course,
+    automatic_mode = (
+        course.cycle.processing_mode
+        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
     )
-    form_class = RegenerationRequestForm if regeneration else GenerationRequestForm
+    if automatic_mode:
+        DepartmentalExamAuthorizationService.require_generation_management(
+            user=request.user,
+            cycle_course=course,
+        )
+        if not regeneration:
+            raise PermissionDenied(
+                "Automatic-mode first generation is performed by deadline processing."
+            )
+    else:
+        DepartmentalExamAuthorizationService.require_course_responsibility(
+            user=request.user,
+            cycle_course=course,
+        )
+    form_class = (
+        AutomaticRegenerationRequestForm
+        if automatic_mode and regeneration
+        else RegenerationRequestForm
+        if regeneration
+        else GenerationRequestForm
+    )
     form = form_class(request.POST)
     if not form.is_valid():
         return _error(
@@ -511,10 +572,41 @@ def generated_revision_detail_view(request, revision_id):
         revision_id=revision_id,
         tenant_id=tenant_id,
     )
-    DepartmentalExamAuthorizationService.require_course_responsibility(
-        user=request.user,
-        cycle_course=revision.cycle_course,
+    automatic_mode = (
+        revision.cycle_course.cycle.processing_mode
+        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
     )
+    can_manage_generation = False
+    if automatic_mode:
+        can_manage_generation = (
+            DepartmentalExamAuthorizationService.has_automatic_course_permission(
+                user=request.user,
+                cycle_course=revision.cycle_course,
+                permissions=(
+                    DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+                ),
+            )
+        )
+        if not can_manage_generation:
+            DepartmentalExamAuthorizationService.require_automatic_course_permission(
+                user=request.user,
+                cycle_course=revision.cycle_course,
+                permissions=(
+                    DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
+                ),
+            )
+            if not (
+                revision.current_marker == 1
+                and revision.status == ExamGenerationRevision.Status.GENERATED
+            ):
+                raise PermissionDenied(
+                    "Historical automatic generation revisions require management authority."
+                )
+    else:
+        DepartmentalExamAuthorizationService.require_generated_exam_view(
+            user=request.user,
+            cycle_course=revision.cycle_course,
+        )
     generated_sets = list(
         GeneratedExamSet.objects.filter(generation_revision=revision)
         .prefetch_related("items")
@@ -525,12 +617,18 @@ def generated_revision_detail_view(request, revision_id):
             generated_set.items.all(),
             key=lambda item: item.position,
         )
-    history = list(
-        ExamGenerationRevision.objects.filter(cycle_course=revision.cycle_course)
-        .select_related("generated_by", "locked_by", "supersedes")
-        .order_by("-revision_number")
+    history = (
+        list(
+            ExamGenerationRevision.objects.filter(cycle_course=revision.cycle_course)
+            .select_related("generated_by", "locked_by", "supersedes")
+            .order_by("-revision_number")
+        )
+        if not automatic_mode or can_manage_generation
+        else []
     )
     is_current_generated = bool(
+        not automatic_mode
+        and
         revision.current_marker == 1
         and revision.status == ExamGenerationRevision.Status.GENERATED
         and revision.cycle_course.cycle.status == revision.cycle_course.cycle.Status.OPEN
@@ -553,6 +651,13 @@ def generated_revision_detail_view(request, revision_id):
                 if is_current_generated
                 else None
             ),
+            "automatic_mode": automatic_mode,
+            "can_manage_generation": can_manage_generation,
+            "can_regenerate": bool(
+                revision.current_marker == 1
+                and revision.status == ExamGenerationRevision.Status.GENERATED
+                and (not automatic_mode or can_manage_generation)
+            ),
         },
     )
 
@@ -560,6 +665,15 @@ def generated_revision_detail_view(request, revision_id):
 @portal_required("ADMIN")
 @require_POST
 def approve_and_lock_view(request, revision_id):
+    revision = ExamGenerationService.revision_for_tenant(
+        revision_id=revision_id,
+        tenant_id=_tenant_id(request),
+    )
+    if (
+        revision.cycle_course.cycle.processing_mode
+        == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+    ):
+        raise PermissionDenied("Automatic-mode generations do not use Approve & Lock.")
     form = ApproveAndLockForm(request.POST)
     if not form.is_valid():
         return _error(
@@ -595,4 +709,100 @@ def approve_and_lock_view(request, revision_id):
     return redirect(
         "departmental_exams:generated_revision_detail",
         revision_id=outcome.revision.id,
+    )
+
+
+@portal_required("ADMIN")
+@require_GET
+def automatic_generation_summary_view(request, cycle_id):
+    tenant_id = _tenant_id(request)
+    cycle = get_object_or_404(
+        ExaminationCycle.objects.filter(tenant_id=tenant_id),
+        pk=cycle_id,
+        processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+    )
+    courses = list(
+        CycleCourse.objects.filter(
+            cycle=cycle,
+            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+        ).select_related("cycle").prefetch_related("offering_snapshots")
+    )
+    if not courses:
+        raise PermissionDenied("No applicable automatic course examinations exist.")
+    permission_map = DepartmentalExamAuthorizationService.automatic_permission_map(
+        user=request.user,
+        courses=courses,
+        permissions=(
+            DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+        ),
+    )
+    if any(
+        DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION
+        not in permission_map[course.id]
+        for course in courses
+    ):
+        raise PermissionDenied(
+            "You do not have automatic examination authority for every participating campus."
+        )
+    summary = AutomaticGenerationSummaryService.build(cycle=cycle)
+    for item in (*summary["generated"], *summary["not_generated"]):
+        item["can_manage_generation"] = (
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+            in permission_map[item["course"].id]
+        )
+    return render(
+        request,
+        "departmental_exams/admin/automatic_generation_summary.html",
+        {"cycle": cycle, **summary},
+    )
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def automatic_contribution_reopen_view(request, cycle_course_id):
+    tenant_id = _tenant_id(request)
+    course = _course(tenant_id, cycle_course_id)
+    DepartmentalExamAuthorizationService.require_generation_management(
+        user=request.user,
+        cycle_course=course,
+    )
+    configuration = getattr(course, "configuration", None)
+    if configuration is None:
+        raise Http404("Course configuration does not exist.")
+    form = AutomaticContributionReopenForm(
+        request.POST or None,
+        initial={"expected_revision": configuration.revision},
+    )
+    status = 200
+    if request.method == "POST" and form.is_valid():
+        try:
+            AutomaticContributionReopenService.reopen(
+                cycle_course_id=course.id,
+                tenant_id=tenant_id,
+                actor=request.user,
+                expected_revision=form.cleaned_data["expected_revision"],
+                new_deadline=form.cleaned_data["new_deadline"],
+                request=request,
+            )
+        except CourseExamConfigurationConflict as exc:
+            form.add_error(None, str(exc))
+            status = 409
+        except ValidationError as exc:
+            form.add_error(None, exc)
+            status = 400
+        else:
+            messages.success(
+                request,
+                "Contributions reopened. Submitted contributions remain immutable.",
+            )
+            return redirect(
+                "departmental_exams:automatic_generation_summary",
+                cycle_id=course.cycle_id,
+            )
+    return render(
+        request,
+        "departmental_exams/admin/automatic_contribution_reopen.html",
+        {"cycle_course": course, "configuration": configuration, "form": form},
+        status=status,
     )

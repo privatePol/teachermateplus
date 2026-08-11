@@ -246,6 +246,7 @@ class ExaminationCycleConfigurationService:
         """Keep cycle audit evidence bounded while preserving exact stored guidance."""
         instructions = cycle.contributor_instructions or ""
         return {
+            "processing_mode": cycle.processing_mode,
             "default_questions_required_per_faculty": cycle.default_questions_required_per_faculty,
             "default_final_item_count": cycle.default_final_item_count,
             "default_contribution_deadline": cycle.default_contribution_deadline,
@@ -435,13 +436,18 @@ class ExaminationCycleConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, default_questions_required_per_faculty, default_final_item_count, contributor_instructions, default_contribution_deadline=None, reason="", request=None):
+    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, default_questions_required_per_faculty, default_final_item_count, contributor_instructions, default_contribution_deadline=None, processing_mode=None, reason="", request=None):
         cycle = cls._lock_cycle(cycle_id=cycle_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_permission(user=user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
         if cycle.status == ExaminationCycle.Status.CLOSED:
             raise ValidationError("Closed cycles cannot change defaults.")
         if expected_updated_at != cls.transition_token(cycle):
             raise CourseExamConfigurationConflict("The examination cycle changed after this page was loaded.")
+        processing_mode = processing_mode or cycle.processing_mode
+        if processing_mode not in ExaminationCycle.ProcessingMode.values:
+            raise ValidationError("Unsupported examination processing mode.")
+        if cycle.status != ExaminationCycle.Status.DRAFT and processing_mode != cycle.processing_mode:
+            raise ValidationError("Processing mode can change only while the cycle is Draft.")
         for value in (default_questions_required_per_faculty, default_final_item_count):
             if value is not None and not 50 <= value <= 75:
                 raise ValidationError("Cycle defaults must be from 50 to 75.")
@@ -471,6 +477,7 @@ class ExaminationCycleConfigurationService:
         before = cls._configuration_audit_payload(cycle)
         changed = (
             defaults_changed
+            or cycle.processing_mode != processing_mode
             or cycle.contributor_instructions != contributor_instructions
         )
         if not changed:
@@ -478,11 +485,12 @@ class ExaminationCycleConfigurationService:
         cycle.default_questions_required_per_faculty = default_questions_required_per_faculty
         cycle.default_final_item_count = default_final_item_count
         cycle.default_contribution_deadline = effective_default_deadline
+        cycle.processing_mode = processing_mode
         if defaults_changed:
             cycle.defaults_revision += 1
         cycle.contributor_instructions = contributor_instructions
         cycle.full_clean()
-        cycle.save(update_fields=["default_questions_required_per_faculty", "default_final_item_count", "default_contribution_deadline", "defaults_revision", "contributor_instructions", "updated_at"])
+        cycle.save(update_fields=["processing_mode", "default_questions_required_per_faculty", "default_final_item_count", "default_contribution_deadline", "defaults_revision", "contributor_instructions", "updated_at"])
         propagation = (
             cls._propagate_defaults_to_drafts(cycle=cycle, changed_defaults={key for key, value in (("questions_required_per_faculty", default_questions_required_per_faculty), ("final_item_count", default_final_item_count), ("contribution_deadline", effective_default_deadline)) if getattr(cycle, f"default_{key}") != before[f"default_{key}"]})
             if defaults_changed
@@ -558,6 +566,10 @@ class DepartmentalExamAuthorizationService:
 
     CONFIGURE_PERMISSION = "departmental_exams.configure"
     REVIEWER_PERMISSION = "departmental_exams.review_generate"
+    VIEW_GENERATED_PERMISSION = "departmental_exams.view_generated_exams"
+    PRINT_GENERATED_PERMISSION = "departmental_exams.print_generated_exams"
+    MANAGE_GENERATION_PERMISSION = "departmental_exams.manage_exam_generation"
+    ANY_AUTOMATIC_PERMISSION = "__any_automatic_permission__"
 
     @staticmethod
     def _effective_permission_annotations(
@@ -739,6 +751,21 @@ class DepartmentalExamAuthorizationService:
             return
         if cls.reviewable_departments(user=user, tenant_id=tenant_id).exists():
             return
+        automatic_courses = CycleCourse.objects.filter(
+            cycle__tenant_id=tenant_id,
+            cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+        ).prefetch_related("offering_snapshots")
+        permissions = cls.automatic_permission_map(
+            user=user,
+            courses=list(automatic_courses),
+            permissions=(
+                cls.VIEW_GENERATED_PERMISSION,
+                cls.MANAGE_GENERATION_PERMISSION,
+            ),
+        )
+        if any(permissions.values()):
+            return
         raise PermissionDenied("You do not have current course examination access.")
 
     @classmethod
@@ -762,6 +789,21 @@ class DepartmentalExamAuthorizationService:
             raise PermissionDenied(
                 "Course examination is outside your configure scope."
             )
+
+    @classmethod
+    def require_blueprint_structure_management(cls, *, user, cycle_course):
+        if (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            return cls.require_generation_management(
+                user=user,
+                cycle_course=cycle_course,
+            )
+        return cls.require_configure_cycle_course(
+            user=user,
+            cycle_course=cycle_course,
+        )
 
     @classmethod
     def configurer_visible_cycle_courses(
@@ -972,6 +1014,250 @@ class DepartmentalExamAuthorizationService:
                 tenant_id=tenant_id,
                 campus_id=cycle_course.responsible_department.campus_id,
             )
+
+    @staticmethod
+    def participating_campus_ids(cycle_course):
+        prefetched = getattr(cycle_course, "_prefetched_objects_cache", {}).get(
+            "offering_snapshots"
+        )
+        if prefetched is not None:
+            return tuple(sorted({row.campus_id for row in prefetched}))
+        return tuple(
+            cycle_course.offering_snapshots.order_by("campus_id")
+            .values_list("campus_id", flat=True)
+            .distinct()
+        )
+
+    @classmethod
+    def automatic_permission_map(cls, *, user, courses, permissions):
+        courses = list(courses)
+        permission_codes = tuple(dict.fromkeys(permissions))
+        result = {course.id: set() for course in courses}
+        if not courses or not permission_codes:
+            return result
+        tenant_ids = {course.cycle.tenant_id for course in courses}
+        if len(tenant_ids) != 1:
+            return result
+        tenant_id = next(iter(tenant_ids))
+        try:
+            cls.require_enabled(tenant_id=tenant_id)
+        except PermissionDenied:
+            return result
+        if not user or not user.is_authenticated or not user.is_active:
+            return result
+
+        if user.is_superuser:
+            active_codes = set(
+                Permission.objects.filter(
+                    code__in=permission_codes,
+                    is_active=True,
+                ).values_list("code", flat=True)
+            )
+            for course in courses:
+                if (
+                    course.cycle.processing_mode
+                    == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+                    and course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+                    and cls.participating_campus_ids(course)
+                ):
+                    result[course.id] = set(active_codes)
+                    if active_codes:
+                        result[course.id].add(cls.ANY_AUTOMATIC_PERMISSION)
+            return result
+
+        direct_rows = list(
+            UserPermission.objects.filter(
+                user=user,
+                permission__code__in=permission_codes,
+                permission__is_active=True,
+            )
+            .filter(Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True))
+            .values_list(
+                "permission__code",
+                "tenant_id",
+                "campus_id",
+                "grant_type",
+            )
+        )
+        role_rows = list(
+            UserRole.objects.filter(
+                user=user,
+                is_active=True,
+                role__is_active=True,
+                role__role_permissions__permission__code__in=permission_codes,
+                role__role_permissions__permission__is_active=True,
+            )
+            .filter(Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True))
+            .values_list(
+                "role__role_permissions__permission__code",
+                "tenant_id",
+                "campus_id",
+            )
+        )
+
+        def direct_decision(permission, campus_id):
+            matching = [
+                row
+                for row in direct_rows
+                if row[0] == permission and row[2] in (None, campus_id)
+            ]
+            if any(row[3] == UserPermission.GrantType.DENY for row in matching):
+                return False
+            if any(row[3] == UserPermission.GrantType.ALLOW for row in matching):
+                return True
+            return None
+
+        def role_allows(permission, campus_id):
+            return any(
+                row[0] == permission and row[2] in (None, campus_id)
+                for row in role_rows
+            )
+
+        def permission_allows(permission, campus_id):
+            direct = direct_decision(permission, campus_id)
+            return direct is True or (
+                direct is None and role_allows(permission, campus_id)
+            )
+
+        for course in courses:
+            if (
+                course.cycle.processing_mode
+                != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+                or course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED
+            ):
+                continue
+            campus_ids = cls.participating_campus_ids(course)
+            if not campus_ids:
+                continue
+            for permission in permission_codes:
+                if all(
+                    permission_allows(permission, campus_id)
+                    for campus_id in campus_ids
+                ):
+                    result[course.id].add(permission)
+            if all(
+                any(
+                    permission_allows(permission, campus_id)
+                    for permission in permission_codes
+                )
+                for campus_id in campus_ids
+            ):
+                result[course.id].add(cls.ANY_AUTOMATIC_PERMISSION)
+        return result
+
+    @staticmethod
+    def _has_scoped_permission(*, user, permission, tenant_id, campus_id):
+        if user.is_superuser:
+            return Permission.objects.filter(code=permission, is_active=True).exists()
+        scoped_direct = UserPermission.objects.filter(
+            user=user,
+            permission__code=permission,
+            permission__is_active=True,
+        ).filter(
+            Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True),
+            Q(campus_id=campus_id) | Q(campus_id__isnull=True),
+        )
+        if scoped_direct.filter(grant_type=UserPermission.GrantType.DENY).exists():
+            return False
+        if scoped_direct.filter(grant_type=UserPermission.GrantType.ALLOW).exists():
+            return True
+        return UserRole.objects.filter(
+            user=user,
+            is_active=True,
+            role__is_active=True,
+            role__role_permissions__permission__code=permission,
+            role__role_permissions__permission__is_active=True,
+        ).filter(
+            Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True),
+            Q(campus_id=campus_id) | Q(campus_id__isnull=True),
+        ).exists()
+
+    @classmethod
+    def has_automatic_course_permission(cls, *, user, cycle_course, permissions):
+        tenant_id = cycle_course.cycle.tenant_id
+        if (
+            cycle_course.cycle.processing_mode
+            != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            or cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED
+        ):
+            return False
+        try:
+            cls.require_enabled(tenant_id=tenant_id)
+        except PermissionDenied:
+            return False
+        if not user or not user.is_authenticated or not user.is_active:
+            return False
+        permission_codes = tuple(permissions)
+        campus_ids = cls.participating_campus_ids(cycle_course)
+        if not campus_ids:
+            return False
+        return all(
+            any(
+                cls._has_scoped_permission(
+                    user=user,
+                    permission=permission,
+                    tenant_id=tenant_id,
+                    campus_id=campus_id,
+                )
+                for permission in permission_codes
+            )
+            for campus_id in campus_ids
+        )
+
+    @classmethod
+    def require_automatic_course_permission(
+        cls, *, user, cycle_course, permissions
+    ):
+        if not cls.has_automatic_course_permission(
+            user=user,
+            cycle_course=cycle_course,
+            permissions=permissions,
+        ):
+            raise PermissionDenied(
+                "You do not have automatic examination authority for every participating campus."
+            )
+
+    @classmethod
+    def require_generation_management(cls, *, user, cycle_course):
+        cls.require_automatic_course_permission(
+            user=user,
+            cycle_course=cycle_course,
+            permissions=(cls.MANAGE_GENERATION_PERMISSION,),
+        )
+
+    @classmethod
+    def require_generation_input_management(cls, *, user, cycle_course):
+        if (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            return cls.require_generation_management(
+                user=user,
+                cycle_course=cycle_course,
+            )
+        return cls.require_course_responsibility(
+            user=user,
+            cycle_course=cycle_course,
+        )
+
+    @classmethod
+    def require_generated_exam_view(cls, *, user, cycle_course):
+        if (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+        ):
+            return cls.require_course_responsibility(
+                user=user,
+                cycle_course=cycle_course,
+            )
+        cls.require_automatic_course_permission(
+            user=user,
+            cycle_course=cycle_course,
+            permissions=(
+                cls.VIEW_GENERATED_PERMISSION,
+                cls.MANAGE_GENERATION_PERMISSION,
+            ),
+        )
 
 
 class CycleCourseTransitionConflict(ValidationError):
@@ -1383,7 +1669,7 @@ class ExaminationCycleService:
 
     @classmethod
     @transaction.atomic
-    def create_cycle(cls, *, user, tenant, academic_year, term, exam_period, request=None):
+    def create_cycle(cls, *, user, tenant, academic_year, term, exam_period, processing_mode=ExaminationCycle.ProcessingMode.MANUAL_REVIEW, request=None):
         DepartmentalExamAuthorizationService.require_permission(
             user=user,
             permission="departmental_exams.manage_cycles",
@@ -1394,6 +1680,7 @@ class ExaminationCycleService:
             academic_year=academic_year,
             term=term,
             exam_period=exam_period,
+            processing_mode=processing_mode,
             created_by=user,
         )
         cycle.full_clean()
@@ -1453,7 +1740,11 @@ class ExaminationCycleService:
             entity_id=cycle.id,
             actor=user,
             tenant=tenant,
-            metadata={"exam_period": exam_period, "course_count": course_count},
+            metadata={
+                "exam_period": exam_period,
+                "processing_mode": processing_mode,
+                "course_count": course_count,
+            },
             request=request,
         )
         return cycle

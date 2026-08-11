@@ -352,9 +352,10 @@ class ContributionAuthorizationService:
             raise PermissionDenied("Faculty contribution is not open.")
         if not 50 <= contribution.quota_snapshot <= 75:
             raise PermissionDenied("A valid contribution quota is required.")
-        if configuration.contribution_deadline is None:
+        deadline = configuration.active_contribution_deadline
+        if deadline is None:
             raise PermissionDenied("A contribution deadline is required.")
-        if timezone.now() >= configuration.contribution_deadline:
+        if timezone.now() >= deadline:
             raise PermissionDenied("The contribution deadline has passed.")
         if not cls.has_retained_live_eligibility(contribution=contribution):
             raise PermissionDenied("No current qualifying teaching assignment remains.")

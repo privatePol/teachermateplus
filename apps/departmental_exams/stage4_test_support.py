@@ -38,6 +38,9 @@ class Stage4TestCase(TestCase):
             ("departmental_exams.manage_cycles", "manage_cycles"),
             ("departmental_exams.configure", "configure"),
             ("departmental_exams.review_generate", "review_generate"),
+            ("departmental_exams.view_generated_exams", "view_generated_exams"),
+            ("departmental_exams.print_generated_exams", "print_generated_exams"),
+            ("departmental_exams.manage_exam_generation", "manage_exam_generation"),
         ):
             Permission.objects.get_or_create(code=code, defaults={"module": code.rsplit(".", 1)[0], "action": action, "description": code, "is_active": True})
 

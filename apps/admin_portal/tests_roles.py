@@ -171,6 +171,10 @@ class RoleManagementTests(TestCase):
         role = Role.objects.create(code="DE_FOUNDATION_ROLE", name="Departmental Exam Foundation")
         migration = import_module("apps.rbac.migrations.0032_seed_departmental_exam_permissions")
         migration.seed_permissions(django_apps, None)
+        automatic_migration = import_module(
+            "apps.rbac.migrations.0033_seed_departmental_exam_automatic_permissions"
+        )
+        automatic_migration.seed_permissions(django_apps, None)
 
         response = self.client.get(reverse("admin_portal:role_permissions", args=[role.id]))
 
@@ -186,6 +190,9 @@ class RoleManagementTests(TestCase):
                 "departmental_exams.manage_cycles",
                 "departmental_exams.configure",
                 "departmental_exams.review_generate",
+                "departmental_exams.view_generated_exams",
+                "departmental_exams.print_generated_exams",
+                "departmental_exams.manage_exam_generation",
             },
         )
         self.assertContains(response, "Manage examination cycles.")
@@ -193,6 +200,9 @@ class RoleManagementTests(TestCase):
             response, "Configure authorized grouped course examinations."
         )
         self.assertContains(response, "Review assigned grouped course examinations.")
+        self.assertContains(response, "View confidential current automatic-mode generated examinations.")
+        self.assertContains(response, "Print current automatic-mode generated questionnaires")
+        self.assertContains(response, "Manage automatic examination generation, regeneration, history")
         self.assertNotContains(response, "Contribute departmental examination questions.")
         self.assertNotContains(response, "Encode departmental examination questions.")
         self.assertNotContains(response, "Generate departmental examination questionnaires.")

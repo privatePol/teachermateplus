@@ -13,8 +13,8 @@
       <div class="text-end">
         <div><strong>{{ saved_count }} / {{ quota }}</strong> questions</div>
         <div>{{ progress_percent }}% complete</div>
-        <div><strong>Deadline:</strong> {{ configuration.contribution_deadline|date:"M j, Y g:i A" }}</div>
-        <div class="small text-muted">{{ configuration.get_contribution_deadline_source_display|default:"No deadline provenance" }}</div>
+        <div><strong>Deadline:</strong> {{ configuration.active_contribution_deadline|date:"M j, Y g:i A" }}</div>
+        <div class="small text-muted">{% if configuration.reopened_contribution_deadline %}Authorized reopened deadline{% else %}{{ configuration.get_contribution_deadline_source_display|default:"No deadline provenance" }}{% endif %}</div>
       </div>
     </div>
     {% if configuration.contributor_instructions_snapshot %}<hr><div>{{ configuration.contributor_instructions_snapshot|linebreaksbr }}</div>{% endif %}

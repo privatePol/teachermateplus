@@ -22,9 +22,11 @@ from .models import (
     CourseExamConfiguration,
     CycleCourse,
     ExamBlueprint,
+    ExamGenerationRevision,
     ExamScenario,
     ExamScenarioMember,
     ExamSection,
+    ExaminationCycle,
     FacultyContribution,
     FacultyContributionEligibilitySource,
     Question,
@@ -449,6 +451,18 @@ class BlueprintMutationService:
     @staticmethod
     def _require_prelock(*, cycle_course, configuration):
         FinalExamLockPolicy.require_not_locked(cycle_course)
+        if (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            and ExamGenerationRevision.objects.filter(
+                cycle_course=cycle_course,
+                current_marker=1,
+                status=ExamGenerationRevision.Status.GENERATED,
+            ).exists()
+        ):
+            raise Stage6Conflict(
+                "Reopen contributions before changing inputs for a current automatic generation."
+            )
         if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
             raise ValidationError("Only Included course examinations may use a blueprint.")
         require_stage6_open_cycle(cycle_course.cycle)
@@ -495,7 +509,7 @@ class BlueprintMutationService:
         _cycle, course, configuration = Stage5LockService.lock_cycle_course(
             cycle_course_id=cycle_course_id, tenant_id=tenant_id
         )
-        DepartmentalExamAuthorizationService.require_configure_cycle_course(
+        DepartmentalExamAuthorizationService.require_blueprint_structure_management(
             user=actor, cycle_course=course
         )
         cls._require_prelock(cycle_course=course, configuration=configuration)
@@ -686,7 +700,7 @@ class QuestionPlacementService:
             cycle_course_id=identity["contribution__cycle_course_id"],
             tenant_id=tenant_id,
         )
-        DepartmentalExamAuthorizationService.require_course_responsibility(
+        DepartmentalExamAuthorizationService.require_generation_input_management(
             user=actor, cycle_course=course
         )
         BlueprintMutationService._require_prelock(cycle_course=course, configuration=configuration)
@@ -738,7 +752,11 @@ class QuestionPlacementService:
                 entity_id=placement.id,
                 actor=actor,
                 tenant=tenant_id,
-                campus=course.responsible_department.campus_id,
+                campus=(
+                    course.responsible_department.campus_id
+                    if course.responsible_department_id
+                    else None
+                ),
                 metadata={
                     "cycle_id": course.cycle_id,
                     "cycle_course_id": course.id,
@@ -821,7 +839,7 @@ class ScenarioMutationService:
         _cycle, course, configuration = Stage5LockService.lock_cycle_course(
             cycle_course_id=cycle_course_id, tenant_id=tenant_id
         )
-        DepartmentalExamAuthorizationService.require_course_responsibility(
+        DepartmentalExamAuthorizationService.require_generation_input_management(
             user=actor, cycle_course=course
         )
         BlueprintMutationService._require_prelock(cycle_course=course, configuration=configuration)
@@ -931,7 +949,11 @@ class ScenarioMutationService:
             entity_id=scenario.id,
             actor=actor,
             tenant=tenant_id,
-            campus=course.responsible_department.campus_id,
+            campus=(
+                course.responsible_department.campus_id
+                if course.responsible_department_id
+                else None
+            ),
             metadata={
                 "cycle_id": course.cycle_id,
                 "cycle_course_id": course.id,
@@ -963,7 +985,7 @@ class ScenarioMutationService:
         _cycle, course, configuration = Stage5LockService.lock_cycle_course(
             cycle_course_id=identity["blueprint__cycle_course_id"], tenant_id=tenant_id
         )
-        DepartmentalExamAuthorizationService.require_course_responsibility(
+        DepartmentalExamAuthorizationService.require_generation_input_management(
             user=actor, cycle_course=course
         )
         BlueprintMutationService._require_prelock(cycle_course=course, configuration=configuration)
@@ -988,7 +1010,11 @@ class ScenarioMutationService:
             entity_id=scenario.id,
             actor=actor,
             tenant=tenant_id,
-            campus=course.responsible_department.campus_id,
+            campus=(
+                course.responsible_department.campus_id
+                if course.responsible_department_id
+                else None
+            ),
             metadata={
                 "cycle_id": course.cycle_id,
                 "cycle_course_id": course.id,

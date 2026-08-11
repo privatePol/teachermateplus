@@ -20,6 +20,10 @@ def normalize_contribution_deadline_to_minute(value):
 
 
 class ExaminationCycle(TimeStampedModel, ActivatableModel):
+    class ProcessingMode(models.TextChoices):
+        MANUAL_REVIEW = "MANUAL_REVIEW", "Manual Review"
+        AUTOMATIC_GENERATION = "AUTOMATIC_GENERATION", "Automatic Generation"
+
     class ItemCountMode(models.TextChoices):
         FIXED_ALL = "FIXED_ALL", "Fixed Item Count for All Courses"
         PER_COURSE = "PER_COURSE", "Configure Item Count per Course"
@@ -37,6 +41,11 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
     term = models.ForeignKey("academics.Term", on_delete=models.PROTECT, related_name="examination_cycles")
     exam_period = models.CharField(max_length=10, choices=ExamPeriod.choices)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
+    processing_mode = models.CharField(
+        max_length=24,
+        choices=ProcessingMode.choices,
+        default=ProcessingMode.MANUAL_REVIEW,
+    )
     # Kept solely to preserve the 0002 migration history.  New runtime code
     # must use the independent CAO defaults below.
     legacy_item_count_mode = models.CharField(max_length=12, choices=ItemCountMode.choices, null=True, blank=True)
@@ -155,6 +164,12 @@ class CourseExamConfiguration(TimeStampedModel):
         OPEN = "OPEN", "Open for Faculty Contribution"
         CLOSED = "CLOSED", "Closed"
 
+    class AutomaticProcessingStatus(models.TextChoices):
+        BLOCKED = "BLOCKED", "Blocked"
+        GENERATED = "GENERATED", "Generated"
+        SKIPPED = "SKIPPED", "Skipped"
+        ERROR = "ERROR", "Error"
+
     cycle_course = models.OneToOneField(CycleCourse, on_delete=models.PROTECT, related_name="configuration")
     final_item_count = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
     questions_required_per_faculty = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
@@ -164,6 +179,7 @@ class CourseExamConfiguration(TimeStampedModel):
     general_instructions = models.TextField(blank=True)
     contribution_deadline = models.DateTimeField(null=True, blank=True)
     contribution_deadline_source = models.CharField(max_length=8, choices=ValueSource.choices, null=True, blank=True)
+    reopened_contribution_deadline = models.DateTimeField(null=True, blank=True)
     easy_percent = models.PositiveSmallIntegerField(default=30)
     moderate_percent = models.PositiveSmallIntegerField(default=50)
     difficult_percent = models.PositiveSmallIntegerField(default=20)
@@ -186,6 +202,14 @@ class CourseExamConfiguration(TimeStampedModel):
         related_name="initialized_exam_contributor_rosters",
     )
     contributor_roster_revision = models.PositiveIntegerField(default=0)
+    automatic_processing_status = models.CharField(
+        max_length=12,
+        choices=AutomaticProcessingStatus.choices,
+        blank=True,
+        default="",
+    )
+    automatic_processing_code = models.CharField(max_length=64, blank=True, default="")
+    automatic_processed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "departmental_exam_configurations"
@@ -209,11 +233,22 @@ class CourseExamConfiguration(TimeStampedModel):
                 name="ck_de_cfg_roster_state",
             ),
         ]
-        indexes = [models.Index(fields=["workflow_status", "contribution_deadline"], name="idx_de_cfg_status_deadline")]
+        indexes = [
+            models.Index(fields=["workflow_status", "contribution_deadline"], name="idx_de_cfg_status_deadline"),
+            models.Index(
+                fields=["workflow_status", "reopened_contribution_deadline"],
+                name="idx_de_cfg_reopen_deadline",
+            ),
+        ]
 
     @property
     def maximum_score(self):
         return self.final_item_count
+
+    @property
+    def active_contribution_deadline(self):
+        """Return the current intake deadline without rewriting first-open history."""
+        return self.reopened_contribution_deadline or self.contribution_deadline
 
     def _guard_first_open_deadline_pair_on_save(self, *, using, update_fields):
         """Protect persisted first-open deadline history on supported saves.
@@ -866,6 +901,7 @@ class ExamGenerationRevision(TimeStampedModel):
         "algorithm_version",
         "generated_at",
         "generated_by_id",
+        "generation_trigger",
         "configuration_revision_snapshot",
         "blueprint_revision_snapshot",
         "roster_boundary_snapshot",
@@ -882,6 +918,10 @@ class ExamGenerationRevision(TimeStampedModel):
         GENERATED = "GENERATED", "Generated"
         SUPERSEDED = "SUPERSEDED", "Superseded"
         LOCKED = "LOCKED", "Locked"
+
+    class GenerationTrigger(models.TextChoices):
+        MANUAL = "MANUAL", "Manual"
+        AUTOMATIC = "AUTOMATIC", "Automatic"
 
     cycle_course = models.ForeignKey(
         CycleCourse,
@@ -904,6 +944,13 @@ class ExamGenerationRevision(TimeStampedModel):
         "accounts.User",
         on_delete=models.PROTECT,
         related_name="generated_departmental_exams",
+        null=True,
+        blank=True,
+    )
+    generation_trigger = models.CharField(
+        max_length=12,
+        choices=GenerationTrigger.choices,
+        default=GenerationTrigger.MANUAL,
     )
     configuration_revision_snapshot = models.PositiveIntegerField()
     blueprint_revision_snapshot = models.PositiveIntegerField()
@@ -987,6 +1034,13 @@ class ExamGenerationRevision(TimeStampedModel):
                     & ~models.Q(approval_attestation_version="")
                 ),
                 name="ck_de_gen_current_status",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(generation_trigger="AUTOMATIC", generated_by__isnull=True)
+                    | models.Q(generation_trigger="MANUAL", generated_by__isnull=False)
+                ),
+                name="ck_de_gen_trigger_actor",
             ),
         ]
         indexes = [

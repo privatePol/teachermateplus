@@ -91,10 +91,11 @@ class ExaminationCycleForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-select")
+        self.fields["processing_mode"].required = False
 
     class Meta:
         model = ExaminationCycle
-        fields = ["academic_year", "term", "exam_period"]
+        fields = ["academic_year", "term", "exam_period", "processing_mode"]
 
     def clean(self):
         cleaned = super().clean()
@@ -104,6 +105,12 @@ class ExaminationCycleForm(forms.ModelForm):
             self.add_error("term", "Choose a term belonging to the selected academic year and tenant.")
         return cleaned
 
+    def clean_processing_mode(self):
+        return (
+            self.cleaned_data.get("processing_mode")
+            or ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+        )
+
 
 class ExaminationCycleConfigurationForm(forms.ModelForm):
     expected_updated_at = forms.CharField(
@@ -112,9 +119,26 @@ class ExaminationCycleConfigurationForm(forms.ModelForm):
     )
     reason = forms.CharField(required=False, max_length=500, widget=forms.Textarea(attrs={"rows": 3}), help_text="Required (10-500 characters) when changing defaults on an Open cycle.")
 
+    def clean_processing_mode(self):
+        return (
+            self.cleaned_data.get("processing_mode")
+            or getattr(
+                self.instance,
+                "processing_mode",
+                ExaminationCycle.ProcessingMode.MANUAL_REVIEW,
+            )
+            or ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+        )
+
     class Meta:
         model = ExaminationCycle
-        fields = ["default_questions_required_per_faculty", "default_final_item_count", "default_contribution_deadline", "contributor_instructions"]
+        fields = [
+            "processing_mode",
+            "default_questions_required_per_faculty",
+            "default_final_item_count",
+            "default_contribution_deadline",
+            "contributor_instructions",
+        ]
         widgets = {
             "default_questions_required_per_faculty": forms.NumberInput(attrs={"class": "form-control"}),
             "default_final_item_count": forms.NumberInput(attrs={"class": "form-control"}),
@@ -127,6 +151,8 @@ class ExaminationCycleConfigurationForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["processing_mode"].required = False
+        self.fields["processing_mode"].widget.attrs.setdefault("class", "form-select")
         self.fields["default_contribution_deadline"].input_formats = ["%Y-%m-%dT%H:%M"]
         self.fields["expected_updated_at"].widget.attrs["class"] = "d-none"
         self.fields["reason"].widget.attrs["class"] = "form-control"
@@ -334,6 +360,22 @@ class CourseContributionOpenForm(_ConfigurationActionForm):
 
 class CourseContributionReopenForm(_ConfigurationActionForm):
     pass
+
+
+class AutomaticContributionReopenForm(_ConfigurationActionForm):
+    new_deadline = forms.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local", "class": "form-control"},
+        ),
+        help_text="Set a new Asia/Manila deadline for unfinished Draft contributions.",
+    )
+
+    def clean_new_deadline(self):
+        return normalize_contribution_deadline_to_minute(
+            self.cleaned_data.get("new_deadline")
+        )
 
 
 class _ReasonedConfigurationActionForm(_ConfigurationActionForm):

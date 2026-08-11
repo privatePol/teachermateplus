@@ -3,7 +3,7 @@
 {% include "departmental_exams/admin/_stage41_styles.html" %}
 <header class="de-exam-hero">
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
-    <div><span class="badge {% if is_locked %}text-bg-dark{% else %}text-bg-warning text-dark{% endif %} mb-2">{% if is_locked %}LOCKED FINAL EXAMINATION{% else %}CONFIDENTIAL REVIEWER WORKSPACE{% endif %}</span><h1>{% if is_locked %}Final examination locked{% else %}Generate Set A and Set B{% endif %}</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div>
+    <div><span class="badge {% if is_locked %}text-bg-dark{% else %}text-bg-warning text-dark{% endif %} mb-2">{% if is_locked %}LOCKED FINAL EXAMINATION{% elif automatic_mode %}CONFIDENTIAL AUTOMATIC OUTPUT{% else %}CONFIDENTIAL REVIEWER WORKSPACE{% endif %}</span><h1>{% if is_locked %}Final examination locked{% elif automatic_mode %}Automatic Set A and Set B{% else %}Generate Set A and Set B{% endif %}</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div>
     {% if current_revision %}<a class="btn btn-light" data-generation-control href="{% url 'departmental_exams:generated_revision_detail' current_revision.id %}">Review current revision</a>{% endif %}
   </div>
 </header>
@@ -28,18 +28,22 @@
     {% elif not readiness.ready %}
       <div class="alert alert-warning mb-0">Resolve the aggregate readiness blockers before generation. Confidential question identities remain hidden from configuration-facing readiness.</div>
     {% elif not current_revision %}
+      {% if automatic_mode %}
+      <div class="alert alert-info mb-0">The next due deadline-processing run creates the first current revision. Browser actions never bypass automatic first-generation processing.</div>
+      {% else %}
       <form method="post" action="{% url 'departmental_exams:generate_exam' cycle_course.id %}" class="js-generation-form" data-generation-form aria-busy="false">
         {% csrf_token %}{{ generation_form.expected_current_revision }}{{ generation_form.input_fingerprint }}{{ generation_form.request_token }}
         <div class="de-generation-busy mb-3" data-generation-busy><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Generating Set A and Set B... Please wait.</span></div>
         <button class="btn btn-success" type="submit" data-generation-submit><i class="bi bi-stars me-1" aria-hidden="true"></i>Generate Set A and Set B</button>
       </form>
+      {% endif %}
     {% else %}
       <div class="alert alert-info">Regeneration creates a new immutable revision and supersedes revision #{{ current_revision.revision_number }}. Existing question, order, and answer snapshots remain unchanged.</div>
       <form method="post" action="{% url 'departmental_exams:regenerate_exam' cycle_course.id %}" class="js-generation-form" data-generation-form aria-busy="false">
         {% csrf_token %}{{ regeneration_form.expected_current_revision }}{{ regeneration_form.input_fingerprint }}{{ regeneration_form.request_token }}
-        <div class="mb-3"><label class="form-label fw-semibold" for="{{ regeneration_form.reason.id_for_label }}">Regeneration reason</label>{{ regeneration_form.reason }}<div class="form-text">Stored confidentially; audit metadata records only its hash and length.</div></div>
+        <div class="mb-3"><label class="form-label fw-semibold" for="{{ regeneration_form.reason.id_for_label }}">{% if automatic_mode %}Optional note{% else %}Regeneration reason{% endif %}</label>{{ regeneration_form.reason }}<div class="form-text">{% if automatic_mode %}A note is optional and never blocks regeneration.{% else %}Stored confidentially; audit metadata records only its hash and length.{% endif %}</div></div>
         <div class="de-generation-busy mb-3" data-generation-busy><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Generating Set A and Set B... Please wait.</span></div>
-        <button class="btn btn-warning" type="submit" data-generation-submit><i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Regenerate both sets</button>
+        <button class="btn btn-warning" type="submit" data-generation-submit><i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Regenerate Set A &amp; Set B</button>
       </form>
     {% endif %}
   </div>

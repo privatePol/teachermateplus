@@ -140,8 +140,8 @@ def _workspace_context(contribution):
         == contribution.cycle_course.InclusionStatus.INCLUDED
         and configuration.workflow_status
         == configuration.WorkflowStatus.OPEN
-        and configuration.contribution_deadline
-        and timezone.now() < configuration.contribution_deadline
+        and configuration.active_contribution_deadline
+        and timezone.now() < configuration.active_contribution_deadline
         and 50 <= quota <= 75
     )
     has_retained_live_eligibility = bool(
