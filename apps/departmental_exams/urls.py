@@ -72,6 +72,11 @@ urlpatterns = [
         name="contributor_monitoring",
     ),
     path(
+        "admin-portal/departmental-exams/contributor-monitoring/print/",
+        monitoring_views.contributor_monitoring_print_view,
+        name="contributor_monitoring_print",
+    ),
+    path(
         "admin-portal/departmental-exams/courses/<int:cycle_course_id>/roster/<str:action>/",
         monitoring_views.roster_action_view,
         name="roster_action",

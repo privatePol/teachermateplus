@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import wraps
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -13,6 +14,7 @@ from django.utils import timezone
 from apps.core.decorators import portal_required
 
 from .contribution_forms import RosterActionForm
+from .contribution_authorization import ContributorEligibilityService
 from .contribution_selectors import ContributionMonitoringSelector
 from .contribution_services import ContributionRosterService
 from .blueprint_services import (
@@ -63,9 +65,7 @@ def _admin_error_page(view_func):
     return wrapped
 
 
-@_admin_error_page
-@portal_required("ADMIN")
-def contributor_monitoring_view(request):
+def _monitoring_scope_context(request):
     tenant_id = _tenant_id(request)
     DepartmentalExamAuthorizationService.require_assigned_course_route_capability(
         user=request.user, tenant_id=tenant_id
@@ -106,6 +106,60 @@ def contributor_monitoring_view(request):
         and (not selected_period or course.cycle.exam_period == selected_period)
         and (selected_course_id is None or course.course_id == selected_course_id)
     ]
+    selected_filters = {
+        "cycle": selected_cycle_id or "",
+        "period": selected_period,
+        "course": selected_course_id or "",
+    }
+    filter_query = urlencode(
+        {key: value for key, value in selected_filters.items() if value}
+    )
+    return {
+        "tenant_id": tenant_id,
+        "courses": courses,
+        "cycle_choices": sorted(
+            cycles_by_id.values(),
+            key=lambda cycle: (
+                cycle.academic_year.name,
+                cycle.term.name,
+                cycle.exam_period,
+                cycle.id,
+            ),
+        ),
+        "period_choices": ExaminationCycle.ExamPeriod.choices,
+        "course_choices": sorted(
+            courses_by_id.values(),
+            key=lambda course: (course.code, course.id),
+        ),
+        "selected_cycle_id": selected_cycle_id,
+        "selected_period": selected_period,
+        "selected_course_id": selected_course_id,
+        "filter_query": filter_query,
+    }
+
+
+def _decorate_contribution_metrics(courses):
+    for course in courses:
+        for contribution in course.faculty_contributions.all():
+            sources = list(contribution.eligibility_sources.all())
+            contribution.valid_source_count = sum(
+                1 for source in sources if source.is_current
+            )
+            contribution.invalid_source_count = (
+                len(sources) - contribution.valid_source_count
+            )
+            contribution.progress_percent = round(
+                (contribution.saved_question_count / contribution.quota_snapshot) * 100
+            )
+
+
+@_admin_error_page
+@portal_required("ADMIN")
+def contributor_monitoring_view(request):
+    context = _monitoring_scope_context(request)
+    courses = context["courses"]
+    tenant_id = context["tenant_id"]
+    _decorate_contribution_metrics(courses)
     configurer_ids = set(
         DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
             user=request.user,
@@ -128,12 +182,6 @@ def contributor_monitoring_view(request):
     }
     for course in courses:
         for contribution in course.faculty_contributions.all():
-            sources = list(contribution.eligibility_sources.all())
-            contribution.valid_source_count = sum(1 for source in sources if source.is_current)
-            contribution.invalid_source_count = len(sources) - contribution.valid_source_count
-            contribution.progress_percent = round(
-                (contribution.saved_question_count / contribution.quota_snapshot) * 100
-            )
             configuration = getattr(course, "configuration", None)
             contribution.is_overdue = bool(
                 configuration
@@ -155,38 +203,119 @@ def contributor_monitoring_view(request):
                 )
             )
         course.can_configure = course.pk in configurer_ids | automatic_manage_ids
-    selected_filters = {
-        "cycle": selected_cycle_id or "",
-        "period": selected_period,
-        "course": selected_course_id or "",
-    }
-    filter_query = urlencode(
-        {key: value for key, value in selected_filters.items() if value}
-    )
     return render(
         request,
         "departmental_exams/admin/contributor_monitoring.html",
+        context,
+    )
+
+
+def _source_assignment_matches_report_scope(*, source, course, offering_scope):
+    assignment = source.assignment
+    if assignment is None or assignment.id != source.assignment_id_snapshot:
+        return False
+    offering = assignment.offering
+    effective_scope = ContributorEligibilityService._effective_scope(assignment)
+    return bool(
+        offering.id == source.offering_id_snapshot
+        and offering_scope.get(offering.id) == source.campus_id_snapshot
+        and effective_scope
+        == (source.tenant_id_snapshot, source.campus_id_snapshot)
+        and offering.tenant_id == course.cycle.tenant_id
+        and offering.course_id == course.course_id
+        and offering.academic_year_id == course.cycle.academic_year_id
+        and offering.term_id == course.cycle.term_id
+    )
+
+
+def _decorate_print_report(*, courses, tenant_id):
+    _decorate_contribution_metrics(courses)
+    for course_number, course in enumerate(courses, start=1):
+        snapshots = list(course.offering_snapshots.all())
+        offering_scope = {
+            snapshot.offering_id: snapshot.campus_id for snapshot in snapshots
+        }
+        campus_names = {
+            snapshot.campus_id: snapshot.campus.name
+            for snapshot in snapshots
+            if snapshot.campus.tenant_id == tenant_id
+        }
+        contributions = list(course.faculty_contributions.all())
+        for contribution in contributions:
+            contributor_campuses = set()
+            contributor_sections = set()
+            for source in contribution.eligibility_sources.all():
+                if (
+                    not source.is_current
+                    or source.tenant_id_snapshot != tenant_id
+                    or offering_scope.get(source.offering_id_snapshot)
+                    != source.campus_id_snapshot
+                ):
+                    continue
+                campus_name = campus_names.get(source.campus_id_snapshot)
+                if campus_name:
+                    contributor_campuses.add(campus_name)
+                if _source_assignment_matches_report_scope(
+                    source=source,
+                    course=course,
+                    offering_scope=offering_scope,
+                ):
+                    section_code = (source.assignment.offering.section.code or "").strip()
+                    if section_code:
+                        contributor_sections.add(section_code)
+            contribution.print_campus_names = sorted(
+                contributor_campuses, key=str.casefold
+            )
+            contribution.print_section_codes = sorted(
+                contributor_sections, key=str.casefold
+            )
+        course.print_number = course_number
+        course.print_campus_names = sorted(
+            set(campus_names.values()), key=str.casefold
+        )
+        course.represented_offering_count = len(snapshots)
+        course.total_contributors = len(contributions)
+        course.total_questions_saved = sum(
+            contribution.saved_question_count for contribution in contributions
+        )
+        course.total_questions_required = sum(
+            contribution.quota_snapshot for contribution in contributions
+        )
+
+
+@_admin_error_page
+@portal_required("ADMIN")
+@require_http_methods(["GET"])
+def contributor_monitoring_print_view(request):
+    context = _monitoring_scope_context(request)
+    courses = context["courses"]
+    _decorate_print_report(courses=courses, tenant_id=context["tenant_id"])
+    cycle_contexts = []
+    seen_cycle_ids = set()
+    for course in courses:
+        if course.cycle_id in seen_cycle_ids:
+            continue
+        seen_cycle_ids.add(course.cycle_id)
+        cycle_contexts.append(
+            f"{course.cycle.academic_year} / {course.cycle.term} / "
+            f"{course.cycle.get_exam_period_display()}"
+        )
+    context.update(
         {
-            "courses": courses,
-            "cycle_choices": sorted(
-                cycles_by_id.values(),
-                key=lambda cycle: (
-                    cycle.academic_year.name,
-                    cycle.term.name,
-                    cycle.exam_period,
-                    cycle.id,
-                ),
+            "cycle_contexts": cycle_contexts,
+            "generated_at": timezone.localtime(
+                timezone.now(), timezone=ZoneInfo("Asia/Manila")
             ),
-            "period_choices": ExaminationCycle.ExamPeriod.choices,
-            "course_choices": sorted(
-                courses_by_id.values(),
-                key=lambda course: (course.code, course.id),
+            "total_authorized_courses": len(courses),
+            "total_course_offerings": sum(
+                course.represented_offering_count for course in courses
             ),
-            "selected_cycle_id": selected_cycle_id,
-            "selected_period": selected_period,
-            "selected_course_id": selected_course_id,
-            "filter_query": filter_query,
-        },
+        }
+    )
+    return render(
+        request,
+        "departmental_exams/admin/contributor_monitoring_print.html",
+        context,
     )
 
 

@@ -6,7 +6,13 @@ from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 
 from .contribution_authorization import ContributorEligibilityService
-from .models import CourseExamConfiguration, CycleCourse, FacultyContribution
+from .models import (
+    CourseExamConfiguration,
+    CycleCourse,
+    CycleCourseOffering,
+    FacultyContribution,
+    FacultyContributionEligibilitySource,
+)
 from .services import DepartmentalExamAuthorizationService
 
 
@@ -97,12 +103,49 @@ class ContributionMonitoringSelector:
             if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
             in automatic_permissions[course.id]
         }
+        contribution_sources = (
+            FacultyContributionEligibilitySource.objects.select_related(
+                "assignment",
+                "assignment__offering",
+                "assignment__offering__section",
+            )
+            .only(
+                "id",
+                "contribution_id",
+                "assignment_id",
+                "assignment_id_snapshot",
+                "offering_id_snapshot",
+                "tenant_id_snapshot",
+                "campus_id_snapshot",
+                "is_current",
+                "assignment__id",
+                "assignment__tenant_id",
+                "assignment__campus_id",
+                "assignment__offering_id",
+                "assignment__offering__id",
+                "assignment__offering__tenant_id",
+                "assignment__offering__campus_id",
+                "assignment__offering__course_id",
+                "assignment__offering__academic_year_id",
+                "assignment__offering__term_id",
+                "assignment__offering__section_id",
+                "assignment__offering__section__id",
+                "assignment__offering__section__code",
+            )
+            .order_by("assignment_id_snapshot", "id")
+        )
         contributions = (
             FacultyContribution.objects.select_related("faculty_user")
-            .prefetch_related("eligibility_sources", "blocked_resolution_events")
+            .prefetch_related(
+                Prefetch("eligibility_sources", queryset=contribution_sources),
+                "blocked_resolution_events",
+            )
             .annotate(saved_question_count=Count("questions"))
             .order_by("faculty_user__last_name", "faculty_user__first_name", "id")
         )
+        offering_snapshots = CycleCourseOffering.objects.select_related(
+            "campus"
+        ).order_by("campus__name", "offering_id")
         return (
             base.filter(Q(pk__in=visible_ids) | Q(pk__in=automatic_ids))
             .select_related(
@@ -115,7 +158,7 @@ class ContributionMonitoringSelector:
                 "configuration",
             )
             .prefetch_related(
-                "offering_snapshots",
+                Prefetch("offering_snapshots", queryset=offering_snapshots),
                 Prefetch("faculty_contributions", queryset=contributions),
             )
             .annotate(

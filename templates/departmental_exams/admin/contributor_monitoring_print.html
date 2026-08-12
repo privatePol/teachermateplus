@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contributor Completion Monitoring</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 1100px; padding: 24px; background: #fff; color: #111; font-family: Arial, sans-serif; font-size: 13px; line-height: 1.35; }
+    h1, h2, p { margin-top: 0; }
+    h1 { margin-bottom: 6px; font-size: 24px; }
+    h2 { margin-bottom: 4px; font-size: 17px; }
+    .toolbar { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+    .print-button { border: 1px solid #222; border-radius: 4px; padding: 8px 16px; background: #fff; color: #111; cursor: pointer; font: inherit; }
+    .meta { color: #333; }
+    .summary { display: flex; gap: 32px; margin: 18px 0 22px; padding: 12px 0; border-top: 2px solid #222; border-bottom: 1px solid #777; }
+    .summary strong { display: block; font-size: 21px; }
+    .course-report { margin: 0 0 24px; }
+    .course-heading { break-after: avoid; page-break-after: avoid; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .course-meta { margin-bottom: 0; color: #333; }
+    table { width: 100%; margin-top: 8px; border-collapse: collapse; }
+    thead { display: table-header-group; }
+    th, td { border: 1px solid #777; padding: 5px 7px; text-align: left; vertical-align: top; }
+    th { background: #eee; color: #111; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    .course-totals { break-inside: avoid; page-break-inside: avoid; margin: 7px 0 0; font-weight: 700; }
+    .legend { break-inside: avoid; page-break-inside: avoid; margin-top: 22px; border-top: 1px solid #777; padding-top: 12px; }
+    .legend p { margin-bottom: 7px; }
+    .empty { padding: 14px; border: 1px solid #777; }
+    @page { margin: 14mm; }
+    @media print {
+      body { max-width: none; padding: 0; font-size: 10pt; }
+      .print-controls { display: none !important; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar print-controls"><button class="print-button" type="button" onclick="window.print()">Print</button></div>
+  <header>
+    <h1>Contributor Completion Monitoring</h1>
+    <p class="meta"><strong>Academic Year / Term / Examination Period:</strong> {% if cycle_contexts %}{{ cycle_contexts|join:"; " }}{% else %}No authorized course examinations in the current filtered scope{% endif %}</p>
+    <p class="meta"><strong>Generated/printed:</strong> {{ generated_at|date:"M j, Y g:i A T" }} (Asia/Manila)</p>
+  </header>
+
+  <section class="summary" aria-label="Report summary totals">
+    <div><strong>{{ total_authorized_courses }}</strong>Total Authorized Courses</div>
+    <div><strong>{{ total_course_offerings }}</strong>Total Course Offerings Represented</div>
+  </section>
+
+  {% for course in courses %}
+  <section class="course-report">
+    <header class="course-heading">
+      <h2>{{ course.print_number }}. {{ course.course.code }} &mdash; {{ course.course.title }}</h2>
+      <p class="course-meta">
+        <strong>Campus/es:</strong> {% if course.print_campus_names %}{{ course.print_campus_names|join:", " }}{% else %}&mdash;{% endif %}
+        &nbsp;|&nbsp; <strong>Contribution Deadline:</strong> {% if course.configuration.active_contribution_deadline %}{{ course.configuration.active_contribution_deadline|date:"M j, Y g:i A" }}{% else %}&mdash;{% endif %}
+        &nbsp;|&nbsp; <strong>AY / Term / Period:</strong> {{ course.cycle.academic_year }} / {{ course.cycle.term }} / {{ course.cycle.get_exam_period_display }}
+        &nbsp;|&nbsp; <strong>Course Offerings:</strong> {{ course.represented_offering_count }}
+      </p>
+    </header>
+    <table>
+      <thead><tr><th>Contributor</th><th>Campus</th><th>Section</th><th>Progress</th><th>Sources</th></tr></thead>
+      <tbody>
+      {% for contribution in course.faculty_contributions.all %}
+        <tr>
+          <td>{{ contribution.faculty_user.full_name|default:contribution.faculty_user.username }}</td>
+          <td class="contributor-campuses">{% if contribution.print_campus_names %}{{ contribution.print_campus_names|join:", " }}{% else %}&mdash;{% endif %}</td>
+          <td class="contributor-sections">{% if contribution.print_section_codes %}{{ contribution.print_section_codes|join:", " }}{% else %}&mdash;{% endif %}</td>
+          <td>{{ contribution.saved_question_count }} / {{ contribution.quota_snapshot }} ({{ contribution.progress_percent }}%)</td>
+          <td>{{ contribution.valid_source_count }} valid / {{ contribution.invalid_source_count }} invalid</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5">No contributor records.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="course-totals">Course Totals: Contributors: {{ course.total_contributors }} &nbsp;|&nbsp; Questions: {{ course.total_questions_saved }} / {{ course.total_questions_required }}</p>
+  </section>
+  {% empty %}
+  <p class="empty">No authorized course examinations match the selected filters.</p>
+  {% endfor %}
+
+  <section class="legend" aria-label="Report explanations">
+    <p><strong>Progress:</strong> Progress shows the number of questions currently saved/credited for the contributor against the required faculty quota, with the percentage completed. Progress alone does not necessarily mean Final Submission has been completed.</p>
+    <p><strong>Sources:</strong> Sources are the teaching-assignment records used to determine the contributor's eligibility for this grouped course examination.</p>
+    <p><strong>Valid</strong> = qualifying source/assignment accepted by TMP for contributor eligibility. <strong>Invalid</strong> = source/assignment evaluated but rejected by the existing eligibility rules.</p>
+    <p><strong>Source counts are not question counts.</strong></p>
+  </section>
+</body>
+</html>
