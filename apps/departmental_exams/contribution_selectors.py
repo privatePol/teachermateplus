@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from django.db.models import Count, Prefetch
+from django.db.models import Count, Prefetch, Q
 
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
@@ -76,6 +76,27 @@ class ContributionMonitoringSelector:
             queryset=base,
         )
         visible_ids = configurer.values("pk").union(reviewer.values("pk"))
+        automatic_courses = list(
+            base.filter(
+                cycle__processing_mode="AUTOMATIC_GENERATION",
+                inclusion_status="INCLUDED",
+            ).select_related("cycle").prefetch_related("offering_snapshots")
+        )
+        automatic_permissions = (
+            DepartmentalExamAuthorizationService.automatic_permission_map(
+                user=user,
+                courses=automatic_courses,
+                permissions=(
+                    DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+                ),
+            )
+        )
+        automatic_ids = {
+            course.id
+            for course in automatic_courses
+            if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+            in automatic_permissions[course.id]
+        }
         contributions = (
             FacultyContribution.objects.select_related("faculty_user")
             .prefetch_related("eligibility_sources", "blocked_resolution_events")
@@ -83,7 +104,7 @@ class ContributionMonitoringSelector:
             .order_by("faculty_user__last_name", "faculty_user__first_name", "id")
         )
         return (
-            base.filter(pk__in=visible_ids)
+            base.filter(Q(pk__in=visible_ids) | Q(pk__in=automatic_ids))
             .select_related(
                 "cycle",
                 "cycle__tenant",
@@ -93,7 +114,10 @@ class ContributionMonitoringSelector:
                 "responsible_department",
                 "configuration",
             )
-            .prefetch_related(Prefetch("faculty_contributions", queryset=contributions))
+            .prefetch_related(
+                "offering_snapshots",
+                Prefetch("faculty_contributions", queryset=contributions),
+            )
             .annotate(
                 contribution_count=Count("faculty_contributions", distinct=True),
                 question_count=Count("faculty_contributions__questions", distinct=True),

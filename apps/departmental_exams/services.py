@@ -79,6 +79,11 @@ class CourseExamDefaultTrackingPolicy:
     def parent_exclusion_reason(cycle_course):
         if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
             return "EXEMPT"
+        if (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            return None
         if not cycle_course.responsible_department_id:
             return "NULL_RESPONSIBILITY"
         if not cycle_course.responsible_department.is_active:
@@ -147,10 +152,14 @@ class CourseExamConfigurationReadinessService:
         blockers = []
         if cycle_course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
             blockers.append("Exempt")
-        if not cycle_course.responsible_department_id:
-            blockers.append("Needs Exam Department")
-        elif not cycle_course.responsible_department.is_active:
-            blockers.append("Exam Department Inactive")
+        if (
+            cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+        ):
+            if not cycle_course.responsible_department_id:
+                blockers.append("Needs Exam Department")
+            elif not cycle_course.responsible_department.is_active:
+                blockers.append("Exam Department Inactive")
         if cycle.status != ExaminationCycle.Status.OPEN:
             blockers.append("Cycle Not Open")
         if not configuration:
@@ -205,6 +214,11 @@ class CourseExamConfigurationReadinessService:
                         deadline_matches_default = False
                     if not deadline_matches_default:
                         blockers.append("Needs Configuration")
+                if (
+                    configuration.coverage_source == "DEFAULT"
+                    and configuration.coverage != cycle.default_coverage
+                ):
+                    blockers.append("Needs Configuration")
                 if configuration.cycle_defaults_revision_snapshot != cycle.defaults_revision:
                     blockers.append("Needs Configuration")
             if not (configuration.coverage or "").strip():
@@ -245,12 +259,17 @@ class ExaminationCycleConfigurationService:
     def _configuration_audit_payload(cycle):
         """Keep cycle audit evidence bounded while preserving exact stored guidance."""
         instructions = cycle.contributor_instructions or ""
+        coverage = cycle.default_coverage or ""
         return {
             "processing_mode": cycle.processing_mode,
             "default_questions_required_per_faculty": cycle.default_questions_required_per_faculty,
             "default_final_item_count": cycle.default_final_item_count,
             "default_contribution_deadline": cycle.default_contribution_deadline,
             "defaults_revision": cycle.defaults_revision,
+            "default_coverage_sha256": hashlib.sha256(
+                coverage.encode("utf-8")
+            ).hexdigest(),
+            "default_coverage_length": len(coverage),
             "contributor_instructions_sha256": hashlib.sha256(
                 instructions.encode("utf-8")
             ).hexdigest(),
@@ -299,7 +318,7 @@ class ExaminationCycleConfigurationService:
             # exclusion counters and later child locks see one coherent batch.
             parents = list(
                 CycleCourse.objects.select_for_update()
-                .select_related("responsible_department")
+                .select_related("cycle", "responsible_department")
                 .filter(cycle=cycle, id__gt=last_parent_id)
                 .order_by("id")[: cls.PROPAGATION_BATCH_SIZE]
             )
@@ -382,6 +401,9 @@ class ExaminationCycleConfigurationService:
                     if cycle.default_contribution_deadline is not None:
                         values["contribution_deadline"] = cycle.default_contribution_deadline
                         values["contribution_deadline_source"] = "DEFAULT"
+                    if cycle.default_coverage:
+                        values["coverage"] = cycle.default_coverage
+                        values["coverage_source"] = "DEFAULT"
                     creates.append(CourseExamConfiguration(**values))
                     continue
                 prior = {
@@ -391,6 +413,8 @@ class ExaminationCycleConfigurationService:
                     "final_item_count_source": configuration.final_item_count_source,
                     "contribution_deadline": configuration.contribution_deadline,
                     "contribution_deadline_source": configuration.contribution_deadline_source,
+                    "coverage": configuration.coverage,
+                    "coverage_source": configuration.coverage_source,
                     "cycle_defaults_revision_snapshot": configuration.cycle_defaults_revision_snapshot,
                 }
                 if "questions_required_per_faculty" in changed_defaults and configuration.questions_required_per_faculty_source in (None, "DEFAULT"):
@@ -402,6 +426,9 @@ class ExaminationCycleConfigurationService:
                 if "contribution_deadline" in changed_defaults and configuration.contribution_deadline_source in (None, "DEFAULT"):
                     configuration.contribution_deadline = cycle.default_contribution_deadline
                     configuration.contribution_deadline_source = "DEFAULT" if cycle.default_contribution_deadline is not None else None
+                if "coverage" in changed_defaults and configuration.coverage_source in (None, "DEFAULT"):
+                    configuration.coverage = cycle.default_coverage
+                    configuration.coverage_source = "DEFAULT" if cycle.default_coverage else None
                 configuration.cycle_defaults_revision_snapshot = cycle.defaults_revision
                 if prior != {
                     "questions_required_per_faculty": configuration.questions_required_per_faculty,
@@ -410,6 +437,8 @@ class ExaminationCycleConfigurationService:
                     "final_item_count_source": configuration.final_item_count_source,
                     "contribution_deadline": configuration.contribution_deadline,
                     "contribution_deadline_source": configuration.contribution_deadline_source,
+                    "coverage": configuration.coverage,
+                    "coverage_source": configuration.coverage_source,
                     "cycle_defaults_revision_snapshot": configuration.cycle_defaults_revision_snapshot,
                 }:
                     if len(affected_configuration_ids) < cls.PROPAGATION_BATCH_SIZE:
@@ -423,7 +452,7 @@ class ExaminationCycleConfigurationService:
             if changes:
                 CourseExamConfiguration.objects.bulk_update(
                     changes,
-                    ["questions_required_per_faculty", "questions_required_per_faculty_source", "final_item_count", "final_item_count_source", "contribution_deadline", "contribution_deadline_source", "cycle_defaults_revision_snapshot", "revision", "updated_at"],
+                    ["questions_required_per_faculty", "questions_required_per_faculty_source", "final_item_count", "final_item_count_source", "contribution_deadline", "contribution_deadline_source", "coverage", "coverage_source", "cycle_defaults_revision_snapshot", "revision", "updated_at"],
                     batch_size=cls.PROPAGATION_BATCH_SIZE,
                 )
                 updated += len(changes)
@@ -436,7 +465,7 @@ class ExaminationCycleConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, default_questions_required_per_faculty, default_final_item_count, contributor_instructions, default_contribution_deadline=None, processing_mode=None, reason="", request=None):
+    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, default_questions_required_per_faculty, default_final_item_count, contributor_instructions, default_contribution_deadline=None, default_coverage=None, processing_mode=None, reason="", request=None):
         cycle = cls._lock_cycle(cycle_id=cycle_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_permission(user=user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
         if cycle.status == ExaminationCycle.Status.CLOSED:
@@ -452,6 +481,11 @@ class ExaminationCycleConfigurationService:
             if value is not None and not 50 <= value <= 75:
                 raise ValidationError("Cycle defaults must be from 50 to 75.")
         contributor_instructions = contributor_instructions or ""
+        default_coverage = (
+            cycle.default_coverage
+            if default_coverage is None
+            else (default_coverage or "").strip()
+        )
         normalized_default_deadline = normalize_contribution_deadline_to_minute(
             default_contribution_deadline
         )
@@ -470,11 +504,13 @@ class ExaminationCycleConfigurationService:
             cycle.default_questions_required_per_faculty != default_questions_required_per_faculty
             or cycle.default_final_item_count != default_final_item_count
             or deadline_changed
+            or cycle.default_coverage != default_coverage
         )
         reason = (reason or "").strip()
         if cycle.status == ExaminationCycle.Status.OPEN and defaults_changed and not 10 <= len(reason) <= 500:
             raise ValidationError("An administrative reason from 10 to 500 characters is required while the cycle is Open.")
         before = cls._configuration_audit_payload(cycle)
+        prior_default_coverage = cycle.default_coverage
         changed = (
             defaults_changed
             or cycle.processing_mode != processing_mode
@@ -485,14 +521,15 @@ class ExaminationCycleConfigurationService:
         cycle.default_questions_required_per_faculty = default_questions_required_per_faculty
         cycle.default_final_item_count = default_final_item_count
         cycle.default_contribution_deadline = effective_default_deadline
+        cycle.default_coverage = default_coverage
         cycle.processing_mode = processing_mode
         if defaults_changed:
             cycle.defaults_revision += 1
         cycle.contributor_instructions = contributor_instructions
         cycle.full_clean()
-        cycle.save(update_fields=["processing_mode", "default_questions_required_per_faculty", "default_final_item_count", "default_contribution_deadline", "defaults_revision", "contributor_instructions", "updated_at"])
+        cycle.save(update_fields=["processing_mode", "default_questions_required_per_faculty", "default_final_item_count", "default_contribution_deadline", "default_coverage", "defaults_revision", "contributor_instructions", "updated_at"])
         propagation = (
-            cls._propagate_defaults_to_drafts(cycle=cycle, changed_defaults={key for key, value in (("questions_required_per_faculty", default_questions_required_per_faculty), ("final_item_count", default_final_item_count), ("contribution_deadline", effective_default_deadline)) if getattr(cycle, f"default_{key}") != before[f"default_{key}"]})
+            cls._propagate_defaults_to_drafts(cycle=cycle, changed_defaults={key for key, value in (("questions_required_per_faculty", default_questions_required_per_faculty), ("final_item_count", default_final_item_count), ("contribution_deadline", effective_default_deadline), ("coverage", default_coverage)) if getattr(cycle, f"default_{key}") != (before[f"default_{key}"] if key != "coverage" else prior_default_coverage)})
             if defaults_changed
             else {
                 "created": 0,
@@ -775,6 +812,14 @@ class DepartmentalExamAuthorizationService:
         cls.require_enabled(tenant_id=tenant_id)
         if not user or not user.is_authenticated or not user.is_active:
             raise PermissionDenied("An active user is required for course administration.")
+        if (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            return cls.require_generation_management(
+                user=user,
+                cycle_course=cycle_course,
+            )
         if user.is_superuser:
             return
         if not cycle_course.responsible_department_id:
@@ -1171,6 +1216,26 @@ class DepartmentalExamAuthorizationService:
             Q(tenant_id=tenant_id) | Q(tenant_id__isnull=True),
             Q(campus_id=campus_id) | Q(campus_id__isnull=True),
         ).exists()
+
+    @classmethod
+    def require_automatic_tenant_permission(
+        cls, *, user, permission, tenant_id
+    ):
+        """Require campus-neutral authority when no participating campus exists."""
+        cls.require_enabled(tenant_id=tenant_id)
+        if not user or not user.is_authenticated or not user.is_active:
+            raise PermissionDenied(
+                "An active user is required for Departmental Exam Builder administration."
+            )
+        if not cls._has_scoped_permission(
+            user=user,
+            permission=permission,
+            tenant_id=tenant_id,
+            campus_id=None,
+        ):
+            raise PermissionDenied(
+                "You do not have tenant-wide automatic examination authority."
+            )
 
     @classmethod
     def has_automatic_course_permission(cls, *, user, cycle_course, permissions):
@@ -1601,21 +1666,32 @@ class CycleCourseAdministrationService:
         DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=cycle_course)
         if cycle_course.cycle.status == ExaminationCycle.Status.CLOSED:
             raise ValidationError({"__all__": "Closed cycles cannot change course responsibility or reviewer assignment."})
-        if not responsible_department:
+        automatic_mode = (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        )
+        if not responsible_department and not automatic_mode:
             raise ValidationError({"responsible_department": "Select an exam department before assigning or changing a reviewer."})
-        if not DepartmentalExamAuthorizationService.is_eligible_configurer(
+        if responsible_department and not DepartmentalExamAuthorizationService.is_eligible_configurer(
             user=user, tenant_id=tenant_id, responsible_department=responsible_department
         ):
             raise PermissionDenied("Exam department is outside your scope.")
         configuration = CourseExamConfiguration.objects.select_for_update().filter(cycle_course=cycle_course).first()
-        ownership_changed = responsible_department.id != cycle_course.responsible_department_id
+        responsible_department_id = (
+            responsible_department.id if responsible_department else None
+        )
+        ownership_changed = (
+            responsible_department_id != cycle_course.responsible_department_id
+        )
         if ownership_changed:
             if configuration and configuration.opened_at:
                 raise ValidationError({"responsible_department": "Responsible exam department cannot change after first opening."})
             if FacultyContribution.objects.filter(cycle_course=cycle_course).exists() or Question.objects.filter(contribution__cycle_course=cycle_course).exists():
                 raise ValidationError({"responsible_department": "Responsible exam department cannot change after downstream activity."})
         reviewer_cleared = False
-        if reviewer and not DepartmentalExamAuthorizationService.is_eligible_reviewer(
+        if automatic_mode:
+            reviewer = None
+        elif reviewer and not DepartmentalExamAuthorizationService.is_eligible_reviewer(
             user=reviewer, tenant_id=tenant_id, responsible_department=responsible_department
         ):
             if ownership_changed and reviewer.id == cycle_course.reviewer_id:
@@ -1761,6 +1837,7 @@ class CourseExamConfigurationService:
             "final_item_count": configuration.final_item_count,
             "questions_required_per_faculty": configuration.questions_required_per_faculty,
             "coverage": configuration.coverage,
+            "coverage_source": configuration.coverage_source,
             **ExaminationCycleConfigurationService._text_audit_evidence(
                 value=configuration.additional_instructions,
                 label="additional_instructions",
@@ -1804,6 +1881,11 @@ class CourseExamConfigurationService:
 
     @staticmethod
     def _require_active_responsible_department(parent):
+        if (
+            parent.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            return
         if not parent.responsible_department_id:
             raise ValidationError(
                 {"responsible_department": "Assign an active exam department before opening faculty contribution."}
@@ -1833,7 +1915,7 @@ class CourseExamConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def save_course_draft(cls, *, cycle_course_id, tenant_id, user, expected_revision, final_item_count, questions_required_per_faculty, final_item_count_mode, questions_required_per_faculty_mode, coverage, additional_instructions, contribution_deadline, contribution_deadline_mode=None, request=None):
+    def save_course_draft(cls, *, cycle_course_id, tenant_id, user, expected_revision, final_item_count, questions_required_per_faculty, final_item_count_mode, questions_required_per_faculty_mode, coverage, additional_instructions, contribution_deadline, contribution_deadline_mode=None, coverage_mode=None, request=None):
         parent, configuration = cls._lock_parent_and_configuration(cycle_course_id=cycle_course_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_configure_cycle_course(user=user, cycle_course=parent)
         cls._require_active_responsible_department(parent)
@@ -1925,12 +2007,43 @@ class CourseExamConfigurationService:
             and contribution_deadline_source is None
         ):
             raise ValidationError("A course deadline override requires a contribution deadline.")
+        submitted_coverage = (coverage or "").strip()
+        existing_coverage_source = configuration.coverage_source if configuration else None
+        if coverage_mode is None:
+            coverage = submitted_coverage
+            if not coverage:
+                coverage_source = None
+            elif (
+                configuration is not None
+                and submitted_coverage == configuration.coverage
+                and existing_coverage_source
+                in CourseExamConfiguration.ValueSource.values
+            ):
+                coverage_source = existing_coverage_source
+            else:
+                coverage_source = CourseExamConfiguration.ValueSource.OVERRIDE
+        elif coverage_mode == CourseExamConfiguration.ValueSource.DEFAULT:
+            coverage = (cycle.default_coverage or "").strip()
+            coverage_source = (
+                CourseExamConfiguration.ValueSource.DEFAULT
+                if coverage
+                else None
+            )
+        elif coverage_mode == CourseExamConfiguration.ValueSource.OVERRIDE:
+            coverage = submitted_coverage
+            coverage_source = (
+                CourseExamConfiguration.ValueSource.OVERRIDE
+                if coverage
+                else None
+            )
+        else:
+            raise ValidationError("Unsupported coverage mode.")
         if configuration is None:
             configuration = CourseExamConfiguration(cycle_course=parent, revision=1)
             before = None
         else:
             before = cls._configuration_payload(configuration)
-        values = {"final_item_count": final_item_count, "final_item_count_source": final_item_count_source, "questions_required_per_faculty": questions_required_per_faculty, "questions_required_per_faculty_source": questions_required_per_faculty_source, "contribution_deadline": contribution_deadline, "contribution_deadline_source": contribution_deadline_source, "cycle_defaults_revision_snapshot": cycle.defaults_revision, "coverage": (coverage or "").strip(), "additional_instructions": (additional_instructions or "").strip()}
+        values = {"final_item_count": final_item_count, "final_item_count_source": final_item_count_source, "questions_required_per_faculty": questions_required_per_faculty, "questions_required_per_faculty_source": questions_required_per_faculty_source, "contribution_deadline": contribution_deadline, "contribution_deadline_source": contribution_deadline_source, "cycle_defaults_revision_snapshot": cycle.defaults_revision, "coverage": coverage, "coverage_source": coverage_source, "additional_instructions": (additional_instructions or "").strip()}
         if before and all(
             getattr(configuration, key) == value for key, value in values.items()
         ):

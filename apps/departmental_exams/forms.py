@@ -137,6 +137,7 @@ class ExaminationCycleConfigurationForm(forms.ModelForm):
             "default_questions_required_per_faculty",
             "default_final_item_count",
             "default_contribution_deadline",
+            "default_coverage",
             "contributor_instructions",
         ]
         widgets = {
@@ -147,6 +148,7 @@ class ExaminationCycleConfigurationForm(forms.ModelForm):
                 attrs={"type": "datetime-local", "class": "form-control"},
             ),
             "contributor_instructions": forms.Textarea(attrs={"rows": 4, "class": "form-control"}),
+            "default_coverage": forms.Textarea(attrs={"rows": 3, "class": "form-control"}),
         }
 
     def __init__(self, *args, **kwargs):
@@ -159,6 +161,9 @@ class ExaminationCycleConfigurationForm(forms.ModelForm):
 
     def clean_contributor_instructions(self):
         return (self.cleaned_data.get("contributor_instructions") or "").strip()
+
+    def clean_default_coverage(self):
+        return (self.cleaned_data.get("default_coverage") or "").strip()
 
     def clean_expected_updated_at(self):
         value = self.cleaned_data["expected_updated_at"]
@@ -202,6 +207,10 @@ class ExaminationCycleCloseForm(_CycleTransitionForm):
     pass
 
 
+class PrepareFacultyContributionsForm(_CycleTransitionForm):
+    pass
+
+
 class CourseExamConfigurationForm(forms.ModelForm):
     expected_revision = forms.IntegerField(
         widget=forms.HiddenInput,
@@ -213,12 +222,13 @@ class CourseExamConfigurationForm(forms.ModelForm):
     questions_required_per_faculty_mode = forms.ChoiceField(choices=[("DEFAULT", "Use cycle default"), ("OVERRIDE", "Use course override")])
     final_item_count_mode = forms.ChoiceField(choices=[("DEFAULT", "Use cycle default"), ("OVERRIDE", "Use course override")])
     contribution_deadline_mode = forms.ChoiceField(required=False, choices=[("DEFAULT", "Use cycle default"), ("OVERRIDE", "Course override")])
+    coverage_mode = forms.ChoiceField(required=False, choices=[("DEFAULT", "Use cycle default"), ("OVERRIDE", "Course override")])
 
     def __init__(self, *args, cycle=None, **kwargs):
         self.cycle = cycle
         super().__init__(*args, **kwargs)
         self.fields["contribution_deadline"].input_formats = ["%Y-%m-%dT%H:%M"]
-        for name in ("questions_required_per_faculty_mode", "final_item_count_mode", "contribution_deadline_mode"):
+        for name in ("questions_required_per_faculty_mode", "final_item_count_mode", "contribution_deadline_mode", "coverage_mode"):
             self.fields[name].widget.attrs["class"] = "form-select"
 
     class Meta:
@@ -246,6 +256,9 @@ class CourseExamConfigurationForm(forms.ModelForm):
     def clean_additional_instructions(self):
         return (self.cleaned_data.get("additional_instructions") or "").strip()
 
+    def clean_coverage_mode(self):
+        return self.cleaned_data.get("coverage_mode") or None
+
     def clean_contribution_deadline(self):
         return normalize_contribution_deadline_to_minute(
             self.cleaned_data.get("contribution_deadline")
@@ -253,6 +266,35 @@ class CourseExamConfigurationForm(forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
+        submitted_coverage = (cleaned.get("coverage") or "").strip()
+        coverage_mode = cleaned.get("coverage_mode")
+        existing_coverage = (self.instance.coverage or "").strip()
+        existing_source = self.instance.coverage_source
+        if coverage_mode == CourseExamConfiguration.ValueSource.DEFAULT:
+            effective_coverage = (
+                (self.cycle.default_coverage or "").strip() if self.cycle else ""
+            )
+            cleaned["coverage"] = effective_coverage
+            self.instance.coverage_source = (
+                CourseExamConfiguration.ValueSource.DEFAULT
+                if effective_coverage
+                else None
+            )
+        elif coverage_mode == CourseExamConfiguration.ValueSource.OVERRIDE:
+            self.instance.coverage_source = (
+                CourseExamConfiguration.ValueSource.OVERRIDE
+                if submitted_coverage
+                else None
+            )
+        elif not submitted_coverage:
+            self.instance.coverage_source = None
+        elif (
+            submitted_coverage == existing_coverage
+            and existing_source in CourseExamConfiguration.ValueSource.values
+        ):
+            self.instance.coverage_source = existing_source
+        else:
+            self.instance.coverage_source = CourseExamConfiguration.ValueSource.OVERRIDE
         for field in ("final_item_count", "questions_required_per_faculty"):
             value = cleaned.get(field)
             mode = cleaned.get(f"{field}_mode")

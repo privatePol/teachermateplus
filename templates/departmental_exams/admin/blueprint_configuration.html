@@ -1,6 +1,7 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Exam Blueprint</li></ol></nav>
 <header class="de-exam-hero"><div><h1>Stage 6 Blueprint</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div></header>
 {% include "departmental_exams/admin/_stage6_readiness.html" %}
 {% if locked_revision %}<div class="de-locked-panel mb-3"><span class="badge text-bg-dark mb-2">LOCKED</span><h2 class="h5">Blueprint structure is read-only.</h2><p class="mb-2">The final examination was permanently locked from revision #{{ locked_revision.revision_number }}. Structure, sections, quotas, and generated meaning cannot be changed.</p><a class="btn btn-light" href="{% url 'departmental_exams:generated_revision_detail' locked_revision.id %}">Review Final Locked Exam</a></div>{% elif has_current_automatic_generation %}<div class="alert alert-info"><h2 class="h5">Current automatic generation is protected</h2><p class="mb-0">Reopen contributions to supersede the current revision before changing blueprint structure or other generation inputs.</p></div>{% else %}

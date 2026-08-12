@@ -69,6 +69,7 @@ class Stage4TestCase(TestCase):
         default_questions_required_per_faculty=None,
         default_final_item_count=None,
         default_contribution_deadline=None,
+        default_coverage="",
         instructions="",
         scope_suffix=None,
     ):
@@ -94,6 +95,7 @@ class Stage4TestCase(TestCase):
             default_questions_required_per_faculty=default_questions_required_per_faculty,
             default_final_item_count=default_final_item_count,
             default_contribution_deadline=default_contribution_deadline,
+            default_coverage=default_coverage,
             contributor_instructions=instructions, created_by=self.admin,
         )
 
@@ -122,6 +124,7 @@ class Stage4TestCase(TestCase):
         workflow=CourseExamConfiguration.WorkflowStatus.DRAFT,
         opened_at=None,
         coverage="Core outcomes",
+        coverage_source="OVERRIDE",
         deadline=None,
         deadline_source="OVERRIDE",
     ):
@@ -136,6 +139,7 @@ class Stage4TestCase(TestCase):
             opened_at=opened_at,
             opened_by=self.admin if opened_at else None,
             coverage=coverage,
+            coverage_source=coverage_source,
             contribution_deadline=deadline or self.future_deadline(),
             contribution_deadline_source=deadline_source,
         )

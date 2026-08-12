@@ -439,6 +439,63 @@ class Stage6BlockedResolutionTests(Stage6FixtureMixin, Stage4TestCase):
         audit = AuditLog.objects.get(action="DE_EXAM_BLOCKED_CONTRIBUTION_RESOLVED")
         self.assertNotIn("Documented staffing loss", str(audit.metadata_json))
 
+    def test_resolution_redirect_preserves_only_active_monitoring_filters(self):
+        parent, configuration, contribution, _assignment = self._blocked()
+        client = Client()
+        client.force_login(self.configurer)
+        response = client.post(
+            reverse(
+                "departmental_exams:blocked_contribution_resolve",
+                args=[contribution.id],
+            ),
+            {
+                "expected_contribution_revision": contribution.revision,
+                "expected_roster_revision": configuration.contributor_roster_revision,
+                "reason": "Resolve this blocked contribution with monitored filters.",
+                "cycle": parent.cycle_id,
+                "period": parent.cycle.exam_period,
+                "course": parent.course_id,
+                "next": "https://attacker.example/redirect",
+                "return_url": "/admin-portal/",
+            },
+        )
+        expected = (
+            reverse("departmental_exams:contributor_monitoring")
+            + f"?cycle={parent.cycle_id}&period={parent.cycle.exam_period}"
+            + f"&course={parent.course_id}"
+        )
+        self.assertRedirects(response, expected, fetch_redirect_response=False)
+        follow = client.get(response.url)
+        self.assertEqual(follow.status_code, 200)
+        self.assertEqual(follow.context["selected_cycle_id"], parent.cycle_id)
+        self.assertEqual(follow.context["selected_period"], parent.cycle.exam_period)
+        self.assertEqual(follow.context["selected_course_id"], parent.course_id)
+
+    def test_resolution_redirect_leaves_stale_filters_for_normal_validation(self):
+        _parent, configuration, contribution, _assignment = self._blocked()
+        client = Client()
+        client.force_login(self.configurer)
+        response = client.post(
+            reverse(
+                "departmental_exams:blocked_contribution_resolve",
+                args=[contribution.id],
+            ),
+            {
+                "expected_contribution_revision": contribution.revision,
+                "expected_roster_revision": configuration.contributor_roster_revision,
+                "reason": "Resolve this blocked contribution with stale filters.",
+                "cycle": "999999",
+                "period": "STALE",
+                "course": "888888",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        follow = client.get(response.url)
+        self.assertEqual(follow.status_code, 200)
+        self.assertIsNone(follow.context["selected_cycle_id"])
+        self.assertEqual(follow.context["selected_period"], "")
+        self.assertIsNone(follow.context["selected_course_id"])
+
     def test_repeated_block_episodes_get_distinct_events_and_active_again_requires_submission(self):
         parent, configuration, contribution, assignment = self._blocked()
         first_blocked_at = contribution.roster_blocked_at

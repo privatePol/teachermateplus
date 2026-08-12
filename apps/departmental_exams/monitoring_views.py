@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from functools import wraps
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 from django.utils import timezone
 
@@ -17,7 +19,7 @@ from .blueprint_services import (
     contribution_source_evidence,
     resolution_matches_episode,
 )
-from .models import CycleCourse
+from .models import CycleCourse, ExaminationCycle
 from .services import DepartmentalExamAuthorizationService
 
 
@@ -72,11 +74,38 @@ def contributor_monitoring_view(request):
         user=request.user, tenant_id=tenant_id
     ):
         raise PermissionDenied("No exact-scoped contributor monitoring assignment is available.")
-    courses = list(
+    visible_courses = list(
         ContributionMonitoringSelector.visible_cycle_courses(
             user=request.user, tenant_id=tenant_id
         )
     )
+    cycles_by_id = {
+        course.cycle_id: course.cycle for course in visible_courses
+    }
+    courses_by_id = {
+        course.course_id: course.course for course in visible_courses
+    }
+
+    def selected_int(name, valid_ids):
+        try:
+            value = int(request.GET.get(name, ""))
+        except (TypeError, ValueError):
+            return None
+        return value if value in valid_ids else None
+
+    selected_cycle_id = selected_int("cycle", cycles_by_id)
+    selected_course_id = selected_int("course", courses_by_id)
+    selected_period = request.GET.get("period", "")
+    if selected_period not in ExaminationCycle.ExamPeriod.values:
+        selected_period = ""
+
+    courses = [
+        course
+        for course in visible_courses
+        if (selected_cycle_id is None or course.cycle_id == selected_cycle_id)
+        and (not selected_period or course.cycle.exam_period == selected_period)
+        and (selected_course_id is None or course.course_id == selected_course_id)
+    ]
     configurer_ids = set(
         DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
             user=request.user,
@@ -84,6 +113,19 @@ def contributor_monitoring_view(request):
             queryset=CycleCourse.objects.filter(pk__in=[course.pk for course in courses]),
         ).values_list("pk", flat=True)
     )
+    automatic_permissions = DepartmentalExamAuthorizationService.automatic_permission_map(
+        user=request.user,
+        courses=courses,
+        permissions=(
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+        ),
+    )
+    automatic_manage_ids = {
+        course.id
+        for course in courses
+        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+        in automatic_permissions[course.id]
+    }
     for course in courses:
         for contribution in course.faculty_contributions.all():
             sources = list(contribution.eligibility_sources.all())
@@ -112,11 +154,39 @@ def contributor_monitoring_view(request):
                     for resolution in contribution.blocked_resolution_events.all()
                 )
             )
-        course.can_configure = course.pk in configurer_ids
+        course.can_configure = course.pk in configurer_ids | automatic_manage_ids
+    selected_filters = {
+        "cycle": selected_cycle_id or "",
+        "period": selected_period,
+        "course": selected_course_id or "",
+    }
+    filter_query = urlencode(
+        {key: value for key, value in selected_filters.items() if value}
+    )
     return render(
         request,
         "departmental_exams/admin/contributor_monitoring.html",
-        {"courses": courses},
+        {
+            "courses": courses,
+            "cycle_choices": sorted(
+                cycles_by_id.values(),
+                key=lambda cycle: (
+                    cycle.academic_year.name,
+                    cycle.term.name,
+                    cycle.exam_period,
+                    cycle.id,
+                ),
+            ),
+            "period_choices": ExaminationCycle.ExamPeriod.choices,
+            "course_choices": sorted(
+                courses_by_id.values(),
+                key=lambda course: (course.code, course.id),
+            ),
+            "selected_cycle_id": selected_cycle_id,
+            "selected_period": selected_period,
+            "selected_course_id": selected_course_id,
+            "filter_query": filter_query,
+        },
     )
 
 
@@ -138,6 +208,13 @@ def roster_action_view(request, cycle_course_id, action):
         user=request.user, cycle_course=cycle_course
     )
     form = RosterActionForm(request.POST or None)
+    filter_query = urlencode(
+        {
+            key: request.GET.get(key)
+            for key in ("cycle", "period", "course")
+            if request.GET.get(key)
+        }
+    )
     if request.method == "POST" and form.is_valid():
         method = (
             ContributionRosterService.initialize
@@ -159,10 +236,18 @@ def roster_action_view(request, cycle_course_id, action):
                 f"Roster {action} complete: {result['created']} created, "
                 f"{result['activated']} activated, {result['blocked']} blocked.",
             )
-            return redirect("departmental_exams:contributor_monitoring")
+            monitoring_url = reverse("departmental_exams:contributor_monitoring")
+            if filter_query:
+                monitoring_url = f"{monitoring_url}?{filter_query}"
+            return redirect(monitoring_url)
     return render(
         request,
         "departmental_exams/admin/roster_action_confirm.html",
-        {"form": form, "cycle_course": cycle_course, "action": action},
+        {
+            "form": form,
+            "cycle_course": cycle_course,
+            "action": action,
+            "filter_query": filter_query,
+        },
         status=400 if request.method == "POST" and form.errors else 200,
     )

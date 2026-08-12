@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.core.services.audit import AuditService
 from apps.core.services.features import FeatureSettingsService
 
+from .contribution_authorization import ContributorEligibilityService
 from .contribution_services import ContributionRosterService, Stage5LockService
 from .generation_readiness import Stage6ReadinessService
 from .generation_services import ExamGenerationService
@@ -24,7 +25,13 @@ from .models import (
     FacultyContribution,
     normalize_contribution_deadline_to_minute,
 )
-from .services import CourseExamConfigurationConflict, DepartmentalExamAuthorizationService
+from .services import (
+    CourseExamConfigurationConflict,
+    CourseExamConfigurationReadinessService,
+    CourseExamConfigurationService,
+    DepartmentalExamAuthorizationService,
+    ExaminationCycleConfigurationService,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +44,315 @@ class AutomaticProcessingResult:
     code: str
     message: str
     generation_revision: int | None = None
+
+
+class FacultyContributionPreparationService:
+    """Prepare every authorized Included automatic course independently."""
+
+    @staticmethod
+    def _course_details(course):
+        campuses = tuple(
+            dict.fromkeys(
+                snapshot.campus.name
+                for snapshot in course.offering_snapshots.all()
+            )
+        )
+        return {
+            "cycle_course_id": course.id,
+            "course_code": course.course.code,
+            "course_title": course.course.title,
+            "campuses": campuses,
+        }
+
+    @classmethod
+    def _item(cls, course, *, status, reason, recommended_action):
+        return {
+            **cls._course_details(course),
+            "status": status,
+            "reason": reason,
+            "recommended_action": recommended_action,
+        }
+
+    @staticmethod
+    def _draft_attention(configuration, readiness):
+        if not (configuration.coverage or "").strip():
+            return (
+                "Coverage not configured",
+                "Set course Coverage or apply a cycle Default Coverage.",
+            )
+        if configuration.contribution_deadline is None:
+            return (
+                "Effective contribution deadline is missing",
+                "Set a future course or cycle contribution deadline.",
+            )
+        if configuration.contribution_deadline <= timezone.now():
+            return (
+                "Effective contribution deadline is not in the future",
+                "Set a future contribution deadline before preparing this course.",
+            )
+        blockers = tuple(readiness.get("blockers") or ())
+        if blockers:
+            return (
+                "Course configuration incomplete",
+                "Review the course configuration and resolve: " + ", ".join(blockers) + ".",
+            )
+        return None
+
+    @classmethod
+    def _require_cycle_authority(cls, *, user, cycle, courses):
+        DepartmentalExamAuthorizationService.require_enabled(tenant_id=cycle.tenant_id)
+        if not user or not user.is_authenticated or not user.is_active:
+            raise PermissionDenied("An active user is required for faculty contribution preparation.")
+        if not courses:
+            DepartmentalExamAuthorizationService.require_automatic_tenant_permission(
+                user=user,
+                permission=(
+                    DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+                ),
+                tenant_id=cycle.tenant_id,
+            )
+            return
+        permission_map = DepartmentalExamAuthorizationService.automatic_permission_map(
+            user=user,
+            courses=courses,
+            permissions=(
+                DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+            ),
+        )
+        if any(
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+            not in permission_map[course.id]
+            for course in courses
+        ):
+            raise PermissionDenied(
+                "You do not have automatic examination authority for every participating campus."
+            )
+
+    @classmethod
+    def authorize(cls, *, cycle, user):
+        if cycle.processing_mode != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION:
+            raise ValidationError(
+                "Prepare Faculty Contributions is available only for Automatic Generation cycles."
+            )
+        courses = list(
+            CycleCourse.objects.filter(
+                cycle=cycle,
+                inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+            )
+            .select_related("cycle", "cycle__tenant", "course", "configuration")
+            .prefetch_related("offering_snapshots__campus")
+            .order_by("course__code", "course_id")
+        )
+        cls._require_cycle_authority(user=user, cycle=cycle, courses=courses)
+        return courses
+
+    @classmethod
+    def prepare(
+        cls,
+        *,
+        cycle_id,
+        tenant_id,
+        actor,
+        expected_updated_at=None,
+        request=None,
+    ):
+        DepartmentalExamAuthorizationService.require_enabled(tenant_id=tenant_id)
+        cycle = ExaminationCycle.objects.select_related("tenant").get(
+            pk=cycle_id,
+            tenant_id=tenant_id,
+        )
+        courses = cls.authorize(cycle=cycle, user=actor)
+        if cycle.status != ExaminationCycle.Status.OPEN:
+            raise ValidationError(
+                "Open the examination cycle before preparing faculty contributions."
+            )
+        if (
+            expected_updated_at is not None
+            and expected_updated_at
+            != ExaminationCycleConfigurationService.transition_token(cycle)
+        ):
+            raise CourseExamConfigurationConflict(
+                "The examination cycle changed after this page was loaded."
+            )
+
+        opened = 0
+        initialized = 0
+        already_prepared = []
+        prepared = []
+        needs_attention = []
+        preserved = []
+
+        for course in courses:
+            configuration = getattr(course, "configuration", None)
+            if configuration is None:
+                needs_attention.append(
+                    cls._item(
+                        course,
+                        status="Needs Attention",
+                        reason="Course configuration is missing",
+                        recommended_action="Configure the course examination and apply the required defaults.",
+                    )
+                )
+                continue
+            if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.CLOSED:
+                preserved.append(
+                    cls._item(
+                        course,
+                        status="Preserved",
+                        reason="Course contributions are already closed",
+                        recommended_action="Use the governed per-course reopen action only if additional faculty work is required.",
+                    )
+                )
+                continue
+            if (
+                configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.DRAFT
+                and (
+                    configuration.opened_at is not None
+                    or configuration.contributor_roster_initialized_at is not None
+                )
+            ):
+                preserved.append(
+                    cls._item(
+                        course,
+                        status="Preserved",
+                        reason="Historical course state prevents automatic reopening",
+                        recommended_action="Review this course individually.",
+                    )
+                )
+                continue
+
+            try:
+                if configuration.workflow_status == CourseExamConfiguration.WorkflowStatus.OPEN:
+                    if configuration.contributor_roster_initialized_at is not None:
+                        already_prepared.append(
+                            cls._item(
+                                course,
+                                status="Already Prepared",
+                                reason="Contributions are open and the contributor roster is already initialized",
+                                recommended_action="No action is needed. Use Synchronize only as an explicit per-course decision.",
+                            )
+                        )
+                        continue
+                    inventory = ContributorEligibilityService.source_inventory(
+                        cycle_course=course
+                    )
+                    if not inventory.eligible_sources:
+                        needs_attention.append(
+                            cls._item(
+                                course,
+                                status="Needs Attention",
+                                reason="No qualifying teaching assignments found",
+                                recommended_action="Correct active accepted teaching assignments and Faculty Portal access, then run Prepare again.",
+                            )
+                        )
+                        continue
+                    result = ContributionRosterService.initialize(
+                        cycle_course_id=course.id,
+                        tenant_id=tenant_id,
+                        actor=actor,
+                        request=request,
+                    )
+                    if result["changed"]:
+                        initialized += 1
+                    prepared.append(
+                        cls._item(
+                            course,
+                            status="Prepared",
+                            reason="Missing contributor roster initialized",
+                            recommended_action="Faculty may begin contribution work.",
+                        )
+                    )
+                    continue
+
+                readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
+                    cycle_course=course,
+                    configuration=configuration,
+                    user=actor,
+                )
+                attention = cls._draft_attention(configuration, readiness)
+                if attention is not None:
+                    needs_attention.append(
+                        cls._item(
+                            course,
+                            status="Needs Attention",
+                            reason=attention[0],
+                            recommended_action=attention[1],
+                        )
+                    )
+                    continue
+                inventory = ContributorEligibilityService.preparation_source_inventory(
+                    cycle_course=course
+                )
+                if not inventory.eligible_sources:
+                    needs_attention.append(
+                        cls._item(
+                            course,
+                            status="Needs Attention",
+                            reason="No qualifying teaching assignments found",
+                            recommended_action="Correct active accepted teaching assignments and Faculty Portal access, then run Prepare again.",
+                        )
+                    )
+                    continue
+                had_roster = configuration.contributor_roster_initialized_at is not None
+                updated, changed = CourseExamConfigurationService.open_for_contribution(
+                    cycle_course_id=course.id,
+                    tenant_id=tenant_id,
+                    user=actor,
+                    expected_revision=configuration.revision,
+                    request=request,
+                )
+                if changed:
+                    opened += 1
+                if not had_roster and updated.contributor_roster_initialized_at is not None:
+                    initialized += 1
+                prepared.append(
+                    cls._item(
+                        course,
+                        status="Prepared",
+                        reason="Contributions opened and missing contributor roster initialized",
+                        recommended_action="Faculty may begin contribution work.",
+                    )
+                )
+            except (CourseExamConfigurationConflict, ValidationError, PermissionDenied) as exc:
+                message = " ".join(getattr(exc, "messages", ()) or (str(exc),))
+                needs_attention.append(
+                    cls._item(
+                        course,
+                        status="Needs Attention",
+                        reason=message or "Course lifecycle prevents preparation",
+                        recommended_action="Review this course individually, correct the reported state, and run Prepare again.",
+                    )
+                )
+            except Exception as exc:  # fault isolation is intentional
+                logger.error(
+                    "Automatic faculty contribution preparation failed for tenant=%s cycle_course=%s error_type=%s.",
+                    tenant_id,
+                    course.id,
+                    exc.__class__.__name__,
+                )
+                needs_attention.append(
+                    cls._item(
+                        course,
+                        status="Needs Attention",
+                        reason="Course preparation failed safely",
+                        recommended_action="Review the secured application log and prepare this course individually.",
+                    )
+                )
+
+        successfully_prepared = len(prepared) + len(already_prepared)
+        return {
+            "total_considered": len(courses),
+            "successfully_prepared": successfully_prepared,
+            "contributions_opened": opened,
+            "rosters_initialized": initialized,
+            "already_prepared_count": len(already_prepared),
+            "needs_attention_count": len(needs_attention),
+            "preserved_count": len(preserved),
+            "prepared": prepared,
+            "already_prepared": already_prepared,
+            "needs_attention": needs_attention,
+            "preserved": preserved,
+        }
 
 
 def readiness_blocker_text(report):

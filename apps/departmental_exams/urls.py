@@ -79,8 +79,10 @@ urlpatterns = [
     path("admin-portal/departmental-exams/cycles/create/", views.cycle_create_view, name="cycle_create"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/configuration/", views.cycle_configuration_view, name="cycle_configuration"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/configuration/apply-defaults/", views.cycle_apply_defaults_view, name="cycle_apply_defaults"),
+    path("admin-portal/departmental-exams/cycles/<int:cycle_id>/prepare-faculty-contributions/", views.prepare_faculty_contributions_view, name="prepare_faculty_contributions"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/open/", views.cycle_open_view, name="cycle_open"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/close/", views.cycle_close_view, name="cycle_close"),
+    path("admin-portal/departmental-exams/cycles/<int:cycle_id>/delete/", views.cycle_delete_view, name="cycle_delete"),
     path(
         "admin-portal/departmental-exams/assigned-courses/",
         views.assigned_course_examinations_view,

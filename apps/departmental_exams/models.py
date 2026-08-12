@@ -52,6 +52,7 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
     default_final_item_count = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
     default_questions_required_per_faculty = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
     default_contribution_deadline = models.DateTimeField(null=True, blank=True, default=None)
+    default_coverage = models.TextField(blank=True)
     defaults_revision = models.PositiveIntegerField(default=0)
     contributor_instructions = models.TextField(blank=True)
     created_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, related_name="created_examination_cycles")
@@ -189,6 +190,12 @@ class CourseExamConfiguration(TimeStampedModel):
     closed_at = models.DateTimeField(null=True, blank=True)
     closed_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="closed_exam_configurations")
     coverage = models.TextField(blank=True)
+    coverage_source = models.CharField(
+        max_length=8,
+        choices=ValueSource.choices,
+        null=True,
+        blank=True,
+    )
     additional_instructions = models.TextField(blank=True)
     contributor_instructions_snapshot = models.TextField(blank=True)
     legacy_item_count_mode_snapshot = models.CharField(max_length=12, choices=ExaminationCycle.ItemCountMode.choices, null=True, blank=True)
@@ -217,6 +224,17 @@ class CourseExamConfiguration(TimeStampedModel):
             models.CheckConstraint(condition=(models.Q(questions_required_per_faculty__isnull=True, questions_required_per_faculty_source__isnull=True) | models.Q(questions_required_per_faculty__isnull=False, questions_required_per_faculty_source__isnull=False, questions_required_per_faculty__gte=50, questions_required_per_faculty__lte=75, questions_required_per_faculty_source__in=["DEFAULT", "OVERRIDE"])), name="ck_de_cfg_q_value_source"),
             models.CheckConstraint(condition=(models.Q(final_item_count__isnull=True, final_item_count_source__isnull=True) | models.Q(final_item_count__isnull=False, final_item_count_source__isnull=False, final_item_count__gte=50, final_item_count__lte=75, final_item_count_source__in=["DEFAULT", "OVERRIDE"])), name="ck_de_cfg_final_value_source"),
             models.CheckConstraint(condition=(models.Q(contribution_deadline__isnull=True, contribution_deadline_source__isnull=True) | models.Q(contribution_deadline__isnull=False, contribution_deadline_source__isnull=False, contribution_deadline_source__in=["DEFAULT", "OVERRIDE"])), name="ck_de_cfg_deadline_source"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(coverage="", coverage_source__isnull=True)
+                    | (
+                        ~models.Q(coverage="")
+                        & models.Q(coverage_source__isnull=False)
+                        & models.Q(coverage_source__in=("DEFAULT", "OVERRIDE"))
+                    )
+                ),
+                name="ck_de_cfg_coverage_source",
+            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(
@@ -304,6 +322,15 @@ class CourseExamConfiguration(TimeStampedModel):
             raise ValidationError({"contribution_deadline_source": "A source is allowed only when the deadline is set."})
         if self.contribution_deadline is not None and self.contribution_deadline_source not in self.ValueSource.values:
             raise ValidationError({"contribution_deadline": "A configured deadline requires a default or override source."})
+        self.coverage = (self.coverage or "").strip()
+        if not self.coverage and self.coverage_source is not None:
+            raise ValidationError(
+                {"coverage_source": "A source is allowed only when coverage is set."}
+            )
+        if self.coverage and self.coverage_source not in self.ValueSource.values:
+            raise ValidationError(
+                {"coverage": "Configured coverage requires a default or override source."}
+            )
         # Current-default equality is a live workflow rule, not a durable row
         # invariant. Protected historical rows intentionally retain their
         # materialized DEFAULT values and revision snapshot after propagation.

@@ -1,8 +1,8 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
-<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_list' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Automatic Generation Summary</li></ol></nav>
-<header class="de-exam-hero"><div class="d-flex flex-wrap justify-content-between gap-3"><div><span class="badge text-bg-light text-dark mb-2">AUTOMATIC GENERATION</span><h1>Cycle Processing Summary</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }}</p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:cycle_list' %}">Back to Departmental Exam Builder</a></div></header>
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Automatic Generation Summary</li></ol></nav>
+<header class="de-exam-hero"><div class="d-flex flex-wrap justify-content-between gap-3"><div><span class="badge text-bg-light text-dark mb-2">AUTOMATIC GENERATION</span><h1>Cycle Processing Summary</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }}</p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Departmental Exam Builder</a></div></header>
 
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Total applicable courses</span><strong>{{ total }}</strong></div></div>

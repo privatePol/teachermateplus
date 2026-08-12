@@ -2,9 +2,9 @@
 {% load tz %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
-<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Assigned Course Examinations</a></li><li class="breadcrumb-item active">Course Configuration</li></ol></nav>
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Course Configuration</li></ol></nav>
 <header class="de-exam-hero"><div class="d-flex justify-content-between gap-3 flex-wrap"><div><h1>Course Examination Configuration</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}. One grouped examination is shared across {{ cycle_course.campus_presentation.list_text }}; it is not separate per campus.</p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Assigned Course Examinations</a></div></header>
-<div class="alert alert-light border"><strong>Responsible Exam Department:</strong> {{ cycle_course.responsible_department }}. One department owns this grouped examination across its listed campuses; responsibility is not assigned separately per campus.</div>
+<div class="alert alert-light border"><strong>Responsible Exam Department:</strong> {% if cycle_course.responsible_department %}{{ cycle_course.responsible_department }}. One department owns this grouped examination across its listed campuses; responsibility is not assigned separately per campus.{% elif cycle_course.cycle.processing_mode == 'AUTOMATIC_GENERATION' %}<span class="text-muted">No Exam Department assigned. This is optional in Automatic Generation.</span>{% else %}<span class="text-warning">Needs Exam Department.</span>{% endif %}</div>
 <div class="row g-3">
   <div class="col-xl-8">
     <div class="card de-exam-card"><div class="card-body">
@@ -20,7 +20,7 @@
           <div class="col-md-6"><label class="form-label" for="{{ form.final_item_count.id_for_label }}">Final questionnaire item count</label>{{ form.final_item_count }}<div class="form-text">Required from 50 to 75 for an override.</div>{{ form.final_item_count.errors }}</div>
           <div class="col-md-6"><label class="form-label" for="{{ form.contribution_deadline_mode.id_for_label }}">Contribution deadline mode</label>{{ form.contribution_deadline_mode }}<div class="form-text">Use the inherited cycle default or create one course exception.</div>{{ form.contribution_deadline_mode.errors }}</div>
           <div class="col-md-6"><label class="form-label" for="{{ form.contribution_deadline.id_for_label }}">Contribution deadline</label>{{ form.contribution_deadline }}<div class="form-text">Cycle default: {% if cycle_course.cycle.default_contribution_deadline %}{{ cycle_course.cycle.default_contribution_deadline|localtime|date:"M j, Y g:i A" }}{% else %}NOT CONFIGURED; this course cannot open until a deadline is configured.{% endif %} Times use Asia/Manila.</div>{{ form.contribution_deadline.errors }}</div>
-          <div class="col-12"><label class="form-label" for="{{ form.coverage.id_for_label }}">Coverage</label>{{ form.coverage }}{{ form.coverage.errors }}</div>
+          <div class="col-md-4"><label class="form-label" for="{{ form.coverage_mode.id_for_label }}">Coverage source</label>{{ form.coverage_mode }}<div class="form-text">Use the cycle Default Coverage or keep a course override.</div>{{ form.coverage_mode.errors }}</div><div class="col-md-8"><label class="form-label" for="{{ form.coverage.id_for_label }}">Coverage</label>{{ form.coverage }}{{ form.coverage.errors }}</div>
           <div class="col-12"><label class="form-label" for="{{ form.additional_instructions.id_for_label }}">Additional instructions</label>{{ form.additional_instructions }}{{ form.additional_instructions.errors }}</div>
         </div>
         <button class="btn btn-success mt-3" type="submit">Save Draft Configuration</button>

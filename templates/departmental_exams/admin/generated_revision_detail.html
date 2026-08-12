@@ -1,6 +1,7 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li>{% if automatic_mode %}<li class="breadcrumb-item"><a href="{% url 'departmental_exams:automatic_generation_summary' cycle_course.cycle_id %}">Automatic Generation Summary</a></li>{% endif %}<li class="breadcrumb-item active">Generated Revision</li></ol></nav>
 <header class="de-exam-hero">
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
     <div><span class="badge {% if revision.status == 'LOCKED' %}text-bg-dark{% else %}text-bg-warning text-dark{% endif %} mb-2">{% if revision.status == 'LOCKED' %}LOCKED FINAL EXAMINATION{% else %}CONFIDENTIAL GENERATED OUTPUT{% endif %}</span><h1>Generation revision #{{ revision.revision_number }}</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div>

@@ -1,0 +1,12 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_list' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_course_list' cycle.id %}">Course Examinations</a></li><li class="breadcrumb-item active">Prepare Faculty Contributions</li></ol></nav>
+<header class="de-exam-hero"><div><span class="badge text-bg-light text-dark mb-2">AUTOMATIC GENERATION</span><h1>Prepare Faculty Contributions</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }}</p></div></header>
+<div class="card de-exam-card"><div class="card-body p-4">
+  <p>TMP will open all ready Included Automatic Generation course contributions and initialize missing contributor rosters. Courses that are not ready will be left unchanged and reported separately. Existing initialized rosters will not be synchronized.</p>
+  {% if cycle.status != 'OPEN' %}<div class="alert alert-warning">Open the examination cycle before preparing faculty contributions.</div>{% endif %}
+  {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+  <form method="post">{% csrf_token %}{% for field in form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}<button class="btn btn-primary" type="submit"{% if cycle.status != 'OPEN' %} disabled{% endif %}>Prepare Faculty Contributions</button> <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:cycle_course_list' cycle.id %}">Cancel</a></form>
+</div></div>
+{% endblock %}

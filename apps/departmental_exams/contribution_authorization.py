@@ -80,7 +80,12 @@ class ContributorEligibilityService:
 
     @staticmethod
     def _structurally_valid(
-        *, assignment, cycle_course, configuration, allow_closed_contribution=False
+        *,
+        assignment,
+        cycle_course,
+        configuration,
+        allow_closed_contribution=False,
+        allow_draft_configuration=False,
     ):
         cycle = cycle_course.cycle
         offering = assignment.offering
@@ -110,7 +115,14 @@ class ContributorEligibilityService:
                     CourseExamConfiguration.WorkflowStatus.CLOSED,
                 )
                 if allow_closed_contribution
-                else (CourseExamConfiguration.WorkflowStatus.OPEN,)
+                else (
+                    (
+                        CourseExamConfiguration.WorkflowStatus.DRAFT,
+                        CourseExamConfiguration.WorkflowStatus.OPEN,
+                    )
+                    if allow_draft_configuration
+                    else (CourseExamConfiguration.WorkflowStatus.OPEN,)
+                )
             )
             and FeatureSettingsService.is_departmental_exam_builder_enabled(
                 tenant_id=cycle.tenant_id
@@ -165,6 +177,7 @@ class ContributorEligibilityService:
         cycle_course,
         faculty_user_id=None,
         allow_closed_contribution=False,
+        allow_draft_configuration=False,
     ):
         configuration = getattr(cycle_course, "configuration", None)
         assignments = tuple(
@@ -184,11 +197,20 @@ class ContributorEligibilityService:
                     cycle_course=cycle_course,
                     configuration=configuration,
                     allow_closed_contribution=allow_closed_contribution,
+                    allow_draft_configuration=allow_draft_configuration,
                 )
                 and (assignment.faculty_user_id, *effective_scope) in allowed_keys
             ):
                 eligible.append(assignment)
         return SourceInventory(all_sources=assignments, eligible_sources=tuple(eligible))
+
+    @classmethod
+    def preparation_source_inventory(cls, *, cycle_course):
+        """Evaluate faculty eligibility for a Draft row as if it were opened now."""
+        return cls.source_inventory(
+            cycle_course=cycle_course,
+            allow_draft_configuration=True,
+        )
 
     @classmethod
     def source_is_eligible(cls, *, assignment, cycle_course):

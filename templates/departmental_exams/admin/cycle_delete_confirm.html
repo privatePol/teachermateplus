@@ -1,0 +1,28 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_list' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Configure Examination Cycle</a></li><li class="breadcrumb-item active">Delete Examination Cycle</li></ol></nav>
+<header class="de-exam-hero"><h1>Delete Examination Cycle</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }} <span class="badge {% if cycle.status == 'DRAFT' %}text-bg-secondary{% elif cycle.status == 'OPEN' %}text-bg-success{% else %}text-bg-dark{% endif %}">{{ cycle.get_status_display }}</span></p></header>
+
+{% if safe_delete.eligible %}
+  {% if cycle.status == 'OPEN' %}<div class="alert alert-warning">This cycle is Open, but no faculty contribution or examination activity has occurred. Only setup records will be removed.</div>{% endif %}
+  <div class="card de-exam-card"><div class="card-body">
+    <p>TeacherMate+ verified that this cycle has no faculty contribution, question, blueprint, or generated examination history.</p>
+    <h2 class="h6">Setup records that will be removed</h2>
+    <dl class="row mb-3">
+      <dt class="col-sm-7">Grouped course records</dt><dd class="col-sm-5">{{ safe_delete.counts.cycle_courses }}</dd>
+      <dt class="col-sm-7">Offering snapshots</dt><dd class="col-sm-5">{{ safe_delete.counts.offering_snapshots }}</dd>
+      <dt class="col-sm-7">Draft course configurations</dt><dd class="col-sm-5">{{ safe_delete.counts.draft_configurations }}</dd>
+      <dt class="col-sm-7">Faculty contributions</dt><dd class="col-sm-5">{{ safe_delete.counts.faculty_contributions }}</dd>
+      <dt class="col-sm-7">Questions</dt><dd class="col-sm-5">{{ safe_delete.counts.questions }}</dd>
+      <dt class="col-sm-7">Generated examinations</dt><dd class="col-sm-5">{{ safe_delete.counts.generation_revisions }}</dd>
+    </dl>
+    <p class="mb-1"><strong>Existing audit history will be preserved.</strong></p>
+    <p class="text-danger">This cannot be undone.</p>
+    <form method="post" class="d-flex flex-wrap gap-2">{% csrf_token %}<a class="btn btn-outline-secondary" href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Cancel</a><button class="btn btn-danger" type="submit">Delete Examination Cycle</button></form>
+  </div></div>
+{% else %}
+  <div class="alert alert-danger"><h2 class="h6">This examination cycle cannot be safely deleted.</h2><ul class="mb-0">{% for blocker in safe_delete.blockers %}<li>{{ blocker.message }}</li>{% endfor %}</ul></div>
+  <a class="btn btn-outline-secondary" href="{% url 'departmental_exams:cycle_configuration' cycle.id %}">Back to Cycle Configuration</a>
+{% endif %}
+{% endblock %}

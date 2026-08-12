@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import secrets
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.core.decorators import portal_required
@@ -324,7 +326,17 @@ def blocked_contribution_resolve_view(request, contribution_id):
     except ValidationError as exc:
         return _error(request, status=400, message=" ".join(exc.messages))
     messages.success(request, f"Blocked Draft resolution #{resolution.id} recorded.")
-    return redirect("departmental_exams:contributor_monitoring")
+    monitoring_url = reverse("departmental_exams:contributor_monitoring")
+    filter_query = urlencode(
+        {
+            key: request.POST.get(key)
+            for key in ("cycle", "period", "course")
+            if request.POST.get(key)
+        }
+    )
+    if filter_query:
+        monitoring_url = f"{monitoring_url}?{filter_query}"
+    return redirect(monitoring_url)
 
 
 @portal_required("ADMIN")
