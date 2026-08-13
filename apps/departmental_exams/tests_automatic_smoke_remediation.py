@@ -2,6 +2,9 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.urls import reverse
 from django.utils import timezone
 
+from apps.auditlog.models import AuditLog
+from apps.core.services.settings import SystemSettingService
+from apps.rbac.models import Permission, UserPermission
 from apps.academics.models import (
     AcademicYear,
     Course,
@@ -23,6 +26,7 @@ from .models import (
 )
 from .services import (
     CourseExamConfigurationReadinessService,
+    CycleCourseInclusionService,
     DepartmentalExamAuthorizationService,
     ExaminationCycleConfigurationService,
 )
@@ -68,6 +72,78 @@ class AutomaticSmokeRemediationTests(Stage5FixtureMixin, Stage4TestCase):
                 deadline=cycle.default_contribution_deadline,
                 deadline_source=CourseExamConfiguration.ValueSource.DEFAULT,
             )
+        return parent
+
+    def make_other_tenant_automatic_course(self, *, code="AUTO-OTHER"):
+        campus = Campus.objects.create(
+            tenant=self.other_tenant,
+            code=f"{code}-CAMPUS",
+            name="Other Tenant Campus",
+        )
+        department = Department.objects.create(
+            tenant=self.other_tenant,
+            campus=campus,
+            code=f"{code}-DEPT",
+            name="Other Tenant Department",
+        )
+        year = AcademicYear.objects.create(
+            tenant=self.other_tenant,
+            code=f"{code}-AY",
+            name="Other Tenant Academic Year",
+            start_date="2026-06-01",
+            end_date="2027-05-31",
+        )
+        term = Term.objects.create(
+            tenant=self.other_tenant,
+            academic_year=year,
+            code=f"{code}-TERM",
+            name="Other Tenant Term",
+        )
+        course = Course.objects.create(
+            tenant=self.other_tenant,
+            code=code,
+            title="Other Tenant Automatic Course",
+        )
+        program = Program.objects.create(
+            tenant=self.other_tenant,
+            campus=campus,
+            department=department,
+            code=f"{code}-PROGRAM",
+            name="Other Tenant Program",
+        )
+        section = Section.objects.create(
+            tenant=self.other_tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            code=f"{code}-SECTION",
+            name="Other Tenant Section",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=self.other_tenant,
+            campus=campus,
+            department=department,
+            program=program,
+            academic_year=year,
+            term=term,
+            course=course,
+            section=section,
+        )
+        cycle = ExaminationCycle.objects.create(
+            tenant=self.other_tenant,
+            academic_year=year,
+            term=term,
+            exam_period=ExaminationCycle.ExamPeriod.MIDTERM,
+            status=ExaminationCycle.Status.DRAFT,
+            processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+            created_by=self.admin,
+        )
+        parent = CycleCourse.objects.create(cycle=cycle, course=course)
+        CycleCourseOffering.objects.create(
+            cycle_course=parent,
+            offering=offering,
+            campus=campus,
+        )
         return parent
 
     def add_same_course_to_cycle(self, *, source_parent, cycle, slug):
@@ -206,6 +282,381 @@ class AutomaticSmokeRemediationTests(Stage5FixtureMixin, Stage4TestCase):
         parent.refresh_from_db()
         self.assertIsNone(parent.responsible_department_id)
         self.assertIsNone(parent.reviewer_id)
+
+    def test_automatic_exempt_restore_keeps_administration_reachable_and_downstream_closed(self):
+        cycle = self.make_automatic_cycle()
+        cycle.status = ExaminationCycle.Status.DRAFT
+        cycle.save(update_fields=["status", "updated_at"])
+        parent = self.make_automatic_course(cycle=cycle, code="AUTO-INCLUSION")
+        administration_url = reverse(
+            "departmental_exams:cycle_course_administration", args=[parent.id]
+        )
+        exempt_url = reverse(
+            "departmental_exams:cycle_course_exempt", args=[parent.id]
+        )
+        restore_url = reverse(
+            "departmental_exams:cycle_course_restore", args=[parent.id]
+        )
+        configuration_url = reverse(
+            "departmental_exams:course_configuration", args=[parent.id]
+        )
+        self.client.force_login(self.generation_manager)
+
+        response = self.client.get(administration_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, exempt_url)
+
+        response = self.client.post(
+            exempt_url,
+            {
+                "exemption_category": CycleCourse.ExemptionCategory.INTERNSHIP,
+                "reason": "Approved internship assessment workflow",
+                "expected_updated_at": CycleCourseInclusionService.transition_token(
+                    parent
+                ),
+            },
+            follow=True,
+        )
+        self.assertRedirects(response, administration_url)
+        self.assertEqual(response.status_code, 200)
+        parent.refresh_from_db()
+        self.assertEqual(
+            parent.inclusion_status,
+            CycleCourse.InclusionStatus.EXEMPT,
+        )
+        exempt_audit = AuditLog.objects.get(
+            action="DE_EXAM_CYCLE_COURSE_EXEMPTED",
+            entity_id=str(parent.id),
+        )
+        self.assertEqual(exempt_audit.actor_user_id, self.generation_manager.id)
+        self.assertEqual(exempt_audit.after_json["inclusion_status"], "EXEMPT")
+        self.assertContains(response, "Examination status:")
+        self.assertContains(response, "Exempt")
+        self.assertContains(response, restore_url)
+        self.assertContains(response, "inclusion-management-only")
+        self.assertNotContains(response, "Save Responsibility")
+        for downstream_url in (
+            configuration_url,
+            reverse("departmental_exams:blueprint_configuration", args=[parent.id]),
+            reverse("departmental_exams:blueprint_review", args=[parent.id]),
+            reverse("departmental_exams:generation_workspace", args=[parent.id]),
+        ):
+            with self.subTest(downstream_url=downstream_url):
+                self.assertNotContains(response, downstream_url)
+
+        response = self.client.get(restore_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Restore this course examination?")
+
+        assigned_response = self.client.get(
+            reverse("departmental_exams:assigned_course_examinations")
+        )
+        self.assertEqual(assigned_response.status_code, 200)
+        self.assertContains(assigned_response, parent.course.code)
+        self.assertContains(assigned_response, administration_url)
+        self.assertNotContains(assigned_response, configuration_url)
+        listed = {course.id: course for course in assigned_response.context["courses"]}
+        self.assertTrue(listed[parent.id].can_administer)
+        self.assertFalse(listed[parent.id].can_configure)
+        self.assertFalse(listed[parent.id].can_manage_generation)
+        self.assertFalse(listed[parent.id].can_view_generation)
+
+        cycle_list_response = self.client.get(
+            reverse("departmental_exams:cycle_course_list", args=[cycle.id])
+        )
+        self.assertEqual(cycle_list_response.status_code, 200)
+        self.assertContains(cycle_list_response, administration_url)
+        self.assertNotContains(cycle_list_response, configuration_url)
+
+        self.assertEqual(self.client.get(configuration_url).status_code, 403)
+        with self.assertRaises(PermissionDenied):
+            DepartmentalExamAuthorizationService.require_generation_management(
+                user=self.generation_manager,
+                cycle_course=parent,
+            )
+
+        response = self.client.post(
+            restore_url,
+            {
+                "reason": "Restore the approved questionnaire workflow",
+                "expected_updated_at": CycleCourseInclusionService.transition_token(
+                    parent
+                ),
+            },
+            follow=True,
+        )
+        self.assertRedirects(response, administration_url)
+        self.assertEqual(response.status_code, 200)
+        parent.refresh_from_db()
+        self.assertEqual(
+            parent.inclusion_status,
+            CycleCourse.InclusionStatus.INCLUDED,
+        )
+        restore_audit = AuditLog.objects.get(
+            action="DE_EXAM_CYCLE_COURSE_RESTORED",
+            entity_id=str(parent.id),
+        )
+        self.assertEqual(restore_audit.actor_user_id, self.generation_manager.id)
+        self.assertEqual(restore_audit.after_json["inclusion_status"], "INCLUDED")
+        DepartmentalExamAuthorizationService.require_generation_management(
+            user=self.generation_manager,
+            cycle_course=parent,
+        )
+        self.assertEqual(self.client.get(configuration_url).status_code, 200)
+        self.assertContains(response, "Save Responsibility")
+        self.assertNotContains(response, "inclusion-management-only")
+
+        assigned_response = self.client.get(
+            reverse("departmental_exams:assigned_course_examinations")
+        )
+        restored = {
+            course.id: course for course in assigned_response.context["courses"]
+        }[parent.id]
+        self.assertTrue(restored.can_administer)
+        self.assertTrue(restored.can_configure)
+        self.assertTrue(restored.can_manage_generation)
+        self.assertContains(assigned_response, configuration_url)
+
+    def test_automatic_lists_never_use_manual_configurer_or_reviewer_scope(self):
+        cycle = self.make_automatic_cycle()
+        cycle.status = ExaminationCycle.Status.DRAFT
+        cycle.save(update_fields=["status", "updated_at"])
+        parent = self.make_automatic_course(cycle=cycle, code="AUTO-LIST-PARTITION")
+        parent.responsible_department = self.department
+        parent.save(update_fields=["responsible_department", "updated_at"])
+        CycleCourseInclusionService.exempt(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            user=self.generation_manager,
+            exemption_category=CycleCourse.ExemptionCategory.INTERNSHIP,
+            reason="Approved internship assessment workflow",
+            expected_updated_at=CycleCourseInclusionService.transition_token(parent),
+        )
+        parent.refresh_from_db()
+
+        combined_manual = self.make_user(
+            "automatic-manual-combined",
+            self.department,
+            (
+                "admin_portal.access",
+                "departmental_exams.configure",
+                "departmental_exams.review_generate",
+            ),
+        )
+        direct_denied = self.make_user(
+            "automatic-manage-direct-denied",
+            self.department,
+            (
+                "admin_portal.access",
+                "departmental_exams.configure",
+                "departmental_exams.review_generate",
+                "departmental_exams.manage_exam_generation",
+            ),
+        )
+        UserPermission.objects.create(
+            user=direct_denied,
+            permission=Permission.objects.get(
+                code="departmental_exams.manage_exam_generation"
+            ),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+
+        assigned_url = reverse("departmental_exams:assigned_course_examinations")
+        cycle_list_url = reverse(
+            "departmental_exams:cycle_course_list", args=[cycle.id]
+        )
+        administration_url = reverse(
+            "departmental_exams:cycle_course_administration", args=[parent.id]
+        )
+        cases = (
+            ("configure-only", self.configurer, None),
+            ("reviewer-only", self.reviewer, self.reviewer),
+            ("combined-manual", combined_manual, combined_manual),
+            ("manage-direct-deny", direct_denied, direct_denied),
+        )
+        for boundary, user, reviewer in cases:
+            with self.subTest(boundary=boundary):
+                parent.reviewer = reviewer
+                parent.save(update_fields=["reviewer", "updated_at"])
+                self.client.force_login(user)
+
+                assigned_response = self.client.get(assigned_url)
+                self.assertEqual(assigned_response.status_code, 200)
+                self.assertNotContains(assigned_response, parent.course.code)
+                self.assertNotIn(
+                    parent.id,
+                    {course.id for course in assigned_response.context["courses"]},
+                )
+                self.assertEqual(self.client.get(cycle_list_url).status_code, 403)
+                self.assertEqual(self.client.get(administration_url).status_code, 403)
+
+        CycleCourseInclusionService.restore(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+            user=self.generation_manager,
+            reason="Restore the included Automatic workflow boundary",
+            expected_updated_at=CycleCourseInclusionService.transition_token(parent),
+        )
+        configuration_url = reverse(
+            "departmental_exams:course_configuration", args=[parent.id]
+        )
+        for boundary, user in (
+            ("included-combined-manual", combined_manual),
+            ("included-manage-direct-deny", direct_denied),
+        ):
+            with self.subTest(boundary=boundary):
+                parent.reviewer = user
+                parent.save(update_fields=["reviewer", "updated_at"])
+                self.client.force_login(user)
+                assigned_response = self.client.get(assigned_url)
+                self.assertEqual(assigned_response.status_code, 200)
+                self.assertNotIn(
+                    parent.id,
+                    {course.id for course in assigned_response.context["courses"]},
+                )
+                self.assertEqual(self.client.get(cycle_list_url).status_code, 403)
+                self.assertEqual(self.client.get(administration_url).status_code, 403)
+                self.assertEqual(self.client.get(configuration_url).status_code, 403)
+
+    def test_automatic_inclusion_management_requires_permission_and_honors_direct_deny(self):
+        parent = self.make_automatic_course(code="AUTO-RBAC")
+        administration_url = reverse(
+            "departmental_exams:cycle_course_administration", args=[parent.id]
+        )
+        exempt_url = reverse(
+            "departmental_exams:cycle_course_exempt", args=[parent.id]
+        )
+        restore_url = reverse(
+            "departmental_exams:cycle_course_restore", args=[parent.id]
+        )
+
+        self.client.force_login(self.configurer)
+        for url in (administration_url, exempt_url, restore_url):
+            with self.subTest(boundary="missing-manage", url=url):
+                self.assertEqual(self.client.get(url).status_code, 403)
+
+        UserPermission.objects.create(
+            user=self.generation_manager,
+            permission=Permission.objects.get(
+                code="departmental_exams.manage_exam_generation"
+            ),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        self.client.force_login(self.generation_manager)
+        for url in (administration_url, exempt_url, restore_url):
+            with self.subTest(boundary="direct-deny", url=url):
+                self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_automatic_inclusion_management_fails_closed_for_feature_tenant_and_campus_scope(self):
+        parent = self.make_automatic_course(code="AUTO-SCOPE")
+        assigned_url = reverse("departmental_exams:assigned_course_examinations")
+        cycle_list_url = reverse(
+            "departmental_exams:cycle_course_list", args=[parent.cycle_id]
+        )
+        administration_url = reverse(
+            "departmental_exams:cycle_course_administration", args=[parent.id]
+        )
+        self.client.force_login(self.generation_manager)
+
+        SystemSettingService.set(
+            "FEATURE_DEPARTMENTAL_EXAM_BUILDER_ENABLED",
+            False,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+        self.assertEqual(self.client.get(assigned_url).status_code, 403)
+        self.assertEqual(self.client.get(cycle_list_url).status_code, 403)
+        self.assertEqual(self.client.get(administration_url).status_code, 403)
+        SystemSettingService.set(
+            "FEATURE_DEPARTMENTAL_EXAM_BUILDER_ENABLED",
+            True,
+            tenant_id=self.tenant.id,
+            value_type="BOOL",
+        )
+
+        with self.assertRaises(CycleCourse.DoesNotExist):
+            CycleCourseInclusionService.exempt(
+                cycle_course_id=parent.id,
+                tenant_id=self.other_tenant.id,
+                user=self.generation_manager,
+                exemption_category=CycleCourse.ExemptionCategory.INTERNSHIP,
+                reason="Approved internship assessment workflow",
+                expected_updated_at=CycleCourseInclusionService.transition_token(
+                    parent
+                ),
+            )
+        parent.refresh_from_db()
+        self.assertEqual(
+            parent.inclusion_status,
+            CycleCourse.InclusionStatus.INCLUDED,
+        )
+
+        wrong_tenant_parent = self.make_other_tenant_automatic_course(
+            code="AUTO-WRONG-TENANT"
+        )
+        assigned_response = self.client.get(assigned_url)
+        self.assertEqual(assigned_response.status_code, 200)
+        self.assertNotContains(assigned_response, wrong_tenant_parent.course.code)
+        self.assertNotIn(
+            wrong_tenant_parent.id,
+            {course.id for course in assigned_response.context["courses"]},
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse(
+                    "departmental_exams:cycle_course_list",
+                    args=[wrong_tenant_parent.cycle_id],
+                )
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse(
+                    "departmental_exams:cycle_course_administration",
+                    args=[wrong_tenant_parent.id],
+                )
+            ).status_code,
+            404,
+        )
+
+        program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            code=f"AUTO-NORTH-{parent.id}",
+            name="Automatic North Program",
+        )
+        section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=program,
+            code=f"AUTO-NORTH-{parent.id}",
+            name="Automatic North Section",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=program,
+            academic_year=parent.cycle.academic_year,
+            term=parent.cycle.term,
+            course=parent.course,
+            section=section,
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=parent,
+            offering=offering,
+            campus=self.other_campus,
+        )
+        self.assertEqual(self.client.get(assigned_url).status_code, 403)
+        self.assertEqual(self.client.get(cycle_list_url).status_code, 403)
+        self.assertEqual(self.client.get(administration_url).status_code, 403)
 
     def test_manual_null_department_rules_remain_blocking(self):
         cycle = self.make_cycle(status=ExaminationCycle.Status.OPEN)

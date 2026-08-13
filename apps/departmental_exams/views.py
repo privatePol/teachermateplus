@@ -172,29 +172,30 @@ def _load_cycle_defaults_confirmation(*, request, cycle, tenant_id):
 
 def _visible_cycle_ids_for_user(*, user, tenant_id):
     base_courses = CycleCourse.objects.filter(cycle__tenant_id=tenant_id)
+    manual_courses = base_courses.filter(
+        cycle__processing_mode=ExaminationCycle.ProcessingMode.MANUAL_REVIEW,
+    )
     configurer = DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
-        user=user, tenant_id=tenant_id, queryset=base_courses
+        user=user, tenant_id=tenant_id, queryset=manual_courses
     )
     reviewer = DepartmentalExamAuthorizationService.reviewer_visible_cycle_courses(
-        user=user, tenant_id=tenant_id, queryset=base_courses
+        user=user, tenant_id=tenant_id, queryset=manual_courses
     )
     visible_cycle_ids = set(
-        base_courses.filter(
+        manual_courses.filter(
             Q(id__in=configurer.values("id")) | Q(id__in=reviewer.values("id"))
         ).values_list("cycle_id", flat=True).distinct()
     )
     automatic_courses = list(
         base_courses.filter(
             cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
-            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
         ).select_related("cycle").prefetch_related("offering_snapshots")
     )
-    automatic_permissions = DepartmentalExamAuthorizationService.automatic_permission_map(
-        user=user,
-        courses=automatic_courses,
-        permissions=(
-            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
-        ),
+    automatic_permissions = (
+        DepartmentalExamAuthorizationService.automatic_inclusion_management_map(
+            user=user,
+            courses=automatic_courses,
+        )
     )
     visible_cycle_ids.update(
         course.cycle_id
@@ -515,45 +516,64 @@ def cycle_course_list_view(request, cycle_id):
     base_courses = CycleCourse.objects.filter(cycle=cycle).select_related(
         "cycle", "course", "responsible_department", "reviewer", "configuration"
     ).prefetch_related("offering_snapshots__campus")
+    manual_courses = base_courses.filter(
+        cycle__processing_mode=ExaminationCycle.ProcessingMode.MANUAL_REVIEW,
+    )
     configurer_courses = (
         DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
             user=request.user,
             cycle=cycle,
-            queryset=base_courses,
+            queryset=manual_courses,
         )
     )
     reviewer_courses = (
         DepartmentalExamAuthorizationService.reviewer_visible_cycle_courses(
             user=request.user,
             cycle=cycle,
-            queryset=base_courses,
+            queryset=manual_courses,
         )
     )
     configurer_ids = set(configurer_courses.values_list("id", flat=True))
     automatic_courses = list(
         base_courses.filter(
             cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
-            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
         )
     )
+    automatic_included_courses = [
+        course
+        for course in automatic_courses
+        if course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+    ]
     automatic_permissions = DepartmentalExamAuthorizationService.automatic_permission_map(
         user=request.user,
-        courses=automatic_courses,
+        courses=automatic_included_courses,
         permissions=(
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
         ),
     )
     automatic_manage_ids = {
         course.id
-        for course in automatic_courses
+        for course in automatic_included_courses
         if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
         in automatic_permissions[course.id]
+    }
+    automatic_inclusion_permissions = (
+        DepartmentalExamAuthorizationService.automatic_inclusion_management_map(
+            user=request.user,
+            courses=automatic_courses,
+        )
+    )
+    automatic_inclusion_manage_ids = {
+        course.id
+        for course in automatic_courses
+        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+        in automatic_inclusion_permissions[course.id]
     }
     courses = _with_downstream_activity_flags(
         base_courses.filter(
             Q(id__in=configurer_courses.values("id"))
             | Q(id__in=reviewer_courses.values("id"))
-            | Q(id__in=automatic_manage_ids)
+            | Q(id__in=automatic_inclusion_manage_ids)
         ).distinct()
     )
 
@@ -562,7 +582,20 @@ def cycle_course_list_view(request, cycle_id):
         raise PermissionDenied("You do not have current course examination access.")
     for course in courses:
         _prepare_cycle_course_campus_display(course)
-        course.can_administer = course.id in configurer_ids | automatic_manage_ids
+        automatic_mode = (
+            course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        )
+        course.can_administer = (
+            course.id in automatic_inclusion_manage_ids
+            if automatic_mode
+            else course.id in configurer_ids
+        )
+        course.can_configure = (
+            course.id in automatic_manage_ids
+            if automatic_mode
+            else course.id in configurer_ids
+        )
         course.readiness = CourseExamConfigurationReadinessService.evaluate_readiness(
             cycle_course=course, configuration=getattr(course, "configuration", None), user=request.user
         )
@@ -575,8 +608,11 @@ def cycle_course_list_view(request, cycle_id):
             "can_prepare_faculty_contributions": bool(
                 cycle.processing_mode
                 == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
-                and automatic_courses
-                and all(course.id in automatic_manage_ids for course in automatic_courses)
+                and automatic_included_courses
+                and all(
+                    course.id in automatic_manage_ids
+                    for course in automatic_included_courses
+                )
             ),
         },
     )
@@ -602,11 +638,14 @@ def assigned_course_examinations_view(request):
         )
         .prefetch_related("offering_snapshots__campus", "generation_revisions")
     )
+    manual_courses = base_courses.filter(
+        cycle__processing_mode=ExaminationCycle.ProcessingMode.MANUAL_REVIEW,
+    )
     configurer_courses = (
         DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
             user=request.user,
             tenant_id=tenant_id,
-            queryset=base_courses,
+            queryset=manual_courses,
             include_null_for_superuser=False,
         )
     )
@@ -614,7 +653,7 @@ def assigned_course_examinations_view(request):
         DepartmentalExamAuthorizationService.reviewer_visible_cycle_courses(
             user=request.user,
             tenant_id=tenant_id,
-            queryset=base_courses,
+            queryset=manual_courses,
         )
     )
     configurer_ids = set(configurer_courses.values_list("id", flat=True))
@@ -622,7 +661,6 @@ def assigned_course_examinations_view(request):
     automatic_courses = list(
         base_courses.filter(
             cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
-            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
         )
     )
     automatic_permissions = (
@@ -645,19 +683,44 @@ def assigned_course_examinations_view(request):
         for course_id, codes in automatic_permissions.items()
         if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION in codes
     }
+    automatic_inclusion_permissions = (
+        DepartmentalExamAuthorizationService.automatic_inclusion_management_map(
+            user=request.user,
+            courses=automatic_courses,
+        )
+    )
+    automatic_inclusion_manage_ids = {
+        course_id
+        for course_id, codes in automatic_inclusion_permissions.items()
+        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION in codes
+    }
     courses = list(
         _with_downstream_activity_flags(
             base_courses.filter(
                 Q(id__in=configurer_courses.values("id"))
                 | Q(id__in=reviewer_courses.values("id"))
                 | Q(id__in=automatic_ids)
+                | Q(id__in=automatic_inclusion_manage_ids)
             ).distinct()
         )
         .order_by("-cycle__created_at", "course__code")
     )
     for course in courses:
         _prepare_cycle_course_campus_display(course)
-        course.can_administer = course.id in configurer_ids | automatic_manage_ids
+        automatic_mode = (
+            course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        )
+        course.can_administer = (
+            course.id in automatic_inclusion_manage_ids
+            if automatic_mode
+            else course.id in configurer_ids
+        )
+        course.can_configure = (
+            course.id in automatic_manage_ids
+            if automatic_mode
+            else course.id in configurer_ids
+        )
         course.can_review = bool(
             course.id in reviewer_ids
             and course.cycle.processing_mode
@@ -691,6 +754,8 @@ def assigned_course_examinations_view(request):
         )
     automatic_courses_by_cycle = {}
     for course in automatic_courses:
+        if course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED:
+            continue
         automatic_courses_by_cycle.setdefault(course.cycle_id, []).append(course)
     automatic_summary_cycle_ids = {
         cycle_id
@@ -1060,7 +1125,7 @@ def cycle_course_administration_view(request, cycle_course_id):
         id=cycle_course_id,
         cycle__tenant_id=tenant_id,
     )
-    DepartmentalExamAuthorizationService.require_configure_cycle_course(
+    DepartmentalExamAuthorizationService.require_cycle_course_inclusion_management(
         user=request.user, cycle_course=cycle_course
     )
     _prepare_cycle_course_campus_display(cycle_course)
@@ -1096,7 +1161,7 @@ def _transition_cycle_course(request, cycle_course_id):
         id=cycle_course_id,
         cycle__tenant_id=tenant_id,
     )
-    DepartmentalExamAuthorizationService.require_configure_cycle_course(
+    DepartmentalExamAuthorizationService.require_cycle_course_inclusion_management(
         user=request.user,
         cycle_course=cycle_course,
     )

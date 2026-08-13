@@ -791,17 +791,21 @@ class DepartmentalExamAuthorizationService:
         automatic_courses = CycleCourse.objects.filter(
             cycle__tenant_id=tenant_id,
             cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
-            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
         ).prefetch_related("offering_snapshots")
+        automatic_courses = list(automatic_courses)
         permissions = cls.automatic_permission_map(
             user=user,
-            courses=list(automatic_courses),
+            courses=automatic_courses,
             permissions=(
                 cls.VIEW_GENERATED_PERMISSION,
                 cls.MANAGE_GENERATION_PERMISSION,
             ),
         )
-        if any(permissions.values()):
+        inclusion_permissions = cls.automatic_inclusion_management_map(
+            user=user,
+            courses=automatic_courses,
+        )
+        if any(permissions.values()) or any(inclusion_permissions.values()):
             return
         raise PermissionDenied("You do not have current course examination access.")
 
@@ -1074,7 +1078,9 @@ class DepartmentalExamAuthorizationService:
         )
 
     @classmethod
-    def automatic_permission_map(cls, *, user, courses, permissions):
+    def _automatic_permission_map(
+        cls, *, user, courses, permissions, require_included
+    ):
         courses = list(courses)
         permission_codes = tuple(dict.fromkeys(permissions))
         result = {course.id: set() for course in courses}
@@ -1102,7 +1108,11 @@ class DepartmentalExamAuthorizationService:
                 if (
                     course.cycle.processing_mode
                     == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
-                    and course.inclusion_status == CycleCourse.InclusionStatus.INCLUDED
+                    and (
+                        not require_included
+                        or course.inclusion_status
+                        == CycleCourse.InclusionStatus.INCLUDED
+                    )
                     and cls.participating_campus_ids(course)
                 ):
                     result[course.id] = set(active_codes)
@@ -1168,7 +1178,11 @@ class DepartmentalExamAuthorizationService:
             if (
                 course.cycle.processing_mode
                 != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
-                or course.inclusion_status != CycleCourse.InclusionStatus.INCLUDED
+                or (
+                    require_included
+                    and course.inclusion_status
+                    != CycleCourse.InclusionStatus.INCLUDED
+                )
             ):
                 continue
             campus_ids = cls.participating_campus_ids(course)
@@ -1189,6 +1203,26 @@ class DepartmentalExamAuthorizationService:
             ):
                 result[course.id].add(cls.ANY_AUTOMATIC_PERMISSION)
         return result
+
+    @classmethod
+    def automatic_permission_map(cls, *, user, courses, permissions):
+        """Return Included-only downstream Automatic workflow authority."""
+        return cls._automatic_permission_map(
+            user=user,
+            courses=courses,
+            permissions=permissions,
+            require_included=True,
+        )
+
+    @classmethod
+    def automatic_inclusion_management_map(cls, *, user, courses):
+        """Return status-independent Automatic Exempt/Restore authority."""
+        return cls._automatic_permission_map(
+            user=user,
+            courses=courses,
+            permissions=(cls.MANAGE_GENERATION_PERMISSION,),
+            require_included=False,
+        )
 
     @staticmethod
     def _has_scoped_permission(*, user, permission, tenant_id, campus_id):
@@ -1288,6 +1322,32 @@ class DepartmentalExamAuthorizationService:
             user=user,
             cycle_course=cycle_course,
             permissions=(cls.MANAGE_GENERATION_PERMISSION,),
+        )
+
+    @classmethod
+    def require_automatic_inclusion_management(cls, *, user, cycle_course):
+        permissions = cls.automatic_inclusion_management_map(
+            user=user,
+            courses=(cycle_course,),
+        )
+        if cls.MANAGE_GENERATION_PERMISSION not in permissions[cycle_course.id]:
+            raise PermissionDenied(
+                "You do not have automatic inclusion-management authority for every participating campus."
+            )
+
+    @classmethod
+    def require_cycle_course_inclusion_management(cls, *, user, cycle_course):
+        if (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            return cls.require_automatic_inclusion_management(
+                user=user,
+                cycle_course=cycle_course,
+            )
+        return cls.require_configure_cycle_course(
+            user=user,
+            cycle_course=cycle_course,
         )
 
     @classmethod
@@ -1525,7 +1585,7 @@ class CycleCourseInclusionService:
             cycle_course_id=cycle_course_id,
             tenant_id=tenant_id,
         )
-        DepartmentalExamAuthorizationService.require_configure_cycle_course(
+        DepartmentalExamAuthorizationService.require_cycle_course_inclusion_management(
             user=user,
             cycle_course=cycle_course,
         )
@@ -1594,7 +1654,7 @@ class CycleCourseInclusionService:
             cycle_course_id=cycle_course_id,
             tenant_id=tenant_id,
         )
-        DepartmentalExamAuthorizationService.require_configure_cycle_course(
+        DepartmentalExamAuthorizationService.require_cycle_course_inclusion_management(
             user=user,
             cycle_course=cycle_course,
         )
