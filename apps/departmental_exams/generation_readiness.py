@@ -36,6 +36,11 @@ from .models import (
     QuestionBlueprintPlacement,
     QuestionImportBatch,
 )
+from .stage6_campus_codes import (
+    Stage6CampusCodeAmbiguity,
+    canonicalize_participating_campus_rows,
+    canonicalize_stage6_campus_code,
+)
 
 
 GENERATION_ALGORITHM_VERSION = "stage6b-v1"
@@ -105,14 +110,16 @@ def eligible_submitted_question_pool(*, cycle_course, participating_codes):
         .order_by("id")
     )
     participating_set = {
-        (code or "").strip().upper() for code in participating_codes
+        canonicalize_stage6_campus_code(code) for code in participating_codes
     }
     if not participating_set or participating_set - set(CAMPUS_WEIGHTS):
         return [], len(submitted_questions)
     eligible_questions = []
     invalid_question_count = 0
     for question in submitted_questions:
-        campus_code = (question.contribution.source_campus.code or "").strip().upper()
+        campus_code = canonicalize_stage6_campus_code(
+            question.contribution.source_campus.code
+        )
         try:
             QuestionPayloadService.validate(
                 {
@@ -213,14 +220,15 @@ class Stage6ReadinessService:
                     unresolved=roster.unresolved_blocked_count,
                 )
 
-        participating_codes = tuple(
-            dict.fromkeys(
-                (code or "").strip().upper()
-                for code in cycle_course.offering_snapshots.order_by(
+        try:
+            participating_codes = canonicalize_participating_campus_rows(
+                cycle_course.offering_snapshots.order_by(
                     "campus__code", "campus_id"
-                ).values_list("campus__code", flat=True)
+                ).values_list("campus_id", "campus__code")
             )
-        )
+        except Stage6CampusCodeAmbiguity as exc:
+            participating_codes = ()
+            cls._block(blockers, "CAMPUS_CODE_INVALID", str(exc))
         campus_quotas = {}
         difficulty_quotas = {}
         final_count = configuration.final_item_count if configuration else None

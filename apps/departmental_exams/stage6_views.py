@@ -49,6 +49,10 @@ from .services import (
     CourseExamConfigurationConflict,
     DepartmentalExamAuthorizationService,
 )
+from .stage6_campus_codes import (
+    Stage6CampusCodeAmbiguity,
+    canonicalize_participating_campus_rows,
+)
 from .stage6_forms import (
     BlockedContributionResolutionForm,
     BlueprintForm,
@@ -228,11 +232,14 @@ def blueprint_review_view(request, cycle_course_id):
     questions = []
     scenarios = []
     if can_edit:
-        participating_codes = tuple(
-            course.offering_snapshots.order_by("campus__code", "campus_id").values_list(
-                "campus__code", flat=True
+        try:
+            participating_codes = canonicalize_participating_campus_rows(
+                course.offering_snapshots.order_by(
+                    "campus__code", "campus_id"
+                ).values_list("campus_id", "campus__code")
             )
-        )
+        except Stage6CampusCodeAmbiguity as exc:
+            return _error(request, status=409, message=str(exc))
         questions, _invalid_count = eligible_submitted_question_pool(
             cycle_course=course,
             participating_codes=participating_codes,

@@ -34,6 +34,11 @@ from .models import (
     QuestionImportBatch,
 )
 from .services import DepartmentalExamAuthorizationService
+from .stage6_campus_codes import (
+    Stage6CampusCodeAmbiguity,
+    canonicalize_participating_campus_rows,
+    canonicalize_stage6_campus_code,
+)
 
 
 class Stage6Conflict(ValidationError):
@@ -789,13 +794,19 @@ def get_stage6_question(*, question_id, tenant_id, for_update=False):
 
 
 def require_eligible_stage6_question(*, question, cycle_course):
-    participating_codes = {
-        (code or "").strip().upper()
-        for code in cycle_course.offering_snapshots.values_list(
-            "campus__code", flat=True
+    try:
+        participating_codes = set(
+            canonicalize_participating_campus_rows(
+                cycle_course.offering_snapshots.order_by(
+                    "campus__code", "campus_id"
+                ).values_list("campus_id", "campus__code")
+            )
         )
-    }
-    source_code = (question.contribution.source_campus.code or "").strip().upper()
+    except Stage6CampusCodeAmbiguity as exc:
+        raise ValidationError(str(exc)) from exc
+    source_code = canonicalize_stage6_campus_code(
+        question.contribution.source_campus.code
+    )
     if (
         source_code not in participating_codes
         or source_code not in CAMPUS_WEIGHTS
