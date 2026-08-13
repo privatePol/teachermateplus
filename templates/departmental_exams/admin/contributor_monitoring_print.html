@@ -61,7 +61,7 @@
       </p>
     </header>
     <table>
-      <thead><tr><th>Contributor</th><th>Campus</th><th>Section</th><th>Progress</th><th>Sources</th></tr></thead>
+      <thead><tr><th>Contributor</th><th>Campus</th><th>Section</th><th>Progress</th></tr></thead>
       <tbody>
       {% for contribution in course.faculty_contributions.all %}
         <tr>
@@ -69,10 +69,9 @@
           <td class="contributor-campuses">{% if contribution.print_campus_names %}{{ contribution.print_campus_names|join:", " }}{% else %}&mdash;{% endif %}</td>
           <td class="contributor-sections">{% if contribution.print_section_codes %}{{ contribution.print_section_codes|join:", " }}{% else %}&mdash;{% endif %}</td>
           <td>{{ contribution.saved_question_count }} / {{ contribution.quota_snapshot }} ({{ contribution.progress_percent }}%)</td>
-          <td>{{ contribution.valid_source_count }} valid / {{ contribution.invalid_source_count }} invalid</td>
         </tr>
       {% empty %}
-        <tr><td colspan="5">No contributor records.</td></tr>
+        <tr><td colspan="4">No contributor records.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -84,9 +83,6 @@
 
   <section class="legend" aria-label="Report explanations">
     <p><strong>Progress:</strong> Progress shows the number of questions currently saved/credited for the contributor against the required faculty quota, with the percentage completed. Progress alone does not necessarily mean Final Submission has been completed.</p>
-    <p><strong>Sources:</strong> Sources are the teaching-assignment records used to determine the contributor's eligibility for this grouped course examination.</p>
-    <p><strong>Valid</strong> = qualifying source/assignment accepted by TMP for contributor eligibility. <strong>Invalid</strong> = source/assignment evaluated but rejected by the existing eligibility rules.</p>
-    <p><strong>Source counts are not question counts.</strong></p>
   </section>
 </body>
 </html>

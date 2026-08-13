@@ -141,13 +141,6 @@ def _monitoring_scope_context(request):
 def _decorate_contribution_metrics(courses):
     for course in courses:
         for contribution in course.faculty_contributions.all():
-            sources = list(contribution.eligibility_sources.all())
-            contribution.valid_source_count = sum(
-                1 for source in sources if source.is_current
-            )
-            contribution.invalid_source_count = (
-                len(sources) - contribution.valid_source_count
-            )
             contribution.progress_percent = round(
                 (contribution.saved_question_count / contribution.quota_snapshot) * 100
             )
@@ -160,6 +153,7 @@ def contributor_monitoring_view(request):
     courses = context["courses"]
     tenant_id = context["tenant_id"]
     _decorate_contribution_metrics(courses)
+    _decorate_contributor_locations(courses=courses, tenant_id=tenant_id)
     configurer_ids = set(
         DepartmentalExamAuthorizationService.configurer_visible_cycle_courses(
             user=request.user,
@@ -228,9 +222,8 @@ def _source_assignment_matches_report_scope(*, source, course, offering_scope):
     )
 
 
-def _decorate_print_report(*, courses, tenant_id):
-    _decorate_contribution_metrics(courses)
-    for course_number, course in enumerate(courses, start=1):
+def _decorate_contributor_locations(*, courses, tenant_id):
+    for course in courses:
         snapshots = list(course.offering_snapshots.all())
         offering_scope = {
             snapshot.offering_id: snapshot.campus_id for snapshot in snapshots
@@ -269,11 +262,18 @@ def _decorate_print_report(*, courses, tenant_id):
             contribution.print_section_codes = sorted(
                 contributor_sections, key=str.casefold
             )
-        course.print_number = course_number
         course.print_campus_names = sorted(
             set(campus_names.values()), key=str.casefold
         )
         course.represented_offering_count = len(snapshots)
+
+
+def _decorate_print_report(*, courses, tenant_id):
+    _decorate_contribution_metrics(courses)
+    _decorate_contributor_locations(courses=courses, tenant_id=tenant_id)
+    for course_number, course in enumerate(courses, start=1):
+        contributions = list(course.faculty_contributions.all())
+        course.print_number = course_number
         course.total_contributors = len(contributions)
         course.total_questions_saved = sum(
             contribution.saved_question_count for contribution in contributions

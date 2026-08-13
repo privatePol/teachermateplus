@@ -149,6 +149,12 @@ class ContributorMonitoringPrintTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(response, expected)
         self.assertContains(response, "Print / Printer-Friendly View")
         self.assertContains(response, 'target="_blank"')
+        for header in ("Contributor", "Campus", "Section", "Progress"):
+            self.assertContains(response, f"<th>{header}</th>", html=True)
+        self.assertNotContains(response, "<th>Sources</th>", html=True)
+        self.assertNotContains(response, "1 valid / 0 invalid")
+        self.assertContains(response, self.campus.name)
+        self.assertContains(response, self.assignment.offering.section.code)
 
     def test_summary_totals_numbering_deadline_columns_and_course_totals(self):
         self.add_question(1, "CONFIDENTIAL QUESTION ONE")
@@ -186,8 +192,10 @@ class ContributorMonitoringPrintTests(Stage5FixtureMixin, Stage4TestCase):
         ]
         self.assertEqual(
             headers,
-            ["Contributor", "Campus", "Section", "Progress", "Sources"] * 2,
+            ["Contributor", "Campus", "Section", "Progress"] * 2,
         )
+        self.assertNotContains(response, "<th>Sources</th>", html=True)
+        self.assertNotContains(response, "valid / 0 invalid")
         self.assertNotIn("<th>Workflow</th>", html)
         self.assertNotIn("<th>Roster</th>", html)
         self.assertNotIn("<th>Deadline</th>", html)
@@ -273,8 +281,6 @@ class ContributorMonitoringPrintTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(report_contribution.print_section_codes, ["BSA-2A", "BSA-2B"])
         self.assertNotIn("Remote", report_contribution.print_campus_names)
         self.assertNotIn("PRIVATE-9Z", report_contribution.print_section_codes)
-        self.assertEqual(report_contribution.valid_source_count, 3)
-        self.assertEqual(report_contribution.invalid_source_count, 1)
 
         source_queries = [
             query
@@ -292,10 +298,10 @@ class ContributorMonitoringPrintTests(Stage5FixtureMixin, Stage4TestCase):
 
         self.assertContains(response, "Progress shows the number of questions currently saved/credited")
         self.assertContains(response, "Progress alone does not necessarily mean Final Submission has been completed")
-        self.assertContains(response, "Sources are the teaching-assignment records")
-        self.assertContains(response, "qualifying source/assignment accepted by TMP")
-        self.assertContains(response, "evaluated but rejected by the existing eligibility rules")
-        self.assertContains(response, "Source counts are not question counts")
+        self.assertNotContains(response, "Sources are the teaching-assignment records")
+        self.assertNotContains(response, "qualifying source/assignment accepted by TMP")
+        self.assertNotContains(response, "evaluated but rejected by the existing eligibility rules")
+        self.assertNotContains(response, "Source counts are not question counts")
         self.assertNotContains(response, "CONFIDENTIAL QUESTION TEXT")
         self.assertNotContains(response, "CONFIDENTIAL CHOICE")
         self.assertNotContains(response, "CONFIDENTIAL SOURCE IDENTITY")
