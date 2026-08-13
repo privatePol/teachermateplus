@@ -202,7 +202,7 @@ class AutomaticSmokeRemediationTests(Stage5FixtureMixin, Stage4TestCase):
         initial_codes = {blocker["code"] for blocker in initial_stage6["blockers"]}
         self.assertIn("CYCLE_NOT_OPEN", initial_codes)
         self.assertIn("CONFIGURATION_MISSING", initial_codes)
-        self.assertIn("BLUEPRINT_MISSING", initial_codes)
+        self.assertNotIn("BLUEPRINT_MISSING", initial_codes)
 
         cycle, changed = ExaminationCycleConfigurationService.save_cycle_configuration(
             cycle_id=cycle.id,
@@ -269,7 +269,7 @@ class AutomaticSmokeRemediationTests(Stage5FixtureMixin, Stage4TestCase):
             "CONFIGURATION_MISSING",
             {blocker["code"] for blocker in stage6["blockers"]},
         )
-        self.assertIn(
+        self.assertNotIn(
             "BLUEPRINT_MISSING",
             {blocker["code"] for blocker in stage6["blockers"]},
         )
@@ -893,7 +893,10 @@ class AutomaticSmokeRemediationTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertContains(response, "No Exam Department assigned", count=2)
         self.assertNotContains(response, "Needs Exam Department")
         self.assertNotContains(response, "Read-only")
-        self.assertContains(response, "Confidential Inputs", count=2)
+        self.assertNotContains(response, "Exam Blueprint")
+        self.assertNotContains(response, "Confidential Inputs")
+        self.assertNotContains(response, "Generate Sets")
+        self.assertContains(response, "Automatic workflow")
         summary_url = reverse(
             "departmental_exams:automatic_generation_summary", args=[cycle.id]
         )
@@ -902,6 +905,73 @@ class AutomaticSmokeRemediationTests(Stage5FixtureMixin, Stage4TestCase):
             {course.id for course in response.context["courses"]},
             {first.id, second.id},
         )
+
+    def test_mixed_automatic_view_manage_user_sees_summary_but_not_prepare_action(self):
+        cycle = self.make_automatic_cycle()
+        parent = self.make_automatic_course(cycle=cycle, code="AUTO-MIXED-AUTH")
+        program = Program.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            code="AUTO-MIXED-AUTH",
+            name="Automatic mixed authority program",
+        )
+        section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=program,
+            code="AUTO-MIXED-AUTH",
+            name="Automatic mixed authority section",
+        )
+        offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.other_campus,
+            department=self.other_department,
+            program=program,
+            academic_year=cycle.academic_year,
+            term=cycle.term,
+            course=parent.course,
+            section=section,
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=parent,
+            offering=offering,
+            campus=self.other_campus,
+        )
+        mixed_user = self.make_user(
+            "automatic-mixed-view-manage",
+            self.department,
+            (
+                "admin_portal.access",
+                "departmental_exams.manage_exam_generation",
+            ),
+        )
+        UserPermission.objects.create(
+            user=mixed_user,
+            permission=Permission.objects.get(
+                code="departmental_exams.view_generated_exams"
+            ),
+            grant_type=UserPermission.GrantType.ALLOW,
+            tenant=self.tenant,
+            campus=None,
+        )
+        assigned_url = reverse("departmental_exams:assigned_course_examinations")
+        summary_url = reverse(
+            "departmental_exams:automatic_generation_summary", args=[cycle.id]
+        )
+        prepare_url = reverse(
+            "departmental_exams:prepare_faculty_contributions", args=[cycle.id]
+        )
+
+        self.client.force_login(mixed_user)
+        response = self.client.get(assigned_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, summary_url)
+        self.assertNotContains(response, f'href="{prepare_url}"')
+        self.assertEqual(self.client.get(summary_url).status_code, 200)
+        self.assertEqual(self.client.get(prepare_url).status_code, 403)
 
     def test_automatic_child_pages_expose_module_home_navigation(self):
         cycle = self.make_automatic_cycle()

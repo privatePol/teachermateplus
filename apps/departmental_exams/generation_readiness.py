@@ -31,6 +31,7 @@ from .models import (
     ExamScenario,
     ExamScenarioMember,
     ExamSection,
+    ExaminationCycle,
     FacultyContribution,
     Question,
     QuestionBlueprintPlacement,
@@ -44,6 +45,9 @@ from .stage6_campus_codes import (
 
 
 GENERATION_ALGORITHM_VERSION = "stage6b-v1"
+# Existing immutable revision rows require a positive structure snapshot.
+# This marks the non-persistent Automatic flat contract; it is not a Blueprint PK.
+AUTOMATIC_FLAT_STRUCTURE_REVISION = 1
 
 
 def _sha256_json(value):
@@ -149,6 +153,29 @@ def eligible_submitted_question_pool(*, cycle_course, participating_codes):
     return eligible_questions, invalid_question_count
 
 
+def automatic_unique_question_pool(questions):
+    """Keep only unambiguous question-text identities for flat Automatic output."""
+    by_fingerprint = defaultdict(list)
+    for question in questions:
+        by_fingerprint[
+            QuestionPayloadService.question_fingerprint(question.question_text)
+        ].append(question)
+
+    # The existing duplicate-warning identity deliberately considers only
+    # normalized question text.  A collision can therefore carry different
+    # campus, difficulty, or contributor evidence.  Do not pick a canonical
+    # row here: that would silently introduce an allocation policy.  Exclude
+    # the entire ambiguous group before feasibility and selection instead.
+    unique_questions = []
+    excluded_collision_count = 0
+    for rows in by_fingerprint.values():
+        if len(rows) == 1:
+            unique_questions.append(rows[0])
+        else:
+            excluded_collision_count += len(rows)
+    return unique_questions, excluded_collision_count
+
+
 class Stage6ReadinessService:
     """Read-only aggregate Stage 6A readiness and exact feasibility."""
 
@@ -166,10 +193,18 @@ class Stage6ReadinessService:
     def build_problem(cls, *, cycle_course):
         blockers = []
         shortages = []
+        automatic_flat_mode = (
+            cycle_course.cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        )
         configuration = CourseExamConfiguration.objects.filter(
             cycle_course=cycle_course
         ).first()
-        blueprint = ExamBlueprint.objects.filter(cycle_course=cycle_course).first()
+        blueprint = (
+            None
+            if automatic_flat_mode
+            else ExamBlueprint.objects.filter(cycle_course=cycle_course).first()
+        )
 
         if not stage6_cycle_is_open(cycle_course.cycle):
             cls._block(
@@ -241,7 +276,10 @@ class Stage6ReadinessService:
 
         section_rows = []
         section_quotas = {}
-        if blueprint is None:
+        if automatic_flat_mode:
+            if final_count is not None:
+                section_quotas = {0: final_count}
+        elif blueprint is None:
             cls._block(blockers, "BLUEPRINT_MISSING", "An examination blueprint is required.")
         elif blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS:
             if blueprint.sections.exists():
@@ -265,6 +303,11 @@ class Stage6ReadinessService:
             cycle_course=cycle_course,
             participating_codes=participating_codes,
         )
+        duplicate_question_count = 0
+        if automatic_flat_mode:
+            eligible_questions, duplicate_question_count = automatic_unique_question_pool(
+                eligible_questions
+            )
         if invalid_question_count:
             cls._block(
                 blockers,
@@ -275,7 +318,11 @@ class Stage6ReadinessService:
 
         eligible_ids = {question.id for question in eligible_questions}
         placement_by_question = {}
-        if blueprint is not None and blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS:
+        if (
+            not automatic_flat_mode
+            and blueprint is not None
+            and blueprint.mode == ExamBlueprint.Mode.USE_SECTIONS
+        ):
             placements = list(
                 QuestionBlueprintPlacement.objects.filter(
                     blueprint=blueprint, question_id__in=eligible_ids
@@ -305,7 +352,7 @@ class Stage6ReadinessService:
         scenario_question_ids = set()
         invalid_scenario_count = 0
         scenarios = []
-        if blueprint is not None:
+        if not automatic_flat_mode and blueprint is not None:
             scenarios = list(
                 ExamScenario.objects.filter(blueprint=blueprint)
                 .select_related("section")
@@ -356,7 +403,9 @@ class Stage6ReadinessService:
             question.difficulty for question in eligible_questions
         )
         available_by_section = Counter()
-        if blueprint is not None and blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS:
+        if automatic_flat_mode or (
+            blueprint is not None and blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
+        ):
             available_by_section[0] = len(eligible_questions)
         else:
             available_by_section.update(placement_by_question.values())
@@ -380,7 +429,14 @@ class Stage6ReadinessService:
             if available < required:
                 shortages.append({"dimension": "section", "label": section_labels.get(section_id, "Section"), "required": required, "available": available})
         if shortages:
-            cls._block(blockers, "QUESTION_SHORTAGES", "The eligible Submitted pool has aggregate shortages.")
+            if automatic_flat_mode and duplicate_question_count:
+                cls._block(
+                    blockers,
+                    "UNIQUE_QUESTION_SHORTAGES",
+                    "The unique usable Submitted pool has aggregate shortages.",
+                )
+            else:
+                cls._block(blockers, "QUESTION_SHORTAGES", "The eligible Submitted pool has aggregate shortages.")
 
         solver_result = None
         margins = ()
@@ -403,6 +459,7 @@ class Stage6ReadinessService:
             "QUESTION_PLACEMENTS_INCOMPLETE",
             "SCENARIOS_INVALID",
             "QUESTION_SHORTAGES",
+            "UNIQUE_QUESTION_SHORTAGES",
         }
         if not ({item["code"] for item in blockers} & structural_codes):
             campus_order = tuple(campus_quotas)
@@ -412,7 +469,8 @@ class Stage6ReadinessService:
             def vector_for(question):
                 section_key = (
                     0
-                    if blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
+                    if automatic_flat_mode
+                    or blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
                     else placement_by_question[question.id]
                 )
                 return (
@@ -456,7 +514,11 @@ class Stage6ReadinessService:
                 cls._block(
                     blockers,
                     "HARD_CONSTRAINTS_INFEASIBLE",
-                    "Two equivalent sets cannot satisfy all hard margins and scenario bundles.",
+                    (
+                        "Two equivalent sets cannot satisfy the required questionnaire allocation across campus, difficulty, and item-count constraints."
+                        if automatic_flat_mode
+                        else "Two equivalent sets cannot satisfy all hard margins and scenario bundles."
+                    ),
                 )
 
         report = {
@@ -477,6 +539,7 @@ class Stage6ReadinessService:
             ],
             "eligible_question_count": len(eligible_questions),
             "invalid_question_count": invalid_question_count,
+            "duplicate_question_count": duplicate_question_count,
             "contributor_counts": {
                 "required_active": roster.required_active_count if roster else 0,
                 "submitted_required": roster.submitted_required_count if roster else 0,
@@ -504,7 +567,8 @@ class Stage6ReadinessService:
             for question in eligible_questions:
                 section_id = (
                     0
-                    if blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
+                    if automatic_flat_mode
+                    or blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
                     else placement_by_question[question.id]
                 )
                 scenario_data = scenario_by_question.get(question.id)
@@ -603,13 +667,18 @@ class Stage6ReadinessService:
                     )
                 )
             roster_boundary = roster.boundary_sha256 if roster else ""
+            structure_revision = (
+                AUTOMATIC_FLAT_STRUCTURE_REVISION
+                if automatic_flat_mode
+                else blueprint.revision
+            )
             fingerprint_payload = {
                 "algorithm_version": GENERATION_ALGORITHM_VERSION,
                 "tenant_id": cycle_course.cycle.tenant_id,
                 "cycle_id": cycle_course.cycle_id,
                 "cycle_course_id": cycle_course.id,
                 "configuration_revision": configuration.revision,
-                "blueprint_revision": blueprint.revision,
+                "blueprint_revision": structure_revision,
                 "roster_boundary": roster_boundary,
                 "final_count": final_count,
                 "campus_quotas": campus_quotas,
@@ -635,6 +704,8 @@ class Stage6ReadinessService:
                     )
                 ],
             }
+            if automatic_flat_mode:
+                fingerprint_payload["structure_mode"] = "AUTOMATIC_FLAT"
             problem = GenerationProblem(
                 cycle_course=cycle_course,
                 configuration=configuration,
@@ -649,7 +720,7 @@ class Stage6ReadinessService:
                 blocks=tuple(identity_blocks),
                 input_fingerprint=_sha256_json(fingerprint_payload),
                 configuration_revision=configuration.revision,
-                blueprint_revision=blueprint.revision,
+                blueprint_revision=structure_revision,
                 roster_boundary=roster_boundary,
                 minimum_overlap=solver_result.minimum_overlap,
             )

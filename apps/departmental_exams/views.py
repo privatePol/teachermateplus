@@ -761,7 +761,11 @@ def assigned_course_examinations_view(request):
         cycle_id
         for cycle_id, cycle_courses in automatic_courses_by_cycle.items()
         if all(course.id in automatic_ids for course in cycle_courses)
-        and any(course.id in automatic_manage_ids for course in cycle_courses)
+    }
+    automatic_prepare_cycle_ids = {
+        cycle_id
+        for cycle_id, cycle_courses in automatic_courses_by_cycle.items()
+        if all(course.id in automatic_manage_ids for course in cycle_courses)
     }
     automatic_summary_cycles = []
     seen_automatic_cycle_ids = set()
@@ -770,7 +774,11 @@ def assigned_course_examinations_view(request):
             course.cycle_id in automatic_summary_cycle_ids
             and course.cycle_id not in seen_automatic_cycle_ids
         ):
-            automatic_summary_cycles.append(course.cycle)
+            cycle = course.cycle
+            cycle.can_prepare_faculty_contributions = (
+                cycle.id in automatic_prepare_cycle_ids
+            )
+            automatic_summary_cycles.append(cycle)
             seen_automatic_cycle_ids.add(course.cycle_id)
     return render(
         request,

@@ -68,11 +68,16 @@ class ExamGenerationService:
             cycle_course_id=cycle_course_id,
             tenant_id=tenant_id,
         )
-        blueprint = (
-            ExamBlueprint.objects.select_for_update()
-            .filter(cycle_course=course)
-            .first()
-        )
+        blueprint = None
+        if (
+            cycle.processing_mode
+            == ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+        ):
+            blueprint = (
+                ExamBlueprint.objects.select_for_update()
+                .filter(cycle_course=course)
+                .first()
+            )
         if blueprint is not None:
             course.exam_blueprint = blueprint
             list(
@@ -244,7 +249,7 @@ class ExamGenerationService:
         if duplicate is not None:
             return GenerationOutcome(revision=duplicate, reused=True)
 
-        if configuration is None or blueprint is None:
+        if configuration is None or (not automatic_mode and blueprint is None):
             raise GenerationConflict("Generation prerequisites changed. Refresh the workspace.")
         problem, readiness = Stage6ReadinessService.build_problem(cycle_course=course)
         if problem is None or not readiness["ready"]:

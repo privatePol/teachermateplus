@@ -356,6 +356,9 @@ class FacultyContributionPreparationService:
 
 
 def readiness_blocker_text(report):
+    code = ((report.get("blockers") or [{}])[0]).get("code", "")
+    if code == "UNIQUE_QUESTION_SHORTAGES":
+        return "Insufficient unique usable questions for the required allocation."
     shortages = report.get("shortages") or ()
     if shortages:
         shortage = shortages[0]
@@ -377,14 +380,14 @@ def readiness_recommendation(report):
         "CONFIGURATION_DRAFT": "Open contributions / complete course configuration.",
         "FINAL_COUNT_INVALID": "Set a valid final item count.",
         "CONTRIBUTION_NOT_CLOSED": "Wait for automatic deadline processing.",
+        "WAITING_FOR_DEADLINE": "Monitor faculty contributions until the deadline.",
+        "AUTOMATIC_PROCESSING_PENDING": "No admin action is needed; automatic processing is pending.",
         "ROSTER_STALE": "Synchronize the contributor roster.",
         "ACTIVE_CONTRIBUTORS_INCOMPLETE": "Reopen contributions with a new deadline if more time is needed.",
         "BLOCKED_DRAFTS_UNRESOLVED": "Resolve current Blocked Draft contributions.",
-        "BLUEPRINT_MISSING": "Configure the examination blueprint.",
-        "BLUEPRINT_STRUCTURE_INVALID": "Correct the examination blueprint structure.",
-        "QUESTION_PLACEMENTS_INCOMPLETE": "Complete confidential question classifications.",
         "QUESTION_SHORTAGES": "Obtain enough eligible Submitted questions.",
-        "HARD_CONSTRAINTS_INFEASIBLE": "Review the eligible pool and blueprint constraints.",
+        "UNIQUE_QUESTION_SHORTAGES": "Obtain enough unique usable Submitted questions.",
+        "HARD_CONSTRAINTS_INFEASIBLE": "Review the eligible pool and required allocation constraints.",
         "FEASIBILITY_LIMIT": "Contact an administrator to review the solver limit.",
         "PROCESSING_ERROR": "Review the secured processor log, correct the failure, and rerun deadline processing.",
     }.get(code, "Review the readiness details and correct the blocking input.")
@@ -858,7 +861,8 @@ class AutomaticGenerationSummaryService:
                     for item in contributions
                 ),
                 "submitted_contributors": sum(
-                    item.status == FacultyContribution.Status.SUBMITTED
+                    item.roster_status == FacultyContribution.RosterStatus.ACTIVE
+                    and item.status == FacultyContribution.Status.SUBMITTED
                     for item in contributions
                 ),
             }
@@ -929,7 +933,27 @@ class AutomaticGenerationSummaryService:
                         }
                     ]
                 }
-                status = "Waiting"
+                status = (
+                    "All contributions submitted — waiting for deadline"
+                    if common["eligible_contributors"]
+                    and common["submitted_contributors"]
+                    == common["eligible_contributors"]
+                    else "Contributions open"
+                )
+            elif (
+                configuration.workflow_status
+                == CourseExamConfiguration.WorkflowStatus.OPEN
+                and configuration.active_contribution_deadline
+            ):
+                report = {
+                    "blockers": [
+                        {
+                            "code": "AUTOMATIC_PROCESSING_PENDING",
+                            "message": "The contribution deadline has arrived; automatic processing is pending.",
+                        }
+                    ]
+                }
+                status = "Automatic processing"
             else:
                 report = Stage6ReadinessService.evaluate(cycle_course=course)
                 status = (

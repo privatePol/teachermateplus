@@ -33,6 +33,8 @@ from .blueprint_services import (
     ScenarioMutationService,
     Stage6Conflict,
 )
+from .contribution_services import QuestionPayloadService
+from .generation_algorithms import FeasibilityResult
 from .generation_readiness import Stage6ReadinessService
 from .generation_services import ExamGenerationService
 from .models import (
@@ -288,6 +290,49 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
         self.assertFalse(ExamGenerationRevision.objects.exists())
 
+    def test_summary_shows_clear_waiting_and_processing_states(self):
+        parent, _problem = self.ready_generation_course()
+        self._automatic(parent)
+        configuration = CourseExamConfiguration.objects.get(cycle_course=parent)
+        CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
+            workflow_status=CourseExamConfiguration.WorkflowStatus.OPEN,
+            reopened_contribution_deadline=timezone.now()
+            + timezone.timedelta(days=1),
+        )
+        Question.objects.filter(contribution__cycle_course=parent).update(
+            question_text="Repeated pre-deadline question text"
+        )
+        blocked_report = Stage6ReadinessService.evaluate(cycle_course=parent)
+        self.assertIn(
+            "UNIQUE_QUESTION_SHORTAGES",
+            {blocker["code"] for blocker in blocked_report["blockers"]},
+        )
+
+        waiting = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
+        self.assertEqual(
+            waiting["not_generated"][0]["status"],
+            "All contributions submitted — waiting for deadline",
+        )
+        self.assertNotIn("Ready", waiting["not_generated"][0]["status"])
+        self.assertEqual(
+            waiting["not_generated"][0]["recommended_action"],
+            "Monitor faculty contributions until the deadline.",
+        )
+
+        CourseExamConfiguration.objects.filter(pk=configuration.pk).update(
+            reopened_contribution_deadline=timezone.now()
+            - timezone.timedelta(minutes=1),
+        )
+        pending = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
+        self.assertEqual(
+            pending["not_generated"][0]["status"],
+            "Automatic processing",
+        )
+        self.assertEqual(
+            pending["not_generated"][0]["recommended_action"],
+            "No admin action is needed; automatic processing is pending.",
+        )
+
     def test_due_ready_course_without_department_or_reviewer_generates_once(self):
         parent, configuration, problem = self._ready_automatic_course()
         first = self._process_with_proved_selection(parent=parent, problem=problem)
@@ -318,6 +363,235 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED,
         )
 
+    def test_automatic_without_blueprint_builds_flat_problem_and_generates_sets(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        ExamBlueprint.objects.filter(cycle_course=parent).delete()
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertNotIn(
+            "BLUEPRINT_MISSING",
+            {blocker["code"] for blocker in readiness["blockers"]},
+        )
+        self.assertIsNone(problem.blueprint)
+        self.assertEqual(problem.section_quotas, {0: problem.final_count})
+        self.assertEqual(problem.section_order, (0,))
+        self.assertEqual(readiness["scenario_count"], 0)
+
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+        revision = ExamGenerationRevision.objects.get()
+
+        self.assertEqual(result.status, "GENERATED")
+        self.assertEqual(revision.generated_sets.count(), 2)
+        self.assertEqual(
+            sum(row.items.count() for row in revision.generated_sets.all()),
+            problem.final_count * 2,
+        )
+        self.assertFalse(ExamBlueprint.objects.filter(cycle_course=parent).exists())
+        for generated_set in revision.generated_sets.all():
+            self.assertEqual(
+                generated_set.section_quotas_snapshot,
+                {"0": problem.final_count},
+            )
+            self.assertFalse(
+                generated_set.items.exclude(
+                    source_section__isnull=True,
+                    section_id_snapshot__isnull=True,
+                    section_title_snapshot="Questionnaire",
+                    scenario_id_snapshot__isnull=True,
+                ).exists()
+            )
+
+    def test_automatic_flat_generation_excludes_ambiguous_duplicate_question_text(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        duplicate_source, duplicate_row = list(
+            Question.objects.filter(contribution__cycle_course=parent)
+            .order_by("id")[:2]
+        )
+        Question.objects.filter(pk=duplicate_row.pk).update(
+            question_text=duplicate_source.question_text
+        )
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertEqual(readiness["duplicate_question_count"], 2)
+        self.assertNotIn(duplicate_source.id, problem.questions)
+        self.assertNotIn(duplicate_row.id, problem.questions)
+        self._process_with_proved_selection(parent=parent, problem=problem)
+        for generated_set in ExamGenerationRevision.objects.get().generated_sets.all():
+            fingerprints = [
+                QuestionPayloadService.question_fingerprint(item.question_text_snapshot)
+                for item in generated_set.items.all()
+            ]
+            self.assertEqual(len(fingerprints), len(set(fingerprints)))
+
+    def test_automatic_duplicate_only_pool_blocks_as_insufficient_unique_questions(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        Question.objects.filter(contribution__cycle_course=parent).update(
+            question_text="Repeated normalized question text"
+        )
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+
+        self.assertIsNone(problem)
+        self.assertIn(
+            "UNIQUE_QUESTION_SHORTAGES",
+            {blocker["code"] for blocker in readiness["blockers"]},
+        )
+        self.assertEqual(readiness["duplicate_question_count"], 150)
+        self.assertEqual(result.code, "UNIQUE_QUESTION_SHORTAGES")
+        self.assertEqual(
+            result.message,
+            "Insufficient unique usable questions for the required allocation.",
+        )
+        self.assertFalse(ExamGenerationRevision.objects.exists())
+
+    def test_automatic_flat_infeasibility_uses_no_scenario_wording_while_manual_keeps_it(self):
+        automatic_parent, _configuration, _problem = self._ready_automatic_course()
+        infeasible = FeasibilityResult(
+            feasible=False,
+            minimum_overlap=None,
+            states_explored=1,
+        )
+
+        with patch(
+            "apps.departmental_exams.generation_readiness.solve_two_set_feasibility",
+            return_value=infeasible,
+        ):
+            automatic_problem, automatic_readiness = Stage6ReadinessService.build_problem(
+                cycle_course=automatic_parent
+            )
+            automatic_parent.cycle.processing_mode = (
+                ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+            )
+            automatic_parent.cycle.save(update_fields=["processing_mode", "updated_at"])
+            manual_problem, manual_readiness = Stage6ReadinessService.build_problem(
+                cycle_course=automatic_parent
+            )
+
+        self.assertIsNone(automatic_problem)
+        automatic_message = automatic_readiness["blockers"][0]["message"]
+        self.assertNotIn("scenario", automatic_message.casefold())
+        self.assertIn("questionnaire allocation", automatic_message)
+        self.assertIsNone(manual_problem)
+        self.assertEqual(
+            manual_readiness["blockers"][0]["message"],
+            "Two equivalent sets cannot satisfy all hard margins and scenario bundles.",
+        )
+
+    def test_manual_without_blueprint_keeps_existing_blocker(self):
+        parent, _configuration, _contributions, _assignments = self.closed_course()
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertIsNone(problem)
+        self.assertIn(
+            "BLUEPRINT_MISSING",
+            {blocker["code"] for blocker in readiness["blockers"]},
+        )
+
+    def test_automatic_flat_insufficient_pool_does_not_generate(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        ExamBlueprint.objects.filter(cycle_course=parent).delete()
+        retained_ids = list(
+            Question.objects.filter(contribution__cycle_course=parent)
+            .order_by("id")
+            .values_list("id", flat=True)[:49]
+        )
+        Question.objects.filter(contribution__cycle_course=parent).exclude(
+            id__in=retained_ids
+        ).delete()
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+
+        self.assertIsNone(problem)
+        self.assertIn(
+            "QUESTION_SHORTAGES",
+            {blocker["code"] for blocker in readiness["blockers"]},
+        )
+        self.assertEqual(result.code, "QUESTION_SHORTAGES")
+        self.assertFalse(ExamGenerationRevision.objects.exists())
+
+    def test_mode_aware_assigned_course_actions_preserve_manual_workflow(self):
+        automatic_parent, _configuration, _problem = self._ready_automatic_course()
+        ExamBlueprint.objects.filter(cycle_course=automatic_parent).delete()
+        assigned_url = reverse("departmental_exams:assigned_course_examinations")
+
+        self.client.force_login(self.generation_manager)
+        automatic_response = self.client.get(assigned_url)
+        self.assertEqual(automatic_response.status_code, 200)
+        self.assertContains(automatic_response, "Automatic workflow")
+        self.assertContains(automatic_response, "Configure Override")
+        for manual_action in (
+            "Exam Blueprint",
+            "Confidential Inputs",
+            "Confidential Review",
+            "Generate Sets",
+            "Generation Actions",
+            "Approve &amp; Lock",
+        ):
+            self.assertNotContains(automatic_response, manual_action)
+
+        configuration_response = self.client.get(
+            reverse(
+                "departmental_exams:course_configuration",
+                args=[automatic_parent.id],
+            )
+        )
+        self.assertEqual(configuration_response.status_code, 200)
+        self.assertNotContains(configuration_response, "Exam Blueprint")
+        workspace_response = self.client.get(
+            reverse(
+                "departmental_exams:generation_workspace",
+                args=[automatic_parent.id],
+            )
+        )
+        self.assertEqual(workspace_response.status_code, 200)
+        self.assertContains(workspace_response, "Automatic Generation Summary")
+        self.assertNotContains(workspace_response, "Confidential Inputs")
+        self.assertNotContains(workspace_response, "blueprint review")
+
+        manual_cycle = automatic_parent.cycle
+        manual_cycle.processing_mode = ExaminationCycle.ProcessingMode.MANUAL_REVIEW
+        manual_cycle.save(update_fields=["processing_mode", "updated_at"])
+        automatic_parent.responsible_department = self.department
+        automatic_parent.reviewer = self.reviewer
+        automatic_parent.save(
+            update_fields=["responsible_department", "reviewer", "updated_at"]
+        )
+        self.no_sections_blueprint(automatic_parent)
+        self.client.force_login(self.configurer)
+        configurer_response = self.client.get(assigned_url)
+        self.assertContains(configurer_response, "Exam Blueprint")
+        self.client.force_login(self.reviewer)
+        reviewer_response = self.client.get(assigned_url)
+        self.assertContains(reviewer_response, "Confidential Review")
+        self.assertContains(reviewer_response, "Generate Sets")
+        self.assertContains(reviewer_response, automatic_parent.course.code)
+
     def test_due_incomplete_open_course_auto_closes_and_reports_blocker(self):
         parent, configuration, _campuses, _offerings = self.make_stage6_open_course()
         self._automatic(parent)
@@ -339,7 +613,6 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             {
                 "ROSTER_STALE",
                 "ACTIVE_CONTRIBUTORS_INCOMPLETE",
-                "BLUEPRINT_MISSING",
             },
         )
         self.assertFalse(ExamGenerationRevision.objects.exists())
@@ -995,7 +1268,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         assigned = client.get(
             reverse("departmental_exams:assigned_course_examinations")
         )
-        self.assertContains(assigned, "View Current Generation")
+        self.assertContains(assigned, "View Generated Examination")
         self.assertNotContains(assigned, "Generation Actions")
         summary = client.get(
             reverse(

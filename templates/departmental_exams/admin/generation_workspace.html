@@ -1,7 +1,7 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
-<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item"><a href="{% url 'departmental_exams:blueprint_review' cycle_course.id %}">Confidential Inputs</a></li><li class="breadcrumb-item active">Generation Workspace</li></ol></nav>
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li>{% if automatic_mode %}<li class="breadcrumb-item"><a href="{% url 'departmental_exams:automatic_generation_summary' cycle_course.cycle_id %}">Automatic Generation Summary</a></li><li class="breadcrumb-item active">Regenerate Set A / Set B</li>{% else %}<li class="breadcrumb-item"><a href="{% url 'departmental_exams:blueprint_review' cycle_course.id %}">Confidential Inputs</a></li><li class="breadcrumb-item active">Generation Workspace</li>{% endif %}</ol></nav>
 <header class="de-exam-hero">
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
     <div><span class="badge {% if is_locked %}text-bg-dark{% else %}text-bg-warning text-dark{% endif %} mb-2">{% if is_locked %}LOCKED FINAL EXAMINATION{% elif automatic_mode %}CONFIDENTIAL AUTOMATIC OUTPUT{% else %}CONFIDENTIAL REVIEWER WORKSPACE{% endif %}</span><h1>{% if is_locked %}Final examination locked{% elif automatic_mode %}Automatic Set A and Set B{% else %}Generate Set A and Set B{% endif %}</h1><p>{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }}</p></div>
@@ -51,7 +51,7 @@
 </section>
 
 <div class="d-flex flex-wrap gap-2">
-  <a class="btn btn-outline-secondary" data-generation-control href="{% url 'departmental_exams:blueprint_review' cycle_course.id %}">Back to blueprint review</a>
+  {% if automatic_mode %}<a class="btn btn-outline-secondary" data-generation-control href="{% url 'departmental_exams:automatic_generation_summary' cycle_course.cycle_id %}">Back to Automatic Generation Summary</a>{% else %}<a class="btn btn-outline-secondary" data-generation-control href="{% url 'departmental_exams:blueprint_review' cycle_course.id %}">Back to blueprint review</a>{% endif %}
   <a class="btn btn-outline-secondary" data-generation-control href="{% url 'departmental_exams:assigned_course_examinations' %}">Assigned examinations</a>
   <a class="btn btn-outline-secondary" data-generation-control href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Departmental Exam Builder</a>
 </div>
