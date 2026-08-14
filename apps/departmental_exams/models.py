@@ -24,6 +24,20 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
         MANUAL_REVIEW = "MANUAL_REVIEW", "Manual Review"
         AUTOMATIC_GENERATION = "AUTOMATIC_GENERATION", "Automatic Generation"
 
+    class AutomaticCampusContributionPolicy(models.TextChoices):
+        STRICT = "STRICT", "Require every participating campus"
+        AVAILABLE_WITH_WARNING = (
+            "AVAILABLE_WITH_WARNING",
+            "Use represented campuses and show a warning",
+        )
+
+    class AutomaticContributorCompletionPolicy(models.TextChoices):
+        REQUIRE_ALL = "REQUIRE_ALL", "Require every active contributor"
+        SUFFICIENT_POOL = (
+            "SUFFICIENT_POOL",
+            "Use the sufficient Submitted pool and show a warning",
+        )
+
     class ItemCountMode(models.TextChoices):
         FIXED_ALL = "FIXED_ALL", "Fixed Item Count for All Courses"
         PER_COURSE = "PER_COURSE", "Configure Item Count per Course"
@@ -45,6 +59,16 @@ class ExaminationCycle(TimeStampedModel, ActivatableModel):
         max_length=24,
         choices=ProcessingMode.choices,
         default=ProcessingMode.MANUAL_REVIEW,
+    )
+    automatic_campus_contribution_policy = models.CharField(
+        max_length=24,
+        choices=AutomaticCampusContributionPolicy.choices,
+        default=AutomaticCampusContributionPolicy.AVAILABLE_WITH_WARNING,
+    )
+    automatic_contributor_completion_policy = models.CharField(
+        max_length=16,
+        choices=AutomaticContributorCompletionPolicy.choices,
+        default=AutomaticContributorCompletionPolicy.SUFFICIENT_POOL,
     )
     # Kept solely to preserve the 0002 migration history.  New runtime code
     # must use the independent CAO defaults below.

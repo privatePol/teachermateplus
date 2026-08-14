@@ -336,14 +336,10 @@ class Stage6RealCampusCodeIntegrationTests(Stage6CFixtureMixin, Stage4TestCase):
             cycle_course=parent
         )
         self.assertTrue(readiness["ready"], readiness["blockers"])
-        with patch(
-            "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
-            return_value=self.proved_selection(problem),
-        ):
-            result = AutomaticExamDeadlineService.process_course(
-                cycle_course_id=parent.id,
-                tenant_id=self.tenant.id,
-            )
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
         self.assertEqual(result.status, "GENERATED")
         self.assertEqual(result.code, "GENERATED")
         revision = ExamGenerationService.current_for_course(cycle_course=parent)

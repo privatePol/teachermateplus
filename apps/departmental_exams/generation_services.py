@@ -14,6 +14,7 @@ from apps.core.services.audit import AuditService
 from .blueprint_services import Stage6Conflict, require_stage6_open_cycle
 from .contribution_services import Stage5LockService
 from .generation_algorithms import (
+    confidential_hmac_rank,
     order_selected_blocks,
     proportional_campus_difficulty_score,
     solve_identity_aware_two_sets,
@@ -348,6 +349,8 @@ class ExamGenerationService:
             ),
         )
 
+        selected_block_ids_by_set = {}
+        ordered_members_by_set = {}
         for set_code, selected_ids in (
             (GeneratedExamSet.SetCode.A, selection.set_a_block_ids),
             (GeneratedExamSet.SetCode.B, selection.set_b_block_ids),
@@ -371,8 +374,44 @@ class ExamGenerationService:
                 hmac_context=hmac_context,
                 section_order=problem.section_order,
             )
+            set_a_selected_ids = selected_block_ids_by_set.get(
+                GeneratedExamSet.SetCode.A
+            )
+            set_a_members = ordered_members_by_set.get(GeneratedExamSet.SetCode.A)
+            if (
+                automatic_mode
+                and set_code == GeneratedExamSet.SetCode.B
+                and set_a_selected_ids is not None
+                and set_a_members is not None
+                and len(ordered_members) > 1
+                and tuple(str(block_id) for block_id in selected_ids)
+                == set_a_selected_ids
+            ):
+                rotation_seed = confidential_hmac_rank(
+                    secret=settings.SECRET_KEY,
+                    domain="departmental-exams.automatic.order.set-b.rotation",
+                    context={
+                        **hmac_context,
+                        "selected_source_ids": [
+                            member.source_id for member in ordered_members
+                        ],
+                    },
+                )
+                set_a_source_ids = tuple(member.source_id for member in set_a_members)
+                for offset in range(len(ordered_members)):
+                    rotation = (rotation_seed + offset) % len(ordered_members)
+                    candidate = (
+                        ordered_members[rotation:] + ordered_members[:rotation]
+                    )
+                    if tuple(member.source_id for member in candidate) != set_a_source_ids:
+                        ordered_members = candidate
+                        break
             if len(ordered_members) != problem.final_count:
                 raise GenerationConflict("Generated set item count does not match its snapshot.")
+            selected_block_ids_by_set[set_code] = tuple(
+                str(block_id) for block_id in selected_ids
+            )
+            ordered_members_by_set[set_code] = ordered_members
             GeneratedExamItem.objects.bulk_create(
                 [
                     cls._item_snapshot(

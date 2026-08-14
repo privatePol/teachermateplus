@@ -111,7 +111,6 @@ class ExaminationCycleForm(forms.ModelForm):
             or ExaminationCycle.ProcessingMode.MANUAL_REVIEW
         )
 
-
 class ExaminationCycleConfigurationForm(forms.ModelForm):
     expected_updated_at = forms.CharField(
         widget=forms.HiddenInput,
@@ -130,10 +129,24 @@ class ExaminationCycleConfigurationForm(forms.ModelForm):
             or ExaminationCycle.ProcessingMode.MANUAL_REVIEW
         )
 
+    def clean_automatic_campus_contribution_policy(self):
+        return (
+            self.cleaned_data.get("automatic_campus_contribution_policy")
+            or self.instance.automatic_campus_contribution_policy
+        )
+
+    def clean_automatic_contributor_completion_policy(self):
+        return (
+            self.cleaned_data.get("automatic_contributor_completion_policy")
+            or self.instance.automatic_contributor_completion_policy
+        )
+
     class Meta:
         model = ExaminationCycle
         fields = [
             "processing_mode",
+            "automatic_campus_contribution_policy",
+            "automatic_contributor_completion_policy",
             "default_questions_required_per_faculty",
             "default_final_item_count",
             "default_contribution_deadline",
@@ -155,6 +168,17 @@ class ExaminationCycleConfigurationForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["processing_mode"].required = False
         self.fields["processing_mode"].widget.attrs.setdefault("class", "form-select")
+        self.fields["automatic_campus_contribution_policy"].widget.attrs.setdefault(
+            "class", "form-select"
+        )
+        self.fields["automatic_campus_contribution_policy"].required = False
+        self.fields["automatic_contributor_completion_policy"].widget.attrs.setdefault(
+            "class", "form-select"
+        )
+        self.fields["automatic_contributor_completion_policy"].required = False
+        if self.instance.status != ExaminationCycle.Status.DRAFT:
+            self.fields["automatic_campus_contribution_policy"].disabled = True
+            self.fields["automatic_contributor_completion_policy"].disabled = True
         self.fields["default_contribution_deadline"].input_formats = ["%Y-%m-%dT%H:%M"]
         self.fields["expected_updated_at"].widget.attrs["class"] = "d-none"
         self.fields["reason"].widget.attrs["class"] = "form-control"

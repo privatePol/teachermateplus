@@ -99,8 +99,14 @@ class GenerationProblem:
     minimum_overlap: int
 
 
-def eligible_submitted_question_pool(*, cycle_course, participating_codes):
+def eligible_submitted_question_pool(
+    *, cycle_course, participating_codes=None, participating_campus_ids=None
+):
     """Return the content-valid Submitted pool without exposing it to aggregate callers."""
+    if (participating_codes is None) == (participating_campus_ids is None):
+        raise ValueError(
+            "Provide exactly one participating-campus identity representation."
+        )
     submitted_questions = list(
         Question.objects.filter(
             contribution__cycle_course=cycle_course,
@@ -113,11 +119,25 @@ def eligible_submitted_question_pool(*, cycle_course, participating_codes):
         )
         .order_by("id")
     )
-    participating_set = {
-        canonicalize_stage6_campus_code(code) for code in participating_codes
-    }
-    if not participating_set or participating_set - set(CAMPUS_WEIGHTS):
-        return [], len(submitted_questions)
+    if participating_campus_ids is not None:
+        participating_set = {int(campus_id) for campus_id in participating_campus_ids}
+        if not participating_set:
+            return [], len(submitted_questions)
+        campus_is_participating = (
+            lambda question: question.contribution.source_campus_id in participating_set
+        )
+    else:
+        participating_set = {
+            canonicalize_stage6_campus_code(code) for code in participating_codes
+        }
+        if not participating_set or participating_set - set(CAMPUS_WEIGHTS):
+            return [], len(submitted_questions)
+        campus_is_participating = (
+            lambda question: canonicalize_stage6_campus_code(
+                question.contribution.source_campus.code
+            )
+            in participating_set
+        )
     eligible_questions = []
     invalid_question_count = 0
     for question in submitted_questions:
@@ -139,7 +159,7 @@ def eligible_submitted_question_pool(*, cycle_course, participating_codes):
         except ValidationError:
             invalid_question_count += 1
             continue
-        if campus_code not in participating_set:
+        if not campus_is_participating(question):
             invalid_question_count += 1
             continue
         if (
@@ -151,6 +171,18 @@ def eligible_submitted_question_pool(*, cycle_course, participating_codes):
         question.stage6_campus_code = campus_code
         eligible_questions.append(question)
     return eligible_questions, invalid_question_count
+
+
+def automatic_campus_allocate(*, total, campus_ids):
+    """Evenly allocate an Automatic questionnaire across actual Campus records."""
+    ordered_ids = tuple(sorted({int(campus_id) for campus_id in campus_ids}))
+    if not ordered_ids:
+        return {}
+    base, remainder = divmod(total, len(ordered_ids))
+    return {
+        campus_id: base + (1 if index < remainder else 0)
+        for index, campus_id in enumerate(ordered_ids)
+    }
 
 
 def automatic_unique_question_pool(questions):
@@ -184,6 +216,11 @@ class Stage6ReadinessService:
         if code not in {item["code"] for item in blockers}:
             blockers.append({"code": code, "message": message, **details})
 
+    @staticmethod
+    def _warn(warnings, code, message, **details):
+        if code not in {item["code"] for item in warnings}:
+            warnings.append({"code": code, "message": message, **details})
+
     @classmethod
     def evaluate(cls, *, cycle_course):
         _problem, report = cls.build_problem(cycle_course=cycle_course)
@@ -192,6 +229,7 @@ class Stage6ReadinessService:
     @classmethod
     def build_problem(cls, *, cycle_course):
         blockers = []
+        warnings = []
         shortages = []
         automatic_flat_mode = (
             cycle_course.cycle.processing_mode
@@ -240,13 +278,32 @@ class Stage6ReadinessService:
                     "The contributor roster is stale; synchronize it through the authorized workflow.",
                 )
             if roster.incomplete_active_count:
-                cls._block(
-                    blockers,
-                    "ACTIVE_CONTRIBUTORS_INCOMPLETE",
-                    "Currently required Active contributors have not all Submitted.",
-                    required=roster.required_active_count,
-                    submitted=roster.submitted_required_count,
-                )
+                details = {
+                    "required": roster.required_active_count,
+                    "submitted": roster.submitted_required_count,
+                }
+                if (
+                    automatic_flat_mode
+                    and cycle_course.cycle.automatic_contributor_completion_policy
+                    == ExaminationCycle.AutomaticContributorCompletionPolicy.SUFFICIENT_POOL
+                ):
+                    cls._warn(
+                        warnings,
+                        "ACTIVE_CONTRIBUTORS_INCOMPLETE",
+                        (
+                            f"{roster.submitted_required_count} / "
+                            f"{roster.required_active_count} active contributors "
+                            "Final Submitted; generation uses the sufficient Submitted pool."
+                        ),
+                        **details,
+                    )
+                else:
+                    cls._block(
+                        blockers,
+                        "ACTIVE_CONTRIBUTORS_INCOMPLETE",
+                        "Currently required Active contributors have not all Submitted.",
+                        **details,
+                    )
             if roster.unresolved_blocked_count:
                 cls._block(
                     blockers,
@@ -255,19 +312,38 @@ class Stage6ReadinessService:
                     unresolved=roster.unresolved_blocked_count,
                 )
 
-        try:
-            participating_codes = canonicalize_participating_campus_rows(
-                cycle_course.offering_snapshots.order_by(
-                    "campus__code", "campus_id"
-                ).values_list("campus_id", "campus__code")
-            )
-        except Stage6CampusCodeAmbiguity as exc:
-            participating_codes = ()
-            cls._block(blockers, "CAMPUS_CODE_INVALID", str(exc))
+        automatic_campus_labels = {}
+        automatic_participating_ids = ()
+        participating_codes = ()
+        if automatic_flat_mode:
+            for campus_id, campus_name in cycle_course.offering_snapshots.order_by(
+                "campus_id", "id"
+            ).values_list("campus_id", "campus__name"):
+                automatic_campus_labels.setdefault(campus_id, campus_name)
+            automatic_participating_ids = tuple(automatic_campus_labels)
+            if not automatic_participating_ids:
+                cls._block(
+                    blockers,
+                    "CAMPUS_PARTICIPATION_MISSING",
+                    "At least one participating campus snapshot is required.",
+                )
+        else:
+            try:
+                participating_codes = canonicalize_participating_campus_rows(
+                    cycle_course.offering_snapshots.order_by(
+                        "campus__code", "campus_id"
+                    ).values_list("campus_id", "campus__code")
+                )
+            except Stage6CampusCodeAmbiguity as exc:
+                cls._block(blockers, "CAMPUS_CODE_INVALID", str(exc))
         campus_quotas = {}
         difficulty_quotas = {}
         final_count = configuration.final_item_count if configuration else None
-        if final_count is not None and 50 <= final_count <= 75:
+        if (
+            not automatic_flat_mode
+            and final_count is not None
+            and 50 <= final_count <= 75
+        ):
             try:
                 campus_quotas = allocate_campuses(final_count, participating_codes)
             except AllocationError as exc:
@@ -299,9 +375,14 @@ class Stage6ReadinessService:
             if final_count is not None and sum(section_quotas.values()) != final_count:
                 cls._block(blockers, "SECTION_QUOTA_INVALID", "Section quotas must equal the final item count exactly.")
 
+        pool_kwargs = (
+            {"participating_campus_ids": automatic_participating_ids}
+            if automatic_flat_mode
+            else {"participating_codes": participating_codes}
+        )
         eligible_questions, invalid_question_count = eligible_submitted_question_pool(
             cycle_course=cycle_course,
-            participating_codes=participating_codes,
+            **pool_kwargs,
         )
         duplicate_question_count = 0
         if automatic_flat_mode:
@@ -315,6 +396,58 @@ class Stage6ReadinessService:
                 "Submitted question rows with invalid payload or frozen campus evidence were excluded.",
                 invalid_count=invalid_question_count,
             )
+
+        if automatic_flat_mode:
+            represented_campus_ids = {
+                question.contribution.source_campus_id for question in eligible_questions
+            }
+            missing_campus_ids = tuple(
+                campus_id
+                for campus_id in automatic_participating_ids
+                if campus_id not in represented_campus_ids
+            )
+            missing_campus_names = tuple(
+                automatic_campus_labels[campus_id]
+                for campus_id in missing_campus_ids
+            )
+            if missing_campus_ids:
+                details = {
+                    "campus_names": missing_campus_names,
+                    "missing_campus_count": len(missing_campus_ids),
+                }
+                message = (
+                    "No usable unique Submitted questions represent: "
+                    + ", ".join(missing_campus_names)
+                    + "."
+                )
+                if (
+                    cycle_course.cycle.automatic_campus_contribution_policy
+                    == ExaminationCycle.AutomaticCampusContributionPolicy.AVAILABLE_WITH_WARNING
+                ):
+                    cls._warn(
+                        warnings,
+                        "MISSING_CAMPUS_REPRESENTATION",
+                        message
+                        + " Feasible allocation will use represented campuses only.",
+                        **details,
+                    )
+                    allocation_campus_ids = represented_campus_ids
+                else:
+                    cls._block(
+                        blockers,
+                        "MISSING_CAMPUS_REPRESENTATION",
+                        message,
+                        **details,
+                    )
+                    allocation_campus_ids = automatic_participating_ids
+            else:
+                allocation_campus_ids = automatic_participating_ids
+            if final_count is not None and 50 <= final_count <= 75:
+                campus_quotas = automatic_campus_allocate(
+                    total=final_count,
+                    campus_ids=allocation_campus_ids,
+                )
+                difficulty_quotas = allocate_difficulties(final_count)
 
         eligible_ids = {question.id for question in eligible_questions}
         placement_by_question = {}
@@ -397,7 +530,12 @@ class Stage6ReadinessService:
             )
 
         available_by_campus = Counter(
-            question.stage6_campus_code for question in eligible_questions
+            (
+                question.contribution.source_campus_id
+                if automatic_flat_mode
+                else question.stage6_campus_code
+            )
+            for question in eligible_questions
         )
         available_by_difficulty = Counter(
             question.difficulty for question in eligible_questions
@@ -414,10 +552,15 @@ class Stage6ReadinessService:
             shortages.append(
                 {"dimension": "total", "label": "Total", "required": final_count, "available": len(eligible_questions)}
             )
-        for code, required in campus_quotas.items():
-            available = available_by_campus[code]
+        for campus_key, required in campus_quotas.items():
+            available = available_by_campus[campus_key]
             if available < required:
-                shortages.append({"dimension": "campus", "label": code.title(), "required": required, "available": available})
+                label = (
+                    automatic_campus_labels[campus_key]
+                    if automatic_flat_mode
+                    else campus_key.title()
+                )
+                shortages.append({"dimension": "campus", "label": label, "required": required, "available": available})
         for code, required in difficulty_quotas.items():
             available = available_by_difficulty[code]
             if available < required:
@@ -452,6 +595,8 @@ class Stage6ReadinessService:
             "ACTIVE_CONTRIBUTORS_INCOMPLETE",
             "BLOCKED_DRAFTS_UNRESOLVED",
             "CAMPUS_CODE_INVALID",
+            "CAMPUS_PARTICIPATION_MISSING",
+            "MISSING_CAMPUS_REPRESENTATION",
             "BLUEPRINT_MISSING",
             "BLUEPRINT_STRUCTURE_INVALID",
             "SECTION_QUOTA_INVALID",
@@ -473,9 +618,14 @@ class Stage6ReadinessService:
                     or blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
                     else placement_by_question[question.id]
                 )
+                campus_key = (
+                    question.contribution.source_campus_id
+                    if automatic_flat_mode
+                    else question.stage6_campus_code
+                )
                 return (
                     1,
-                    *(1 if question.stage6_campus_code == key else 0 for key in campus_order),
+                    *(1 if campus_key == key else 0 for key in campus_order),
                     *(1 if question.difficulty == key else 0 for key in difficulty_order),
                     *(1 if section_key == key else 0 for key in section_order),
                 )
@@ -525,6 +675,7 @@ class Stage6ReadinessService:
             "ready": not blockers,
             "status": "READY" if not blockers else "BLOCKED",
             "blockers": blockers,
+            "warnings": warnings,
             "shortages": shortages,
             "campus_quotas": campus_quotas,
             "difficulty_quotas": difficulty_quotas,
@@ -634,7 +785,13 @@ class Stage6ReadinessService:
                                 contributor_id=generation_questions[
                                     member.question_id
                                 ].contributor_id,
-                                campus=generation_questions[member.question_id].campus_code,
+                                campus=(
+                                    generation_questions[member.question_id].campus_id
+                                    if automatic_flat_mode
+                                    else generation_questions[
+                                        member.question_id
+                                    ].campus_code
+                                ),
                                 difficulty=generation_questions[
                                     member.question_id
                                 ].difficulty,
@@ -659,7 +816,11 @@ class Stage6ReadinessService:
                             IdentityMember(
                                 source_id=question.id,
                                 contributor_id=data.contributor_id,
-                                campus=data.campus_code,
+                                campus=(
+                                    data.campus_id
+                                    if automatic_flat_mode
+                                    else data.campus_code
+                                ),
                                 difficulty=data.difficulty,
                                 section_id=data.section_id,
                             ),
@@ -706,6 +867,14 @@ class Stage6ReadinessService:
             }
             if automatic_flat_mode:
                 fingerprint_payload["structure_mode"] = "AUTOMATIC_FLAT"
+                fingerprint_payload["automatic_policies"] = {
+                    "campus_contribution": (
+                        cycle_course.cycle.automatic_campus_contribution_policy
+                    ),
+                    "contributor_completion": (
+                        cycle_course.cycle.automatic_contributor_completion_policy
+                    ),
+                }
             problem = GenerationProblem(
                 cycle_course=cycle_course,
                 configuration=configuration,

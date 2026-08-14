@@ -2,7 +2,8 @@ from unittest.mock import patch
 from io import StringIO
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import PermissionDenied
+from django.conf import settings
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
@@ -34,7 +35,12 @@ from .blueprint_services import (
     Stage6Conflict,
 )
 from .contribution_services import QuestionPayloadService
-from .generation_algorithms import FeasibilityResult
+from .generation_algorithms import (
+    FeasibilityResult,
+    IdentitySelectionResult,
+    proportional_campus_difficulty_score,
+    solve_identity_aware_two_sets,
+)
 from .generation_readiness import Stage6ReadinessService
 from .generation_services import ExamGenerationService
 from .models import (
@@ -46,11 +52,17 @@ from .models import (
     ExamScenario,
     ExaminationCycle,
     FacultyContribution,
+    FacultyContributionEligibilitySource,
+    GeneratedExamItem,
+    GeneratedExamSet,
     Question,
     QuestionBlueprintPlacement,
 )
 from .stage4_test_support import Stage4TestCase
-from .services import DepartmentalExamAuthorizationService
+from .services import (
+    DepartmentalExamAuthorizationService,
+    ExaminationCycleConfigurationService,
+)
 from .tests_stage6_generation import Stage6BGenerationFixtureMixin
 
 
@@ -160,15 +172,145 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             configuration.refresh_from_db()
         return parent, configuration, problem
 
+    def _proved_selection_for(self, *, parent, problem):
+        if (
+            parent.cycle.processing_mode
+            != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+        ):
+            return self.proved_selection(problem)
+        return solve_identity_aware_two_sets(
+            margins=problem.margins,
+            blocks=problem.blocks,
+            minimum_overlap=problem.minimum_overlap,
+            campus_quotas=problem.campus_quotas,
+            difficulty_quotas=problem.difficulty_quotas,
+            secret=settings.SECRET_KEY,
+            hmac_context={"test_selection": "automatic"},
+        )
+
     def _process_with_proved_selection(self, *, parent, problem):
+        current_problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        selection = self._proved_selection_for(parent=parent, problem=current_problem)
+        self.assertTrue(selection.feasible)
         with patch(
             "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
-            return_value=self.proved_selection(problem),
+            return_value=selection,
         ):
             return AutomaticExamDeadlineService.process_course(
                 cycle_course_id=parent.id,
                 tenant_id=self.tenant.id,
             )
+
+    @staticmethod
+    def _identical_pool_selection(problem):
+        blocks = tuple(problem.blocks)
+        cell_counts = {}
+        contributor_counts = {}
+        for block in blocks:
+            for member in block.members:
+                cell = (member.campus, member.difficulty)
+                cell_counts[cell] = cell_counts.get(cell, 0) + 1
+                contributor_counts[member.contributor_id] = (
+                    contributor_counts.get(member.contributor_id, 0) + 2
+                )
+        per_set_score = proportional_campus_difficulty_score(
+            total=problem.final_count,
+            campus_quotas=problem.campus_quotas,
+            difficulty_quotas=problem.difficulty_quotas,
+            cell_counts=cell_counts,
+        )
+        return IdentitySelectionResult(
+            feasible=True,
+            limit_hit=False,
+            states_explored=1,
+            set_a_block_ids=tuple(block.block_id for block in blocks),
+            set_b_block_ids=tuple(block.block_id for block in blocks),
+            overlap=problem.final_count,
+            proportional_score=per_set_score * 2,
+            contributors_represented=len(contributor_counts),
+            squared_contributor_concentration=sum(
+                amount * amount for amount in contributor_counts.values()
+            ),
+        )
+
+    @staticmethod
+    def _set_automatic_policies(
+        parent,
+        *,
+        campus_policy=None,
+        contributor_policy=None,
+    ):
+        cycle = parent.cycle
+        fields = ["updated_at"]
+        if campus_policy is not None:
+            cycle.automatic_campus_contribution_policy = campus_policy
+            fields.append("automatic_campus_contribution_policy")
+        if contributor_policy is not None:
+            cycle.automatic_contributor_completion_policy = contributor_policy
+            fields.append("automatic_contributor_completion_policy")
+        cycle.save(update_fields=fields)
+        parent.cycle = cycle
+
+    @staticmethod
+    def _retain_one_participating_campus(parent):
+        retained = (
+            parent.offering_snapshots.select_related("campus")
+            .order_by("campus_id", "id")
+            .first()
+        )
+        CycleCourseOffering.objects.filter(cycle_course=parent).exclude(
+            pk=retained.pk
+        ).delete()
+        Question.objects.filter(contribution__cycle_course=parent).exclude(
+            contribution__source_campus_id=retained.campus_id
+        ).delete()
+        return retained
+
+    def _four_active_two_submitted_course(self):
+        parent, configuration, _problem = self._ready_automatic_course()
+        draft = (
+            FacultyContribution.objects.filter(cycle_course=parent)
+            .order_by("id")
+            .last()
+        )
+        FacultyContribution.objects.filter(pk=draft.pk).update(
+            status=FacultyContribution.Status.DRAFT,
+            submitted_at=None,
+        )
+        snapshot = (
+            parent.offering_snapshots.select_related("campus", "offering")
+            .order_by("campus_id", "id")
+            .first()
+        )
+        faculty, assignment = self.add_faculty_source(
+            parent=parent,
+            campus=snapshot.campus,
+            offering=snapshot.offering,
+            suffix="fourth-active",
+        )
+        extra = FacultyContribution.objects.create(
+            cycle_course=parent,
+            faculty_user=faculty,
+            source_assignment=assignment,
+            source_campus=snapshot.campus,
+            quota_snapshot=configuration.questions_required_per_faculty,
+            configuration_revision_snapshot=configuration.revision,
+            roster_status=FacultyContribution.RosterStatus.ACTIVE,
+            status=FacultyContribution.Status.DRAFT,
+        )
+        FacultyContributionEligibilitySource.objects.create(
+            contribution=extra,
+            assignment=assignment,
+            assignment_id_snapshot=assignment.id,
+            offering_id_snapshot=assignment.offering_id,
+            tenant_id_snapshot=assignment.tenant_id,
+            campus_id_snapshot=assignment.campus_id,
+            is_current=True,
+        )
+        return parent
 
     def _ready_sectioned_automatic_course(self, *, include_scenario=False):
         parent, configuration, _contributions, _assignments, blueprint, sections = (
@@ -362,6 +504,256 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             configuration.automatic_processing_status,
             CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED,
         )
+
+    def test_automatic_single_campus_exact_pool_generates_with_distinct_deterministic_set_orders(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        retained = self._retain_one_participating_campus(parent)
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertEqual(problem.final_count, 50)
+        self.assertEqual(len(problem.questions), 50)
+        self.assertEqual(problem.campus_quotas, {retained.campus_id: 50})
+        selection = self._identical_pool_selection(problem)
+        with patch(
+            "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
+            return_value=selection,
+        ):
+            first = AutomaticExamDeadlineService.process_course(
+                cycle_course_id=parent.id,
+                tenant_id=self.tenant.id,
+            )
+
+        revision = ExamGenerationRevision.objects.get(cycle_course=parent)
+        set_a = list(
+            GeneratedExamItem.objects.filter(
+                generated_set__generation_revision=revision,
+                generated_set__set_code=GeneratedExamSet.SetCode.A,
+            )
+            .order_by("position")
+            .values_list("source_question_id", flat=True)
+        )
+        set_b = list(
+            GeneratedExamItem.objects.filter(
+                generated_set__generation_revision=revision,
+                generated_set__set_code=GeneratedExamSet.SetCode.B,
+            )
+            .order_by("position")
+            .values_list("source_question_id", flat=True)
+        )
+        second = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+
+        self.assertEqual(first.status, "GENERATED")
+        self.assertEqual(second.code, "CURRENT_GENERATION_EXISTS")
+        self.assertEqual(set(set_a), set(set_b))
+        self.assertNotEqual(set_a, set_b)
+        self.assertEqual(
+            set_b,
+            list(
+                GeneratedExamItem.objects.filter(
+                    generated_set__generation_revision=revision,
+                    generated_set__set_code=GeneratedExamSet.SetCode.B,
+                )
+                .order_by("position")
+                .values_list("source_question_id", flat=True)
+            ),
+        )
+
+    def test_available_with_warning_uses_represented_campuses_and_records_warning(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        missing_snapshot = (
+            parent.offering_snapshots.select_related("campus")
+            .order_by("campus_id", "id")
+            .last()
+        )
+        Question.objects.filter(
+            contribution__cycle_course=parent,
+            contribution__source_campus_id=missing_snapshot.campus_id,
+        ).delete()
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        warnings = {item["code"]: item for item in readiness["warnings"]}
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertIn("MISSING_CAMPUS_REPRESENTATION", warnings)
+        self.assertIn(missing_snapshot.campus.name, warnings["MISSING_CAMPUS_REPRESENTATION"]["message"])
+        self.assertNotIn(missing_snapshot.campus_id, problem.campus_quotas)
+
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+        summary = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
+
+        self.assertEqual(result.status, "GENERATED")
+        self.assertIn(
+            "MISSING_CAMPUS_REPRESENTATION",
+            {item["code"] for item in summary["generated"][0]["warnings"]},
+        )
+
+    def test_strict_policy_preserves_missing_campus_blocker(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        missing_snapshot = (
+            parent.offering_snapshots.select_related("campus")
+            .order_by("campus_id", "id")
+            .last()
+        )
+        Question.objects.filter(
+            contribution__cycle_course=parent,
+            contribution__source_campus_id=missing_snapshot.campus_id,
+        ).delete()
+        self._set_automatic_policies(
+            parent,
+            campus_policy=(
+                ExaminationCycle.AutomaticCampusContributionPolicy.STRICT
+            ),
+        )
+
+        _problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertFalse(readiness["ready"])
+        self.assertIn(
+            "MISSING_CAMPUS_REPRESENTATION",
+            {item["code"] for item in readiness["blockers"]},
+        )
+        self.assertFalse(readiness["warnings"])
+
+    def test_sufficient_pool_uses_submitted_questions_and_warns_for_two_of_four_active_contributors(self):
+        parent = self._four_active_two_submitted_course()
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        warnings = {item["code"]: item for item in readiness["warnings"]}
+        draft_question_ids = set(
+            Question.objects.filter(
+                contribution__cycle_course=parent,
+                contribution__status=FacultyContribution.Status.DRAFT,
+            ).values_list("id", flat=True)
+        )
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertEqual(
+            {
+                "required": warnings["ACTIVE_CONTRIBUTORS_INCOMPLETE"]["required"],
+                "submitted": warnings["ACTIVE_CONTRIBUTORS_INCOMPLETE"]["submitted"],
+            },
+            {"required": 4, "submitted": 2},
+        )
+        self.assertFalse(draft_question_ids.intersection(problem.questions))
+
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+
+        self.assertEqual(result.status, "GENERATED")
+
+    def test_require_all_preserves_contributor_incomplete_blocker(self):
+        parent = self._four_active_two_submitted_course()
+        self._set_automatic_policies(
+            parent,
+            contributor_policy=(
+                ExaminationCycle.AutomaticContributorCompletionPolicy.REQUIRE_ALL
+            ),
+        )
+
+        _problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertFalse(readiness["ready"])
+        self.assertIn(
+            "ACTIVE_CONTRIBUTORS_INCOMPLETE",
+            {item["code"] for item in readiness["blockers"]},
+        )
+
+    def test_cycle_automatic_policies_are_draft_only(self):
+        cycle = self.make_cycle(status=ExaminationCycle.Status.DRAFT)
+        updated, changed = ExaminationCycleConfigurationService.save_cycle_configuration(
+            cycle_id=cycle.id,
+            tenant_id=self.tenant.id,
+            user=self.manager,
+            expected_updated_at=ExaminationCycleConfigurationService.transition_token(
+                cycle
+            ),
+            default_questions_required_per_faculty=(
+                cycle.default_questions_required_per_faculty
+            ),
+            default_final_item_count=cycle.default_final_item_count,
+            contributor_instructions=cycle.contributor_instructions,
+            processing_mode=cycle.processing_mode,
+            automatic_campus_contribution_policy=(
+                ExaminationCycle.AutomaticCampusContributionPolicy.STRICT
+            ),
+            automatic_contributor_completion_policy=(
+                ExaminationCycle.AutomaticContributorCompletionPolicy.REQUIRE_ALL
+            ),
+        )
+        self.assertTrue(changed)
+        self.assertEqual(
+            updated.automatic_campus_contribution_policy,
+            ExaminationCycle.AutomaticCampusContributionPolicy.STRICT,
+        )
+        self.assertEqual(
+            updated.automatic_contributor_completion_policy,
+            ExaminationCycle.AutomaticContributorCompletionPolicy.REQUIRE_ALL,
+        )
+        updated.status = ExaminationCycle.Status.OPEN
+        updated.save(update_fields=["status", "updated_at"])
+        with self.assertRaisesRegex(ValidationError, "Draft"):
+            ExaminationCycleConfigurationService.save_cycle_configuration(
+                cycle_id=updated.id,
+                tenant_id=self.tenant.id,
+                user=self.manager,
+                expected_updated_at=(
+                    ExaminationCycleConfigurationService.transition_token(updated)
+                ),
+                default_questions_required_per_faculty=(
+                    updated.default_questions_required_per_faculty
+                ),
+                default_final_item_count=updated.default_final_item_count,
+                contributor_instructions=updated.contributor_instructions,
+                processing_mode=updated.processing_mode,
+                automatic_campus_contribution_policy=(
+                    ExaminationCycle.AutomaticCampusContributionPolicy
+                    .AVAILABLE_WITH_WARNING
+                ),
+                automatic_contributor_completion_policy=(
+                    updated.automatic_contributor_completion_policy
+                ),
+                reason="A valid Open-cycle administrative reason.",
+            )
+
+    def test_manual_generation_does_not_apply_automatic_set_b_rotation(self):
+        parent, problem = self.ready_generation_course()
+        with patch(
+            "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
+            return_value=self.proved_selection(problem),
+        ), patch(
+            "apps.departmental_exams.generation_services.confidential_hmac_rank"
+        ) as rotation_rank:
+            outcome = ExamGenerationService.generate(
+                cycle_course_id=parent.id,
+                tenant_id=self.tenant.id,
+                actor=self.reviewer,
+                expected_current_revision=0,
+                expected_input_fingerprint=problem.input_fingerprint,
+                request_token="m" * 40,
+            )
+
+        self.assertFalse(outcome.reused)
+        rotation_rank.assert_not_called()
 
     def test_automatic_without_blueprint_builds_flat_problem_and_generates_sets(self):
         parent, _configuration, _problem = self._ready_automatic_course()
@@ -715,7 +1107,10 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertTrue(readiness["ready"], readiness["blockers"])
         with patch(
             "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
-            return_value=self.proved_selection(refreshed_problem),
+            return_value=self._proved_selection_for(
+                parent=parent,
+                problem=refreshed_problem,
+            ),
         ):
             outcome = ExamGenerationService.generate(
                 cycle_course_id=parent.id,
@@ -774,8 +1169,9 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         # generation by returning a structurally valid selection for the same pool.
         with patch(
             "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
-            side_effect=lambda **kwargs: self.proved_selection(
-                Stage6ReadinessService.build_problem(cycle_course=parent)[0]
+            side_effect=lambda **kwargs: self._proved_selection_for(
+                parent=parent,
+                problem=Stage6ReadinessService.build_problem(cycle_course=parent)[0],
             ),
         ):
             result = AutomaticExamDeadlineService.process_course(
@@ -1112,7 +1508,10 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertTrue(readiness["ready"], readiness["blockers"])
         with patch(
             "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
-            return_value=self.proved_selection(fresh_problem),
+            return_value=self._proved_selection_for(
+                parent=parent,
+                problem=fresh_problem,
+            ),
         ):
             result = AutomaticExamDeadlineService.process_course(
                 cycle_course_id=parent.id,
@@ -1239,7 +1638,10 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertTrue(readiness["ready"], readiness["blockers"])
         with patch(
             "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
-            return_value=self.proved_selection(fresh_problem),
+            return_value=self._proved_selection_for(
+                parent=parent,
+                problem=fresh_problem,
+            ),
         ):
             ExamGenerationService.generate(
                 cycle_course_id=parent.id,

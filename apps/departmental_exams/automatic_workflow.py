@@ -868,6 +868,9 @@ class AutomaticGenerationSummaryService:
             }
             if current:
                 sets = {item.set_code: item for item in current.generated_sets.all()}
+                current_readiness = Stage6ReadinessService.evaluate(
+                    cycle_course=course
+                )
                 generated.append(
                     {
                         **common,
@@ -879,6 +882,7 @@ class AutomaticGenerationSummaryService:
                             if "A" in sets
                             else {}
                         ),
+                        "warnings": current_readiness.get("warnings", ()),
                     }
                 )
                 continue
@@ -967,6 +971,7 @@ class AutomaticGenerationSummaryService:
                     "status": status,
                     "reason": readiness_blocker_text(report),
                     "recommended_action": readiness_recommendation(report),
+                    "warnings": report.get("warnings", ()),
                     "configuration": configuration,
                 }
             )

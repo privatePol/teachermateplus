@@ -688,6 +688,54 @@ class CAOAuthorizationRouteTests(Stage4TestCase):
         payload.update(updates)
         return signing.dumps(payload, salt=views._CYCLE_DEFAULTS_CONFIRMATION_SALT)
 
+    def test_signed_confirmation_carries_automatic_generation_policies(self):
+        cycle = self.make_cycle(scope_suffix="automatic-policy-confirmation")
+        self.client.force_login(self.manager)
+        confirmation = self.client.post(
+            reverse("departmental_exams:cycle_configuration", args=[cycle.id]),
+            {
+                "expected_updated_at": ExaminationCycleConfigurationService.transition_token(
+                    cycle
+                ),
+                "default_questions_required_per_faculty": 50,
+                "default_final_item_count": 50,
+                "contributor_instructions": "",
+                "automatic_campus_contribution_policy": (
+                    ExaminationCycle.AutomaticCampusContributionPolicy.STRICT
+                ),
+                "automatic_contributor_completion_policy": (
+                    ExaminationCycle.AutomaticContributorCompletionPolicy.REQUIRE_ALL
+                ),
+            },
+        )
+        self.assertEqual(confirmation.status_code, 200)
+        state = confirmation.context["form"]["confirmation_state"].value()
+        payload = signing.loads(state, salt=views._CYCLE_DEFAULTS_CONFIRMATION_SALT)
+        self.assertEqual(
+            payload["automatic_campus_contribution_policy"],
+            ExaminationCycle.AutomaticCampusContributionPolicy.STRICT,
+        )
+        self.assertEqual(
+            payload["automatic_contributor_completion_policy"],
+            ExaminationCycle.AutomaticContributorCompletionPolicy.REQUIRE_ALL,
+        )
+
+        applied = self.client.post(
+            reverse("departmental_exams:cycle_apply_defaults", args=[cycle.id]),
+            {"confirmation_state": state},
+        )
+
+        self.assertEqual(applied.status_code, 302)
+        cycle.refresh_from_db()
+        self.assertEqual(
+            cycle.automatic_campus_contribution_policy,
+            ExaminationCycle.AutomaticCampusContributionPolicy.STRICT,
+        )
+        self.assertEqual(
+            cycle.automatic_contributor_completion_policy,
+            ExaminationCycle.AutomaticContributorCompletionPolicy.REQUIRE_ALL,
+        )
+
     def test_rendered_confirmation_form_posts_to_writer_and_propagates_defaults(self):
         cycle = self.make_cycle(scope_suffix="browser-shaped-confirmation")
         parent = self.make_course(cycle=cycle, code="BROWSER-CONFIRM")

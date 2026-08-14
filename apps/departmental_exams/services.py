@@ -262,6 +262,12 @@ class ExaminationCycleConfigurationService:
         coverage = cycle.default_coverage or ""
         return {
             "processing_mode": cycle.processing_mode,
+            "automatic_campus_contribution_policy": (
+                cycle.automatic_campus_contribution_policy
+            ),
+            "automatic_contributor_completion_policy": (
+                cycle.automatic_contributor_completion_policy
+            ),
             "default_questions_required_per_faculty": cycle.default_questions_required_per_faculty,
             "default_final_item_count": cycle.default_final_item_count,
             "default_contribution_deadline": cycle.default_contribution_deadline,
@@ -465,7 +471,7 @@ class ExaminationCycleConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, default_questions_required_per_faculty, default_final_item_count, contributor_instructions, default_contribution_deadline=None, default_coverage=None, processing_mode=None, reason="", request=None):
+    def save_cycle_configuration(cls, *, cycle_id, tenant_id, user, expected_updated_at, default_questions_required_per_faculty, default_final_item_count, contributor_instructions, default_contribution_deadline=None, default_coverage=None, processing_mode=None, automatic_campus_contribution_policy=None, automatic_contributor_completion_policy=None, reason="", request=None):
         cycle = cls._lock_cycle(cycle_id=cycle_id, tenant_id=tenant_id)
         DepartmentalExamAuthorizationService.require_permission(user=user, permission="departmental_exams.manage_cycles", tenant_id=tenant_id)
         if cycle.status == ExaminationCycle.Status.CLOSED:
@@ -477,6 +483,31 @@ class ExaminationCycleConfigurationService:
             raise ValidationError("Unsupported examination processing mode.")
         if cycle.status != ExaminationCycle.Status.DRAFT and processing_mode != cycle.processing_mode:
             raise ValidationError("Processing mode can change only while the cycle is Draft.")
+        automatic_campus_contribution_policy = (
+            automatic_campus_contribution_policy
+            or cycle.automatic_campus_contribution_policy
+        )
+        automatic_contributor_completion_policy = (
+            automatic_contributor_completion_policy
+            or cycle.automatic_contributor_completion_policy
+        )
+        if (
+            automatic_campus_contribution_policy
+            not in ExaminationCycle.AutomaticCampusContributionPolicy.values
+            or automatic_contributor_completion_policy
+            not in ExaminationCycle.AutomaticContributorCompletionPolicy.values
+        ):
+            raise ValidationError("Unsupported automatic generation policy.")
+        policies_changed = (
+            cycle.automatic_campus_contribution_policy
+            != automatic_campus_contribution_policy
+            or cycle.automatic_contributor_completion_policy
+            != automatic_contributor_completion_policy
+        )
+        if cycle.status != ExaminationCycle.Status.DRAFT and policies_changed:
+            raise ValidationError(
+                "Automatic generation policies can change only while the cycle is Draft."
+            )
         for value in (default_questions_required_per_faculty, default_final_item_count):
             if value is not None and not 50 <= value <= 75:
                 raise ValidationError("Cycle defaults must be from 50 to 75.")
@@ -514,6 +545,7 @@ class ExaminationCycleConfigurationService:
         changed = (
             defaults_changed
             or cycle.processing_mode != processing_mode
+            or policies_changed
             or cycle.contributor_instructions != contributor_instructions
         )
         if not changed:
@@ -523,11 +555,17 @@ class ExaminationCycleConfigurationService:
         cycle.default_contribution_deadline = effective_default_deadline
         cycle.default_coverage = default_coverage
         cycle.processing_mode = processing_mode
+        cycle.automatic_campus_contribution_policy = (
+            automatic_campus_contribution_policy
+        )
+        cycle.automatic_contributor_completion_policy = (
+            automatic_contributor_completion_policy
+        )
         if defaults_changed:
             cycle.defaults_revision += 1
         cycle.contributor_instructions = contributor_instructions
         cycle.full_clean()
-        cycle.save(update_fields=["processing_mode", "default_questions_required_per_faculty", "default_final_item_count", "default_contribution_deadline", "default_coverage", "defaults_revision", "contributor_instructions", "updated_at"])
+        cycle.save(update_fields=["processing_mode", "automatic_campus_contribution_policy", "automatic_contributor_completion_policy", "default_questions_required_per_faculty", "default_final_item_count", "default_contribution_deadline", "default_coverage", "defaults_revision", "contributor_instructions", "updated_at"])
         propagation = (
             cls._propagate_defaults_to_drafts(cycle=cycle, changed_defaults={key for key, value in (("questions_required_per_faculty", default_questions_required_per_faculty), ("final_item_count", default_final_item_count), ("contribution_deadline", effective_default_deadline), ("coverage", default_coverage)) if getattr(cycle, f"default_{key}") != (before[f"default_{key}"] if key != "coverage" else prior_default_coverage)})
             if defaults_changed

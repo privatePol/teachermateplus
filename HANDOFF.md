@@ -3393,3 +3393,41 @@ Do not run this command in production. It refuses when `DEBUG=False`, but TEST d
 - Run `python manage.py check`.
 - Run `python manage.py migrate` if migrations exist.
 - Smoke-test impacted Admin and Faculty flows.
+
+## 2026-08-14 — Automatic Generation policy configuration
+
+### Completed
+- Added cycle-scoped Automatic policies for campus representation and contributor completion, both Draft-only and included in signed cycle-default confirmation.
+- Automatic readiness now uses participating Campus IDs from offering snapshots, emits structured warnings when the configured warning policies permit generation, and continues to block stale rosters, invalid pools, and hard-constraint failures.
+- Added deterministic Set B reordering when Automatic selections have the exact same A/B block sequence. Manual ordering remains unchanged.
+- Added migration `departmental_exams.0014_automatic_generation_policies`; it has not been applied to the normal local database.
+
+### Changed Files
+- `apps/departmental_exams/models.py`
+- `apps/departmental_exams/migrations/0014_automatic_generation_policies.py`
+- `apps/departmental_exams/forms.py`
+- `apps/departmental_exams/views.py`
+- `apps/departmental_exams/services.py`
+- `apps/departmental_exams/generation_readiness.py`
+- `apps/departmental_exams/generation_services.py`
+- `apps/departmental_exams/automatic_workflow.py`
+- `apps/departmental_exams/tests_automatic_workflow.py`
+- `apps/departmental_exams/tests_stage4_authorization.py`
+- `apps/departmental_exams/tests_stage6_campus_codes.py`
+- `templates/departmental_exams/admin/automatic_generation_summary.html`
+- `templates/departmental_exams/admin/cycle_configuration.html`
+- `templates/departmental_exams/admin/cycle_defaults_confirm.html`
+- `HANDOFF.md`
+
+### Validation Performed
+- Passed 7 focused Automatic-policy tests.
+- Passed 37 Automatic workflow tests, 10 Stage 6 campus-code tests, 14 Stage 6 generation tests, and 6 signed-confirmation tests.
+- Passed `git diff --check`, `python -B manage.py check`, and `python -B manage.py makemigrations --check --dry-run`.
+- `python -B manage.py migrate --plan` lists `departmental_exams.0014_automatic_generation_policies` with the two expected AddField operations; it was not applied.
+
+### Known Issues / Risks
+- No normal local migration, commit, push, deploy, restart, or manual browser smoke test was performed in this implementation gate.
+
+### Exact Next Steps
+1. Inspect the complete diff and final repository status at the next review/commit gate.
+2. Obtain a separate authorization before applying the migration, committing, pushing, deploying, restarting, or changing excluded documentation.

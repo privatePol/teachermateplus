@@ -106,6 +106,12 @@ def _cycle_defaults_confirmation_token(*, request, cycle, tenant_id, cleaned_dat
             "cycle_id": cycle.id,
             "expected_updated_at": cleaned_data["expected_updated_at"],
             "processing_mode": cleaned_data["processing_mode"],
+            "automatic_campus_contribution_policy": cleaned_data[
+                "automatic_campus_contribution_policy"
+            ],
+            "automatic_contributor_completion_policy": cleaned_data[
+                "automatic_contributor_completion_policy"
+            ],
             "default_questions_required_per_faculty": cleaned_data[
                 "default_questions_required_per_faculty"
             ],
@@ -143,6 +149,8 @@ def _load_cycle_defaults_confirmation(*, request, cycle, tenant_id):
         "cycle_id",
         "expected_updated_at",
         "processing_mode",
+        "automatic_campus_contribution_policy",
+        "automatic_contributor_completion_policy",
         "default_questions_required_per_faculty",
         "default_final_item_count",
         "default_contribution_deadline",
@@ -331,6 +339,12 @@ def cycle_apply_defaults_view(request, cycle_id):
                 ],
                 default_coverage=confirmation_state["default_coverage"],
                 processing_mode=confirmation_state["processing_mode"],
+                automatic_campus_contribution_policy=confirmation_state[
+                    "automatic_campus_contribution_policy"
+                ],
+                automatic_contributor_completion_policy=confirmation_state[
+                    "automatic_contributor_completion_policy"
+                ],
                 contributor_instructions=confirmation_state["contributor_instructions"],
                 reason=confirmation_state["reason"],
                 request=request,
