@@ -1,8 +1,18 @@
 {% extends "admin_portal/base.html" %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
-<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Automatic Generation Summary</li></ol></nav>
-<header class="de-exam-hero"><div class="d-flex flex-wrap justify-content-between gap-3"><div><span class="badge text-bg-light text-dark mb-2">AUTOMATIC GENERATION</span><h1>Cycle Processing Summary</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }}</p></div><a class="btn btn-light btn-sm" href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Departmental Exam Builder</a></div></header>
+<div data-automatic-summary aria-busy="false">
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a data-automatic-action href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Automatic Generation Summary</li></ol></nav>
+<header class="de-exam-hero"><div class="d-flex flex-wrap justify-content-between gap-3"><div><span class="badge text-bg-light text-dark mb-2">AUTOMATIC GENERATION</span><h1>Cycle Processing Summary</h1><p>{{ cycle.academic_year }} &mdash; {{ cycle.term }} &mdash; {{ cycle.get_exam_period_display }}</p></div><a class="btn btn-light btn-sm" data-automatic-action href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Departmental Exam Builder</a></div></header>
+
+<div class="alert alert-info de-automatic-processing" data-automatic-processing role="status" aria-live="assertive" hidden>
+  <div class="fw-semibold mb-2">Processing Set A and Set B&hellip; Please wait.</div>
+  <div class="progress" role="progressbar" aria-label="Automatic Set A and Set B processing">
+    <div class="progress-bar progress-bar-striped progress-bar-animated bg-success w-100"></div>
+  </div>
+  <div class="small mt-2">Generation and reopen actions are unavailable until processing finishes.</div>
+</div>
+<div class="alert alert-danger" data-automatic-processing-error role="alert" hidden>Automatic processing could not be completed. Refresh the summary and try again.</div>
 
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3"><div class="de-generation-metric"><span class="small text-muted">Total applicable courses</span><strong>{{ total }}</strong></div></div>
@@ -14,14 +24,81 @@
 <section class="card de-exam-card mb-4" id="questionnaires-generated">
   <div class="card-body p-4"><div class="d-flex flex-wrap justify-content-between gap-2 mb-3"><div><h2 class="h4 mb-1">Questionnaires Generated</h2><p class="text-muted mb-0">Current non-confidential operational metadata. Generated content remains on permission-protected detail pages.</p></div><span class="badge text-bg-success">{{ generated_count }}</span></div>
   <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Course</th><th>Campuses</th><th>Revision</th><th>Sets / items</th><th>Difficulty</th><th>Overlap</th><th>Contributors</th><th>Warnings</th><th>Generated</th><th class="text-end">Actions</th></tr></thead><tbody>
-  {% for item in generated %}<tr><td><strong>{{ item.course.course.code }}</strong><div class="small text-muted">{{ item.course.course.title }}</div></td><td>{{ item.campuses|join:", " }}</td><td>R{{ item.revision.revision_number }}<div class="small text-muted">{{ item.revision.get_status_display }} / Current</div></td><td>A: {{ item.set_a_generated|yesno:"Generated,Missing" }}<br>B: {{ item.set_b_generated|yesno:"Generated,Missing" }}<div class="small text-muted">{{ item.revision.final_item_count_snapshot }} per set</div></td><td class="small">Easy {{ item.difficulty_quotas.EASY|default:"0" }} / Moderate {{ item.difficulty_quotas.MODERATE|default:"0" }} / Difficult {{ item.difficulty_quotas.DIFFICULT|default:"0" }}</td><td>{{ item.revision.minimum_overlap }}</td><td>{{ item.submitted_contributors }} submitted / {{ item.eligible_contributors }} eligible<div class="small text-muted">{{ item.revision.contributors_represented }} represented in A+B</div></td><td class="small">{% if item.pool_metrics.submitted != None %}<div>{{ item.pool_metrics.submitted }} submitted &bull; {{ item.pool_metrics.unique }} unique &bull; {{ item.pool_metrics.redundant }} duplicate copies automatically ignored</div>{% endif %}{% for warning in item.warnings %}{% if warning.code != "REDUNDANT_DUPLICATE_QUESTIONS" %}<div>{{ warning.message }}</div>{% endif %}{% empty %}{% if item.pool_metrics.submitted == None %}<span class="text-muted">None</span>{% endif %}{% endfor %}</td><td>{{ item.revision.generated_at|date:"M j, Y g:i A" }}<div class="small text-muted">{{ item.revision.get_generation_trigger_display }}</div></td><td class="text-end"><div class="d-grid gap-1"><a class="btn btn-sm btn-outline-primary" href="{% url 'departmental_exams:generated_revision_detail' item.revision.id %}">View Current Generation</a>{% if item.can_manage_generation %}<a class="btn btn-sm btn-outline-warning" href="{% url 'departmental_exams:generation_workspace' item.course.id %}#generation-actions">Regenerate Set A &amp; Set B</a><a class="btn btn-sm btn-outline-secondary" href="{% url 'departmental_exams:automatic_contribution_reopen' item.course.id %}">Reopen Contributions</a>{% endif %}</div></td></tr>{% empty %}<tr><td colspan="10" class="text-muted">No current questionnaires have been generated.</td></tr>{% endfor %}
+  {% for item in generated %}<tr><td><strong>{{ item.course.course.code }}</strong><div class="small text-muted">{{ item.course.course.title }}</div></td><td>{{ item.campuses|join:", " }}</td><td>R{{ item.revision.revision_number }}<div class="small text-muted">{{ item.revision.get_status_display }} / Current</div></td><td>A: {{ item.set_a_generated|yesno:"Generated,Missing" }}<br>B: {{ item.set_b_generated|yesno:"Generated,Missing" }}<div class="small text-muted">{{ item.revision.final_item_count_snapshot }} per set</div></td><td class="small">Easy {{ item.difficulty_quotas.EASY|default:"0" }} / Moderate {{ item.difficulty_quotas.MODERATE|default:"0" }} / Difficult {{ item.difficulty_quotas.DIFFICULT|default:"0" }}</td><td>{{ item.revision.minimum_overlap }}</td><td>{{ item.submitted_contributors }} submitted / {{ item.eligible_contributors }} eligible<div class="small text-muted">{{ item.revision.contributors_represented }} represented in A+B</div></td><td class="small">{% if item.pool_metrics.submitted != None %}<div>{{ item.pool_metrics.submitted }} submitted &bull; {{ item.pool_metrics.unique }} unique &bull; {{ item.pool_metrics.redundant }} duplicate copies automatically ignored</div>{% endif %}{% for warning in item.warnings %}{% if warning.code != "REDUNDANT_DUPLICATE_QUESTIONS" %}<div>{{ warning.message }}</div>{% endif %}{% empty %}{% if item.pool_metrics.submitted == None %}<span class="text-muted">None</span>{% endif %}{% endfor %}</td><td>{{ item.revision.generated_at|date:"M j, Y g:i A" }}<div class="small text-muted">{{ item.revision.get_generation_trigger_display }}</div></td><td class="text-end"><div class="d-grid gap-1"><a class="btn btn-sm btn-outline-primary" data-automatic-action href="{% url 'departmental_exams:generated_revision_detail' item.revision.id %}">View Current Generation</a>{% if item.can_manage_generation %}{% if item.regeneration_form %}<form method="post" action="{% url 'departmental_exams:regenerate_exam' item.course.id %}" data-automatic-regeneration-form>{% csrf_token %}{{ item.regeneration_form.expected_current_revision }}{{ item.regeneration_form.input_fingerprint }}{{ item.regeneration_form.request_token }}<button class="btn btn-sm btn-outline-warning w-100" data-automatic-action type="submit">Regenerate Set A &amp; Set B</button></form>{% else %}<a class="btn btn-sm btn-outline-warning" data-automatic-action href="{% url 'departmental_exams:generation_workspace' item.course.id %}#generation-actions">Review Regeneration Readiness</a>{% endif %}<a class="btn btn-sm btn-outline-secondary" data-automatic-action href="{% url 'departmental_exams:automatic_contribution_reopen' item.course.id %}">Reopen Contributions</a>{% endif %}</div></td></tr>{% empty %}<tr><td colspan="10" class="text-muted">No current questionnaires have been generated.</td></tr>{% endfor %}
   </tbody></table></div></div>
 </section>
 
 <section class="card de-exam-card" id="questionnaires-not-generated">
   <div class="card-body p-4"><div class="d-flex flex-wrap justify-content-between gap-2 mb-3"><div><h2 class="h4 mb-1">Questionnaires Not Generated</h2><p class="text-muted mb-0">Actionable readiness status without question text, choices, answers, or source identities.</p></div><span class="badge text-bg-warning">{{ not_generated_count }}</span></div>
   <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Course</th><th>Campuses</th><th>Target</th><th>Status</th><th>Reason / recommended action</th><th class="text-end">Actions</th></tr></thead><tbody>
-  {% for item in not_generated %}<tr><td><strong>{{ item.course.course.code }}</strong><div class="small text-muted">{{ item.course.course.title }}</div></td><td>{{ item.campuses|join:", " }}</td><td>{{ item.target_count|default:"Not configured" }}</td><td>{{ item.status }}</td><td>{{ item.reason }}{% if item.pool_metrics.submitted != None %}<div class="small text-muted mt-1">{{ item.pool_metrics.submitted }} submitted &bull; {{ item.pool_metrics.unique }} unique &bull; {{ item.pool_metrics.redundant }} duplicate copies automatically ignored</div>{% endif %}{% for warning in item.warnings %}{% if warning.code != "REDUNDANT_DUPLICATE_QUESTIONS" %}<div class="small text-warning mt-1">{{ warning.message }}</div>{% endif %}{% endfor %}<div class="small text-muted mt-1">{{ item.recommended_action }}</div></td><td class="text-end">{% if item.can_manage_generation and item.configuration and item.configuration.workflow_status == 'CLOSED' %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'departmental_exams:automatic_contribution_reopen' item.course.id %}">Reopen Contributions</a>{% else %}<span class="text-muted small">No action currently available</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="text-muted">Every applicable course currently has a generated questionnaire.</td></tr>{% endfor %}
+  {% for item in not_generated %}<tr><td><strong>{{ item.course.course.code }}</strong><div class="small text-muted">{{ item.course.course.title }}</div></td><td>{{ item.campuses|join:", " }}</td><td>{{ item.target_count|default:"Not configured" }}</td><td>{{ item.status }}</td><td>{{ item.reason }}{% if item.pool_metrics.submitted != None %}<div class="small text-muted mt-1">{{ item.pool_metrics.submitted }} submitted &bull; {{ item.pool_metrics.unique }} unique &bull; {{ item.pool_metrics.redundant }} duplicate copies automatically ignored</div>{% endif %}{% for warning in item.warnings %}{% if warning.code != "REDUNDANT_DUPLICATE_QUESTIONS" %}<div class="small text-warning mt-1">{{ warning.message }}</div>{% endif %}{% endfor %}<div class="small text-muted mt-1">{{ item.recommended_action }}</div></td><td class="text-end">{% if item.can_manage_generation and item.configuration and item.configuration.workflow_status == 'CLOSED' %}<a class="btn btn-sm btn-outline-secondary" data-automatic-action href="{% url 'departmental_exams:automatic_contribution_reopen' item.course.id %}">Reopen Contributions</a>{% else %}<span class="text-muted small">No action currently available</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="text-muted">Every applicable course currently has a generated questionnaire.</td></tr>{% endfor %}
   </tbody></table></div></div>
 </section>
+</div>
+<script>
+(function () {
+  const root = document.querySelector('[data-automatic-summary]');
+  const progress = document.querySelector('[data-automatic-processing]');
+  const error = document.querySelector('[data-automatic-processing-error]');
+  const forms = document.querySelectorAll('[data-automatic-regeneration-form]');
+  const actions = document.querySelectorAll('[data-automatic-action]');
+  function setProcessing(active) {
+    root.setAttribute('aria-busy', active ? 'true' : 'false');
+    progress.hidden = !active;
+    actions.forEach(function (control) {
+      if ('disabled' in control) { control.disabled = active; }
+      control.classList.toggle('de-generation-control-disabled', active);
+      if (active) {
+        control.setAttribute('aria-disabled', 'true');
+        if (control.tagName === 'A') { control.setAttribute('tabindex', '-1'); }
+      } else {
+        control.removeAttribute('aria-disabled');
+        if (control.tagName === 'A') { control.removeAttribute('tabindex'); }
+      }
+    });
+  }
+  actions.forEach(function (control) {
+    control.addEventListener('click', function (event) {
+      if (root.getAttribute('aria-busy') === 'true') {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+  });
+  forms.forEach(function (form) {
+    form.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      if (root.getAttribute('aria-busy') === 'true') { return; }
+      const payload = new FormData(form);
+      error.hidden = true;
+      setProcessing(true);
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST',
+          body: payload,
+          credentials: 'same-origin',
+          headers: {'X-Requested-With': 'XMLHttpRequest'}
+        });
+        if (response.ok && response.redirected) {
+          window.location.assign(response.url);
+          return;
+        }
+        const responseDocument = new DOMParser().parseFromString(
+          await response.text(),
+          'text/html'
+        );
+        const safeMessage = responseDocument.querySelector('.alert');
+        if (safeMessage && safeMessage.textContent.trim()) {
+          error.textContent = safeMessage.textContent.trim();
+        }
+      } catch (_error) {
+        // The aggregate-only message below is intentionally content-safe.
+      }
+      setProcessing(false);
+      error.hidden = false;
+    });
+  });
+  window.addEventListener('pageshow', function () { setProcessing(false); });
+})();
+</script>
 {% endblock %}

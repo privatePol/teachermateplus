@@ -1,6 +1,7 @@
 from unittest.mock import patch
 from io import StringIO
 from collections import Counter
+from time import perf_counter
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
@@ -9,7 +10,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
 from django.http import Http404
-from django.test import Client
+from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -42,9 +43,13 @@ from .generation_algorithms import (
     IdentityMember,
     IdentitySelectionResult,
     proportional_campus_difficulty_score,
+    solve_automatic_identity_aware_two_sets,
     solve_identity_aware_two_sets,
 )
-from .generation_readiness import Stage6ReadinessService
+from .generation_readiness import (
+    Stage6ReadinessService,
+    resolve_automatic_generation_max_states,
+)
 from .generation_services import ExamGenerationService
 from .models import (
     CourseExamConfiguration,
@@ -181,10 +186,9 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             != ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
         ):
             return self.proved_selection(problem)
-        return solve_identity_aware_two_sets(
+        return solve_automatic_identity_aware_two_sets(
             margins=problem.margins,
             blocks=problem.blocks,
-            minimum_overlap=problem.minimum_overlap,
             campus_quotas=problem.campus_quotas,
             difficulty_quotas=problem.difficulty_quotas,
             secret=settings.SECRET_KEY,
@@ -200,7 +204,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         selection = self._proved_selection_for(parent=parent, problem=current_problem)
         self.assertTrue(selection.feasible, selection)
         with patch(
-            "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
             return_value=selection,
         ):
             return AutomaticExamDeadlineService.process_course(
@@ -637,7 +641,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         self.assertEqual(problem.campus_quotas, {retained.campus_id: 50})
         selection = self._identical_pool_selection(problem)
         with patch(
-            "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
             return_value=selection,
         ):
             first = AutomaticExamDeadlineService.process_course(
@@ -858,7 +862,9 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         with patch(
             "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
             return_value=self.proved_selection(problem),
-        ), patch(
+        ) as manual_solver, patch(
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets"
+        ) as automatic_solver, patch(
             "apps.departmental_exams.generation_services.confidential_hmac_rank"
         ) as rotation_rank:
             outcome = ExamGenerationService.generate(
@@ -871,7 +877,92 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             )
 
         self.assertFalse(outcome.reused)
+        self.assertEqual(
+            manual_solver.call_args.kwargs["max_states"],
+            ExamGenerationService.DEFAULT_MAX_STATES,
+        )
+        automatic_solver.assert_not_called()
         rotation_rank.assert_not_called()
+
+    @override_settings(DEPARTMENTAL_EXAM_GENERATION_MAX_STATES=123_456)
+    def test_automatic_readiness_and_generation_share_configured_state_budget(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+
+        with patch(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            wraps=solve_automatic_identity_aware_two_sets,
+        ) as readiness_solver, patch(
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
+            wraps=solve_automatic_identity_aware_two_sets,
+        ) as generation_solver:
+            result = AutomaticExamDeadlineService.process_course(
+                cycle_course_id=parent.id,
+                tenant_id=self.tenant.id,
+            )
+
+        self.assertEqual(result.status, "GENERATED")
+        self.assertGreaterEqual(readiness_solver.call_count, 2)
+        self.assertEqual(
+            {
+                call.kwargs["max_states"]
+                for call in readiness_solver.call_args_list
+            },
+            {123_456},
+        )
+        self.assertEqual(generation_solver.call_count, 1)
+        self.assertEqual(
+            generation_solver.call_args.kwargs["max_states"],
+            123_456,
+        )
+        self.assertEqual(GeneratedExamSet.objects.count(), 2)
+        self.assertEqual(GeneratedExamItem.objects.count(), 100)
+
+    @override_settings(DEPARTMENTAL_EXAM_GENERATION_MAX_STATES=1)
+    def test_automatic_very_low_state_budget_blocks_readiness_consistently(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        questions = list(
+            Question.objects.filter(contribution__cycle_course=parent).order_by("id")
+        )
+        for question in questions:
+            question.question_text = (
+                f"State-limit logical question {question.position}"
+            )
+        Question.objects.bulk_update(questions, ["question_text"])
+
+        with patch(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            wraps=solve_automatic_identity_aware_two_sets,
+        ) as readiness_solver, patch(
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
+            wraps=solve_automatic_identity_aware_two_sets,
+        ) as generation_solver:
+            problem, readiness = Stage6ReadinessService.build_problem(
+                cycle_course=parent
+            )
+            result = AutomaticExamDeadlineService.process_course(
+                cycle_course_id=parent.id,
+                tenant_id=self.tenant.id,
+            )
+
+        self.assertIsNone(problem)
+        self.assertTrue(readiness["solver_limit_hit"])
+        self.assertIn(
+            "FEASIBILITY_LIMIT",
+            {blocker["code"] for blocker in readiness["blockers"]},
+        )
+        self.assertEqual(readiness["unique_question_count"], 50)
+        self.assertEqual(readiness["duplicate_question_count"], 100)
+        self.assertEqual(result.status, "BLOCKED")
+        self.assertEqual(result.code, "FEASIBILITY_LIMIT")
+        self.assertEqual(
+            {
+                call.kwargs["max_states"]
+                for call in readiness_solver.call_args_list
+            },
+            {1},
+        )
+        generation_solver.assert_not_called()
+        self.assertFalse(ExamGenerationRevision.objects.exists())
 
     def test_automatic_without_blueprint_builds_flat_problem_and_generates_sets(self):
         parent, _configuration, _problem = self._ready_automatic_course()
@@ -954,6 +1045,18 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
         self._process_with_proved_selection(parent=parent, problem=problem)
         for generated_set in ExamGenerationRevision.objects.get().generated_sets.all():
+            self.assertEqual(
+                Counter(
+                    generated_set.items.values_list("source_campus_id", flat=True)
+                ),
+                Counter(problem.campus_quotas),
+            )
+            self.assertEqual(
+                Counter(
+                    generated_set.items.values_list("difficulty_snapshot", flat=True)
+                ),
+                Counter(problem.difficulty_quotas),
+            )
             fingerprints = [
                 QuestionPayloadService.question_fingerprint(item.question_text_snapshot)
                 for item in generated_set.items.all()
@@ -991,12 +1094,30 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
 
     def test_automatic_duplicate_metrics_use_raw_200_unique_123_semantics(self):
         parent, _configuration, _problem = self._ready_automatic_course()
+        self.assertEqual(resolve_automatic_generation_max_states(), 1_000_000)
+        base_problem, base_readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+        self.assertTrue(base_readiness["ready"], base_readiness["blockers"])
+        base_selection = self._proved_selection_for(
+            parent=parent,
+            problem=base_problem,
+        )
+        self.assertTrue(base_selection.feasible, base_selection)
+        self.assertEqual(base_selection.overlap, 0)
+        base_blocks = {
+            str(block.block_id): block for block in base_problem.blocks
+        }
+        selected_source_ids = {
+            base_blocks[str(block_id)].members[0].source_id
+            for block_id in (
+                base_selection.set_a_block_ids + base_selection.set_b_block_ids
+            )
+        }
+        self.assertEqual(len(selected_source_ids), 100)
         questions = list(
             Question.objects.filter(contribution__cycle_course=parent).order_by("id")
         )
-        for duplicate, source in zip(questions[123:], questions[:27]):
-            duplicate.question_text = source.question_text
-        Question.objects.bulk_update(questions[123:], ["question_text"])
         Question.objects.bulk_create(
             [
                 Question(
@@ -1015,10 +1136,37 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                 for question in questions[:50]
             ]
         )
+        questions = list(
+            Question.objects.filter(contribution__cycle_course=parent).order_by("id")
+        )
+        singleton_ids = list(selected_source_ids)
+        singleton_ids.extend(
+            question.id
+            for question in questions
+            if question.id not in singleton_ids
+        )
+        singleton_ids = set(singleton_ids[:121])
+        duplicate_rows = [
+            question for question in questions if question.id not in singleton_ids
+        ]
+        alpha_ids = {question.id for question in duplicate_rows[:39]}
+        for index, question in enumerate(questions):
+            if question.id in singleton_ids:
+                question.question_text = (
+                    f"SASA singleton logical question {index + 1}: "
+                    f"{question.question_text}"
+                )
+            elif question.id in alpha_ids:
+                question.question_text = "SASA alternative logical question alpha"
+            else:
+                question.question_text = "SASA alternative logical question beta"
+        Question.objects.bulk_update(questions, ["question_text"])
 
+        started = perf_counter()
         problem, readiness = Stage6ReadinessService.build_problem(
             cycle_course=parent
         )
+        readiness_elapsed = perf_counter() - started
 
         duplicate_warning = next(
             item
@@ -1034,11 +1182,23 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             len({block.logical_group_id for block in problem.blocks}),
             123,
         )
+        group_sizes = Counter(block.logical_group_id for block in problem.blocks)
+        self.assertEqual(sum(size == 1 for size in group_sizes.values()), 121)
+        self.assertEqual(
+            sorted(size for size in group_sizes.values() if size > 1),
+            [39, 40],
+        )
+        self.assertFalse(readiness["solver_limit_hit"])
+        self.assertLess(readiness["solver_states"], 250_000)
+        self.assertLess(readiness_elapsed, 30)
         self.assertEqual(
             duplicate_warning["message"],
             "200 submitted \u2022 123 unique \u2022 77 duplicate copies automatically ignored.",
         )
-        result = self._process_with_proved_selection(parent=parent, problem=problem)
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
         summary = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
 
         self.assertEqual(result.status, "GENERATED")
@@ -1050,6 +1210,26 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             "REDUNDANT_DUPLICATE_QUESTIONS",
             {item["code"] for item in summary["generated"][0]["warnings"]},
         )
+        for generated_set in ExamGenerationRevision.objects.get().generated_sets.all():
+            self.assertEqual(
+                Counter(
+                    generated_set.items.values_list("source_campus_id", flat=True)
+                ),
+                Counter(problem.campus_quotas),
+            )
+            self.assertEqual(
+                Counter(
+                    generated_set.items.values_list("difficulty_snapshot", flat=True)
+                ),
+                Counter(problem.difficulty_quotas),
+            )
+            fingerprints = [
+                QuestionPayloadService.question_fingerprint(question_text)
+                for question_text in generated_set.items.values_list(
+                    "question_text_snapshot", flat=True
+                )
+            ]
+            self.assertEqual(len(fingerprints), len(set(fingerprints)))
 
     def test_automatic_global_representatives_solve_exact_52_to_50_counterexample(self):
         parent, _configuration, _problem = self._ready_automatic_course()
@@ -1180,11 +1360,12 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         Question.objects.bulk_update(fairview_questions, ["question_text"])
 
         with patch(
-            "apps.departmental_exams.generation_readiness.solve_two_set_feasibility",
-            return_value=FeasibilityResult(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            return_value=IdentitySelectionResult(
                 feasible=True,
-                minimum_overlap=50,
+                limit_hit=False,
                 states_explored=1,
+                overlap=50,
             ),
         ):
             problem, readiness = Stage6ReadinessService.build_problem(
@@ -1266,6 +1447,9 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
 
         with patch(
+            "apps.departmental_exams.generation_readiness.solve_automatic_identity_aware_two_sets",
+            return_value=IdentitySelectionResult(False, False, 1),
+        ), patch(
             "apps.departmental_exams.generation_readiness.solve_two_set_feasibility",
             return_value=infeasible,
         ):
@@ -1510,7 +1694,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
         self.assertTrue(readiness["ready"], readiness["blockers"])
         with patch(
-            "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
             return_value=self._proved_selection_for(
                 parent=parent,
                 problem=refreshed_problem,
@@ -1572,7 +1756,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         # The processor closes first, so obtain the post-close problem inside
         # generation by returning a structurally valid selection for the same pool.
         with patch(
-            "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
             side_effect=lambda **kwargs: self._proved_selection_for(
                 parent=parent,
                 problem=Stage6ReadinessService.build_problem(cycle_course=parent)[0],
@@ -1605,6 +1789,11 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             body.index("Questionnaires Generated"),
             body.index("Questionnaires Not Generated"),
         )
+        self.assertContains(response, "Processing Set A and Set B")
+        self.assertContains(response, 'role="progressbar"')
+        self.assertContains(response, "data-automatic-regeneration-form")
+        self.assertContains(response, "data-automatic-action")
+        self.assertContains(response, "control.disabled = active")
         self.assertNotIn("Question 1-1", body)
         self.assertNotIn("Correct answer:", body)
 
@@ -1911,7 +2100,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
         self.assertTrue(readiness["ready"], readiness["blockers"])
         with patch(
-            "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
             return_value=self._proved_selection_for(
                 parent=parent,
                 problem=fresh_problem,
@@ -2041,7 +2230,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
         self.assertTrue(readiness["ready"], readiness["blockers"])
         with patch(
-            "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
+            "apps.departmental_exams.generation_services.solve_automatic_identity_aware_two_sets",
             return_value=self._proved_selection_for(
                 parent=parent,
                 problem=fresh_problem,

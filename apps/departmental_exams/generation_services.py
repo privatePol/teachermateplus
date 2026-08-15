@@ -17,9 +17,15 @@ from .generation_algorithms import (
     confidential_hmac_rank,
     order_selected_blocks,
     proportional_campus_difficulty_score,
+    solve_automatic_identity_aware_two_sets,
     solve_identity_aware_two_sets,
 )
-from .generation_readiness import GENERATION_ALGORITHM_VERSION, Stage6ReadinessService
+from .generation_readiness import (
+    AUTOMATIC_GENERATION_DEFAULT_MAX_STATES,
+    GENERATION_ALGORITHM_VERSION,
+    Stage6ReadinessService,
+    resolve_automatic_generation_max_states,
+)
 from .models import (
     BlockedContributionResolution,
     CycleCourse,
@@ -55,7 +61,7 @@ class GenerationOutcome:
 
 class ExamGenerationService:
     DEFAULT_MAX_STATES = 500_000
-    AUTOMATIC_DEFAULT_MAX_STATES = 1_000_000
+    AUTOMATIC_DEFAULT_MAX_STATES = AUTOMATIC_GENERATION_DEFAULT_MAX_STATES
 
     @staticmethod
     def request_token_digest(raw_token):
@@ -253,7 +259,15 @@ class ExamGenerationService:
 
         if configuration is None or (not automatic_mode and blueprint is None):
             raise GenerationConflict("Generation prerequisites changed. Refresh the workspace.")
-        problem, readiness = Stage6ReadinessService.build_problem(cycle_course=course)
+        automatic_state_budget = (
+            resolve_automatic_generation_max_states(max_states)
+            if automatic_mode
+            else None
+        )
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=course,
+            automatic_max_states=automatic_state_budget,
+        )
         if problem is None or not readiness["ready"]:
             raise GenerationConflict("Generation readiness changed. Refresh the workspace.")
         expected_fingerprint = str(expected_input_fingerprint or "").strip().lower()
@@ -287,30 +301,38 @@ class ExamGenerationService:
             "input_fingerprint": problem.input_fingerprint,
             "generation_revision": next_revision,
         }
-        default_limit = (
-            cls.AUTOMATIC_DEFAULT_MAX_STATES
-            if automatic_mode
-            else cls.DEFAULT_MAX_STATES
-        )
-        configured_limit = int(
-            max_states
-            if max_states is not None
-            else getattr(
-                settings,
-                "DEPARTMENTAL_EXAM_GENERATION_MAX_STATES",
-                default_limit,
+        if automatic_mode:
+            configured_limit = automatic_state_budget
+            selection = solve_automatic_identity_aware_two_sets(
+                margins=problem.margins,
+                blocks=problem.blocks,
+                campus_quotas=problem.campus_quotas,
+                difficulty_quotas=problem.difficulty_quotas,
+                secret=settings.SECRET_KEY,
+                hmac_context=hmac_context,
+                max_states=configured_limit,
+                optimize_soft=True,
             )
-        )
-        selection = solve_identity_aware_two_sets(
-            margins=problem.margins,
-            blocks=problem.blocks,
-            minimum_overlap=problem.minimum_overlap,
-            campus_quotas=problem.campus_quotas,
-            difficulty_quotas=problem.difficulty_quotas,
-            secret=settings.SECRET_KEY,
-            hmac_context=hmac_context,
-            max_states=configured_limit,
-        )
+        else:
+            configured_limit = int(
+                max_states
+                if max_states is not None
+                else getattr(
+                    settings,
+                    "DEPARTMENTAL_EXAM_GENERATION_MAX_STATES",
+                    cls.DEFAULT_MAX_STATES,
+                )
+            )
+            selection = solve_identity_aware_two_sets(
+                margins=problem.margins,
+                blocks=problem.blocks,
+                minimum_overlap=problem.minimum_overlap,
+                campus_quotas=problem.campus_quotas,
+                difficulty_quotas=problem.difficulty_quotas,
+                secret=settings.SECRET_KEY,
+                hmac_context=hmac_context,
+                max_states=configured_limit,
+            )
         if selection.limit_hit:
             raise GenerationLimitExceeded(
                 "The generation optimum could not be proved within the configured state limit."

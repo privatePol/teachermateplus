@@ -9,6 +9,7 @@ from .generation_algorithms import (
     confidential_hmac_rank,
     order_selected_blocks,
     proportional_campus_difficulty_score,
+    solve_automatic_identity_aware_two_sets,
     solve_identity_aware_two_sets,
     solve_two_set_feasibility,
 )
@@ -445,3 +446,137 @@ class Stage6IdentityAwareSelectionTests(SimpleTestCase):
         self.assertEqual(len(result.set_b_block_ids), 50)
         self.assertTrue(set(result.set_a_block_ids).isdisjoint(result.set_b_block_ids))
         self.assertLess(result.states_explored, 500_000)
+
+    def test_automatic_sasa_shape_uses_shared_solver_without_state_limit(self):
+        campuses = ("CUBAO", "FAIRVIEW", "TAYTAY")
+        difficulties = ("EASY", "MODERATE", "DIFFICULT")
+        campus_quotas = {"CUBAO": 17, "FAIRVIEW": 17, "TAYTAY": 16}
+        difficulty_quotas = {"EASY": 15, "MODERATE": 25, "DIFFICULT": 10}
+        per_campus = ["EASY"] * 15 + ["MODERATE"] * 25 + ["DIFFICULT"] * 10
+        rows = []
+        source_id = 1
+        for contributor_id, campus in enumerate(campuses, start=1):
+            for difficulty in per_campus:
+                rows.append((source_id, contributor_id, campus, difficulty))
+                source_id += 1
+        for _source, contributor_id, campus, difficulty in rows[:50]:
+            rows.append((source_id, contributor_id, campus, difficulty))
+            source_id += 1
+
+        required = {
+            "CUBAO": {"EASY": 10, "MODERATE": 18, "DIFFICULT": 6},
+            "FAIRVIEW": {"EASY": 10, "MODERATE": 18, "DIFFICULT": 6},
+            "TAYTAY": {"EASY": 10, "MODERATE": 14, "DIFFICULT": 8},
+        }
+        singleton_ids = []
+        for campus, counts in required.items():
+            for difficulty, count in counts.items():
+                singleton_ids.extend(
+                    [
+                        row[0]
+                        for row in rows
+                        if row[2] == campus and row[3] == difficulty
+                    ][:count]
+                )
+        singleton_ids.extend(row[0] for row in rows if row[0] not in singleton_ids)
+        singleton_ids = set(singleton_ids[:121])
+        duplicate_ids = [row[0] for row in rows if row[0] not in singleton_ids]
+        alpha_ids = set(duplicate_ids[:39])
+        blocks = []
+        for row in rows:
+            source_id, contributor_id, campus, difficulty = row
+            logical_group_id = (
+                f"singleton:{source_id}"
+                if source_id in singleton_ids
+                else "alternative:alpha"
+                if source_id in alpha_ids
+                else "alternative:beta"
+            )
+            vector = (
+                1,
+                *(1 if campus == code else 0 for code in campuses),
+                *(1 if difficulty == code else 0 for code in difficulties),
+                1,
+            )
+            blocks.append(
+                IdentityBlock(
+                    f"question:{source_id}",
+                    vector,
+                    (
+                        IdentityMember(
+                            source_id,
+                            contributor_id,
+                            campus,
+                            difficulty,
+                            0,
+                        ),
+                    ),
+                    logical_group_id,
+                )
+            )
+        result = solve_automatic_identity_aware_two_sets(
+            margins=(50, 17, 17, 16, 15, 25, 10, 50),
+            blocks=blocks,
+            campus_quotas=campus_quotas,
+            difficulty_quotas=difficulty_quotas,
+            secret=self.secret,
+            hmac_context={"input_fingerprint": "s" * 64},
+            max_states=250_000,
+            optimize_soft=True,
+        )
+
+        self.assertTrue(result.feasible, result)
+        self.assertFalse(result.limit_hit)
+        self.assertEqual(result.overlap, 0)
+        self.assertLess(result.states_explored, 250_000)
+        self.assertEqual(len(result.set_a_block_ids), 50)
+        self.assertEqual(len(result.set_b_block_ids), 50)
+        selected_by_set = (
+            set(result.set_a_block_ids),
+            set(result.set_b_block_ids),
+        )
+        for selected in selected_by_set:
+            logical_ids = {
+                next(
+                    block.logical_group_id
+                    for block in blocks
+                    if block.block_id == block_id
+                )
+                for block_id in selected
+            }
+            self.assertEqual(len(logical_ids), 50)
+
+    def test_automatic_soft_contributor_limit_keeps_hard_feasible_selection(self):
+        blocks = tuple(
+            IdentityBlock(
+                block_id=f"question:{source_id}",
+                vector=(1, 1, 1, 1),
+                members=(
+                    IdentityMember(
+                        source_id,
+                        source_id,
+                        "CUBAO",
+                        "EASY",
+                        0,
+                    ),
+                ),
+                logical_group_id=f"logical:{source_id}",
+            )
+            for source_id in range(1, 5)
+        )
+        result = solve_automatic_identity_aware_two_sets(
+            margins=(2, 2, 2, 2),
+            blocks=blocks,
+            campus_quotas={"CUBAO": 2},
+            difficulty_quotas={"EASY": 2},
+            secret=self.secret,
+            hmac_context={"input_fingerprint": "f" * 64},
+            max_states=2,
+            optimize_soft=True,
+        )
+
+        self.assertTrue(result.feasible, result)
+        self.assertFalse(result.limit_hit)
+        self.assertEqual(result.overlap, 0)
+        self.assertEqual(len(result.set_a_block_ids), 2)
+        self.assertEqual(len(result.set_b_block_ids), 2)

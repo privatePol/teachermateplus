@@ -765,7 +765,23 @@ def automatic_generation_summary_view(request, cycle_id):
             "You do not have automatic examination authority for every participating campus."
         )
     summary = AutomaticGenerationSummaryService.build(cycle=cycle)
-    for item in (*summary["generated"], *summary["not_generated"]):
+    for item in summary["generated"]:
+        item["can_manage_generation"] = (
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+            in permission_map[item["course"].id]
+        )
+        if (
+            item["can_manage_generation"]
+            and item.get("regeneration_input_fingerprint")
+        ):
+            item["regeneration_form"] = AutomaticRegenerationRequestForm(
+                initial={
+                    "expected_current_revision": item["revision"].revision_number,
+                    "input_fingerprint": item["regeneration_input_fingerprint"],
+                    "request_token": secrets.token_urlsafe(32),
+                }
+            )
+    for item in summary["not_generated"]:
         item["can_manage_generation"] = (
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
             in permission_map[item["course"].id]

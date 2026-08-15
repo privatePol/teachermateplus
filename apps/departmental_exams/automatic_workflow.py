@@ -15,7 +15,10 @@ from apps.core.services.features import FeatureSettingsService
 
 from .contribution_authorization import ContributorEligibilityService
 from .contribution_services import ContributionRosterService, Stage5LockService
-from .generation_readiness import Stage6ReadinessService
+from .generation_readiness import (
+    Stage6ReadinessService,
+    resolve_automatic_generation_max_states,
+)
 from .generation_services import ExamGenerationService
 from .models import (
     CourseExamConfiguration,
@@ -482,7 +485,11 @@ class AutomaticExamDeadlineService:
                 current.revision_number,
             )
 
-        problem, readiness = Stage6ReadinessService.build_problem(cycle_course=course)
+        automatic_state_budget = resolve_automatic_generation_max_states(max_states)
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=course,
+            automatic_max_states=automatic_state_budget,
+        )
         if problem is None or not readiness["ready"]:
             code = (readiness.get("blockers") or [{"code": "READINESS_BLOCKED"}])[0][
                 "code"
@@ -512,7 +519,7 @@ class AutomaticExamDeadlineService:
             expected_input_fingerprint=problem.input_fingerprint,
             request_token=request_token,
             generation_trigger=ExamGenerationRevision.GenerationTrigger.AUTOMATIC,
-            max_states=max_states,
+            max_states=automatic_state_budget,
         )
         status = (
             CourseExamConfiguration.AutomaticProcessingStatus.SKIPPED
@@ -866,7 +873,7 @@ class AutomaticGenerationSummaryService:
             }
             if current:
                 sets = {item.set_code: item for item in current.generated_sets.all()}
-                current_readiness = Stage6ReadinessService.evaluate(
+                current_problem, current_readiness = Stage6ReadinessService.build_problem(
                     cycle_course=course
                 )
                 generated.append(
@@ -886,6 +893,11 @@ class AutomaticGenerationSummaryService:
                             "unique": current_readiness.get("unique_question_count"),
                             "redundant": current_readiness.get("duplicate_question_count"),
                         },
+                        "regeneration_input_fingerprint": (
+                            current_problem.input_fingerprint
+                            if current_problem is not None
+                            else ""
+                        ),
                     }
                 )
                 continue

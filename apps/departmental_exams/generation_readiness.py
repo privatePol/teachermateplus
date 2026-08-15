@@ -5,6 +5,7 @@ import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Prefetch
 
@@ -18,10 +19,12 @@ from .contribution_services import QuestionPayloadService
 from .generation_algorithms import (
     AllocationError,
     CAMPUS_WEIGHTS,
+    FeasibilityResult,
     IdentityBlock,
     IdentityMember,
     allocate_campuses,
     allocate_difficulties,
+    solve_automatic_identity_aware_two_sets,
     solve_two_set_feasibility,
 )
 from .models import (
@@ -45,9 +48,24 @@ from .stage6_campus_codes import (
 
 
 GENERATION_ALGORITHM_VERSION = "stage6b-v1"
+AUTOMATIC_GENERATION_DEFAULT_MAX_STATES = 1_000_000
 # Existing immutable revision rows require a positive structure snapshot.
 # This marks the non-persistent Automatic flat contract; it is not a Blueprint PK.
 AUTOMATIC_FLAT_STRUCTURE_REVISION = 1
+
+
+def resolve_automatic_generation_max_states(override=None):
+    """Resolve the one authoritative hard-proof budget for Automatic mode."""
+    configured = (
+        override
+        if override is not None
+        else getattr(
+            settings,
+            "DEPARTMENTAL_EXAM_GENERATION_MAX_STATES",
+            AUTOMATIC_GENERATION_DEFAULT_MAX_STATES,
+        )
+    )
+    return int(configured)
 
 
 def _sha256_json(value):
@@ -218,7 +236,7 @@ class Stage6ReadinessService:
         return report
 
     @classmethod
-    def build_problem(cls, *, cycle_course):
+    def build_problem(cls, *, cycle_course, automatic_max_states=None):
         blockers = []
         warnings = []
         shortages = []
@@ -619,6 +637,7 @@ class Stage6ReadinessService:
         margins = ()
         question_vectors = {}
         identity_blocks = []
+        automatic_identity_blocks = ()
         structural_codes = {
             "NOT_INCLUDED",
             "CONFIGURATION_MISSING",
@@ -695,12 +714,61 @@ class Stage6ReadinessService:
                 *(difficulty_quotas[key] for key in difficulty_order),
                 *(section_quotas[key] for key in section_order),
             )
-            solver_result = solve_two_set_feasibility(
-                margins=margins,
-                scenario_vectors=scenario_vectors,
-                singleton_capacities=singleton_capacities,
-                alternative_vector_groups=alternative_vector_groups,
-            )
+            if automatic_flat_mode:
+                automatic_identity_blocks = tuple(
+                    IdentityBlock(
+                        block_id=f"question:{question.id}",
+                        vector=question_vectors[question.id],
+                        members=(
+                            IdentityMember(
+                                source_id=question.id,
+                                contributor_id=(
+                                    question.contribution.faculty_user_id
+                                ),
+                                campus=question.contribution.source_campus_id,
+                                difficulty=question.difficulty,
+                                section_id=0,
+                            ),
+                        ),
+                        logical_group_id=(
+                            QuestionPayloadService.question_fingerprint(
+                                question.question_text
+                            )
+                        ),
+                    )
+                    for question in eligible_questions
+                )
+                automatic_selection = solve_automatic_identity_aware_two_sets(
+                    margins=margins,
+                    blocks=automatic_identity_blocks,
+                    campus_quotas=campus_quotas,
+                    difficulty_quotas=difficulty_quotas,
+                    secret=settings.SECRET_KEY,
+                    hmac_context={
+                        "algorithm_version": GENERATION_ALGORITHM_VERSION,
+                        "tenant_id": cycle_course.cycle.tenant_id,
+                        "cycle_id": cycle_course.cycle_id,
+                        "cycle_course_id": cycle_course.id,
+                        "configuration_revision": configuration.revision,
+                        "purpose": "automatic-readiness",
+                    },
+                    max_states=resolve_automatic_generation_max_states(
+                        automatic_max_states
+                    ),
+                )
+                solver_result = FeasibilityResult(
+                    feasible=automatic_selection.feasible,
+                    minimum_overlap=automatic_selection.overlap,
+                    states_explored=automatic_selection.states_explored,
+                    limit_hit=automatic_selection.limit_hit,
+                )
+            else:
+                solver_result = solve_two_set_feasibility(
+                    margins=margins,
+                    scenario_vectors=scenario_vectors,
+                    singleton_capacities=singleton_capacities,
+                    alternative_vector_groups=alternative_vector_groups,
+                )
             if solver_result.limit_hit:
                 cls._block(
                     blockers,
@@ -857,8 +925,10 @@ class Stage6ReadinessService:
                         ),
                     )
                 )
+            if automatic_flat_mode:
+                identity_blocks.extend(automatic_identity_blocks)
             for question in eligible_questions:
-                if question.id in scenario_question_ids:
+                if automatic_flat_mode or question.id in scenario_question_ids:
                     continue
                 data = generation_questions[question.id]
                 identity_blocks.append(

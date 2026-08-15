@@ -408,7 +408,7 @@ def _solve_identity_aware_two_sets_ungrouped(
     )
 
 
-def _solve_zero_overlap_fixed_campus_contributors(
+def _solve_zero_overlap_logical_assignment(
     *,
     margins,
     blocks,
@@ -418,8 +418,9 @@ def _solve_zero_overlap_fixed_campus_contributors(
     secret,
     hmac_context,
     max_states,
+    allow_soft_contributor_fallback=False,
 ):
-    """Exact fast path when campus quotas also fix contributor objectives."""
+    """Assignment fast path for zero-overlap logical singleton groups."""
     campus_order = tuple(campus_quotas)
     difficulty_order = tuple(difficulty_quotas)
     cell_order = tuple(
@@ -433,7 +434,13 @@ def _solve_zero_overlap_fixed_campus_contributors(
         if member.campus not in campus_contributors:
             return None
         campus_contributors[member.campus].add(member.contributor_id)
-    if any(len(contributors) != 1 for contributors in campus_contributors.values()):
+    if (
+        not allow_soft_contributor_fallback
+        and any(
+            len(contributors) != 1
+            for contributors in campus_contributors.values()
+        )
+    ):
         return None
     if len(logical_groups) < 2 * margins[0]:
         return None
@@ -614,6 +621,111 @@ def _solve_zero_overlap_fixed_campus_contributors(
     heapq.heapify(pair_heap)
     best_score = None
     best_candidate = None
+
+    def selection_result(*, set_a, set_b, proportional_score):
+        by_id = {str(block.block_id): block for block in blocks}
+        contributor_counts = {}
+        for block_id in set_a + set_b:
+            contributor_id = by_id[block_id].members[0].contributor_id
+            contributor_counts[contributor_id] = (
+                contributor_counts.get(contributor_id, 0) + 1
+            )
+        return IdentitySelectionResult(
+            feasible=True,
+            limit_hit=False,
+            states_explored=states_explored,
+            set_a_block_ids=set_a,
+            set_b_block_ids=set_b,
+            overlap=0,
+            proportional_score=proportional_score,
+            contributors_represented=len(contributor_counts),
+            squared_contributor_concentration=sum(
+                count * count for count in contributor_counts.values()
+            ),
+        )
+
+    if allow_soft_contributor_fallback:
+        fixed_capacity = {cell: 0 for cell in cell_order}
+        for rows in ordered_groups:
+            cells = {
+                (block.members[0].campus, block.members[0].difficulty)
+                for block in rows
+            }
+            if len(cells) == 1:
+                fixed_capacity[next(iter(cells))] += 1
+
+        def capped_table(campus_index, remaining_difficulties, capacities, cells):
+            if campus_index == len(campus_order):
+                return dict(cells) if not any(remaining_difficulties) else None
+            campus = campus_order[campus_index]
+            limits = tuple(
+                min(
+                    remaining_difficulties[position],
+                    capacities[(campus, difficulty)],
+                )
+                for position, difficulty in enumerate(difficulty_order)
+            )
+            for row in allocations(campus_quotas[campus], limits):
+                next_remaining = tuple(
+                    remaining_difficulties[position] - row[position]
+                    for position in range(len(difficulty_order))
+                )
+                next_capacities = dict(capacities)
+                next_cells = dict(cells)
+                for position, difficulty in enumerate(difficulty_order):
+                    cell = (campus, difficulty)
+                    next_capacities[cell] -= row[position]
+                    next_cells[cell] = row[position]
+                result = capped_table(
+                    campus_index + 1,
+                    next_remaining,
+                    next_capacities,
+                    next_cells,
+                )
+                if result is not None:
+                    return result
+            return None
+
+        for score_a, table_a in ordered_tables:
+            states_explored += 1
+            if states_explored > max_states:
+                return IdentitySelectionResult(False, True, states_explored)
+            if any(
+                table_a[cell] > fixed_capacity[cell]
+                for cell in cell_order
+            ):
+                continue
+            residual_capacity = {
+                cell: fixed_capacity[cell] - table_a[cell]
+                for cell in cell_order
+            }
+            table_b = capped_table(
+                0,
+                tuple(difficulty_quotas[key] for key in difficulty_order),
+                residual_capacity,
+                {},
+            )
+            if table_b is None:
+                continue
+            slots = []
+            for set_code, table in (("A", table_a), ("B", table_b)):
+                for cell in cell_order:
+                    slots.extend((set_code, cell) for _ in range(table[cell]))
+            candidate = assign(tuple(slots))
+            if candidate is not None:
+                _cost, set_a, set_b = candidate
+                score_b = proportional_campus_difficulty_score(
+                    total=margins[0],
+                    campus_quotas=campus_quotas,
+                    difficulty_quotas=difficulty_quotas,
+                    cell_counts=table_b,
+                )
+                return selection_result(
+                    set_a=set_a,
+                    set_b=set_b,
+                    proportional_score=score_a + score_b,
+                )
+
     while pair_heap:
         proportional_score, index_a, index_b = heapq.heappop(pair_heap)
         if best_score is not None and proportional_score > best_score:
@@ -630,6 +742,12 @@ def _solve_zero_overlap_fixed_campus_contributors(
         candidate = assign(tuple(slots))
         if candidate is not None:
             cost, set_a, set_b = candidate
+            if allow_soft_contributor_fallback:
+                return selection_result(
+                    set_a=set_a,
+                    set_b=set_b,
+                    proportional_score=proportional_score,
+                )
             scored_candidate = (cost, set_a, set_b)
             if best_candidate is None or scored_candidate < best_candidate:
                 best_score = proportional_score
@@ -646,25 +764,10 @@ def _solve_zero_overlap_fixed_campus_contributors(
             )
     if best_candidate is not None:
         _cost, set_a, set_b = best_candidate
-        by_id = {str(block.block_id): block for block in blocks}
-        contributor_counts = {}
-        for block_id in set_a + set_b:
-            contributor_id = by_id[block_id].members[0].contributor_id
-            contributor_counts[contributor_id] = (
-                contributor_counts.get(contributor_id, 0) + 1
-            )
-        return IdentitySelectionResult(
-            feasible=True,
-            limit_hit=False,
-            states_explored=states_explored,
-            set_a_block_ids=set_a,
-            set_b_block_ids=set_b,
-            overlap=0,
+        return selection_result(
+            set_a=set_a,
+            set_b=set_b,
             proportional_score=best_score,
-            contributors_represented=len(contributor_counts),
-            squared_contributor_concentration=sum(
-                count * count for count in contributor_counts.values()
-            ),
         )
     return None
 
@@ -679,6 +782,7 @@ def solve_identity_aware_two_sets(
     secret,
     hmac_context,
     max_states=500_000,
+    stop_at_first_feasible=False,
 ):
     """Prove the exact Stage 6B objective with safe singleton compression.
 
@@ -752,7 +856,7 @@ def solve_identity_aware_two_sets(
         )
         singleton_groups.setdefault(key, []).append(block)
     if logical_groups and minimum_overlap == 0:
-        fast_result = _solve_zero_overlap_fixed_campus_contributors(
+        fast_result = _solve_zero_overlap_logical_assignment(
             margins=margins,
             blocks=normalized_blocks,
             logical_groups=logical_groups,
@@ -761,6 +865,7 @@ def solve_identity_aware_two_sets(
             secret=secret,
             hmac_context=hmac_context,
             max_states=max_states,
+            allow_soft_contributor_fallback=stop_at_first_feasible,
         )
         if fast_result is not None:
             return fast_result
@@ -1407,6 +1512,9 @@ def solve_identity_aware_two_sets(
     class AutomaticPrimaryOptimumFound(Exception):
         pass
 
+    class HardFeasibleSelectionFound(Exception):
+        pass
+
     def add_vector(left, right, multiplier=1):
         return tuple(
             left[position] + multiplier * right[position]
@@ -1531,6 +1639,8 @@ def solve_identity_aware_two_sets(
                     represented,
                     concentration,
                 )
+                if stop_at_first_feasible:
+                    raise HardFeasibleSelectionFound
                 if (
                     automatic_primary_bound is not None
                     and score[:3] == automatic_primary_bound
@@ -1757,6 +1867,8 @@ def solve_identity_aware_two_sets(
         )
     except AutomaticPrimaryOptimumFound:
         pass
+    except HardFeasibleSelectionFound:
+        pass
     except FeasibilityLimitExceeded:
         return IdentitySelectionResult(False, True, state_count)
     if best_selection is None:
@@ -1772,6 +1884,145 @@ def solve_identity_aware_two_sets(
         proportional_score=best_score[0],
         contributors_represented=represented,
         squared_contributor_concentration=concentration,
+    )
+
+
+def solve_automatic_identity_aware_two_sets(
+    *,
+    margins,
+    blocks,
+    campus_quotas,
+    difficulty_quotas,
+    secret,
+    hmac_context,
+    max_states,
+    optimize_soft=False,
+):
+    """Find the minimum-overlap Automatic selection with a hard-feasible gate.
+
+    The identity-aware selector is authoritative for both readiness and output.
+    The assignment fast path keeps campus/difficulty proportionality and stable
+    HMAC ordering deterministic. Contributor metrics are descriptive on the
+    hard path. Output may attempt the existing soft objectives afterward, but
+    exhausting that bounded refinement returns the proved hard selection.
+    """
+    margins = tuple(int(value) for value in margins)
+    if not margins or margins[0] < 0:
+        return IdentitySelectionResult(False, False, 0)
+    logical_ids = {
+        str(block.logical_group_id)
+        for block in blocks
+        if block.logical_group_id is not None
+    }
+    if any(
+        block.size != 1 or block.logical_group_id is None
+        for block in blocks
+    ):
+        raise ValueError("Automatic logical selections must be singleton blocks.")
+    minimum_possible_overlap = max(0, 2 * margins[0] - len(logical_ids))
+    for campus, quota in campus_quotas.items():
+        available_groups = len(
+            {
+                str(block.logical_group_id)
+                for block in blocks
+                if block.members[0].campus == campus
+            }
+        )
+        minimum_possible_overlap = max(
+            minimum_possible_overlap,
+            2 * int(quota) - available_groups,
+        )
+    for difficulty, quota in difficulty_quotas.items():
+        available_groups = len(
+            {
+                str(block.logical_group_id)
+                for block in blocks
+                if block.members[0].difficulty == difficulty
+            }
+        )
+        minimum_possible_overlap = max(
+            minimum_possible_overlap,
+            2 * int(quota) - available_groups,
+        )
+    states_explored = 0
+    hard_selection = None
+    for overlap in range(minimum_possible_overlap, margins[0] + 1):
+        remaining_states = int(max_states) - states_explored
+        if remaining_states <= 0:
+            return IdentitySelectionResult(False, True, states_explored)
+        candidate = solve_identity_aware_two_sets(
+            margins=margins,
+            blocks=blocks,
+            minimum_overlap=overlap,
+            campus_quotas=campus_quotas,
+            difficulty_quotas=difficulty_quotas,
+            secret=secret,
+            hmac_context={**dict(hmac_context), "minimum_overlap": overlap},
+            max_states=remaining_states,
+            stop_at_first_feasible=True,
+        )
+        states_explored += candidate.states_explored
+        if candidate.limit_hit:
+            return IdentitySelectionResult(False, True, states_explored)
+        if candidate.feasible:
+            hard_selection = IdentitySelectionResult(
+                feasible=True,
+                limit_hit=False,
+                states_explored=states_explored,
+                set_a_block_ids=candidate.set_a_block_ids,
+                set_b_block_ids=candidate.set_b_block_ids,
+                overlap=candidate.overlap,
+                proportional_score=candidate.proportional_score,
+                contributors_represented=candidate.contributors_represented,
+                squared_contributor_concentration=(
+                    candidate.squared_contributor_concentration
+                ),
+            )
+            break
+    if hard_selection is None or not optimize_soft:
+        return hard_selection or IdentitySelectionResult(
+            False, False, states_explored
+        )
+
+    remaining_states = int(max_states) - states_explored
+    if remaining_states <= 0:
+        return hard_selection
+    optimized = solve_identity_aware_two_sets(
+        margins=margins,
+        blocks=blocks,
+        minimum_overlap=hard_selection.overlap,
+        campus_quotas=campus_quotas,
+        difficulty_quotas=difficulty_quotas,
+        secret=secret,
+        hmac_context=dict(hmac_context),
+        max_states=min(remaining_states, 100),
+    )
+    if optimized.feasible:
+        return IdentitySelectionResult(
+            feasible=True,
+            limit_hit=False,
+            states_explored=states_explored + optimized.states_explored,
+            set_a_block_ids=optimized.set_a_block_ids,
+            set_b_block_ids=optimized.set_b_block_ids,
+            overlap=optimized.overlap,
+            proportional_score=optimized.proportional_score,
+            contributors_represented=optimized.contributors_represented,
+            squared_contributor_concentration=(
+                optimized.squared_contributor_concentration
+            ),
+        )
+    return IdentitySelectionResult(
+        feasible=True,
+        limit_hit=False,
+        states_explored=states_explored + optimized.states_explored,
+        set_a_block_ids=hard_selection.set_a_block_ids,
+        set_b_block_ids=hard_selection.set_b_block_ids,
+        overlap=hard_selection.overlap,
+        proportional_score=hard_selection.proportional_score,
+        contributors_represented=hard_selection.contributors_represented,
+        squared_contributor_concentration=(
+            hard_selection.squared_contributor_concentration
+        ),
     )
 
 

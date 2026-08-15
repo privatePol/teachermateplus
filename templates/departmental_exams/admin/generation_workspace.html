@@ -34,7 +34,7 @@
       {% else %}
       <form method="post" action="{% url 'departmental_exams:generate_exam' cycle_course.id %}" class="js-generation-form" data-generation-form aria-busy="false">
         {% csrf_token %}{{ generation_form.expected_current_revision }}{{ generation_form.input_fingerprint }}{{ generation_form.request_token }}
-        <div class="de-generation-busy mb-3" data-generation-busy><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Generating Set A and Set B... Please wait.</span></div>
+        <div class="de-generation-busy mb-3" data-generation-busy role="status" aria-live="assertive"><div class="w-100"><div class="fw-semibold mb-2">Processing Set A and Set B&hellip; Please wait.</div><div class="progress" role="progressbar" aria-label="Set A and Set B processing"><div class="progress-bar progress-bar-striped progress-bar-animated bg-success w-100"></div></div></div></div>
         <button class="btn btn-success" type="submit" data-generation-submit><i class="bi bi-stars me-1" aria-hidden="true"></i>Generate Set A and Set B</button>
       </form>
       {% endif %}
@@ -43,7 +43,7 @@
       <form method="post" action="{% url 'departmental_exams:regenerate_exam' cycle_course.id %}" class="js-generation-form" data-generation-form aria-busy="false">
         {% csrf_token %}{{ regeneration_form.expected_current_revision }}{{ regeneration_form.input_fingerprint }}{{ regeneration_form.request_token }}
         <div class="mb-3"><label class="form-label fw-semibold" for="{{ regeneration_form.reason.id_for_label }}">{% if automatic_mode %}Optional note{% else %}Regeneration reason{% endif %}</label>{{ regeneration_form.reason }}<div class="form-text">{% if automatic_mode %}A note is optional and never blocks regeneration.{% else %}Stored confidentially; audit metadata records only its hash and length.{% endif %}</div></div>
-        <div class="de-generation-busy mb-3" data-generation-busy><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Generating Set A and Set B... Please wait.</span></div>
+        <div class="de-generation-busy mb-3" data-generation-busy role="status" aria-live="assertive"><div class="w-100"><div class="fw-semibold mb-2">Processing Set A and Set B&hellip; Please wait.</div><div class="progress" role="progressbar" aria-label="Set A and Set B processing"><div class="progress-bar progress-bar-striped progress-bar-animated bg-success w-100"></div></div></div></div>
         <button class="btn btn-warning" type="submit" data-generation-submit><i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Regenerate Set A &amp; Set B</button>
       </form>
     {% endif %}
@@ -68,6 +68,7 @@
     document.querySelectorAll('[data-generation-control]').forEach(function (control) {
       control.classList.remove('de-generation-control-disabled');
       control.removeAttribute('aria-disabled');
+      control.removeAttribute('tabindex');
     });
   }
   forms.forEach(function (form) {
@@ -79,7 +80,16 @@
       document.querySelectorAll('[data-generation-control]').forEach(function (control) {
         control.classList.add('de-generation-control-disabled');
         control.setAttribute('aria-disabled', 'true');
+        control.setAttribute('tabindex', '-1');
       });
+    });
+  });
+  document.querySelectorAll('[data-generation-control]').forEach(function (control) {
+    control.addEventListener('click', function (event) {
+      if (control.getAttribute('aria-disabled') === 'true') {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     });
   });
   window.addEventListener('pageshow', resetGenerationState);
