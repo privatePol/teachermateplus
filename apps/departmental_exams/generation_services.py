@@ -55,6 +55,7 @@ class GenerationOutcome:
 
 class ExamGenerationService:
     DEFAULT_MAX_STATES = 500_000
+    AUTOMATIC_DEFAULT_MAX_STATES = 1_000_000
 
     @staticmethod
     def request_token_digest(raw_token):
@@ -286,13 +287,18 @@ class ExamGenerationService:
             "input_fingerprint": problem.input_fingerprint,
             "generation_revision": next_revision,
         }
+        default_limit = (
+            cls.AUTOMATIC_DEFAULT_MAX_STATES
+            if automatic_mode
+            else cls.DEFAULT_MAX_STATES
+        )
         configured_limit = int(
             max_states
             if max_states is not None
             else getattr(
                 settings,
                 "DEPARTMENTAL_EXAM_GENERATION_MAX_STATES",
-                cls.DEFAULT_MAX_STATES,
+                default_limit,
             )
         )
         selection = solve_identity_aware_two_sets(
@@ -475,6 +481,18 @@ class ExamGenerationService:
             source_ids = {member.source_id for member in members}
             if len(source_ids) != len(members):
                 raise GenerationConflict("A set contains a duplicate source question.")
+            if (
+                problem.cycle_course.cycle.processing_mode
+                == ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION
+            ):
+                fingerprints = [
+                    problem.questions[member.source_id].normalized_fingerprint
+                    for member in members
+                ]
+                if len(fingerprints) != len(set(fingerprints)):
+                    raise GenerationConflict(
+                        "An automatic set contains duplicate normalized questions."
+                    )
             cells = {}
             for member in members:
                 key = (member.campus, member.difficulty)

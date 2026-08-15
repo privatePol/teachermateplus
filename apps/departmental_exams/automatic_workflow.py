@@ -357,8 +357,6 @@ class FacultyContributionPreparationService:
 
 def readiness_blocker_text(report):
     code = ((report.get("blockers") or [{}])[0]).get("code", "")
-    if code == "UNIQUE_QUESTION_SHORTAGES":
-        return "Insufficient unique usable questions for the required allocation."
     shortages = report.get("shortages") or ()
     if shortages:
         shortage = shortages[0]
@@ -883,6 +881,11 @@ class AutomaticGenerationSummaryService:
                             else {}
                         ),
                         "warnings": current_readiness.get("warnings", ()),
+                        "pool_metrics": {
+                            "submitted": current_readiness.get("submitted_question_count"),
+                            "unique": current_readiness.get("unique_question_count"),
+                            "redundant": current_readiness.get("duplicate_question_count"),
+                        },
                     }
                 )
                 continue
@@ -972,6 +975,11 @@ class AutomaticGenerationSummaryService:
                     "reason": readiness_blocker_text(report),
                     "recommended_action": readiness_recommendation(report),
                     "warnings": report.get("warnings", ()),
+                    "pool_metrics": {
+                        "submitted": report.get("submitted_question_count"),
+                        "unique": report.get("unique_question_count"),
+                        "redundant": report.get("duplicate_question_count"),
+                    },
                     "configuration": configuration,
                 }
             )

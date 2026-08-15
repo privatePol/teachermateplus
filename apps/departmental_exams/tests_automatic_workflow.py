@@ -1,5 +1,6 @@
 from unittest.mock import patch
 from io import StringIO
+from collections import Counter
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
@@ -37,6 +38,8 @@ from .blueprint_services import (
 from .contribution_services import QuestionPayloadService
 from .generation_algorithms import (
     FeasibilityResult,
+    IdentityBlock,
+    IdentityMember,
     IdentitySelectionResult,
     proportional_campus_difficulty_score,
     solve_identity_aware_two_sets,
@@ -186,6 +189,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             difficulty_quotas=problem.difficulty_quotas,
             secret=settings.SECRET_KEY,
             hmac_context={"test_selection": "automatic"},
+            max_states=ExamGenerationService.AUTOMATIC_DEFAULT_MAX_STATES,
         )
 
     def _process_with_proved_selection(self, *, parent, problem):
@@ -194,7 +198,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
         self.assertTrue(readiness["ready"], readiness["blockers"])
         selection = self._proved_selection_for(parent=parent, problem=current_problem)
-        self.assertTrue(selection.feasible)
+        self.assertTrue(selection.feasible, selection)
         with patch(
             "apps.departmental_exams.generation_services.solve_identity_aware_two_sets",
             return_value=selection,
@@ -253,6 +257,120 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             fields.append("automatic_contributor_completion_policy")
         cycle.save(update_fields=fields)
         parent.cycle = cycle
+
+    def _replace_automatic_question_rows(self, *, parent, rows):
+        contributions = {
+            contribution.source_campus_id: contribution
+            for contribution in FacultyContribution.objects.filter(
+                cycle_course=parent,
+                status=FacultyContribution.Status.SUBMITTED,
+            )
+        }
+        Question.objects.filter(contribution__cycle_course=parent).delete()
+        positions = Counter()
+        questions = []
+        for sequence, (question_text, campus_id, difficulty) in enumerate(
+            rows, start=1
+        ):
+            contribution = contributions[campus_id]
+            positions[contribution.id] += 1
+            questions.append(
+                Question(
+                    contribution=contribution,
+                    question_text=question_text,
+                    choice_a=f"A-{sequence}",
+                    choice_b=f"B-{sequence}",
+                    choice_c=f"C-{sequence}",
+                    choice_d=f"D-{sequence}",
+                    correct_answer="A",
+                    difficulty=difficulty,
+                    position=positions[contribution.id],
+                    revision=1,
+                )
+            )
+        Question.objects.bulk_create(questions)
+
+    def _automatic_52_row_counterexample(self, *, parent, variant):
+        campus_ids = list(
+            parent.offering_snapshots.order_by("campus_id").values_list(
+                "campus_id", flat=True
+            )
+        )
+        campus_a, campus_b, campus_c = campus_ids
+        base_campuses = [campus_a] * 16 + [campus_b] * 16 + [campus_c] * 16
+        base_difficulties = (
+            [Question.Difficulty.EASY] * 14
+            + [Question.Difficulty.MODERATE] * 24
+            + [Question.Difficulty.DIFFICULT] * 10
+        )
+        rows = [
+            (f"Counterexample unique logical question {index}", campus_id, difficulty)
+            for index, (campus_id, difficulty) in enumerate(
+                zip(base_campuses, base_difficulties), start=1
+            )
+        ]
+        if variant == "joint":
+            rows.extend(
+                [
+                    ("Counterexample flexible logical question", campus_a, Question.Difficulty.EASY),
+                    ("Counterexample flexible logical question", campus_b, Question.Difficulty.MODERATE),
+                    ("Counterexample fixed logical question", campus_a, Question.Difficulty.EASY),
+                    ("Counterexample fixed logical question", campus_a, Question.Difficulty.EASY),
+                ]
+            )
+        elif variant == "campus":
+            rows.extend(
+                [
+                    ("Campus flexible logical question", campus_a, Question.Difficulty.EASY),
+                    ("Campus flexible logical question", campus_b, Question.Difficulty.EASY),
+                    ("Campus fixed logical question", campus_a, Question.Difficulty.MODERATE),
+                    ("Campus fixed logical question", campus_a, Question.Difficulty.MODERATE),
+                ]
+            )
+        elif variant == "difficulty":
+            rows.extend(
+                [
+                    ("Difficulty flexible logical question", campus_b, Question.Difficulty.EASY),
+                    ("Difficulty flexible logical question", campus_b, Question.Difficulty.MODERATE),
+                    ("Difficulty fixed logical question", campus_a, Question.Difficulty.EASY),
+                    ("Difficulty fixed logical question", campus_a, Question.Difficulty.EASY),
+                ]
+            )
+        else:
+            raise ValueError("Unknown Automatic counterexample variant.")
+        self._replace_automatic_question_rows(parent=parent, rows=rows)
+        return campus_ids
+
+    def _assert_automatic_selection_margins(self, problem):
+        selection = self._proved_selection_for(
+            parent=problem.cycle_course,
+            problem=problem,
+        )
+        self.assertTrue(selection.feasible, selection)
+        self.assertFalse(selection.limit_hit, selection)
+        ExamGenerationService._validate_selection(
+            problem=problem,
+            selection=selection,
+        )
+        blocks = {str(block.block_id): block for block in problem.blocks}
+        for selected_ids in (
+            selection.set_a_block_ids,
+            selection.set_b_block_ids,
+        ):
+            members = [
+                member
+                for block_id in selected_ids
+                for member in blocks[str(block_id)].members
+            ]
+            self.assertEqual(
+                Counter(member.campus for member in members),
+                Counter(problem.campus_quotas),
+            )
+            self.assertEqual(
+                Counter(member.difficulty for member in members),
+                Counter(problem.difficulty_quotas),
+            )
+        return selection
 
     @staticmethod
     def _retain_one_participating_campus(parent):
@@ -800,7 +918,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                 ).exists()
             )
 
-    def test_automatic_flat_generation_excludes_ambiguous_duplicate_question_text(self):
+    def test_automatic_flat_generation_retains_one_logical_duplicate_question(self):
         parent, _configuration, _problem = self._ready_automatic_course()
         duplicate_source, duplicate_row = list(
             Question.objects.filter(contribution__cycle_course=parent)
@@ -815,9 +933,25 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
         )
 
         self.assertTrue(readiness["ready"], readiness["blockers"])
-        self.assertEqual(readiness["duplicate_question_count"], 2)
-        self.assertNotIn(duplicate_source.id, problem.questions)
-        self.assertNotIn(duplicate_row.id, problem.questions)
+        self.assertEqual(readiness["submitted_question_count"], 150)
+        self.assertEqual(readiness["unique_question_count"], 149)
+        self.assertEqual(readiness["duplicate_question_count"], 1)
+        self.assertIn(duplicate_source.id, problem.questions)
+        self.assertIn(duplicate_row.id, problem.questions)
+        duplicate_blocks = [
+            block
+            for block in problem.blocks
+            if block.members[0].source_id in {duplicate_source.id, duplicate_row.id}
+        ]
+        self.assertEqual(len(duplicate_blocks), 2)
+        self.assertEqual(
+            len({block.logical_group_id for block in duplicate_blocks}),
+            1,
+        )
+        self.assertIn(
+            "REDUNDANT_DUPLICATE_QUESTIONS",
+            {item["code"] for item in readiness["warnings"]},
+        )
         self._process_with_proved_selection(parent=parent, problem=problem)
         for generated_set in ExamGenerationRevision.objects.get().generated_sets.all():
             fingerprints = [
@@ -845,13 +979,283 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             "UNIQUE_QUESTION_SHORTAGES",
             {blocker["code"] for blocker in readiness["blockers"]},
         )
-        self.assertEqual(readiness["duplicate_question_count"], 150)
+        self.assertEqual(readiness["submitted_question_count"], 150)
+        self.assertEqual(readiness["unique_question_count"], 1)
+        self.assertEqual(readiness["duplicate_question_count"], 149)
         self.assertEqual(result.code, "UNIQUE_QUESTION_SHORTAGES")
         self.assertEqual(
             result.message,
-            "Insufficient unique usable questions for the required allocation.",
+            "Insufficient Total questions: 1 available / 50 required",
         )
         self.assertFalse(ExamGenerationRevision.objects.exists())
+
+    def test_automatic_duplicate_metrics_use_raw_200_unique_123_semantics(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        questions = list(
+            Question.objects.filter(contribution__cycle_course=parent).order_by("id")
+        )
+        for duplicate, source in zip(questions[123:], questions[:27]):
+            duplicate.question_text = source.question_text
+        Question.objects.bulk_update(questions[123:], ["question_text"])
+        Question.objects.bulk_create(
+            [
+                Question(
+                    contribution=question.contribution,
+                    question_text=question.question_text,
+                    choice_a=question.choice_a,
+                    choice_b=question.choice_b,
+                    choice_c=question.choice_c,
+                    choice_d=question.choice_d,
+                    correct_answer=question.correct_answer,
+                    difficulty=question.difficulty,
+                    position=question.position + 100,
+                    revision=question.revision,
+                    entry_method=question.entry_method,
+                )
+                for question in questions[:50]
+            ]
+        )
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        duplicate_warning = next(
+            item
+            for item in readiness["warnings"]
+            if item["code"] == "REDUNDANT_DUPLICATE_QUESTIONS"
+        )
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertEqual(readiness["submitted_question_count"], 200)
+        self.assertEqual(readiness["unique_question_count"], 123)
+        self.assertEqual(readiness["duplicate_question_count"], 77)
+        self.assertEqual(len(problem.questions), 200)
+        self.assertEqual(
+            len({block.logical_group_id for block in problem.blocks}),
+            123,
+        )
+        self.assertEqual(
+            duplicate_warning["message"],
+            "200 submitted \u2022 123 unique \u2022 77 duplicate copies automatically ignored.",
+        )
+        result = self._process_with_proved_selection(parent=parent, problem=problem)
+        summary = AutomaticGenerationSummaryService.build(cycle=parent.cycle)
+
+        self.assertEqual(result.status, "GENERATED")
+        self.assertEqual(
+            summary["generated"][0]["pool_metrics"],
+            {"submitted": 200, "unique": 123, "redundant": 77},
+        )
+        self.assertIn(
+            "REDUNDANT_DUPLICATE_QUESTIONS",
+            {item["code"] for item in summary["generated"][0]["warnings"]},
+        )
+
+    def test_automatic_global_representatives_solve_exact_52_to_50_counterexample(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        campus_a, campus_b, campus_c = self._automatic_52_row_counterexample(
+            parent=parent,
+            variant="joint",
+        )
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertFalse(readiness["shortages"])
+        self.assertEqual(readiness["submitted_question_count"], 52)
+        self.assertEqual(readiness["unique_question_count"], 50)
+        self.assertEqual(readiness["duplicate_question_count"], 2)
+        self.assertEqual(
+            problem.campus_quotas,
+            {campus_a: 17, campus_b: 17, campus_c: 16},
+        )
+        self.assertEqual(
+            problem.difficulty_quotas,
+            {"EASY": 15, "MODERATE": 25, "DIFFICULT": 10},
+        )
+        selection = self._assert_automatic_selection_margins(problem)
+        self.assertEqual(
+            set(selection.set_a_block_ids),
+            set(selection.set_b_block_ids),
+        )
+        selected_flexible = [
+            problem.questions[block.members[0].source_id]
+            for block in problem.blocks
+            if str(block.block_id) in selection.set_a_block_ids
+            and problem.questions[block.members[0].source_id].question_text
+            == "Counterexample flexible logical question"
+        ]
+        self.assertEqual(len(selected_flexible), 1)
+        self.assertEqual(selected_flexible[0].campus_id, campus_b)
+        self.assertEqual(
+            selected_flexible[0].difficulty,
+            Question.Difficulty.MODERATE,
+        )
+
+    def test_automatic_global_representatives_avoid_fake_campus_shortage(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        self._automatic_52_row_counterexample(parent=parent, variant="campus")
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertFalse(readiness["shortages"])
+        self._assert_automatic_selection_margins(problem)
+
+    def test_automatic_global_representatives_avoid_fake_difficulty_shortage(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        self._automatic_52_row_counterexample(parent=parent, variant="difficulty")
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertFalse(readiness["shortages"])
+        self._assert_automatic_selection_margins(problem)
+
+    def test_automatic_global_representatives_preserve_better_contributor_coverage(self):
+        vector = (1, 1, 1)
+
+        def block(source_id, contributor_id, logical_group_id):
+            return IdentityBlock(
+                block_id=f"question:{source_id}",
+                vector=vector,
+                members=(
+                    IdentityMember(
+                        source_id=source_id,
+                        contributor_id=contributor_id,
+                        campus="CAMPUS",
+                        difficulty="EASY",
+                        section_id=0,
+                    ),
+                ),
+                logical_group_id=logical_group_id,
+            )
+
+        result = solve_identity_aware_two_sets(
+            margins=(2, 2, 2),
+            blocks=(
+                block(1, 1, "flexible"),
+                block(2, 2, "flexible"),
+                block(3, 1, "fixed"),
+                block(4, 1, "fixed"),
+            ),
+            minimum_overlap=2,
+            campus_quotas={"CAMPUS": 2},
+            difficulty_quotas={"EASY": 2},
+            secret=settings.SECRET_KEY,
+            hmac_context={"test": "logical-contributor-alternatives"},
+            max_states=10_000,
+        )
+
+        self.assertTrue(result.feasible, result)
+        self.assertEqual(result.set_a_block_ids, result.set_b_block_ids)
+        self.assertIn("question:2", result.set_a_block_ids)
+        self.assertEqual(result.contributors_represented, 2)
+        self.assertEqual(result.squared_contributor_concentration, 8)
+
+    def test_automatic_duplicates_preserve_campus_representation(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        campuses = list(parent.offering_snapshots.order_by("campus_id").values_list("campus_id", flat=True))
+        cubao_id, fairview_id, _taytay_id = campuses
+        cubao_questions = list(
+            Question.objects.filter(
+                contribution__cycle_course=parent,
+                contribution__source_campus_id=cubao_id,
+            ).order_by("id")
+        )
+        fairview_questions = list(
+            Question.objects.filter(
+                contribution__cycle_course=parent,
+                contribution__source_campus_id=fairview_id,
+            ).order_by("id")
+        )
+        for duplicate, source in zip(fairview_questions, cubao_questions):
+            duplicate.question_text = source.question_text
+        Question.objects.bulk_update(fairview_questions, ["question_text"])
+
+        with patch(
+            "apps.departmental_exams.generation_readiness.solve_two_set_feasibility",
+            return_value=FeasibilityResult(
+                feasible=True,
+                minimum_overlap=50,
+                states_explored=1,
+            ),
+        ):
+            problem, readiness = Stage6ReadinessService.build_problem(
+                cycle_course=parent
+            )
+
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertEqual(readiness["duplicate_question_count"], 50)
+        self.assertIn(fairview_id, problem.campus_quotas)
+        self.assertGreaterEqual(
+            sum(
+                question.campus_id == fairview_id
+                for question in problem.questions.values()
+            ),
+            problem.campus_quotas[fairview_id],
+        )
+
+    def test_automatic_post_dedupe_difficulty_shortage_reports_true_availability(self):
+        parent, _configuration, _problem = self._ready_automatic_course()
+        moderate = list(
+            Question.objects.filter(
+                contribution__cycle_course=parent,
+                difficulty=Question.Difficulty.MODERATE,
+            ).order_by("id")
+        )
+        retained = moderate[:23]
+        Question.objects.filter(pk__in=[question.id for question in moderate[23:]]).delete()
+        Question.objects.filter(pk=retained[-1].pk).update(
+            question_text=retained[0].question_text
+        )
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+        result = AutomaticExamDeadlineService.process_course(
+            cycle_course_id=parent.id,
+            tenant_id=self.tenant.id,
+        )
+
+        self.assertIsNone(problem)
+        self.assertIn(
+            "UNIQUE_QUESTION_SHORTAGES",
+            {blocker["code"] for blocker in readiness["blockers"]},
+        )
+        self.assertIn(
+            {"dimension": "difficulty", "label": "Moderate", "required": 25, "available": 22},
+            readiness["shortages"],
+        )
+        self.assertEqual(
+            result.message,
+            "Insufficient Moderate questions: 22 available / 25 required",
+        )
+
+    def test_manual_generation_keeps_duplicate_rows_in_its_existing_pool(self):
+        parent, _problem = self.ready_generation_course()
+        duplicate_source, duplicate_row = list(
+            Question.objects.filter(contribution__cycle_course=parent).order_by("id")[:2]
+        )
+        Question.objects.filter(pk=duplicate_row.pk).update(
+            question_text=duplicate_source.question_text
+        )
+
+        problem, readiness = Stage6ReadinessService.build_problem(
+            cycle_course=parent
+        )
+
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        self.assertFalse(readiness["automatic_pool"])
+        self.assertEqual(readiness["duplicate_question_count"], 0)
+        self.assertIn(duplicate_source.id, problem.questions)
+        self.assertIn(duplicate_row.id, problem.questions)
 
     def test_automatic_flat_infeasibility_uses_no_scenario_wording_while_manual_keeps_it(self):
         automatic_parent, _configuration, _problem = self._ready_automatic_course()

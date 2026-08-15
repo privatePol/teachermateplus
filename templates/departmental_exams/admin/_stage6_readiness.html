@@ -6,7 +6,7 @@
     </div>
     <p class="small text-muted mt-2 mb-2">Aggregate results only. No candidate question IDs or potential Set A/Set B membership are displayed.</p>
     <dl class="row small mb-2">
-      <dt class="col-sm-4">Eligible Submitted questions</dt><dd class="col-sm-8">{{ readiness.eligible_question_count }}</dd>
+      {% if readiness.automatic_pool %}<dt class="col-sm-4">Automatic question pool</dt><dd class="col-sm-8">{{ readiness.submitted_question_count }} submitted &bull; {{ readiness.unique_question_count }} unique &bull; {{ readiness.duplicate_question_count }} duplicate copies automatically ignored</dd>{% else %}<dt class="col-sm-4">Eligible Submitted questions</dt><dd class="col-sm-8">{{ readiness.eligible_question_count }}</dd>{% endif %}
       <dt class="col-sm-4">Required Active contributors</dt><dd class="col-sm-8">{{ readiness.contributor_counts.submitted_required }} / {{ readiness.contributor_counts.required_active }} Submitted</dd>
       <dt class="col-sm-4">Blocked Drafts</dt><dd class="col-sm-8">{{ readiness.contributor_counts.unresolved_blocked }} unresolved / {{ readiness.contributor_counts.blocked_drafts }} current</dd>
       <dt class="col-sm-4">Minimum cross-set overlap</dt><dd class="col-sm-8">{% if readiness.minimum_overlap == None %}Not computed{% else %}{{ readiness.minimum_overlap }} question{{ readiness.minimum_overlap|pluralize }}{% endif %}</dd>

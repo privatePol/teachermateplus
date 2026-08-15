@@ -69,6 +69,7 @@ class GenerationQuestion:
     section_id: int
     section_title: str
     section_instructions: str
+    normalized_fingerprint: str
     question_text: str
     choices: tuple[str, str, str, str]
     correct_answer: str
@@ -185,27 +186,17 @@ def automatic_campus_allocate(*, total, campus_ids):
     }
 
 
-def automatic_unique_question_pool(questions):
-    """Keep only unambiguous question-text identities for flat Automatic output."""
+def automatic_logical_question_groups(questions):
+    """Return every eligible row grouped by its Automatic logical identity."""
     by_fingerprint = defaultdict(list)
     for question in questions:
         by_fingerprint[
             QuestionPayloadService.question_fingerprint(question.question_text)
         ].append(question)
-
-    # The existing duplicate-warning identity deliberately considers only
-    # normalized question text.  A collision can therefore carry different
-    # campus, difficulty, or contributor evidence.  Do not pick a canonical
-    # row here: that would silently introduce an allocation policy.  Exclude
-    # the entire ambiguous group before feasibility and selection instead.
-    unique_questions = []
-    excluded_collision_count = 0
-    for rows in by_fingerprint.values():
-        if len(rows) == 1:
-            unique_questions.append(rows[0])
-        else:
-            excluded_collision_count += len(rows)
-    return unique_questions, excluded_collision_count
+    return {
+        fingerprint: tuple(sorted(rows, key=lambda question: question.id))
+        for fingerprint, rows in sorted(by_fingerprint.items())
+    }
 
 
 class Stage6ReadinessService:
@@ -384,11 +375,9 @@ class Stage6ReadinessService:
             cycle_course=cycle_course,
             **pool_kwargs,
         )
+        submitted_question_count = len(eligible_questions)
         duplicate_question_count = 0
-        if automatic_flat_mode:
-            eligible_questions, duplicate_question_count = automatic_unique_question_pool(
-                eligible_questions
-            )
+        automatic_question_groups = {}
         if invalid_question_count:
             cls._block(
                 blockers,
@@ -448,6 +437,24 @@ class Stage6ReadinessService:
                     campus_ids=allocation_campus_ids,
                 )
                 difficulty_quotas = allocate_difficulties(final_count)
+            automatic_question_groups = automatic_logical_question_groups(
+                eligible_questions
+            )
+            duplicate_question_count = (
+                submitted_question_count - len(automatic_question_groups)
+            )
+            if duplicate_question_count:
+                cls._warn(
+                    warnings,
+                    "REDUNDANT_DUPLICATE_QUESTIONS",
+                    (
+                        f"{submitted_question_count} submitted \u2022 {len(automatic_question_groups)} unique "
+                        f"\u2022 {duplicate_question_count} duplicate copies automatically ignored."
+                    ),
+                    submitted=submitted_question_count,
+                    unique=len(automatic_question_groups),
+                    redundant=duplicate_question_count,
+                )
 
         eligible_ids = {question.id for question in eligible_questions}
         placement_by_question = {}
@@ -529,28 +536,55 @@ class Stage6ReadinessService:
                 invalid_count=invalid_scenario_count,
             )
 
-        available_by_campus = Counter(
-            (
-                question.contribution.source_campus_id
-                if automatic_flat_mode
-                else question.stage6_campus_code
+        if automatic_flat_mode:
+            available_by_campus = Counter(
+                {
+                    campus_id: sum(
+                        any(
+                            question.contribution.source_campus_id == campus_id
+                            for question in rows
+                        )
+                        for rows in automatic_question_groups.values()
+                    )
+                    for campus_id in campus_quotas
+                }
             )
-            for question in eligible_questions
-        )
-        available_by_difficulty = Counter(
-            question.difficulty for question in eligible_questions
-        )
+            available_by_difficulty = Counter(
+                {
+                    difficulty: sum(
+                        any(question.difficulty == difficulty for question in rows)
+                        for rows in automatic_question_groups.values()
+                    )
+                    for difficulty in difficulty_quotas
+                }
+            )
+        else:
+            available_by_campus = Counter(
+                question.stage6_campus_code for question in eligible_questions
+            )
+            available_by_difficulty = Counter(
+                question.difficulty for question in eligible_questions
+            )
         available_by_section = Counter()
         if automatic_flat_mode or (
             blueprint is not None and blueprint.mode == ExamBlueprint.Mode.NO_SECTIONS
         ):
-            available_by_section[0] = len(eligible_questions)
+            available_by_section[0] = (
+                len(automatic_question_groups)
+                if automatic_flat_mode
+                else len(eligible_questions)
+            )
         else:
             available_by_section.update(placement_by_question.values())
 
-        if final_count is not None and len(eligible_questions) < final_count:
+        logical_question_count = (
+            len(automatic_question_groups)
+            if automatic_flat_mode
+            else len(eligible_questions)
+        )
+        if final_count is not None and logical_question_count < final_count:
             shortages.append(
-                {"dimension": "total", "label": "Total", "required": final_count, "available": len(eligible_questions)}
+                {"dimension": "total", "label": "Total", "required": final_count, "available": logical_question_count}
             )
         for campus_key, required in campus_quotas.items():
             available = available_by_campus[campus_key]
@@ -576,7 +610,7 @@ class Stage6ReadinessService:
                 cls._block(
                     blockers,
                     "UNIQUE_QUESTION_SHORTAGES",
-                    "The unique usable Submitted pool has aggregate shortages.",
+                    "The deduplicated Submitted pool has aggregate shortages.",
                 )
             else:
                 cls._block(blockers, "QUESTION_SHORTAGES", "The eligible Submitted pool has aggregate shortages.")
@@ -638,11 +672,23 @@ class Stage6ReadinessService:
                         for position in range(len(next(iter(question_vectors.values()))))
                     )
                 )
-            singleton_capacities = Counter(
-                question_vectors[question.id]
-                for question in eligible_questions
-                if question.id not in scenario_question_ids
-            )
+            alternative_vector_groups = []
+            if automatic_flat_mode:
+                singleton_capacities = Counter()
+                for rows in automatic_question_groups.values():
+                    vectors = tuple(
+                        sorted({question_vectors[question.id] for question in rows})
+                    )
+                    if len(vectors) == 1:
+                        singleton_capacities[vectors[0]] += 1
+                    else:
+                        alternative_vector_groups.append(vectors)
+            else:
+                singleton_capacities = Counter(
+                    question_vectors[question.id]
+                    for question in eligible_questions
+                    if question.id not in scenario_question_ids
+                )
             margins = (
                 final_count,
                 *(campus_quotas[key] for key in campus_order),
@@ -653,6 +699,7 @@ class Stage6ReadinessService:
                 margins=margins,
                 scenario_vectors=scenario_vectors,
                 singleton_capacities=singleton_capacities,
+                alternative_vector_groups=alternative_vector_groups,
             )
             if solver_result.limit_hit:
                 cls._block(
@@ -688,9 +735,12 @@ class Stage6ReadinessService:
                 }
                 for section_id, required in section_quotas.items()
             ],
-            "eligible_question_count": len(eligible_questions),
+            "eligible_question_count": logical_question_count,
+            "submitted_question_count": submitted_question_count,
+            "unique_question_count": logical_question_count,
             "invalid_question_count": invalid_question_count,
             "duplicate_question_count": duplicate_question_count,
+            "automatic_pool": automatic_flat_mode,
             "contributor_counts": {
                 "required_active": roster.required_active_count if roster else 0,
                 "submitted_required": roster.submitted_required_count if roster else 0,
@@ -753,6 +803,9 @@ class Stage6ReadinessService:
                     section_id=section_id,
                     section_title=section_labels[section_id],
                     section_instructions=section_instructions[section_id],
+                    normalized_fingerprint=QuestionPayloadService.question_fingerprint(
+                        question.question_text
+                    ),
                     question_text=question.question_text,
                     choices=(
                         question.choice_a,
@@ -825,6 +878,11 @@ class Stage6ReadinessService:
                                 section_id=data.section_id,
                             ),
                         ),
+                        logical_group_id=(
+                            data.normalized_fingerprint
+                            if automatic_flat_mode
+                            else None
+                        ),
                     )
                 )
             roster_boundary = roster.boundary_sha256 if roster else ""
@@ -867,6 +925,7 @@ class Stage6ReadinessService:
             }
             if automatic_flat_mode:
                 fingerprint_payload["structure_mode"] = "AUTOMATIC_FLAT"
+                fingerprint_payload["automatic_dedupe_policy"] = "normalized-text-v3"
                 fingerprint_payload["automatic_policies"] = {
                     "campus_contribution": (
                         cycle_course.cycle.automatic_campus_contribution_policy
