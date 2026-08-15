@@ -8,6 +8,7 @@ from apps.tenants.models import Department
 from .models import (
     CourseExamConfiguration,
     CycleCourse,
+    ExamGenerationRevision,
     ExaminationCycle,
     normalize_contribution_deadline_to_minute,
 )
@@ -442,6 +443,53 @@ class AutomaticContributionReopenForm(_ConfigurationActionForm):
         return normalize_contribution_deadline_to_minute(
             self.cleaned_data.get("new_deadline")
         )
+
+
+class QuestionnairePrintReleaseForm(forms.Form):
+    cycle_course_id = forms.IntegerField(widget=forms.HiddenInput)
+    generation_revision = forms.ModelChoiceField(
+        queryset=ExamGenerationRevision.objects.none(),
+        empty_label=None,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    print_from = forms.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local", "class": "form-control"},
+        ),
+    )
+    print_until = forms.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local", "class": "form-control"},
+        ),
+    )
+
+    def __init__(self, *args, cycle_course=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if cycle_course is not None:
+            self.fields["generation_revision"].queryset = (
+                ExamGenerationRevision.objects.filter(cycle_course=cycle_course)
+                .order_by("-revision_number")
+            )
+            self.fields["generation_revision"].label_from_instance = (
+                lambda revision: (
+                    f"R{revision.revision_number} — {revision.get_status_display()}"
+                )
+            )
+
+    def clean(self):
+        cleaned = super().clean()
+        print_from = cleaned.get("print_from")
+        print_until = cleaned.get("print_until")
+        if print_from and print_until and print_until <= print_from:
+            self.add_error(
+                "print_until",
+                "Print Until must be later than Print From.",
+            )
+        return cleaned
 
 
 class _ReasonedConfigurationActionForm(_ConfigurationActionForm):

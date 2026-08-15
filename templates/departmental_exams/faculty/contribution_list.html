@@ -28,7 +28,16 @@
             <div class="progress mb-3" role="progressbar" aria-label="Contribution progress" aria-valuenow="{{ contribution.progress_percent }}" aria-valuemin="0" aria-valuemax="100">
               <div class="progress-bar" style="width: {{ contribution.progress_percent }}%">{{ contribution.progress_percent }}%</div>
             </div>
-            <a class="btn btn-primary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Open workspace</a>
+            <div class="d-flex flex-wrap gap-2">
+              <a class="btn btn-primary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Open workspace</a>
+              {% if contribution.questionnaire_print %}
+                <div class="btn-group" role="group" aria-label="Print Questionnaire revision R{{ contribution.questionnaire_print.revision_number }}">
+                  <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id contribution.questionnaire_print.release_id 'A' %}">Print Set A</a>
+                  <a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:questionnaire_print' contribution.id contribution.questionnaire_print.release_id 'B' %}">Print Set B</a>
+                </div>
+                <span class="small text-muted align-self-center">Print Questionnaire &middot; Released R{{ contribution.questionnaire_print.revision_number }}</span>
+              {% endif %}
+            </div>
           </div>
         </div>
       </div>

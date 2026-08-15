@@ -10,6 +10,7 @@ _DEPARTMENTAL_EXAM_ACTIVE_ROUTES = {
         "DE_EXAM_FACULTY_CONTRIBUTIONS": {
             "departmental_exams:contribution_list",
             "departmental_exams:contribution_workspace",
+            "departmental_exams:questionnaire_print",
             "departmental_exams:question_create",
             "departmental_exams:question_edit",
             "departmental_exams:question_delete",
@@ -53,6 +54,9 @@ _DEPARTMENTAL_EXAM_ACTIVE_ROUTES = {
             "departmental_exams:contributor_monitoring",
             "departmental_exams:roster_action",
             "departmental_exams:blocked_contribution_resolve",
+        },
+        "DE_EXAM_QUESTIONNAIRE_PRINT_RELEASE": {
+            "departmental_exams:questionnaire_print_release",
         },
     },
 }

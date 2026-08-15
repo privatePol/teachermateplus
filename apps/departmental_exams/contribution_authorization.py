@@ -205,6 +205,57 @@ class ContributorEligibilityService:
         return SourceInventory(all_sources=assignments, eligible_sources=tuple(eligible))
 
     @classmethod
+    def print_source_inventory(cls, *, cycle_course, faculty_user_id=None):
+        """Return current teaching assignments without reopening contribution lifecycle.
+
+        Questionnaire printing is governed by current assignment ownership and
+        its own release window. A closed contribution intake or examination
+        cycle therefore must not make a still-current teaching assignment
+        historical, while tenant/course/offering scope and direct-deny portal
+        authority remain fail-closed.
+        """
+        assignments = tuple(
+            cls._linked_assignments(
+                cycle_course=cycle_course,
+                faculty_user_id=faculty_user_id,
+            )
+        )
+        allowed_keys = cls._bulk_allowed_keys(assignments)
+        eligible = []
+        cycle = cycle_course.cycle
+        for assignment in assignments:
+            effective_scope = cls._effective_scope(assignment)
+            offering = assignment.offering
+            if (
+                effective_scope is not None
+                and assignment.faculty_user.is_active
+                and cycle.tenant.is_active
+                and effective_scope[0] == cycle.tenant_id
+                and offering.tenant.is_active
+                and offering.campus.is_active
+                and offering.is_active
+                and offering.status == CourseOffering.Status.OPEN
+                and assignment.is_active
+                and assignment.response_status
+                == FacultyAssignment.ResponseStatus.ACCEPTED
+                and assignment.accepted_at is not None
+                and offering.course_id == cycle_course.course_id
+                and offering.academic_year_id == cycle.academic_year_id
+                and offering.term_id == cycle.term_id
+                and cycle_course.inclusion_status
+                == CycleCourse.InclusionStatus.INCLUDED
+                and FeatureSettingsService.is_departmental_exam_builder_enabled(
+                    tenant_id=cycle.tenant_id
+                )
+                and (assignment.faculty_user_id, *effective_scope) in allowed_keys
+            ):
+                eligible.append(assignment)
+        return SourceInventory(
+            all_sources=assignments,
+            eligible_sources=tuple(eligible),
+        )
+
+    @classmethod
     def preparation_source_inventory(cls, *, cycle_course):
         """Evaluate faculty eligibility for a Draft row as if it were opened now."""
         return cls.source_inventory(
@@ -286,24 +337,14 @@ class ContributorEligibilityService:
 
 class ContributionAuthorizationService:
     @staticmethod
-    def has_retained_live_eligibility(*, contribution):
-        """Return whether a retained current source is still eligible live.
-
-        This is deliberately read-only so GET callers can enforce the same
-        source intersection as mutation authorization without synchronizing
-        or otherwise rewriting the contributor roster.
-        """
-        inventory = ContributorEligibilityService.source_inventory(
-            cycle_course=contribution.cycle_course,
-            faculty_user_id=contribution.faculty_user_id,
-        )
+    def _retained_source_intersects(*, contribution, assignments):
         eligible_source_keys = {
             (
                 assignment.id,
                 assignment.offering_id,
                 *ContributorEligibilityService._effective_scope(assignment),
             )
-            for assignment in inventory.eligible_sources
+            for assignment in assignments
         }
         if not eligible_source_keys:
             return False
@@ -318,6 +359,34 @@ class ContributionAuthorizationService:
             if source.is_current
         }
         return bool(retained_current_keys & eligible_source_keys)
+
+    @staticmethod
+    def has_retained_live_eligibility(*, contribution):
+        """Return whether a retained current source is still eligible live.
+
+        This is deliberately read-only so GET callers can enforce the same
+        source intersection as mutation authorization without synchronizing
+        or otherwise rewriting the contributor roster.
+        """
+        inventory = ContributorEligibilityService.source_inventory(
+            cycle_course=contribution.cycle_course,
+            faculty_user_id=contribution.faculty_user_id,
+        )
+        return ContributionAuthorizationService._retained_source_intersects(
+            contribution=contribution,
+            assignments=inventory.eligible_sources,
+        )
+
+    @staticmethod
+    def has_retained_current_print_eligibility(*, contribution):
+        inventory = ContributorEligibilityService.print_source_inventory(
+            cycle_course=contribution.cycle_course,
+            faculty_user_id=contribution.faculty_user_id,
+        )
+        return ContributionAuthorizationService._retained_source_intersects(
+            contribution=contribution,
+            assignments=inventory.eligible_sources,
+        )
 
     @staticmethod
     def require_common_read_access(*, user, tenant, request_tenant_id, request_campus_id):

@@ -1,0 +1,53 @@
+{% extends "admin_portal/base.html" %}
+{% load tz %}
+{% block admin_content %}
+{% include "departmental_exams/admin/_stage41_styles.html" %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Questionnaire Print Release</li></ol></nav>
+<header class="de-exam-hero">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+    <div><span class="badge text-bg-light text-dark mb-2">CONTROLLED FACULTY OUTPUT</span><h1>Questionnaire Print Release</h1><p>Release one exact generated revision for a bounded faculty print window. Regeneration never releases a newer revision automatically.</p></div>
+    <a class="btn btn-light btn-sm" href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Departmental Exam Builder</a>
+  </div>
+</header>
+
+<div class="alert alert-warning"><strong>Confidential release control:</strong> Confirm the exact revision and Asia/Manila window. Replacing or revoking a release preserves its historical audit record.</div>
+
+{% for course in courses %}
+<section class="card de-exam-card mb-4" id="course-{{ course.id }}">
+  <div class="card-header bg-white p-4 d-flex flex-wrap justify-content-between gap-3">
+    <div><h2 class="h5 mb-1">{{ course.course.code }} — {{ course.course.title }}</h2><div class="small text-muted">{{ course.cycle.academic_year }} / {{ course.cycle.term }} / {{ course.cycle.get_exam_period_display }} &middot; {% for snapshot in course.offering_snapshots.all %}{% if not forloop.first %}, {% endif %}{{ snapshot.campus.name }}{% endfor %}</div></div>
+    <span class="badge {% if course.print_window_status == 'Printable now' %}text-bg-success{% elif course.print_window_status == 'Scheduled' %}text-bg-info{% elif course.print_window_status == 'Window ended' %}text-bg-secondary{% else %}text-bg-light text-dark border{% endif %}">{{ course.print_window_status }}</span>
+  </div>
+  <div class="card-body p-4">
+    {% if course.active_print_release %}
+      <div class="row g-3 mb-3">
+        <div class="col-md-2"><div class="small text-muted">Released revision</div><strong>R{{ course.active_print_release.generation_revision.revision_number }}</strong></div>
+        <div class="col-md-3"><div class="small text-muted">Print From</div><strong>{{ course.active_print_release.print_from|localtime|date:"M j, Y g:i A" }}</strong></div>
+        <div class="col-md-3"><div class="small text-muted">Print Until</div><strong>{{ course.active_print_release.print_until|localtime|date:"M j, Y g:i A" }}</strong></div>
+        <div class="col-md-4"><div class="small text-muted">Released By / At</div><strong>{{ course.active_print_release.released_by.full_name|default:course.active_print_release.released_by.username }}</strong><div class="small">{{ course.active_print_release.released_at|localtime|date:"M j, Y g:i A" }}</div></div>
+      </div>
+      {% if course.newer_revision_exists %}<div class="alert alert-info py-2"><strong>A newer generated revision exists.</strong> It is not printable until it receives its own explicit release.</div>{% endif %}
+      <form method="post" class="mb-4">{% csrf_token %}<input type="hidden" name="action" value="revoke"><input type="hidden" name="release_id" value="{{ course.active_print_release.id }}"><button class="btn btn-sm btn-outline-danger" type="submit">Revoke Current Release</button></form>
+    {% else %}
+      <p class="text-muted">No revision is currently released for faculty printing.</p>
+    {% endif %}
+
+    <h3 class="h6">{% if course.active_print_release %}Replace active release{% else %}Release an exact revision{% endif %}</h3>
+    <form method="post" novalidate>
+      {% csrf_token %}<input type="hidden" name="action" value="release">{{ course.release_form.cycle_course_id }}
+      {% if course.release_form.non_field_errors %}<div class="alert alert-danger">{{ course.release_form.non_field_errors }}</div>{% endif %}
+      <div class="row g-3 align-items-start">
+        <div class="col-lg-4"><label class="form-label" for="{{ course.release_form.generation_revision.id_for_label }}">Exact generated revision</label>{{ course.release_form.generation_revision }}{{ course.release_form.generation_revision.errors }}<div class="form-text">A historical revision remains selectable because releases stay bound to the exact snapshot.</div></div>
+        <div class="col-lg-3"><label class="form-label" for="{{ course.release_form.print_from.id_for_label }}">Print From</label>{{ course.release_form.print_from }}{{ course.release_form.print_from.errors }}<div class="form-text">Asia/Manila</div></div>
+        <div class="col-lg-3"><label class="form-label" for="{{ course.release_form.print_until.id_for_label }}">Print Until</label>{{ course.release_form.print_until }}{{ course.release_form.print_until.errors }}<div class="form-text">Asia/Manila</div></div>
+        <div class="col-lg-2 d-grid"><label class="form-label invisible" aria-hidden="true">Action</label><button class="btn btn-primary" type="submit">Release Revision</button></div>
+      </div>
+    </form>
+
+    {% if course.release_history %}
+      <details class="mt-4"><summary class="fw-semibold">Release history ({{ course.release_history|length }})</summary><div class="table-responsive mt-2"><table class="table table-sm align-middle"><thead><tr><th>Revision</th><th>Status</th><th>Window</th><th>Released</th><th>Revoked</th></tr></thead><tbody>{% for release in course.release_history %}<tr><td>R{{ release.generation_revision.revision_number }}</td><td>{{ release.get_status_display }}</td><td>{{ release.print_from|localtime|date:"M j, Y g:i A" }} – {{ release.print_until|localtime|date:"M j, Y g:i A" }}</td><td>{{ release.released_by.full_name|default:release.released_by.username }}<br><span class="small text-muted">{{ release.released_at|localtime|date:"M j, Y g:i A" }}</span></td><td>{% if release.revoked_at %}{{ release.revoked_by.full_name|default:release.revoked_by.username }}<br><span class="small text-muted">{{ release.revoked_at|localtime|date:"M j, Y g:i A" }}</span>{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div></details>
+    {% endif %}
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

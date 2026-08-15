@@ -16,6 +16,11 @@ urlpatterns = [
         name="contribution_workspace",
     ),
     path(
+        "faculty/departmental-exams/contributions/<int:contribution_id>/questionnaires/<int:release_id>/set-<str:set_code>/print/",
+        faculty_views.questionnaire_print_view,
+        name="questionnaire_print",
+    ),
+    path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/questions/add/",
         faculty_views.question_create_view,
         name="question_create",
@@ -95,6 +100,7 @@ urlpatterns = [
     ),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/courses/", views.cycle_course_list_view, name="cycle_course_list"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/automatic-summary/", stage6_views.automatic_generation_summary_view, name="automatic_generation_summary"),
+    path("admin-portal/departmental-exams/questionnaire-print-release/", stage6_views.questionnaire_print_release_view, name="questionnaire_print_release"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/administration/", views.cycle_course_administration_view, name="cycle_course_administration"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/exempt/", views.cycle_course_exempt_view, name="cycle_course_exempt"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/restore/", views.cycle_course_restore_view, name="cycle_course_restore"),

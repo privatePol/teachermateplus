@@ -1,0 +1,87 @@
+{% load static %}{% get_media_prefix as MEDIA_URL %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ course_code }} — Set {{ set_code }} Questionnaire</title>
+  <style>
+    @page { size: Letter portrait; margin: 0.55in 0.6in 0.65in; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #111; background: #ececec; font-family: Arial, Helvetica, sans-serif; font-size: 11pt; line-height: 1.35; }
+    .print-controls { max-width: 8.5in; margin: 16px auto 8px; text-align: right; }
+    .print-controls button { padding: 8px 18px; border: 0; border-radius: 4px; background: #0c6838; color: #fff; font-weight: 700; cursor: pointer; }
+    .questionnaire { width: 8.5in; min-height: 11in; margin: 0 auto 20px; padding: 0.55in 0.6in 0.7in; background: #fff; box-shadow: 0 2px 14px rgba(0, 0, 0, .16); }
+    .running-header { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #aaa; color: #777; font-size: 9pt; font-weight: 700; text-decoration: underline; }
+    .running-course-title { text-align: right; }
+    .institution-header { display: grid; grid-template-columns: 82px 1fr 82px; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 2px solid #0c6838; text-align: center; }
+    .institution-header img { width: 76px; height: 76px; object-fit: contain; }
+    .institution-name { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 17pt; font-weight: 700; text-transform: uppercase; }
+    .institution-address { margin-top: 2px; font-size: 9.5pt; }
+    .institution-cycle { display: flex; justify-content: center; gap: 18px; margin-top: 3px; font-size: 9.5pt; font-weight: 700; }
+    .exam-heading { margin: 12px 0 4px; text-align: center; }
+    .exam-period { font-size: 12pt; font-weight: 700; text-transform: uppercase; }
+    .exam-heading h1 { margin: 0; font-size: 15pt; text-transform: uppercase; letter-spacing: .04em; }
+    .course-title { margin-top: 7px; font-size: 13pt; font-weight: 700; text-transform: uppercase; }
+    .course-code { margin-top: 1px; font-size: 11pt; font-weight: 700; }
+    .set-label { display: inline-block; margin-top: 8px; padding: 4px 26px; border: 2px solid #111; font-size: 17pt; font-weight: 800; letter-spacing: .14em; }
+    .instructions { margin: 12px 0 16px; padding: 8px 4px 10px; border-bottom: 2px solid #555; }
+    .instructions p { margin: 0 0 4px; }
+    .instructions p:last-child { margin-bottom: 0; }
+    .instructions strong { text-transform: uppercase; }
+    .no-erasures { margin-top: 6px !important; font-weight: 800; text-align: center; }
+    .question { margin: 0 0 12px; break-inside: avoid; page-break-inside: avoid; }
+    .question-line { display: grid; grid-template-columns: 28px 1fr; gap: 5px; font-weight: 600; }
+    .choices { margin: 5px 0 0 33px; padding-left: 22px; columns: 2; column-gap: 42px; }
+    .choices li { margin: 2px 0; padding-left: 3px; break-inside: avoid; }
+    .confidential-footer { position: fixed; right: 0.6in; bottom: 0.28in; left: 0.6in; padding-top: 5px; border-top: 1px solid #555; font-size: 8pt; font-weight: 700; text-align: center; letter-spacing: .02em; }
+    @media print {
+      body { background: #fff; }
+      .print-controls { display: none !important; }
+      .questionnaire { width: auto; min-height: auto; margin: 0; padding: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-controls"><button type="button" onclick="window.print()">Print Questionnaire</button></div>
+  <main class="questionnaire">
+    <div class="running-header" aria-label="Course running header">
+      <span class="running-course-code">{{ course_code }}</span>
+      <span class="running-course-title">{{ course_title }}</span>
+    </div>
+    <header class="institution-header">
+      <img src="{{ MEDIA_URL }}logos/ncba-logo.png" alt="NCBA school logo">
+      <div>
+        <p class="institution-name">{{ school_name }}</p>
+        {% if school_address %}<div class="institution-address">{{ school_address }}</div>{% endif %}
+        <div class="institution-cycle">
+          <span>{{ term }}</span>
+          <span>Academic Year {{ academic_year }}</span>
+        </div>
+      </div>
+      <div aria-hidden="true"></div>
+    </header>
+    <section class="exam-heading">
+      <div class="exam-period">{{ exam_period }}</div>
+      <h1>DEPARTMENTAL EXAMINATIONS</h1>
+      <div class="course-title">{{ course_title }}</div>
+      <div class="course-code">{{ course_code }}</div>
+      <div class="set-label">SET {{ set_code }}</div>
+    </section>
+    <div class="instructions">
+      <p><strong>Instructions:</strong> Read each question carefully and select the correct answer.</p>
+      <p>Using Pencil No. 2, shade the circle on the answer sheet that corresponds to your selected answer.</p>
+      <p class="no-erasures"><strong>STRICTLY NO ERASURES ALLOWED</strong></p>
+    </div>
+    <section aria-label="Multiple-choice questions">
+      {% for item in items %}
+        <article class="question">
+          <div class="question-line"><span>{{ item.position }}.</span><span>{{ item.question_text }}</span></div>
+          <ol class="choices" type="A">{% for choice in item.choices %}<li>{{ choice }}</li>{% endfor %}</ol>
+        </article>
+      {% endfor %}
+    </section>
+    <footer class="confidential-footer">CONFIDENTIAL &bull; {{ course_code }} &bull; SET {{ set_code }} &bull; Revision R{{ revision_number }} &bull; Printed {{ printed_at|date:"M j, Y g:i A" }}</footer>
+  </main>
+</body>
+</html>

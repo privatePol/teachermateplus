@@ -1160,6 +1160,154 @@ class ExamGenerationRevision(TimeStampedModel):
         raise ValidationError("Generation revisions are immutable historical records.")
 
 
+class QuestionnairePrintRelease(TimeStampedModel):
+    _IMMUTABLE_FIELDS = (
+        "cycle_course_id",
+        "generation_revision_id",
+        "print_from",
+        "print_until",
+        "released_by_id",
+        "released_at",
+    )
+
+    class Status(models.TextChoices):
+        ACTIVE = "ACTIVE", "Active"
+        REVOKED = "REVOKED", "Revoked"
+
+    cycle_course = models.ForeignKey(
+        CycleCourse,
+        on_delete=models.PROTECT,
+        related_name="questionnaire_print_releases",
+    )
+    generation_revision = models.ForeignKey(
+        ExamGenerationRevision,
+        on_delete=models.PROTECT,
+        related_name="questionnaire_print_releases",
+    )
+    print_from = models.DateTimeField()
+    print_until = models.DateTimeField()
+    released_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="released_departmental_exam_questionnaires",
+    )
+    released_at = models.DateTimeField(default=timezone.now)
+    status = models.CharField(
+        max_length=8,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+    # MariaDB permits multiple NULL values in this scoped uniqueness rule.
+    # The sole active row uses 1; historical rows use NULL.
+    active_marker = models.PositiveSmallIntegerField(null=True, blank=True, default=1)
+    revoked_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="revoked_departmental_exam_questionnaire_releases",
+        null=True,
+        blank=True,
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "departmental_exam_questionnaire_print_releases"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cycle_course", "active_marker"],
+                name="uq_de_print_release_active",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(print_until__gt=models.F("print_from")),
+                name="ck_de_print_release_window",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status="ACTIVE",
+                        active_marker=1,
+                        revoked_by__isnull=True,
+                        revoked_at__isnull=True,
+                    )
+                    | models.Q(
+                        status="REVOKED",
+                        active_marker__isnull=True,
+                        revoked_by__isnull=False,
+                        revoked_at__isnull=False,
+                    )
+                ),
+                name="ck_de_print_release_status",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["cycle_course", "status", "print_from", "print_until"],
+                name="idx_de_print_release_window",
+            ),
+            models.Index(
+                fields=["generation_revision", "status"],
+                name="idx_de_print_release_revision",
+            ),
+        ]
+
+    def clean(self):
+        if self.print_from and self.print_until and self.print_until <= self.print_from:
+            raise ValidationError(
+                {"print_until": "Print Until must be later than Print From."}
+            )
+        if (
+            self.cycle_course_id
+            and self.generation_revision_id
+            and self.generation_revision.cycle_course_id != self.cycle_course_id
+        ):
+            raise ValidationError(
+                {"generation_revision": "Released revision must belong to the selected course examination."}
+            )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "status",
+                "active_marker",
+                "revoked_by_id",
+                "revoked_at",
+                *self._IMMUTABLE_FIELDS,
+            ).first()
+            if previous is not None:
+                if any(
+                    previous[field] != getattr(self, field)
+                    for field in self._IMMUTABLE_FIELDS
+                ):
+                    raise ValidationError("Questionnaire print release details are immutable.")
+                before_state = (previous["status"], previous["active_marker"])
+                after_state = (self.status, self.active_marker)
+                allowed = {
+                    (self.Status.ACTIVE, 1): {
+                        (self.Status.ACTIVE, 1),
+                        (self.Status.REVOKED, None),
+                    },
+                    (self.Status.REVOKED, None): {(self.Status.REVOKED, None)},
+                }
+                if after_state not in allowed.get(before_state, set()):
+                    raise ValidationError("Questionnaire print release lifecycle transition is invalid.")
+                revoked_before = (
+                    previous["revoked_by_id"],
+                    previous["revoked_at"],
+                )
+                revoked_after = (self.revoked_by_id, self.revoked_at)
+                if before_state == (self.Status.ACTIVE, 1) and after_state == (
+                    self.Status.REVOKED,
+                    None,
+                ):
+                    if not all(revoked_after):
+                        raise ValidationError("Questionnaire print revocation metadata is incomplete.")
+                elif revoked_before != revoked_after:
+                    raise ValidationError("Questionnaire print revocation metadata is immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Questionnaire print releases are auditable historical records.")
+
+
 class GeneratedExamSet(TimeStampedModel):
     class SetCode(models.TextChoices):
         A = "A", "Set A"

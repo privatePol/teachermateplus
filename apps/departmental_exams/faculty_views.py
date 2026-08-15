@@ -9,7 +9,7 @@ from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_http_methods, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.core.decorators import portal_required
 from apps.tenants.models import Tenant
@@ -32,6 +32,7 @@ from .contribution_selectors import ContributionSelector
 from .contribution_services import QuestionMutationService
 from .csv_import import CSV_FILENAME, QuestionCSVImportService
 from .models import FacultyContribution, Question
+from .questionnaire_printing import FacultyQuestionnairePrintService
 
 
 def _scope(request):
@@ -206,15 +207,47 @@ def contribution_list_view(request):
     contributions = list(
         ContributionSelector.owner_queryset(user=request.user, tenant_id=tenant_id)
     )
+    print_options = FacultyQuestionnairePrintService.available_options(
+        contributions=contributions,
+    )
     for contribution in contributions:
         contribution.progress_percent = round(
             (contribution.saved_question_count / contribution.quota_snapshot) * 100
         )
+        contribution.questionnaire_print = print_options.get(contribution.id)
     return render(
         request,
         "departmental_exams/faculty/contribution_list.html",
         {"contributions": contributions},
     )
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def questionnaire_print_view(
+    request,
+    contribution_id,
+    release_id,
+    set_code,
+):
+    contribution = _owner_contribution(request, contribution_id)
+    context = FacultyQuestionnairePrintService.build_safe_context(
+        contribution=contribution,
+        release_id=release_id,
+        set_code=set_code,
+        actor=request.user,
+        request=request,
+    )
+    response = render(
+        request,
+        "departmental_exams/faculty/questionnaire_print.html",
+        context,
+    )
+    response["Cache-Control"] = "no-store, no-cache, private, max-age=0"
+    response["Pragma"] = "no-cache"
+    response["Expires"] = "0"
+    return response
 
 
 @_faculty_error_page

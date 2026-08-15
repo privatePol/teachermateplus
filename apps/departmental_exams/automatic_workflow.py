@@ -26,6 +26,7 @@ from .models import (
     ExamGenerationRevision,
     ExaminationCycle,
     FacultyContribution,
+    GeneratedExamSet,
     normalize_contribution_deadline_to_minute,
 )
 from .services import (
@@ -378,7 +379,7 @@ def readiness_recommendation(report):
     code = ((report.get("blockers") or [{}])[0]).get("code", "")
     return {
         "CONFIGURATION_MISSING": "Configure the course examination.",
-        "CONFIGURATION_DRAFT": "Open contributions / complete course configuration.",
+        "CONFIGURATION_DRAFT": "Complete the course configuration and open contributions before automatic generation can proceed.",
         "FINAL_COUNT_INVALID": "Set a valid final item count.",
         "CONTRIBUTION_NOT_CLOSED": "Wait for automatic deadline processing.",
         "WAITING_FOR_DEADLINE": "Monitor faculty contributions until the deadline.",
@@ -822,7 +823,14 @@ class AutomaticGenerationSummaryService:
                     "generation_revisions",
                     queryset=ExamGenerationRevision.objects.select_related(
                         "generated_by"
-                    ).prefetch_related("generated_sets"),
+                    ).prefetch_related(
+                        Prefetch(
+                            "generated_sets",
+                            queryset=GeneratedExamSet.objects.prefetch_related(
+                                "items"
+                            ).order_by("set_code"),
+                        )
+                    ),
                 ),
             )
             .order_by("course__code", "course_id")
@@ -873,6 +881,45 @@ class AutomaticGenerationSummaryService:
             }
             if current:
                 sets = {item.set_code: item for item in current.generated_sets.all()}
+                actual_set_counts = []
+                for set_code in (GeneratedExamSet.SetCode.A, GeneratedExamSet.SetCode.B):
+                    generated_set = sets.get(set_code)
+                    campus_counts = {}
+                    if generated_set is not None:
+                        for item in generated_set.items.all():
+                            campus_key = (
+                                item.campus_code_snapshot,
+                                item.campus_name_snapshot,
+                            )
+                            campus_row = campus_counts.setdefault(
+                                campus_key,
+                                {
+                                    "campus_code": item.campus_code_snapshot,
+                                    "campus_name": item.campus_name_snapshot,
+                                    "total": 0,
+                                    "easy": 0,
+                                    "moderate": 0,
+                                    "difficult": 0,
+                                },
+                            )
+                            campus_row["total"] += 1
+                            campus_row[item.difficulty_snapshot.lower()] += 1
+                    actual_set_counts.append(
+                        {
+                            "set_code": set_code,
+                            "total": sum(
+                                campus_row["total"]
+                                for campus_row in campus_counts.values()
+                            ),
+                            "campuses": tuple(
+                                campus_counts[key]
+                                for key in sorted(
+                                    campus_counts,
+                                    key=lambda value: (value[1], value[0]),
+                                )
+                            ),
+                        }
+                    )
                 current_problem, current_readiness = Stage6ReadinessService.build_problem(
                     cycle_course=course
                 )
@@ -882,11 +929,7 @@ class AutomaticGenerationSummaryService:
                         "revision": current,
                         "set_a_generated": "A" in sets,
                         "set_b_generated": "B" in sets,
-                        "difficulty_quotas": (
-                            sets["A"].difficulty_quotas_snapshot
-                            if "A" in sets
-                            else {}
-                        ),
+                        "actual_set_counts": tuple(actual_set_counts),
                         "warnings": current_readiness.get("warnings", ()),
                         "pool_metrics": {
                             "submitted": current_readiness.get("submitted_question_count"),
@@ -920,7 +963,7 @@ class AutomaticGenerationSummaryService:
                     "blockers": [
                         {
                             "code": "CONFIGURATION_DRAFT",
-                            "message": "Course examination configuration is still Draft.",
+                            "message": "Course setup is not yet complete.",
                         }
                     ]
                 }
@@ -948,7 +991,7 @@ class AutomaticGenerationSummaryService:
                     "blockers": [
                         {
                             "code": "WAITING_FOR_DEADLINE",
-                            "message": "Contribution deadline has not arrived.",
+                            "message": "Contribution deadline has not arrived yet.",
                         }
                     ]
                 }
@@ -984,6 +1027,9 @@ class AutomaticGenerationSummaryService:
                 {
                     **common,
                     "status": status,
+                    "blocker_code": (
+                        (report.get("blockers") or [{}])[0].get("code", "")
+                    ),
                     "reason": readiness_blocker_text(report),
                     "recommended_action": readiness_recommendation(report),
                     "warnings": report.get("warnings", ()),
@@ -993,6 +1039,11 @@ class AutomaticGenerationSummaryService:
                         "redundant": report.get("duplicate_question_count"),
                     },
                     "configuration": configuration,
+                    "active_deadline": (
+                        configuration.active_contribution_deadline
+                        if configuration
+                        else None
+                    ),
                 }
             )
         return {

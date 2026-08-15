@@ -9,6 +9,7 @@ from django.db.models import Prefetch
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from apps.core.decorators import portal_required
@@ -43,8 +44,10 @@ from .models import (
     GeneratedExamSet,
     ExamGenerationRevision,
     ExaminationCycle,
+    QuestionnairePrintRelease,
 )
-from .forms import AutomaticContributionReopenForm
+from .forms import AutomaticContributionReopenForm, QuestionnairePrintReleaseForm
+from .questionnaire_printing import QuestionnairePrintReleaseService
 from .services import (
     CourseExamConfigurationConflict,
     DepartmentalExamAuthorizationService,
@@ -790,6 +793,189 @@ def automatic_generation_summary_view(request, cycle_id):
         request,
         "departmental_exams/admin/automatic_generation_summary.html",
         {"cycle": cycle, **summary},
+    )
+
+
+@portal_required("ADMIN")
+@require_http_methods(["GET", "POST"])
+def questionnaire_print_release_view(request):
+    tenant_id = _tenant_id(request)
+    courses = list(
+        CycleCourse.objects.filter(
+            cycle__tenant_id=tenant_id,
+            cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+            generation_revisions__isnull=False,
+        )
+        .select_related(
+            "cycle",
+            "cycle__academic_year",
+            "cycle__term",
+            "course",
+        )
+        .prefetch_related(
+            "offering_snapshots__campus",
+            Prefetch(
+                "generation_revisions",
+                queryset=ExamGenerationRevision.objects.order_by("-revision_number"),
+            ),
+            Prefetch(
+                "questionnaire_print_releases",
+                queryset=QuestionnairePrintRelease.objects.select_related(
+                    "generation_revision",
+                    "released_by",
+                    "revoked_by",
+                ).order_by("-released_at", "-id"),
+            ),
+        )
+        .distinct()
+        .order_by(
+            "-cycle__academic_year__start_date",
+            "cycle__term__name",
+            "course__code",
+        )
+    )
+    permission_map = DepartmentalExamAuthorizationService.automatic_permission_map(
+        user=request.user,
+        courses=courses,
+        permissions=(
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+        ),
+    )
+    courses = [
+        course
+        for course in courses
+        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+        in permission_map[course.id]
+    ]
+    if not courses:
+        raise PermissionDenied(
+            "No generated course examination is available within your management authority."
+        )
+
+    course_by_id = {course.id: course for course in courses}
+    bound_course_id = None
+    bound_form = None
+    status = 200
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "revoke":
+            try:
+                QuestionnairePrintReleaseService.revoke(
+                    release_id=int(request.POST.get("release_id") or 0),
+                    tenant_id=tenant_id,
+                    actor=request.user,
+                    request=request,
+                )
+            except (ValueError, ValidationError) as exc:
+                messages.error(request, " ".join(getattr(exc, "messages", (str(exc),))))
+                status = 400
+            else:
+                messages.success(request, "Questionnaire print release revoked.")
+                return redirect("departmental_exams:questionnaire_print_release")
+        elif action == "release":
+            try:
+                bound_course_id = int(request.POST.get("cycle_course_id") or 0)
+            except (TypeError, ValueError):
+                bound_course_id = 0
+            course = course_by_id.get(bound_course_id)
+            if course is None:
+                raise PermissionDenied(
+                    "The selected course examination is outside your management authority."
+                )
+            bound_form = QuestionnairePrintReleaseForm(
+                request.POST,
+                cycle_course=course,
+                auto_id=f"id_course_{course.id}_%s",
+            )
+            if bound_form.is_valid():
+                try:
+                    QuestionnairePrintReleaseService.release(
+                        cycle_course_id=course.id,
+                        revision_id=bound_form.cleaned_data["generation_revision"].id,
+                        tenant_id=tenant_id,
+                        actor=request.user,
+                        print_from=bound_form.cleaned_data["print_from"],
+                        print_until=bound_form.cleaned_data["print_until"],
+                        request=request,
+                    )
+                except ValidationError as exc:
+                    if hasattr(exc, "message_dict"):
+                        for field, errors in exc.message_dict.items():
+                            target = field if field in bound_form.fields else None
+                            for error in errors:
+                                bound_form.add_error(target, error)
+                    else:
+                        bound_form.add_error(None, exc)
+                    status = 400
+                else:
+                    messages.success(
+                        request,
+                        "Exact questionnaire revision released for faculty printing.",
+                    )
+                    return redirect("departmental_exams:questionnaire_print_release")
+            else:
+                status = 400
+        else:
+            raise Http404("Unknown questionnaire print release action.")
+
+    now = timezone.now()
+    local_now = timezone.localtime(now).replace(second=0, microsecond=0)
+    for course in courses:
+        course.available_revisions = list(course.generation_revisions.all())
+        course.release_history = list(course.questionnaire_print_releases.all())
+        course.active_print_release = next(
+            (
+                release
+                for release in course.release_history
+                if release.status == QuestionnairePrintRelease.Status.ACTIVE
+                and release.active_marker == 1
+            ),
+            None,
+        )
+        active = course.active_print_release
+        if active is None:
+            course.print_window_status = "Not released"
+        elif now < active.print_from:
+            course.print_window_status = "Scheduled"
+        elif now > active.print_until:
+            course.print_window_status = "Window ended"
+        else:
+            course.print_window_status = "Printable now"
+        course.newer_revision_exists = bool(
+            active
+            and any(
+                revision.revision_number
+                > active.generation_revision.revision_number
+                for revision in course.available_revisions
+            )
+        )
+        if bound_form is not None and course.id == bound_course_id:
+            course.release_form = bound_form
+        else:
+            course.release_form = QuestionnairePrintReleaseForm(
+                cycle_course=course,
+                auto_id=f"id_course_{course.id}_%s",
+                initial={
+                    "cycle_course_id": course.id,
+                    "generation_revision": (
+                        course.available_revisions[0]
+                        if course.available_revisions
+                        else None
+                    ),
+                    "print_from": active.print_from if active else local_now,
+                    "print_until": (
+                        active.print_until
+                        if active
+                        else local_now + timezone.timedelta(days=1)
+                    ),
+                },
+            )
+    return render(
+        request,
+        "departmental_exams/admin/questionnaire_print_release.html",
+        {"courses": courses, "now": now},
+        status=status,
     )
 
 
