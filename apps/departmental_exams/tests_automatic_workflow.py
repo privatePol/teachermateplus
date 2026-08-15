@@ -1095,72 +1095,51 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
     def test_automatic_duplicate_metrics_use_raw_200_unique_123_semantics(self):
         parent, _configuration, _problem = self._ready_automatic_course()
         self.assertEqual(resolve_automatic_generation_max_states(), 1_000_000)
-        base_problem, base_readiness = Stage6ReadinessService.build_problem(
-            cycle_course=parent
-        )
-        self.assertTrue(base_readiness["ready"], base_readiness["blockers"])
-        base_selection = self._proved_selection_for(
-            parent=parent,
-            problem=base_problem,
-        )
-        self.assertTrue(base_selection.feasible, base_selection)
-        self.assertEqual(base_selection.overlap, 0)
-        base_blocks = {
-            str(block.block_id): block for block in base_problem.blocks
-        }
-        selected_source_ids = {
-            base_blocks[str(block_id)].members[0].source_id
-            for block_id in (
-                base_selection.set_a_block_ids + base_selection.set_b_block_ids
+        campus_a, campus_b, campus_c = list(
+            parent.offering_snapshots.order_by("campus_id").values_list(
+                "campus_id", flat=True
             )
-        }
-        self.assertEqual(len(selected_source_ids), 100)
-        questions = list(
-            Question.objects.filter(contribution__cycle_course=parent).order_by("id")
         )
-        Question.objects.bulk_create(
+        fixed_capacities = (
+            (campus_a, Question.Difficulty.DIFFICULT, 10),
+            (campus_a, Question.Difficulty.EASY, 15),
+            (campus_a, Question.Difficulty.MODERATE, 24),
+            (campus_b, Question.Difficulty.DIFFICULT, 10),
+            (campus_b, Question.Difficulty.EASY, 15),
+            (campus_b, Question.Difficulty.MODERATE, 23),
+            (campus_c, Question.Difficulty.EASY, 15),
+            (campus_c, Question.Difficulty.MODERATE, 9),
+        )
+        logical_groups = []
+        for campus_id, difficulty, count in fixed_capacities:
+            logical_groups.extend([((campus_id, difficulty),)] * count)
+        logical_groups.extend(
             [
-                Question(
-                    contribution=question.contribution,
-                    question_text=question.question_text,
-                    choice_a=question.choice_a,
-                    choice_b=question.choice_b,
-                    choice_c=question.choice_c,
-                    choice_d=question.choice_d,
-                    correct_answer=question.correct_answer,
-                    difficulty=question.difficulty,
-                    position=question.position + 100,
-                    revision=question.revision,
-                    entry_method=question.entry_method,
-                )
-                for question in questions[:50]
+                (
+                    (campus_a, Question.Difficulty.MODERATE),
+                    (campus_b, Question.Difficulty.MODERATE),
+                ),
+                (
+                    (campus_b, Question.Difficulty.MODERATE),
+                    (campus_c, Question.Difficulty.MODERATE),
+                ),
             ]
         )
-        questions = list(
-            Question.objects.filter(contribution__cycle_course=parent).order_by("id")
-        )
-        singleton_ids = list(selected_source_ids)
-        singleton_ids.extend(
-            question.id
-            for question in questions
-            if question.id not in singleton_ids
-        )
-        singleton_ids = set(singleton_ids[:121])
-        duplicate_rows = [
-            question for question in questions if question.id not in singleton_ids
-        ]
-        alpha_ids = {question.id for question in duplicate_rows[:39]}
-        for index, question in enumerate(questions):
-            if question.id in singleton_ids:
-                question.question_text = (
-                    f"SASA singleton logical question {index + 1}: "
-                    f"{question.question_text}"
+        group_sizes = [1] * 49 + [2] * 72 + [3, 4]
+        rows = []
+        for group_number, (options, group_size) in enumerate(
+            zip(logical_groups, group_sizes), start=1
+        ):
+            for row_number in range(group_size):
+                campus_id, difficulty = options[row_number % len(options)]
+                rows.append(
+                    (
+                        f"SASA logical question {group_number}",
+                        campus_id,
+                        difficulty,
+                    )
                 )
-            elif question.id in alpha_ids:
-                question.question_text = "SASA alternative logical question alpha"
-            else:
-                question.question_text = "SASA alternative logical question beta"
-        Question.objects.bulk_update(questions, ["question_text"])
+        self._replace_automatic_question_rows(parent=parent, rows=rows)
 
         started = perf_counter()
         problem, readiness = Stage6ReadinessService.build_problem(
@@ -1183,13 +1162,24 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             123,
         )
         group_sizes = Counter(block.logical_group_id for block in problem.blocks)
-        self.assertEqual(sum(size == 1 for size in group_sizes.values()), 121)
-        self.assertEqual(
-            sorted(size for size in group_sizes.values() if size > 1),
-            [39, 40],
-        )
+        self.assertEqual(Counter(group_sizes.values()), {1: 49, 2: 72, 3: 1, 4: 1})
+        cross_campus_groups = {
+            logical_id
+            for logical_id in group_sizes
+            if len(
+                {
+                    block.members[0].campus
+                    for block in problem.blocks
+                    if block.logical_group_id == logical_id
+                }
+            )
+            > 1
+        }
+        self.assertEqual(len(cross_campus_groups), 2)
+        self.assertEqual(readiness["minimum_overlap"], 7)
+        self.assertEqual(problem.minimum_overlap, 7)
         self.assertFalse(readiness["solver_limit_hit"])
-        self.assertLess(readiness["solver_states"], 250_000)
+        self.assertLess(readiness["solver_states"], 10_000)
         self.assertLess(readiness_elapsed, 30)
         self.assertEqual(
             duplicate_warning["message"],
@@ -1210,7 +1200,10 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             "REDUNDANT_DUPLICATE_QUESTIONS",
             {item["code"] for item in summary["generated"][0]["warnings"]},
         )
-        for generated_set in ExamGenerationRevision.objects.get().generated_sets.all():
+        revision = ExamGenerationRevision.objects.get()
+        self.assertEqual(revision.minimum_overlap, 7)
+        generated_fingerprints = []
+        for generated_set in revision.generated_sets.all():
             self.assertEqual(
                 Counter(
                     generated_set.items.values_list("source_campus_id", flat=True)
@@ -1230,6 +1223,11 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                 )
             ]
             self.assertEqual(len(fingerprints), len(set(fingerprints)))
+            generated_fingerprints.append(set(fingerprints))
+        self.assertEqual(
+            len(generated_fingerprints[0].intersection(generated_fingerprints[1])),
+            7,
+        )
 
     def test_automatic_global_representatives_solve_exact_52_to_50_counterexample(self):
         parent, _configuration, _problem = self._ready_automatic_course()

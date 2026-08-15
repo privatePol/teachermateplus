@@ -408,11 +408,12 @@ def _solve_identity_aware_two_sets_ungrouped(
     )
 
 
-def _solve_zero_overlap_logical_assignment(
+def _solve_logical_assignment(
     *,
     margins,
     blocks,
     logical_groups,
+    minimum_overlap,
     campus_quotas,
     difficulty_quotas,
     secret,
@@ -420,7 +421,7 @@ def _solve_zero_overlap_logical_assignment(
     max_states,
     allow_soft_contributor_fallback=False,
 ):
-    """Assignment fast path for zero-overlap logical singleton groups."""
+    """Assignment fast path for Automatic logical singleton groups."""
     campus_order = tuple(campus_quotas)
     difficulty_order = tuple(difficulty_quotas)
     cell_order = tuple(
@@ -442,7 +443,7 @@ def _solve_zero_overlap_logical_assignment(
         )
     ):
         return None
-    if len(logical_groups) < 2 * margins[0]:
+    if len(logical_groups) < 2 * margins[0] - minimum_overlap:
         return None
 
     def allocations(total, limits, position=0, prefix=()):
@@ -510,7 +511,11 @@ def _solve_zero_overlap_logical_assignment(
     def choice_for(group_index, set_code, cell):
         key = (group_index, set_code, cell)
         if key not in choice_cache:
-            selection_state = "A" if set_code == "A" else "B"
+            selection_state = {
+                "A": "A",
+                "B": "B",
+                "X": "BOTH",
+            }[set_code]
             candidates = []
             for block in ordered_groups[group_index]:
                 member = block.members[0]
@@ -609,8 +614,12 @@ def _solve_zero_overlap_logical_assignment(
             if costs[row_index][group_index] >= infinity:
                 return None
             total_cost += costs[row_index][group_index]
-            target = selected_a if slots[row_index][0] == "A" else selected_b
-            target.append(block_ids[row_index][group_index])
+            set_code = slots[row_index][0]
+            block_id = block_ids[row_index][group_index]
+            if set_code in ("A", "X"):
+                selected_a.append(block_id)
+            if set_code in ("B", "X"):
+                selected_b.append(block_id)
         return total_cost, tuple(sorted(selected_a)), tuple(sorted(selected_b))
 
     states_explored = 0
@@ -636,13 +645,125 @@ def _solve_zero_overlap_logical_assignment(
             states_explored=states_explored,
             set_a_block_ids=set_a,
             set_b_block_ids=set_b,
-            overlap=0,
+            overlap=minimum_overlap,
             proportional_score=proportional_score,
             contributors_represented=len(contributor_counts),
             squared_contributor_concentration=sum(
                 count * count for count in contributor_counts.values()
             ),
         )
+
+    if minimum_overlap > 0:
+        if not allow_soft_contributor_fallback:
+            return None
+        available_capacity = {cell: 0 for cell in cell_order}
+        for rows in ordered_groups:
+            for cell in {
+                (block.members[0].campus, block.members[0].difficulty)
+                for block in rows
+            }:
+                available_capacity[cell] += 1
+        feasible_tables = tuple(
+            (score, table)
+            for score, table in ordered_tables
+            if all(
+                table[cell] <= available_capacity[cell]
+                for cell in cell_order
+            )
+        )
+        if not feasible_tables:
+            return None
+
+        def shared_tables(table_a, table_b):
+            lower = tuple(
+                max(
+                    0,
+                    table_a[cell]
+                    + table_b[cell]
+                    - available_capacity[cell],
+                )
+                for cell in cell_order
+            )
+            upper = tuple(
+                min(table_a[cell], table_b[cell]) for cell in cell_order
+            )
+            if sum(lower) > minimum_overlap or sum(upper) < minimum_overlap:
+                return
+            suffix_lower = [0] * (len(cell_order) + 1)
+            suffix_upper = [0] * (len(cell_order) + 1)
+            for position in range(len(cell_order) - 1, -1, -1):
+                suffix_lower[position] = suffix_lower[position + 1] + lower[position]
+                suffix_upper[position] = suffix_upper[position + 1] + upper[position]
+
+            def build(position, remaining, prefix):
+                if position == len(cell_order):
+                    if remaining == 0:
+                        yield prefix
+                    return
+                start = max(
+                    lower[position],
+                    remaining - suffix_upper[position + 1],
+                )
+                stop = min(
+                    upper[position],
+                    remaining - suffix_lower[position + 1],
+                )
+                for amount in range(start, stop + 1):
+                    yield from build(
+                        position + 1,
+                        remaining - amount,
+                        prefix + (amount,),
+                    )
+
+            yield from build(0, minimum_overlap, ())
+
+        pair_heap = [
+            (score_a + feasible_tables[0][0], index_a, 0)
+            for index_a, (score_a, _table_a) in enumerate(feasible_tables)
+        ]
+        heapq.heapify(pair_heap)
+        while pair_heap:
+            proportional_score, index_a, index_b = heapq.heappop(pair_heap)
+            states_explored += 1
+            if states_explored > max_states:
+                return IdentitySelectionResult(False, True, states_explored)
+            table_a = feasible_tables[index_a][1]
+            table_b = feasible_tables[index_b][1]
+            for shared in shared_tables(table_a, table_b):
+                states_explored += 1
+                if states_explored > max_states:
+                    return IdentitySelectionResult(False, True, states_explored)
+                slots = []
+                for position, cell in enumerate(cell_order):
+                    slots.extend(("X", cell) for _ in range(shared[position]))
+                    slots.extend(
+                        ("A", cell)
+                        for _ in range(table_a[cell] - shared[position])
+                    )
+                    slots.extend(
+                        ("B", cell)
+                        for _ in range(table_b[cell] - shared[position])
+                    )
+                candidate = assign(tuple(slots))
+                if candidate is not None:
+                    _cost, set_a, set_b = candidate
+                    return selection_result(
+                        set_a=set_a,
+                        set_b=set_b,
+                        proportional_score=proportional_score,
+                    )
+            next_b = index_b + 1
+            if next_b < len(feasible_tables):
+                heapq.heappush(
+                    pair_heap,
+                    (
+                        feasible_tables[index_a][0]
+                        + feasible_tables[next_b][0],
+                        index_a,
+                        next_b,
+                    ),
+                )
+        return None
 
     if allow_soft_contributor_fallback:
         fixed_capacity = {cell: 0 for cell in cell_order}
@@ -855,11 +976,12 @@ def solve_identity_aware_two_sets(
             member.section_id,
         )
         singleton_groups.setdefault(key, []).append(block)
-    if logical_groups and minimum_overlap == 0:
-        fast_result = _solve_zero_overlap_logical_assignment(
+    if logical_groups:
+        fast_result = _solve_logical_assignment(
             margins=margins,
             blocks=normalized_blocks,
             logical_groups=logical_groups,
+            minimum_overlap=minimum_overlap,
             campus_quotas=campus_quotas,
             difficulty_quotas=difficulty_quotas,
             secret=secret,
