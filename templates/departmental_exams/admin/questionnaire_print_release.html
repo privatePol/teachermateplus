@@ -5,12 +5,12 @@
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Questionnaire Print Release</li></ol></nav>
 <header class="de-exam-hero">
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
-    <div><span class="badge text-bg-light text-dark mb-2">CONTROLLED FACULTY OUTPUT</span><h1>Questionnaire Print Release</h1><p>Release one exact generated revision for a bounded faculty print window. Regeneration never releases a newer revision automatically.</p></div>
+    <div><span class="badge text-bg-light text-dark mb-2">CONFIDENTIAL EXAM OUTPUT</span><h1>Questionnaire Print Release</h1><p>Print an exact revision for authorized Admin use, run its deterministic audit, or manage a bounded Faculty print release.</p></div>
     <a class="btn btn-light btn-sm" href="{% url 'departmental_exams:assigned_course_examinations' %}">Back to Departmental Exam Builder</a>
   </div>
 </header>
 
-<div class="alert alert-warning"><strong>Confidential release control:</strong> Confirm the exact revision and Asia/Manila window. Replacing or revoking a release preserves its historical audit record.</div>
+<div class="alert alert-warning"><strong>Confidential output control:</strong> Admin printing is independent of Faculty release windows. Confirm the exact revision before printing, auditing, releasing, replacing, or revoking.</div>
 
 {% for course in courses %}
 <section class="card de-exam-card mb-4" id="course-{{ course.id }}">
@@ -19,6 +19,17 @@
     <span class="badge {% if course.print_window_status == 'Printable now' %}text-bg-success{% elif course.print_window_status == 'Scheduled' %}text-bg-info{% elif course.print_window_status == 'Window ended' %}text-bg-secondary{% else %}text-bg-light text-dark border{% endif %}">{{ course.print_window_status }}</span>
   </div>
   <div class="card-body p-4">
+    <h3 class="h6">Generated revisions</h3>
+    <div class="table-responsive mb-4"><table class="table table-sm align-middle"><thead><tr><th>Revision</th><th>Generated</th><th>Admin Questionnaire</th><th>Automatic Audit</th></tr></thead><tbody>
+      {% for revision in course.available_revisions %}<tr>
+        <td><strong>R{{ revision.revision_number }}</strong><br><span class="small text-muted">{{ revision.get_status_display }}</span></td>
+        <td>{{ revision.generated_at|localtime|date:"M j, Y g:i A" }}</td>
+        <td>{% if revision.can_admin_print %}<div class="btn-group btn-group-sm" role="group" aria-label="Admin print revision R{{ revision.revision_number }}"><a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:admin_questionnaire_print' revision.id 'A' %}">Print Set A</a><a class="btn btn-outline-success" target="_blank" rel="noopener" href="{% url 'departmental_exams:admin_questionnaire_print' revision.id 'B' %}">Print Set B</a></div><div class="small text-muted mt-1">Exact R{{ revision.revision_number }}; no Faculty release required.</div>{% else %}<span class="text-muted">Not authorized</span>{% endif %}</td>
+        <td>{% if revision.can_run_automatic_audit %}<div class="d-flex flex-wrap gap-2 align-items-center"><form method="post" class="d-inline">{% csrf_token %}<input type="hidden" name="action" value="run_audit"><input type="hidden" name="revision_id" value="{{ revision.id }}"><button class="btn btn-sm btn-outline-dark" type="submit">Run Automatic Audit</button></form>{% if revision.latest_automatic_audit %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'departmental_exams:automatic_generation_audit_result' revision.id revision.latest_automatic_audit.id %}">View Audit Result</a><span class="badge {% if revision.latest_automatic_audit.status == 'PASS' %}text-bg-success{% elif revision.latest_automatic_audit.status == 'WARNING' %}text-bg-warning{% else %}text-bg-danger{% endif %}">{{ revision.latest_automatic_audit.status }}</span>{% endif %}</div>{% if revision.audit_history %}<details class="small mt-2"><summary>Audit history ({{ revision.audit_history|length }})</summary><ul class="list-unstyled mb-0 mt-1">{% for audit_run in revision.audit_history %}<li><a href="{% url 'departmental_exams:automatic_generation_audit_result' revision.id audit_run.id %}">{{ audit_run.status }} &middot; {{ audit_run.run_at|localtime|date:"M j, Y g:i A" }}</a></li>{% endfor %}</ul></details>{% endif %}{% else %}<span class="text-muted">Not authorized</span>{% endif %}</td>
+      </tr>{% endfor %}
+    </tbody></table></div>
+
+    {% if course.can_manage_release %}
     {% if course.active_print_release %}
       <div class="row g-3 mb-3">
         <div class="col-md-2"><div class="small text-muted">Released revision</div><strong>R{{ course.active_print_release.generation_revision.revision_number }}</strong></div>
@@ -46,6 +57,9 @@
 
     {% if course.release_history %}
       <details class="mt-4"><summary class="fw-semibold">Release history ({{ course.release_history|length }})</summary><div class="table-responsive mt-2"><table class="table table-sm align-middle"><thead><tr><th>Revision</th><th>Status</th><th>Window</th><th>Released</th><th>Revoked</th></tr></thead><tbody>{% for release in course.release_history %}<tr><td>R{{ release.generation_revision.revision_number }}</td><td>{{ release.get_status_display }}</td><td>{{ release.print_from|localtime|date:"M j, Y g:i A" }} – {{ release.print_until|localtime|date:"M j, Y g:i A" }}</td><td>{{ release.released_by.full_name|default:release.released_by.username }}<br><span class="small text-muted">{{ release.released_at|localtime|date:"M j, Y g:i A" }}</span></td><td>{% if release.revoked_at %}{{ release.revoked_by.full_name|default:release.revoked_by.username }}<br><span class="small text-muted">{{ release.revoked_at|localtime|date:"M j, Y g:i A" }}</span>{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div></details>
+    {% endif %}
+    {% else %}
+      <div class="alert alert-light border mb-0">Faculty release controls require generation-management authority. Admin questionnaire printing and deterministic audit permissions do not create or modify Faculty releases.</div>
     {% endif %}
   </div>
 </section>

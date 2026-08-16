@@ -36,6 +36,7 @@ from .models import (
     ExamSection,
     ExaminationCycle,
     FacultyContribution,
+    FacultyContributionEligibilitySource,
     Question,
     QuestionBlueprintPlacement,
     QuestionImportBatch,
@@ -49,6 +50,9 @@ from .stage6_campus_codes import (
 
 GENERATION_ALGORITHM_VERSION = "stage6b-v1"
 AUTOMATIC_GENERATION_DEFAULT_MAX_STATES = 1_000_000
+SOURCE_AUDIT_SCHEMA_VERSION = "generation-source-audit-v1"
+AUTOMATIC_LOGICAL_IDENTITY_VERSION = "normalized-text-v3"
+MANUAL_LOGICAL_IDENTITY_VERSION = "source-question-id-v1"
 # Existing immutable revision rows require a positive structure snapshot.
 # This marks the non-persistent Automatic flat contract; it is not a Blueprint PK.
 AUTOMATIC_FLAT_STRUCTURE_REVISION = 1
@@ -99,6 +103,29 @@ class GenerationQuestion:
 
 
 @dataclass(frozen=True)
+class GenerationSourceQuestion:
+    source_id: int
+    source_revision: int
+    source_digest: str
+    contribution_id: int
+    contribution_revision: int
+    contribution_submitted_at: object
+    contributor_id: int
+    contributor_name: str
+    campus_id: int
+    campus_code: str
+    campus_name: str
+    assignment_context: tuple[dict, ...]
+    question_text: str
+    choices: tuple[str, str, str, str]
+    difficulty: str
+    correct_answer: str
+    normalized_fingerprint: str
+    eligible_for_generation: bool
+    exclusion_code: str
+
+
+@dataclass(frozen=True)
 class GenerationProblem:
     cycle_course: object
     configuration: object
@@ -116,12 +143,65 @@ class GenerationProblem:
     blueprint_revision: int
     roster_boundary: str
     minimum_overlap: int
+    source_audit_questions: tuple[GenerationSourceQuestion, ...]
+    logical_identity_version: str
 
 
-def eligible_submitted_question_pool(
+def _generation_question_source_digest(question):
+    return _sha256_json(
+        {
+            "source_id": question.id,
+            "revision": question.revision,
+            "question_text": question.question_text,
+            "choices": [
+                question.choice_a,
+                question.choice_b,
+                question.choice_c,
+                question.choice_d,
+            ],
+            "correct_answer": question.correct_answer,
+            "difficulty": question.difficulty,
+        }
+    )
+
+
+def _assignment_context_snapshot(contribution):
+    rows = []
+    for source in contribution.eligibility_sources.all():
+        assignment = source.assignment
+        offering = assignment.offering if assignment is not None else None
+        section = offering.section if offering is not None else None
+        assignment_matches = bool(
+            assignment is not None
+            and assignment.id == source.assignment_id_snapshot
+            and offering is not None
+            and offering.id == source.offering_id_snapshot
+        )
+        rows.append(
+            {
+                "assignment_id": source.assignment_id_snapshot,
+                "offering_id": source.offering_id_snapshot,
+                "tenant_id": source.tenant_id_snapshot,
+                "campus_id": source.campus_id_snapshot,
+                "is_current": source.is_current,
+                "section_code": (
+                    (section.code or "").strip()
+                    if assignment_matches and section is not None
+                    else ""
+                ),
+                "section_name": (
+                    (section.name or "").strip()
+                    if assignment_matches and section is not None
+                    else ""
+                ),
+            }
+        )
+    return tuple(rows)
+
+
+def _assessed_submitted_question_pool(
     *, cycle_course, participating_codes=None, participating_campus_ids=None
 ):
-    """Return the content-valid Submitted pool without exposing it to aggregate callers."""
     if (participating_codes is None) == (participating_campus_ids is None):
         raise ValueError(
             "Provide exactly one participating-campus identity representation."
@@ -136,33 +216,44 @@ def eligible_submitted_question_pool(
             "contribution__faculty_user",
             "import_batch",
         )
+        .prefetch_related(
+            Prefetch(
+                "contribution__eligibility_sources",
+                queryset=FacultyContributionEligibilitySource.objects.select_related(
+                    "assignment__offering__section"
+                ).order_by("assignment_id_snapshot"),
+            )
+        )
         .order_by("id")
     )
     if participating_campus_ids is not None:
         participating_set = {int(campus_id) for campus_id in participating_campus_ids}
         if not participating_set:
-            return [], len(submitted_questions)
+            return [], len(submitted_questions), []
         campus_is_participating = (
-            lambda question: question.contribution.source_campus_id in participating_set
+            lambda question: question.contribution.source_campus_id
+            in participating_set
         )
     else:
         participating_set = {
             canonicalize_stage6_campus_code(code) for code in participating_codes
         }
         if not participating_set or participating_set - set(CAMPUS_WEIGHTS):
-            return [], len(submitted_questions)
+            return [], len(submitted_questions), []
         campus_is_participating = (
             lambda question: canonicalize_stage6_campus_code(
                 question.contribution.source_campus.code
             )
             in participating_set
         )
+
     eligible_questions = []
-    invalid_question_count = 0
+    audit_questions = []
     for question in submitted_questions:
         campus_code = canonicalize_stage6_campus_code(
             question.contribution.source_campus.code
         )
+        exclusion_code = ""
         try:
             QuestionPayloadService.validate(
                 {
@@ -176,20 +267,64 @@ def eligible_submitted_question_pool(
                 }
             )
         except ValidationError:
-            invalid_question_count += 1
-            continue
-        if not campus_is_participating(question):
-            invalid_question_count += 1
-            continue
+            exclusion_code = "INVALID_PAYLOAD"
+        if not exclusion_code and not campus_is_participating(question):
+            exclusion_code = "NON_PARTICIPATING_CAMPUS"
         if (
-            question.import_batch_id
+            not exclusion_code
+            and question.import_batch_id
             and question.import_batch.status != QuestionImportBatch.Status.CONFIRMED
         ):
-            invalid_question_count += 1
-            continue
-        question.stage6_campus_code = campus_code
-        eligible_questions.append(question)
-    return eligible_questions, invalid_question_count
+            exclusion_code = "UNCONFIRMED_IMPORT_BATCH"
+        eligible = not exclusion_code
+        if eligible:
+            question.stage6_campus_code = campus_code
+            eligible_questions.append(question)
+        contribution = question.contribution
+        contributor = contribution.faculty_user
+        audit_questions.append(
+            GenerationSourceQuestion(
+                source_id=question.id,
+                source_revision=question.revision,
+                source_digest=_generation_question_source_digest(question),
+                contribution_id=contribution.id,
+                contribution_revision=contribution.revision,
+                contribution_submitted_at=contribution.submitted_at,
+                contributor_id=contributor.id,
+                contributor_name=contributor.full_name,
+                campus_id=contribution.source_campus_id,
+                campus_code=campus_code,
+                campus_name=contribution.source_campus.name,
+                assignment_context=_assignment_context_snapshot(contribution),
+                question_text=question.question_text,
+                choices=(
+                    question.choice_a,
+                    question.choice_b,
+                    question.choice_c,
+                    question.choice_d,
+                ),
+                difficulty=question.difficulty,
+                correct_answer=question.correct_answer,
+                normalized_fingerprint=QuestionPayloadService.question_fingerprint(
+                    question.question_text
+                ),
+                eligible_for_generation=eligible,
+                exclusion_code=exclusion_code,
+            )
+        )
+    return eligible_questions, len(submitted_questions) - len(eligible_questions), audit_questions
+
+
+def eligible_submitted_question_pool(
+    *, cycle_course, participating_codes=None, participating_campus_ids=None
+):
+    """Return the content-valid Submitted pool without exposing it to aggregate callers."""
+    eligible, invalid_count, _audit_questions = _assessed_submitted_question_pool(
+        cycle_course=cycle_course,
+        participating_codes=participating_codes,
+        participating_campus_ids=participating_campus_ids,
+    )
+    return eligible, invalid_count
 
 
 def automatic_campus_allocate(*, total, campus_ids):
@@ -389,7 +524,11 @@ class Stage6ReadinessService:
             if automatic_flat_mode
             else {"participating_codes": participating_codes}
         )
-        eligible_questions, invalid_question_count = eligible_submitted_question_pool(
+        (
+            eligible_questions,
+            invalid_question_count,
+            source_audit_questions,
+        ) = _assessed_submitted_question_pool(
             cycle_course=cycle_course,
             **pool_kwargs,
         )
@@ -842,21 +981,7 @@ class Stage6ReadinessService:
                 )
                 scenario_data = scenario_by_question.get(question.id)
                 scenario = scenario_data[0] if scenario_data else None
-                source_digest = _sha256_json(
-                    {
-                        "source_id": question.id,
-                        "revision": question.revision,
-                        "question_text": question.question_text,
-                        "choices": [
-                            question.choice_a,
-                            question.choice_b,
-                            question.choice_c,
-                            question.choice_d,
-                        ],
-                        "correct_answer": question.correct_answer,
-                        "difficulty": question.difficulty,
-                    }
-                )
+                source_digest = _generation_question_source_digest(question)
                 contributor = question.contribution.faculty_user
                 generation_questions[question.id] = GenerationQuestion(
                     source_id=question.id,
@@ -1021,5 +1146,11 @@ class Stage6ReadinessService:
                 blueprint_revision=structure_revision,
                 roster_boundary=roster_boundary,
                 minimum_overlap=solver_result.minimum_overlap,
+                source_audit_questions=tuple(source_audit_questions),
+                logical_identity_version=(
+                    AUTOMATIC_LOGICAL_IDENTITY_VERSION
+                    if automatic_flat_mode
+                    else MANUAL_LOGICAL_IDENTITY_VERSION
+                ),
             )
         return problem, report

@@ -1471,3 +1471,172 @@ class GeneratedExamItem(TimeStampedModel):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Generated examination item snapshots are immutable.")
+
+
+class GenerationSourceAuditSnapshot(TimeStampedModel):
+    generation_revision = models.OneToOneField(
+        ExamGenerationRevision,
+        on_delete=models.PROTECT,
+        related_name="source_audit_snapshot",
+    )
+    schema_version = models.CharField(max_length=32)
+    logical_identity_version = models.CharField(max_length=32)
+    submitted_count = models.PositiveIntegerField()
+    eligible_count = models.PositiveIntegerField()
+    unique_logical_count = models.PositiveIntegerField()
+    redundant_copy_count = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = "departmental_exam_generation_source_audits"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    submitted_count__gte=models.F("eligible_count"),
+                    eligible_count__gte=models.F("unique_logical_count"),
+                ),
+                name="ck_de_source_audit_counts",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    redundant_copy_count=(
+                        models.F("eligible_count")
+                        - models.F("unique_logical_count")
+                    )
+                ),
+                name="ck_de_source_audit_redundant",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Generation source audit snapshots are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Generation source audit snapshots are immutable.")
+
+
+class GenerationSourceQuestionSnapshot(TimeStampedModel):
+    audit_snapshot = models.ForeignKey(
+        GenerationSourceAuditSnapshot,
+        on_delete=models.PROTECT,
+        related_name="question_snapshots",
+    )
+    source_question = models.ForeignKey(
+        Question,
+        on_delete=models.PROTECT,
+        related_name="generation_source_audit_snapshots",
+    )
+    source_question_id_snapshot = models.PositiveBigIntegerField()
+    source_question_revision = models.PositiveIntegerField()
+    source_question_digest = models.CharField(max_length=64)
+    contribution_id_snapshot = models.PositiveBigIntegerField()
+    contribution_revision_snapshot = models.PositiveIntegerField()
+    contribution_submitted_at_snapshot = models.DateTimeField()
+    contributor_id_snapshot = models.PositiveBigIntegerField()
+    contributor_name_snapshot = models.CharField(max_length=255)
+    campus_id_snapshot = models.PositiveBigIntegerField()
+    campus_code_snapshot = models.CharField(max_length=30)
+    campus_name_snapshot = models.CharField(max_length=120)
+    assignment_context_snapshot = models.JSONField(default=list)
+    question_text_snapshot = models.TextField(max_length=5000)
+    choices_snapshot = models.JSONField(default=list)
+    difficulty_snapshot = models.CharField(
+        max_length=10,
+        choices=Question.Difficulty.choices,
+    )
+    correct_answer_snapshot = models.CharField(
+        max_length=1,
+        choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")],
+    )
+    normalized_fingerprint = models.CharField(max_length=64)
+    eligible_for_generation = models.BooleanField(default=True)
+    exclusion_code = models.CharField(max_length=40, blank=True)
+
+    class Meta:
+        db_table = "departmental_exam_generation_source_questions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["audit_snapshot", "source_question"],
+                name="uq_de_source_audit_question",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    source_question_revision__gte=1,
+                    contribution_revision_snapshot__gte=1,
+                    difficulty_snapshot__in=["EASY", "MODERATE", "DIFFICULT"],
+                    correct_answer_snapshot__in=["A", "B", "C", "D"],
+                ),
+                name="ck_de_source_audit_question_values",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(eligible_for_generation=True, exclusion_code="")
+                    | (
+                        models.Q(eligible_for_generation=False)
+                        & ~models.Q(exclusion_code="")
+                    )
+                ),
+                name="ck_de_source_audit_eligibility",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["audit_snapshot", "normalized_fingerprint"],
+                name="idx_de_source_audit_fp",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Generation source question snapshots are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Generation source question snapshots are immutable.")
+
+
+class AutomaticGenerationAuditRun(TimeStampedModel):
+    class Status(models.TextChoices):
+        PASS = "PASS", "Pass"
+        WARNING = "WARNING", "Warning"
+        FAIL = "FAIL", "Fail"
+
+    generation_revision = models.ForeignKey(
+        ExamGenerationRevision,
+        on_delete=models.PROTECT,
+        related_name="automatic_audit_runs",
+    )
+    status = models.CharField(max_length=10, choices=Status.choices)
+    check_version = models.CharField(max_length=32)
+    run_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        related_name="departmental_exam_automatic_audit_runs",
+    )
+    run_at = models.DateTimeField(default=timezone.now)
+    findings_snapshot = models.JSONField(default=list)
+    summary_counts_snapshot = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "departmental_exam_automatic_audit_runs"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=["PASS", "WARNING", "FAIL"]),
+                name="ck_de_auto_audit_status",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["generation_revision", "-run_at"],
+                name="idx_de_auto_audit_revision",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Automatic generation audit runs are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Automatic generation audit runs are immutable.")

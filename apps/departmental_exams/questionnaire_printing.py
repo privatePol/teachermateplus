@@ -26,6 +26,54 @@ from .services import DepartmentalExamAuthorizationService
 MANILA_TIMEZONE = ZoneInfo("Asia/Manila")
 
 
+def _sanitized_questionnaire_context(*, revision, generated_set):
+    if generated_set.generation_revision_id != revision.id:
+        raise PermissionDenied("The generated questionnaire set is unavailable.")
+    item_rows = list(
+        generated_set.items.order_by("position").values(
+            "position",
+            "question_text_snapshot",
+            "choices_snapshot",
+        )
+    )
+    if (
+        len(item_rows) != generated_set.item_count
+        or [row["position"] for row in item_rows]
+        != list(range(1, generated_set.item_count + 1))
+    ):
+        raise PermissionDenied("The generated questionnaire set is incomplete.")
+    cycle = revision.cycle_course.cycle
+    tenant = cycle.tenant
+    return {
+        "school_name": SystemSettingService.get(
+            "PRINT_HEADER_SCHOOL_NAME",
+            tenant_id=tenant.id,
+            default=tenant.name,
+        ),
+        "school_address": SystemSettingService.get(
+            "PRINT_HEADER_SCHOOL_ADDRESS",
+            tenant_id=tenant.id,
+            default="",
+        ),
+        "academic_year": cycle.academic_year.name,
+        "term": cycle.term.name,
+        "exam_period": cycle.get_exam_period_display(),
+        "course_code": revision.cycle_course.course.code,
+        "course_title": revision.cycle_course.course.title,
+        "set_code": generated_set.set_code,
+        "revision_number": revision.revision_number,
+        "printed_at": timezone.now().astimezone(MANILA_TIMEZONE),
+        "items": tuple(
+            {
+                "position": row["position"],
+                "question_text": row["question_text_snapshot"],
+                "choices": tuple(row["choices_snapshot"] or ()),
+            }
+            for row in item_rows
+        ),
+    }
+
+
 class QuestionnairePrintReleaseService:
     @staticmethod
     def _lock_course(*, cycle_course_id, tenant_id):
@@ -346,15 +394,6 @@ class FacultyQuestionnairePrintService:
             set_code=set_code,
             now=now,
         )
-        item_rows = list(
-            generated_set.items.order_by("position").values(
-                "position",
-                "question_text_snapshot",
-                "choices_snapshot",
-            )
-        )
-        if len(item_rows) != generated_set.item_count:
-            raise PermissionDenied("The released questionnaire set is incomplete.")
         cycle = release.cycle_course.cycle
         tenant = cycle.tenant
         printed_at = timezone.now().astimezone(MANILA_TIMEZONE)
@@ -377,31 +416,55 @@ class FacultyQuestionnairePrintService:
             },
             request=request,
         )
-        return {
-            "school_name": SystemSettingService.get(
-                "PRINT_HEADER_SCHOOL_NAME",
-                tenant_id=tenant.id,
-                default=tenant.name,
-            ),
-            "school_address": SystemSettingService.get(
-                "PRINT_HEADER_SCHOOL_ADDRESS",
-                tenant_id=tenant.id,
-                default="",
-            ),
-            "academic_year": cycle.academic_year.name,
-            "term": cycle.term.name,
-            "exam_period": cycle.get_exam_period_display(),
-            "course_code": release.cycle_course.course.code,
-            "course_title": release.cycle_course.course.title,
-            "set_code": normalized_set,
-            "revision_number": release.generation_revision.revision_number,
-            "printed_at": printed_at,
-            "items": tuple(
-                {
-                    "position": row["position"],
-                    "question_text": row["question_text_snapshot"],
-                    "choices": tuple(row["choices_snapshot"] or ()),
-                }
-                for row in item_rows
-            ),
-        }
+        context = _sanitized_questionnaire_context(
+            revision=release.generation_revision,
+            generated_set=generated_set,
+        )
+        context["printed_at"] = printed_at
+        return context
+
+
+class AdminQuestionnairePrintService:
+    @staticmethod
+    def build_safe_context(
+        *, revision, set_code, actor, request=None
+    ):
+        from .generation_reporting import GenerationReportingAuthorizationService
+
+        GenerationReportingAuthorizationService.require_print(
+            user=actor,
+            revision=revision,
+        )
+        normalized_set = (set_code or "").strip().upper()
+        if normalized_set not in GeneratedExamSet.SetCode.values:
+            raise Http404("Questionnaire set does not exist.")
+        try:
+            generated_set = GeneratedExamSet.objects.get(
+                generation_revision=revision,
+                set_code=normalized_set,
+            )
+        except GeneratedExamSet.DoesNotExist as exc:
+            raise Http404("Questionnaire set does not exist.") from exc
+        context = _sanitized_questionnaire_context(
+            revision=revision,
+            generated_set=generated_set,
+        )
+        AuditService.log_event(
+            action="DE_ADMIN_QUESTIONNAIRE_PRINT_SET_ACCESSED",
+            portal="ADMIN",
+            entity_type="ExamGenerationRevision",
+            entity_id=revision.id,
+            actor=actor,
+            tenant=revision.cycle_course.cycle.tenant_id,
+            metadata={
+                "cycle_id": revision.cycle_course.cycle_id,
+                "cycle_course_id": revision.cycle_course_id,
+                "revision_id": revision.id,
+                "revision_number": revision.revision_number,
+                "set_code": normalized_set,
+                "item_count": len(context["items"]),
+                "printed_at": context["printed_at"],
+            },
+            request=request,
+        )
+        return context

@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import faculty_views, monitoring_views, stage6_views, views
+from . import faculty_views, monitoring_views, reporting_views, stage6_views, views
 
 app_name = "departmental_exams"
 
@@ -121,5 +121,12 @@ urlpatterns = [
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/generation/generate/", stage6_views.generate_exam_view, name="generate_exam"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/generation/regenerate/", stage6_views.regenerate_exam_view, name="regenerate_exam"),
     path("admin-portal/departmental-exams/generations/<int:revision_id>/", stage6_views.generated_revision_detail_view, name="generated_revision_detail"),
+    path("admin-portal/departmental-exams/generations/<int:revision_id>/selection-audit/", reporting_views.generation_selection_audit_view, name="generation_selection_audit"),
+    path("admin-portal/departmental-exams/generations/<int:revision_id>/selection-audit/print/", reporting_views.generation_selection_audit_print_view, name="generation_selection_audit_print"),
+    path("admin-portal/departmental-exams/generations/<int:revision_id>/answer-key/set-<str:set_code>/", reporting_views.generation_answer_key_view, name="generation_answer_key"),
+    path("admin-portal/departmental-exams/generations/<int:revision_id>/answer-key/set-<str:set_code>/print/", reporting_views.generation_answer_key_print_view, name="generation_answer_key_print"),
+    path("admin-portal/departmental-exams/generations/<int:revision_id>/questionnaire/set-<str:set_code>/print/", reporting_views.admin_questionnaire_print_view, name="admin_questionnaire_print"),
+    path("admin-portal/departmental-exams/generations/<int:revision_id>/automatic-audits/<int:audit_run_id>/", reporting_views.automatic_generation_audit_result_view, name="automatic_generation_audit_result"),
+    path("admin-portal/departmental-exams/generations/<int:revision_id>/automatic-audits/<int:audit_run_id>/print/", reporting_views.automatic_generation_audit_result_print_view, name="automatic_generation_audit_result_print"),
     path("admin-portal/departmental-exams/generations/<int:revision_id>/approve-lock/", stage6_views.approve_and_lock_view, name="approve_and_lock"),
 ]

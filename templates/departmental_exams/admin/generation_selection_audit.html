@@ -1,0 +1,24 @@
+{% extends "admin_portal/base.html" %}
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:generated_revision_detail' revision.id %}">Generation R{{ revision.revision_number }}</a></li><li class="breadcrumb-item active">Question Selection Audit</li></ol></nav>
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+  <div><span class="badge text-bg-danger mb-2">CONFIDENTIAL</span><h1 class="h3 mb-1">Question Selection Audit Report</h1><p class="text-muted mb-0">{{ cycle_course.course.code }} &mdash; {{ cycle_course.course.title }} &middot; {{ academic_year }} &middot; {{ term }} &middot; {{ exam_period }} &middot; Revision R{{ revision.revision_number }}</p></div>
+  <a class="btn btn-outline-dark" href="{% url 'departmental_exams:generation_selection_audit_print' revision.id %}?filter={{ active_filter }}" target="_blank" rel="noopener">Printable Report</a>
+</div>
+<div class="alert alert-warning"><strong>Confidential:</strong> This report includes contributed question text, contributor identity, and correct answers. Do not copy its contents into general logs or monitoring pages.</div>
+{% if not audit_available %}<div class="alert alert-danger"><strong>Source-pool audit unavailable for this legacy revision.</strong> Exact persisted Set A/Set B membership is shown below. Unselected and duplicate/equivalent historical membership is not claimed.</div>{% endif %}
+<div class="row g-2 mb-3">
+  <div class="col-6 col-md"><div class="border rounded p-2 h-100"><div class="small text-muted">Submitted questions</div><strong>{% if summary.submitted != None %}{{ summary.submitted }}{% else %}Unavailable{% endif %}</strong></div></div>
+  <div class="col-6 col-md"><div class="border rounded p-2 h-100"><div class="small text-muted">Unique logical</div><strong>{% if summary.unique_logical != None %}{{ summary.unique_logical }}{% else %}Unavailable{% endif %}</strong></div></div>
+  <div class="col-6 col-md"><div class="border rounded p-2 h-100"><div class="small text-muted">Duplicate/equivalent copies</div><strong>{% if summary.redundant != None %}{{ summary.redundant }}{% else %}Unavailable{% endif %}</strong></div></div>
+  <div class="col-6 col-md"><div class="border rounded p-2 h-100"><div class="small text-muted">Set A</div><strong>{{ summary.set_a }}</strong></div></div>
+  <div class="col-6 col-md"><div class="border rounded p-2 h-100"><div class="small text-muted">Set B</div><strong>{{ summary.set_b }}</strong></div></div>
+  <div class="col-6 col-md"><div class="border rounded p-2 h-100"><div class="small text-muted">Overlap</div><strong>{{ summary.overlap }}</strong></div></div>
+  <div class="col-6 col-md"><div class="border rounded p-2 h-100"><div class="small text-muted">Selected unique</div><strong>{{ summary.selected_unique }}</strong></div></div>
+  <div class="col-6 col-md"><div class="border rounded p-2 h-100"><div class="small text-muted">Not selected</div><strong>{% if summary.not_selected != None %}{{ summary.not_selected }}{% else %}Unavailable{% endif %}</strong></div></div>
+</div>
+<nav class="d-flex flex-wrap gap-2 mb-3" aria-label="Audit report filters">{% for code, label in filters %}<a class="btn btn-sm {% if active_filter == code %}btn-dark{% else %}btn-outline-dark{% endif %}" href="?filter={{ code }}">{{ label }}</a>{% endfor %}</nav>
+<div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead class="table-light"><tr><th>Question</th><th>Contributor</th><th>Campus / Context</th><th>Difficulty</th><th>Correct Answer</th><th>Source</th><th>Set A</th><th>Set B</th><th>Equivalence Status</th></tr></thead><tbody>
+{% for row in rows %}<tr><td>{{ row.question }}</td><td>{{ row.contributor }}</td><td><strong>{{ row.campus }}</strong><div class="small text-muted">{{ row.context }}</div></td><td>{{ row.difficulty }}</td><td class="text-center fw-bold">{{ row.correct_answer }}</td><td>{{ row.source_reference }}</td><td class="text-center">{% if row.set_a_position %}{{ row.set_a_position }}{% else %}&mdash;{% endif %}</td><td class="text-center">{% if row.set_b_position %}{{ row.set_b_position }}{% else %}&mdash;{% endif %}</td><td>{{ row.equivalence_status }}</td></tr>{% empty %}<tr><td colspan="9" class="text-muted text-center py-4">No rows match this filter.</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

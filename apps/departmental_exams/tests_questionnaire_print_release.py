@@ -207,6 +207,103 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             ],
         )
 
+    def _admin_print_url(self, revision=None, set_code="A"):
+        return reverse(
+            "departmental_exams:admin_questionnaire_print",
+            args=[(revision or self.r2).id, set_code],
+        )
+
+    def test_admin_direct_prints_exact_set_a_and_b_without_faculty_release(self):
+        client = Client()
+        client.force_login(self.manager_user)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+        page = client.get(reverse("departmental_exams:questionnaire_print_release"))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Print Set A")
+        self.assertContains(page, "Print Set B")
+
+        for set_code in ("A", "B"):
+            with self.subTest(set_code=set_code):
+                response = client.get(self._admin_print_url(set_code=set_code))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["revision_number"], 2)
+                self.assertEqual(response.context["set_code"], set_code)
+                self.assertIn("no-store", response["Cache-Control"])
+                self.assertIn("private", response["Cache-Control"])
+                body = response.content.decode()
+                self.assertIn(f"Released {set_code} question 1", body)
+                self.assertNotIn("CONFIDENTIAL CONTRIBUTOR", body)
+                self.assertNotIn("PRIVATE-CAMPUS", body)
+                self.assertNotIn("Private provenance campus", body)
+                self.assertNotIn("SECRET-DIGEST", body)
+                self.assertNotIn("MODERATE", body)
+
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+        audits = AuditLog.objects.filter(
+            action="DE_ADMIN_QUESTIONNAIRE_PRINT_SET_ACCESSED"
+        )
+        self.assertEqual(audits.count(), 2)
+        for audit in audits:
+            metadata = str(audit.metadata_json).lower()
+            self.assertNotIn("answer", metadata)
+            self.assertNotIn("question_text", metadata)
+            self.assertNotIn("fingerprint", metadata)
+
+    def test_admin_direct_print_preserves_requested_historical_revision(self):
+        ExamGenerationRevision.objects.filter(pk=self.r2.pk).update(
+            status=ExamGenerationRevision.Status.SUPERSEDED,
+            current_marker=None,
+        )
+        r3 = self._make_revision(
+            self.parent,
+            revision_number=3,
+            supersedes=self.r2,
+        )
+        client = Client()
+        client.force_login(self.manager_user)
+
+        response = client.get(self._admin_print_url(revision=self.r2, set_code="A"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["revision_number"], 2)
+        self.assertContains(response, "Revision R2")
+        self.assertNotEqual(response.context["revision_number"], r3.revision_number)
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+
+    def test_admin_direct_print_permission_and_direct_deny_fail_closed(self):
+        print_user = self.make_user(
+            "questionnaire-admin-printer",
+            self.department,
+            (
+                "admin_portal.access",
+                "departmental_exams.print_generated_exams",
+            ),
+        )
+        client = Client()
+        client.force_login(print_user)
+        self.assertEqual(client.get(self._admin_print_url()).status_code, 200)
+        self.assertEqual(
+            client.get(reverse("departmental_exams:questionnaire_print_release")).status_code,
+            200,
+        )
+        UserPermission.objects.create(
+            user=print_user,
+            permission=Permission.objects.get(
+                code="departmental_exams.print_generated_exams"
+            ),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+        self.assertEqual(client.get(self._admin_print_url()).status_code, 403)
+        self.assertEqual(
+            client.get(reverse("departmental_exams:questionnaire_print_release")).status_code,
+            403,
+        )
+        unauthorized = Client()
+        unauthorized.force_login(self.configurer)
+        self.assertEqual(unauthorized.get(self._admin_print_url()).status_code, 403)
+
     def test_authorized_admin_releases_exact_revision_and_records_safe_audit(self):
         client = Client()
         client.force_login(self.manager_user)

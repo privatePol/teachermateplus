@@ -63,6 +63,8 @@ from .models import (
     FacultyContributionEligibilitySource,
     GeneratedExamItem,
     GeneratedExamSet,
+    GenerationSourceAuditSnapshot,
+    GenerationSourceQuestionSnapshot,
     Question,
     QuestionBlueprintPlacement,
 )
@@ -524,6 +526,7 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             "departmental_exams.view_generated_exams",
             "departmental_exams.print_generated_exams",
             "departmental_exams.manage_exam_generation",
+            "departmental_exams.audit_generated_exams",
         }
         self.assertEqual(
             set(Permission.objects.filter(code__in=codes).values_list("code", flat=True)),
@@ -536,7 +539,24 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                     permission__code__in=codes,
                 ).values_list("permission__code", flat=True)
             ),
-            codes - {"departmental_exams.print_generated_exams"},
+            codes
+            - {
+                "departmental_exams.print_generated_exams",
+                "departmental_exams.audit_generated_exams",
+            },
+        )
+        self.assertEqual(
+            set(
+                MenuItemPermission.objects.filter(
+                    menu_item__code="DE_EXAM_QUESTIONNAIRE_PRINT_RELEASE",
+                    permission__code__in=codes,
+                ).values_list("permission__code", flat=True)
+            ),
+            {
+                "departmental_exams.manage_exam_generation",
+                "departmental_exams.print_generated_exams",
+                "departmental_exams.audit_generated_exams",
+            },
         )
 
     def test_before_deadline_skips_without_close_or_generation(self):
@@ -1044,6 +1064,20 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             {item["code"] for item in readiness["warnings"]},
         )
         self._process_with_proved_selection(parent=parent, problem=problem)
+        audit_snapshot = GenerationSourceAuditSnapshot.objects.get()
+        self.assertEqual(audit_snapshot.submitted_count, 150)
+        self.assertEqual(audit_snapshot.eligible_count, 150)
+        self.assertEqual(audit_snapshot.unique_logical_count, 149)
+        self.assertEqual(audit_snapshot.redundant_copy_count, 1)
+        duplicate_snapshots = GenerationSourceQuestionSnapshot.objects.filter(
+            audit_snapshot=audit_snapshot,
+            source_question_id_snapshot__in=(duplicate_source.id, duplicate_row.id),
+        )
+        self.assertEqual(duplicate_snapshots.count(), 2)
+        self.assertEqual(
+            duplicate_snapshots.values("normalized_fingerprint").distinct().count(),
+            1,
+        )
         for generated_set in ExamGenerationRevision.objects.get().generated_sets.all():
             self.assertEqual(
                 Counter(
@@ -1823,6 +1857,45 @@ class AutomaticWorkflowTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             )
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_answer_key_print_permission_direct_deny_fails_closed(self):
+        parent, _configuration, problem = self._ready_automatic_course(
+            clear_manual_assignment=False
+        )
+        self._process_with_proved_selection(parent=parent, problem=problem)
+        revision = ExamGenerationRevision.objects.get()
+        viewer = self._make_generation_viewer()
+        viewer_role = UserRole.objects.get(user=viewer).role
+        RolePermission.objects.create(
+            role=viewer_role,
+            permission=Permission.objects.get(
+                code="departmental_exams.print_generated_exams"
+            ),
+        )
+        client = Client()
+        client.force_login(viewer)
+        view_url = reverse(
+            "departmental_exams:generation_answer_key",
+            args=[revision.id, "A"],
+        )
+        print_url = reverse(
+            "departmental_exams:generation_answer_key_print",
+            args=[revision.id, "A"],
+        )
+        self.assertEqual(client.get(view_url).status_code, 200)
+        self.assertEqual(client.get(print_url).status_code, 200)
+
+        denied_campus = parent.offering_snapshots.order_by("campus_id").first().campus
+        UserPermission.objects.create(
+            user=viewer,
+            permission=Permission.objects.get(
+                code="departmental_exams.print_generated_exams"
+            ),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=denied_campus,
+        )
+        self.assertEqual(client.get(print_url).status_code, 403)
 
     def test_legacy_reviewer_and_inactive_automatic_role_cannot_view_content(self):
         parent, _configuration, problem = self._ready_automatic_course(

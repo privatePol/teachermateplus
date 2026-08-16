@@ -644,6 +644,7 @@ class DepartmentalExamAuthorizationService:
     VIEW_GENERATED_PERMISSION = "departmental_exams.view_generated_exams"
     PRINT_GENERATED_PERMISSION = "departmental_exams.print_generated_exams"
     MANAGE_GENERATION_PERMISSION = "departmental_exams.manage_exam_generation"
+    AUDIT_GENERATED_PERMISSION = "departmental_exams.audit_generated_exams"
     ANY_AUTOMATIC_PERMISSION = "__any_automatic_permission__"
 
     @staticmethod
@@ -1360,6 +1361,17 @@ class DepartmentalExamAuthorizationService:
             user=user,
             cycle_course=cycle_course,
             permissions=(cls.MANAGE_GENERATION_PERMISSION,),
+        )
+
+    @classmethod
+    def require_generation_audit(cls, *, user, cycle_course):
+        cls.require_automatic_course_permission(
+            user=user,
+            cycle_course=cycle_course,
+            permissions=(
+                cls.AUDIT_GENERATED_PERMISSION,
+                cls.MANAGE_GENERATION_PERMISSION,
+            ),
         )
 
     @classmethod

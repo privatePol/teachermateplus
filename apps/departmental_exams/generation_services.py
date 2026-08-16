@@ -21,8 +21,10 @@ from .generation_algorithms import (
     solve_identity_aware_two_sets,
 )
 from .generation_readiness import (
+    AUTOMATIC_LOGICAL_IDENTITY_VERSION,
     AUTOMATIC_GENERATION_DEFAULT_MAX_STATES,
     GENERATION_ALGORITHM_VERSION,
+    SOURCE_AUDIT_SCHEMA_VERSION,
     Stage6ReadinessService,
     resolve_automatic_generation_max_states,
 )
@@ -39,6 +41,8 @@ from .models import (
     FacultyContributionEligibilitySource,
     GeneratedExamItem,
     GeneratedExamSet,
+    GenerationSourceAuditSnapshot,
+    GenerationSourceQuestionSnapshot,
     Question,
     QuestionBlueprintPlacement,
 )
@@ -376,6 +380,7 @@ class ExamGenerationService:
                 selection.squared_contributor_concentration
             ),
         )
+        cls._create_source_audit_snapshot(revision=revision, problem=problem)
 
         selected_block_ids_by_set = {}
         ordered_members_by_set = {}
@@ -478,6 +483,59 @@ class ExamGenerationService:
             metadata=reason_metadata,
         )
         return GenerationOutcome(revision=revision)
+
+    @staticmethod
+    def _create_source_audit_snapshot(*, revision, problem):
+        eligible_rows = tuple(
+            row for row in problem.source_audit_questions if row.eligible_for_generation
+        )
+        if problem.logical_identity_version == AUTOMATIC_LOGICAL_IDENTITY_VERSION:
+            unique_logical_count = len(
+                {row.normalized_fingerprint for row in eligible_rows}
+            )
+        else:
+            unique_logical_count = len(eligible_rows)
+        audit_snapshot = GenerationSourceAuditSnapshot.objects.create(
+            generation_revision=revision,
+            schema_version=SOURCE_AUDIT_SCHEMA_VERSION,
+            logical_identity_version=problem.logical_identity_version,
+            submitted_count=len(problem.source_audit_questions),
+            eligible_count=len(eligible_rows),
+            unique_logical_count=unique_logical_count,
+            redundant_copy_count=len(eligible_rows) - unique_logical_count,
+        )
+        GenerationSourceQuestionSnapshot.objects.bulk_create(
+            [
+                GenerationSourceQuestionSnapshot(
+                    audit_snapshot=audit_snapshot,
+                    source_question_id=row.source_id,
+                    source_question_id_snapshot=row.source_id,
+                    source_question_revision=row.source_revision,
+                    source_question_digest=row.source_digest,
+                    contribution_id_snapshot=row.contribution_id,
+                    contribution_revision_snapshot=row.contribution_revision,
+                    contribution_submitted_at_snapshot=(
+                        row.contribution_submitted_at
+                    ),
+                    contributor_id_snapshot=row.contributor_id,
+                    contributor_name_snapshot=row.contributor_name,
+                    campus_id_snapshot=row.campus_id,
+                    campus_code_snapshot=row.campus_code,
+                    campus_name_snapshot=row.campus_name,
+                    assignment_context_snapshot=list(row.assignment_context),
+                    question_text_snapshot=row.question_text,
+                    choices_snapshot=list(row.choices),
+                    difficulty_snapshot=row.difficulty,
+                    correct_answer_snapshot=row.correct_answer,
+                    normalized_fingerprint=row.normalized_fingerprint,
+                    eligible_for_generation=row.eligible_for_generation,
+                    exclusion_code=row.exclusion_code,
+                )
+                for row in problem.source_audit_questions
+            ],
+            batch_size=500,
+        )
+        return audit_snapshot
 
     @staticmethod
     def _validate_selection(*, problem, selection):

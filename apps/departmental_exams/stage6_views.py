@@ -22,6 +22,7 @@ from .blueprint_services import (
     Stage6Conflict,
 )
 from .approval_services import ApprovalConflict, ExamApprovalLockService
+from .automatic_generation_audit import AutomaticGenerationAuditService
 from .automatic_workflow import (
     AutomaticContributionReopenService,
     AutomaticGenerationSummaryService,
@@ -36,6 +37,7 @@ from .generation_services import (
     GenerationLimitExceeded,
 )
 from .models import (
+    AutomaticGenerationAuditRun,
     CourseExamConfiguration,
     CycleCourse,
     ExamBlueprint,
@@ -817,7 +819,14 @@ def questionnaire_print_release_view(request):
             "offering_snapshots__campus",
             Prefetch(
                 "generation_revisions",
-                queryset=ExamGenerationRevision.objects.order_by("-revision_number"),
+                queryset=ExamGenerationRevision.objects.prefetch_related(
+                    Prefetch(
+                        "automatic_audit_runs",
+                        queryset=AutomaticGenerationAuditRun.objects.select_related(
+                            "run_by"
+                        ).order_by("-run_at", "-id"),
+                    )
+                ).order_by("-revision_number"),
             ),
             Prefetch(
                 "questionnaire_print_releases",
@@ -835,25 +844,51 @@ def questionnaire_print_release_view(request):
             "course__code",
         )
     )
-    permission_map = DepartmentalExamAuthorizationService.automatic_permission_map(
+    management_map = DepartmentalExamAuthorizationService.automatic_permission_map(
         user=request.user,
         courses=courses,
         permissions=(
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
         ),
     )
+    print_map = DepartmentalExamAuthorizationService.automatic_permission_map(
+        user=request.user,
+        courses=courses,
+        permissions=(
+            DepartmentalExamAuthorizationService.PRINT_GENERATED_PERMISSION,
+        ),
+    )
+    audit_map = DepartmentalExamAuthorizationService.automatic_permission_map(
+        user=request.user,
+        courses=courses,
+        permissions=(
+            DepartmentalExamAuthorizationService.AUDIT_GENERATED_PERMISSION,
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+        ),
+    )
     courses = [
         course
         for course in courses
-        if DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
-        in permission_map[course.id]
+        if (
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+            in management_map[course.id]
+            or DepartmentalExamAuthorizationService.PRINT_GENERATED_PERMISSION
+            in print_map[course.id]
+            or DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION
+            in audit_map[course.id]
+        )
     ]
     if not courses:
         raise PermissionDenied(
-            "No generated course examination is available within your management authority."
+            "No generated course examination is available within your output authority."
         )
 
     course_by_id = {course.id: course for course in courses}
+    revision_by_id = {
+        revision.id: revision
+        for course in courses
+        for revision in course.generation_revisions.all()
+    }
     bound_course_id = None
     bound_form = None
     status = 200
@@ -873,6 +908,30 @@ def questionnaire_print_release_view(request):
             else:
                 messages.success(request, "Questionnaire print release revoked.")
                 return redirect("departmental_exams:questionnaire_print_release")
+        elif action == "run_audit":
+            try:
+                revision_id = int(request.POST.get("revision_id") or 0)
+            except (TypeError, ValueError):
+                revision_id = 0
+            if revision_id not in revision_by_id:
+                raise PermissionDenied(
+                    "The selected revision is outside your automatic-audit authority."
+                )
+            audit_run = AutomaticGenerationAuditService.run(
+                revision_id=revision_id,
+                tenant_id=tenant_id,
+                actor=request.user,
+                request=request,
+            )
+            messages.success(
+                request,
+                f"Automatic audit completed with status {audit_run.status}.",
+            )
+            return redirect(
+                "departmental_exams:automatic_generation_audit_result",
+                revision_id=revision_id,
+                audit_run_id=audit_run.id,
+            )
         elif action == "release":
             try:
                 bound_course_id = int(request.POST.get("cycle_course_id") or 0)
@@ -922,7 +981,35 @@ def questionnaire_print_release_view(request):
     now = timezone.now()
     local_now = timezone.localtime(now).replace(second=0, microsecond=0)
     for course in courses:
+        course.can_manage_release = (
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+            in management_map[course.id]
+        )
+        course.can_print_questionnaire = bool(
+            course.can_manage_release
+            or DepartmentalExamAuthorizationService.PRINT_GENERATED_PERMISSION
+            in print_map[course.id]
+        )
+        course.can_run_automatic_audit = bool(
+            DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION
+            in audit_map[course.id]
+        )
         course.available_revisions = list(course.generation_revisions.all())
+        for revision in course.available_revisions:
+            revision.can_admin_print = bool(
+                course.can_manage_release
+                or (
+                    DepartmentalExamAuthorizationService.PRINT_GENERATED_PERMISSION
+                    in print_map[course.id]
+                    and revision.current_marker == 1
+                    and revision.status == ExamGenerationRevision.Status.GENERATED
+                )
+            )
+            revision.can_run_automatic_audit = course.can_run_automatic_audit
+            revision.audit_history = list(revision.automatic_audit_runs.all())
+            revision.latest_automatic_audit = (
+                revision.audit_history[0] if revision.audit_history else None
+            )
         course.release_history = list(course.questionnaire_print_releases.all())
         course.active_print_release = next(
             (
@@ -950,7 +1037,9 @@ def questionnaire_print_release_view(request):
                 for revision in course.available_revisions
             )
         )
-        if bound_form is not None and course.id == bound_course_id:
+        if not course.can_manage_release:
+            course.release_form = None
+        elif bound_form is not None and course.id == bound_course_id:
             course.release_form = bound_form
         else:
             course.release_form = QuestionnairePrintReleaseForm(
