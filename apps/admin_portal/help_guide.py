@@ -268,7 +268,7 @@ ADMIN_HELP_SECTIONS = [
                 "steps": [
                     "On Questionnaire Print Release, confirm the exact course and revision before setting Print From and Print Until. Faculty print buttons appear only for that released revision while the common Asia/Manila window is active; regeneration requires a separate release for the newer revision.",
                     "For several courses, select one generated revision per course in Bulk Print Release, confirm the selected count, and apply one common window. The batch is all-or-nothing, while each course keeps an independent exact-revision release record and history.",
-                    "Use Print Set A or Print Set B for Admin-only printing when Faculty release is unnecessary. Admin Direct Print does not create, replace, or extend a Faculty release.",
+                    "Use Print Set A or Print Set B for Admin-only printing when Faculty release is unnecessary. Choose Letter (default) or A4 before opening the browser print dialog. Admin Direct Print does not create, replace, or extend a Faculty release.",
                     "Open the confidential Set A or Set B Answer Key only for the intended exact revision. Answer keys are restricted to authorized users and are never provided to Faculty through questionnaire printing.",
                     "In Question Selection Audit, summary counts mean: Submitted Questions is the persisted eligible source-row total; Unique Logical is the number of logical questions after equivalence grouping; Duplicate/Equivalent Copies is Submitted minus Unique Logical; Set A and Set B are their persisted item totals; Overlap is the number of logical questions selected in both sets; Selected Unique is the union selected by either set; Not Selected is the authoritative logical source pool outside that union.",
                     "Audit columns are No. (displayed report line), Question, Contributor, Campus / Context, Difficulty, Correct Answer, Source (Q### r#), Set A position, Set B position, and Equivalence Status.",
@@ -300,7 +300,7 @@ ADMIN_HELP_SECTIONS = [
                     },
                     {
                         "name": "Admin Direct Print",
-                        "does": "Opens sanitized Print Set A or Print Set B output for an exact revision without a Faculty release.",
+                        "does": "Opens sanitized Print Set A or Print Set B output for an exact revision without a Faculty release, with Letter (default) and A4 paper choices.",
                         "when": "Use it for authorized Admin-only printing cases.",
                         "avoid": "Do not treat direct printing as permission for Faculty access.",
                         "result": "A private, no-store questionnaire is rendered without answers or internal audit metadata.",

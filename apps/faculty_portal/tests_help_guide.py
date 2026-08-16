@@ -75,6 +75,8 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "inside its Print From/Print Until window")
         self.assertContains(response, "regenerated revision")
         self.assertContains(response, "new release")
+        self.assertContains(response, "Letter as the default paper size")
+        self.assertContains(response, "choose the paper size")
         self.assertContains(
             response,
             "Faculty do not receive Answer Keys, Question Selection Audit reports, or Automatic Generation Audit reports.",

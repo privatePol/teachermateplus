@@ -173,6 +173,7 @@ def admin_questionnaire_print_view(request, revision_id, set_code):
         set_code=set_code,
         actor=request.user,
         request=request,
+        paper_size=request.GET.get("paper"),
     )
     return _confidential_response(
         request,

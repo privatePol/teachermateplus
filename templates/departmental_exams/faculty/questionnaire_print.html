@@ -6,17 +6,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ course_code }} — Set {{ set_code }} Questionnaire</title>
   <style>
-    @page { size: Letter portrait; margin: 0.55in 0.6in 0.65in; }
+    @page { size: {{ paper_css_size }} portrait; margin: 0.55in 0.6in 0.85in; }
     * { box-sizing: border-box; }
     body { margin: 0; color: #111; background: #ececec; font-family: Arial, Helvetica, sans-serif; font-size: 11pt; line-height: 1.35; }
-    .print-controls { max-width: 8.5in; margin: 16px auto 8px; text-align: right; }
+    .print-controls { display: flex; justify-content: flex-end; align-items: center; gap: 10px; max-width: {{ paper_sheet_width }}; margin: 16px auto 8px; }
+    .print-controls form { display: flex; align-items: center; gap: 7px; }
+    .print-controls label { font-size: 9.5pt; font-weight: 700; }
+    .print-controls select { padding: 7px 30px 7px 9px; border: 1px solid #777; border-radius: 4px; background: #fff; color: #111; }
     .print-controls button { padding: 8px 18px; border: 0; border-radius: 4px; background: #0c6838; color: #fff; font-weight: 700; cursor: pointer; }
-    .questionnaire { width: 8.5in; min-height: 11in; margin: 0 auto 20px; padding: 0.55in 0.6in 0.7in; background: #fff; box-shadow: 0 2px 14px rgba(0, 0, 0, .16); }
+    .print-controls .apply-paper { background: #555; }
+    .questionnaire { width: {{ paper_sheet_width }}; min-height: {{ paper_sheet_height }}; margin: 0 auto 20px; padding: 0.55in 0.6in 0.7in; background: #fff; box-shadow: 0 2px 14px rgba(0, 0, 0, .16); }
     .running-header { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #aaa; color: #777; font-size: 9pt; font-weight: 700; text-decoration: underline; }
     .running-course-title { text-align: right; }
     .institution-header { display: grid; grid-template-columns: 82px 1fr 82px; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 2px solid #0c6838; text-align: center; }
     .institution-header img { width: 76px; height: 76px; object-fit: contain; }
-    .institution-name { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 17pt; font-weight: 700; text-transform: uppercase; }
+    .institution-name { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 14pt; line-height: 1.05; font-weight: 700; letter-spacing: -.015em; text-transform: uppercase; white-space: nowrap; }
     .institution-address { margin-top: 2px; font-size: 9.5pt; }
     .institution-cycle { display: flex; justify-content: center; gap: 18px; margin-top: 3px; font-size: 9.5pt; font-weight: 700; }
     .exam-heading { margin: 12px 0 4px; text-align: center; }
@@ -30,20 +34,32 @@
     .instructions p:last-child { margin-bottom: 0; }
     .instructions strong { text-transform: uppercase; }
     .no-erasures { margin-top: 6px !important; font-weight: 800; text-align: center; }
-    .question { margin: 0 0 12px; break-inside: avoid; page-break-inside: avoid; }
-    .question-line { display: grid; grid-template-columns: 28px 1fr; gap: 5px; font-weight: 600; }
-    .choices { margin: 5px 0 0 33px; padding-left: 22px; columns: 2; column-gap: 42px; }
-    .choices li { margin: 2px 0; padding-left: 3px; break-inside: avoid; }
-    .confidential-footer { position: fixed; right: 0.6in; bottom: 0.28in; left: 0.6in; padding-top: 5px; border-top: 1px solid #555; font-size: 8pt; font-weight: 700; text-align: center; letter-spacing: .02em; }
+    .questions { padding-bottom: 0.08in; }
+    .question { margin: 0 0 12px; break-inside: avoid-page; page-break-inside: avoid; }
+    .question-line { display: grid; grid-template-columns: 28px 1fr; gap: 5px; font-weight: 600; break-after: avoid-page; page-break-after: avoid; }
+    .choices { margin: 5px 0 0 33px; padding-left: 22px; columns: 2; column-gap: 42px; break-inside: avoid-page; page-break-inside: avoid; }
+    .choices li { margin: 2px 0; padding-left: 3px; break-inside: avoid-page; page-break-inside: avoid; }
+    .confidential-footer { position: static; margin-top: 0.25in; padding-top: 5px; border-top: 1px solid #555; font-size: 8pt; font-weight: 700; text-align: center; letter-spacing: .02em; break-inside: avoid-page; page-break-inside: avoid; }
     @media print {
       body { background: #fff; }
       .print-controls { display: none !important; }
-      .questionnaire { width: auto; min-height: auto; margin: 0; padding: 0; box-shadow: none; }
+      .questionnaire { width: auto; min-height: auto; margin: 0; padding: 0 0 0.16in; box-shadow: none; }
+      .question { orphans: 3; widows: 3; }
+      .confidential-footer { position: static; margin-top: 0.25in; }
     }
   </style>
 </head>
 <body>
-  <div class="print-controls"><button type="button" onclick="window.print()">Print Questionnaire</button></div>
+  <div class="print-controls">
+    <form method="get">
+      <label for="questionnaire-paper-size">Paper size</label>
+      <select id="questionnaire-paper-size" name="paper">
+        {% for option in paper_options %}<option value="{{ option.value }}"{% if option.value == paper_size %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+      </select>
+      <button class="apply-paper" type="submit">Apply</button>
+    </form>
+    <button type="button" onclick="window.print()">Print Questionnaire</button>
+  </div>
   <main class="questionnaire">
     <div class="running-header" aria-label="Course running header">
       <span class="running-course-code">{{ course_code }}</span>
@@ -73,7 +89,7 @@
       <p>Using Pencil No. 2, shade the circle on the answer sheet that corresponds to your selected answer.</p>
       <p class="no-erasures"><strong>STRICTLY NO ERASURES ALLOWED</strong></p>
     </div>
-    <section aria-label="Multiple-choice questions">
+    <section class="questions" aria-label="Multiple-choice questions">
       {% for item in items %}
         <article class="question">
           <div class="question-line"><span>{{ item.position }}.</span><span>{{ item.question_text }}</span></div>

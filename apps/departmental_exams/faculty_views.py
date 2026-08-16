@@ -238,6 +238,7 @@ def questionnaire_print_view(
         set_code=set_code,
         actor=request.user,
         request=request,
+        paper_size=request.GET.get("paper"),
     )
     response = render(
         request,

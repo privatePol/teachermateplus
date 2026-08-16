@@ -304,6 +304,139 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             self.assertNotIn("question_text", metadata)
             self.assertNotIn("fingerprint", metadata)
 
+    def test_faculty_and_admin_questionnaires_support_letter_and_a4_for_both_sets(self):
+        release = self._release()
+        admin_client = Client()
+        admin_client.force_login(self.manager_user)
+        portals = (
+            (
+                "faculty",
+                self._faculty_client(),
+                lambda set_code: self._print_url(release, set_code),
+            ),
+            (
+                "admin",
+                admin_client,
+                lambda set_code: self._admin_print_url(set_code=set_code),
+            ),
+        )
+        paper_sizes = (
+            ("letter", "Letter", "8.5in", "11in"),
+            ("a4", "A4", "210mm", "297mm"),
+        )
+
+        for portal, client, url_for_set in portals:
+            for set_code in ("A", "B"):
+                for paper_value, css_size, sheet_width, sheet_height in paper_sizes:
+                    with self.subTest(
+                        portal=portal,
+                        set_code=set_code,
+                        paper=paper_value,
+                    ):
+                        response = client.get(
+                            url_for_set(set_code),
+                            {"paper": paper_value},
+                        )
+                        self.assertEqual(response.status_code, 200)
+                        self.assertEqual(response.context["set_code"], set_code)
+                        self.assertEqual(response.context["paper_size"], paper_value)
+                        self.assertContains(
+                            response,
+                            f"@page {{ size: {css_size} portrait; margin: 0.55in 0.6in 0.85in; }}",
+                        )
+                        self.assertContains(
+                            response,
+                            (
+                                f".questionnaire {{ width: {sheet_width}; "
+                                f"min-height: {sheet_height};"
+                            ),
+                        )
+                        self.assertContains(
+                            response,
+                            f'<option value="{paper_value}" selected>{css_size}</option>',
+                            html=True,
+                        )
+
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action="DE_QUESTIONNAIRE_PRINT_SET_ACCESSED"
+            ).count(),
+            4,
+        )
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action="DE_ADMIN_QUESTIONNAIRE_PRINT_SET_ACCESSED"
+            ).count(),
+            4,
+        )
+        for audit in AuditLog.objects.filter(
+            action__in=(
+                "DE_QUESTIONNAIRE_PRINT_SET_ACCESSED",
+                "DE_ADMIN_QUESTIONNAIRE_PRINT_SET_ACCESSED",
+            )
+        ):
+            self.assertNotIn("paper", audit.metadata_json)
+
+    def test_questionnaire_layout_keeps_school_name_and_footer_print_safe(self):
+        release = self._release()
+        admin_client = Client()
+        admin_client.force_login(self.manager_user)
+        responses = (
+            self._faculty_client().get(self._print_url(release, "A")),
+            admin_client.get(self._admin_print_url(set_code="A")),
+        )
+
+        for response in responses:
+            with self.subTest(portal=response.request["PATH_INFO"]):
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["paper_size"], "letter")
+                self.assertContains(response, "@page { size: Letter portrait;")
+                self.assertContains(
+                    response,
+                    "font-size: 14pt; line-height: 1.05;",
+                )
+                self.assertContains(response, "white-space: nowrap;")
+                self.assertContains(
+                    response,
+                    ".question { margin: 0 0 12px; break-inside: avoid-page; page-break-inside: avoid; }",
+                )
+                self.assertContains(
+                    response,
+                    ".confidential-footer { position: static; margin-top: 0.25in;",
+                )
+                self.assertNotContains(
+                    response,
+                    ".confidential-footer { position: fixed;",
+                )
+                self.assertContains(
+                    response,
+                    '<section class="questions" aria-label="Multiple-choice questions">',
+                    html=False,
+                )
+
+    def test_unknown_paper_size_falls_back_to_letter_without_reflection(self):
+        release = self._release()
+        admin_client = Client()
+        admin_client.force_login(self.manager_user)
+        unsafe_value = "a4; } body { display: none"
+
+        responses = (
+            self._faculty_client().get(
+                self._print_url(release, "A"),
+                {"paper": unsafe_value},
+            ),
+            admin_client.get(
+                self._admin_print_url(set_code="A"),
+                {"paper": unsafe_value},
+            ),
+        )
+        for response in responses:
+            with self.subTest(portal=response.request["PATH_INFO"]):
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["paper_size"], "letter")
+                self.assertContains(response, "@page { size: Letter portrait;")
+                self.assertNotContains(response, unsafe_value)
+
     def test_release_page_renders_each_campus_once_for_repeated_offerings(self):
         original_offering = self.parent.offering_snapshots.get().offering
         section = Section.objects.create(

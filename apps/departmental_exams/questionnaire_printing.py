@@ -25,8 +25,48 @@ from .services import DepartmentalExamAuthorizationService
 
 MANILA_TIMEZONE = ZoneInfo("Asia/Manila")
 
+QUESTIONNAIRE_PAPER_SIZES = {
+    "letter": {
+        "value": "letter",
+        "label": "Letter",
+        "css_size": "Letter",
+        "sheet_width": "8.5in",
+        "sheet_height": "11in",
+    },
+    "a4": {
+        "value": "a4",
+        "label": "A4",
+        "css_size": "A4",
+        "sheet_width": "210mm",
+        "sheet_height": "297mm",
+    },
+}
+DEFAULT_QUESTIONNAIRE_PAPER_SIZE = "letter"
 
-def _sanitized_questionnaire_context(*, revision, generated_set):
+
+def _questionnaire_paper_context(value):
+    normalized = (value or "").strip().lower()
+    selected = QUESTIONNAIRE_PAPER_SIZES.get(
+        normalized,
+        QUESTIONNAIRE_PAPER_SIZES[DEFAULT_QUESTIONNAIRE_PAPER_SIZE],
+    )
+    return {
+        "paper_size": selected["value"],
+        "paper_label": selected["label"],
+        "paper_css_size": selected["css_size"],
+        "paper_sheet_width": selected["sheet_width"],
+        "paper_sheet_height": selected["sheet_height"],
+        "paper_options": tuple(
+            {
+                "value": option["value"],
+                "label": option["label"],
+            }
+            for option in QUESTIONNAIRE_PAPER_SIZES.values()
+        ),
+    }
+
+
+def _sanitized_questionnaire_context(*, revision, generated_set, paper_size=None):
     if generated_set.generation_revision_id != revision.id:
         raise PermissionDenied("The generated questionnaire set is unavailable.")
     item_rows = list(
@@ -71,6 +111,7 @@ def _sanitized_questionnaire_context(*, revision, generated_set):
             }
             for row in item_rows
         ),
+        **_questionnaire_paper_context(paper_size),
     }
 
 
@@ -439,6 +480,7 @@ class FacultyQuestionnairePrintService:
         now=None,
         actor,
         request=None,
+        paper_size=None,
     ):
         release, generated_set, normalized_set = cls._printable_release(
             contribution=contribution,
@@ -471,6 +513,7 @@ class FacultyQuestionnairePrintService:
         context = _sanitized_questionnaire_context(
             revision=release.generation_revision,
             generated_set=generated_set,
+            paper_size=paper_size,
         )
         context["printed_at"] = printed_at
         return context
@@ -479,7 +522,7 @@ class FacultyQuestionnairePrintService:
 class AdminQuestionnairePrintService:
     @staticmethod
     def build_safe_context(
-        *, revision, set_code, actor, request=None
+        *, revision, set_code, actor, request=None, paper_size=None
     ):
         from .generation_reporting import GenerationReportingAuthorizationService
 
@@ -500,6 +543,7 @@ class AdminQuestionnairePrintService:
         context = _sanitized_questionnaire_context(
             revision=revision,
             generated_set=generated_set,
+            paper_size=paper_size,
         )
         AuditService.log_event(
             action="DE_ADMIN_QUESTIONNAIRE_PRINT_SET_ACCESSED",
