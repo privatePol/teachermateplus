@@ -462,12 +462,39 @@ class Stage5ResumableCSVImportTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(len(row_numbers), len(set(row_numbers)))
 
     def test_upload_and_preview_render_honest_progress_lock_and_reminder(self):
-        upload_response = self.client.get(
-            reverse("departmental_exams:csv_upload", args=[self.contribution.id])
+        upload_url = reverse(
+            "departmental_exams:csv_upload", args=[self.contribution.id]
         )
+        initial_batch_count = QuestionImportBatch.objects.count()
+        upload_response = self.client.get(
+            upload_url
+        )
+        self.assertEqual(upload_response.status_code, 200)
+        self.assertEqual(QuestionImportBatch.objects.count(), initial_batch_count)
         self.assertContains(upload_response, "data-csv-upload-form")
         self.assertContains(upload_response, "Question CSV upload progress")
         self.assertContains(upload_response, "Question import is in progress")
+        upload_html = upload_response.content.decode()
+        self.assertIn(
+            'data-import-overlay role="status" aria-live="assertive" hidden',
+            upload_html,
+        )
+        self.assertRegex(
+            upload_html,
+            r"\[data-import-overlay\]\[hidden\]\s*\{\s*"
+            r"display:\s*none\s*!important;\s*\}",
+        )
+        workspace_response = self.client.get(
+            reverse(
+                "departmental_exams:contribution_workspace",
+                args=[self.contribution.id],
+            )
+        )
+        self.assertContains(
+            workspace_response,
+            f'<a class="btn btn-outline-primary" href="{upload_url}">Upload CSV</a>',
+            html=True,
+        )
         batch = self.create_preview(2)
         preview_response = self.client.get(
             reverse("departmental_exams:csv_preview", args=[batch.token])
@@ -491,6 +518,21 @@ class Stage5ResumableCSVImportTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertIn('window.addEventListener("beforeunload"', script)
         self.assertIn('window.removeEventListener("beforeunload"', script)
         self.assertIn("lockPage(false)", script)
+        self.assertIn("overlay.hidden = !active;", script)
+        self.assertNotIn('uploadForm.addEventListener("change"', script)
+        self.assertEqual(script.count("lockPage(true)"), 2)
+        upload_submit = script.index('uploadForm.addEventListener("submit"')
+        first_lock = script.index("lockPage(true)")
+        resumable_import = script.index("const runImport = async event =>")
+        second_lock = script.index("lockPage(true)", first_lock + 1)
+        self.assertLess(upload_submit, first_lock)
+        self.assertLess(first_lock, resumable_import)
+        self.assertLess(resumable_import, second_lock)
+        self.assertIn(
+            'if (resumeForm) resumeForm.addEventListener("submit", runImport);',
+            script,
+        )
+        self.assertIn("recoverStatus();", script)
 
     def test_duplicate_warning_remains_nonblocking_with_row_identity(self):
         Question.objects.create(
