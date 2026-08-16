@@ -131,6 +131,44 @@ class GenerationReportingTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
             ).first().normalized_fingerprint,
         )
 
+    def test_screen_and_print_reports_number_displayed_rows_sequentially(self):
+        for printable in (False, True):
+            for filter_code in (None, "duplicate"):
+                with self.subTest(
+                    printable=printable,
+                    filter_code=filter_code or "all",
+                ):
+                    response = self.client.get(
+                        self.audit_url(
+                            printable=printable,
+                            filter_code=filter_code,
+                        )
+                    )
+                    self.assertEqual(response.status_code, 200)
+                    self.assertContains(
+                        response,
+                        (
+                            '<th class="number">No.</th>'
+                            if printable
+                            else "<th>No.</th>"
+                        ),
+                        html=True,
+                    )
+                    for number, row in enumerate(
+                        response.context["rows"],
+                        start=1,
+                    ):
+                        number_cell = (
+                            f'<td class="number">{number}</td>'
+                            if printable
+                            else f'<td class="text-center">{number}</td>'
+                        )
+                        self.assertContains(
+                            response,
+                            f"{number_cell}<td>{row['question']}</td>",
+                            html=True,
+                        )
+
     def test_legacy_revision_discloses_only_exact_selected_membership(self):
         selected_item = GeneratedExamItem.objects.filter(
             generated_set__generation_revision=self.revision

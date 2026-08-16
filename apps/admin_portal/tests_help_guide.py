@@ -188,6 +188,52 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(response, "cycle-wide contribution deadline")
         self.assertContains(response, "NOT CONFIGURED")
 
+    def test_departmental_exam_output_guides_cover_release_and_audit_operations(self):
+        output_permission, _ = Permission.objects.get_or_create(
+            code="departmental_exams.manage_exam_generation",
+            defaults={"module": "departmental_exams", "action": "manage_exam_generation"},
+        )
+        user = self._make_user(
+            username="departmental_exam_output_guide",
+            role_code="DEPARTMENTAL_EXAM_OUTPUT_GUIDE",
+            permissions=[self.portal_permission, output_permission],
+        )
+
+        sections = build_admin_help_sections(
+            user=user,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        topic = next(
+            topic
+            for section in sections
+            for topic in section["topics"]
+            if topic["code"] == "departmental-exam-confidential-output"
+        )
+        guide_text = " ".join(topic["steps"])
+        self.assertIn("Bulk Print Release", guide_text)
+        self.assertIn("Admin Direct Print", guide_text)
+        self.assertIn("Submitted Questions", guide_text)
+        self.assertIn("Duplicate/Equivalent Copies", guide_text)
+        self.assertIn("Source (Q### r#)", guide_text)
+        self.assertIn("Selected representative (EQ-###)", guide_text)
+        self.assertIn("not AI judgment", guide_text)
+        self.assertIn("legacy source snapshot", guide_text)
+
+        self.client.force_login(user)
+        practical = self.client.get(reverse("admin_portal:guide"))
+        self.assertEqual(practical.status_code, 200)
+        self.assertContains(practical, "Questionnaire Output, Answer Keys, and Generation Audits")
+        self.assertContains(practical, "select one generated revision per course")
+        self.assertContains(practical, "Equivalent copy not selected (EQ-###)")
+        self.assertContains(practical, "PASS, WARNING, or FAIL")
+        full = self.client.get(reverse("admin_portal:guide"), {"view": "full"})
+        self.assertEqual(full.status_code, 200)
+        self.assertContains(full, "Bulk Print Release")
+        self.assertContains(full, "Selected Unique")
+        self.assertContains(full, "not a raw hash")
+        self.assertContains(full, "not AI judgment")
+
     def test_admin_guide_can_restore_legacy_template(self):
         user = User.objects.create_superuser(
             username="guide_root",

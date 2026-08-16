@@ -12,10 +12,44 @@
 
 <div class="alert alert-warning"><strong>Confidential output control:</strong> Admin printing is independent of Faculty release windows. Confirm the exact revision before printing, auditing, releasing, replacing, or revoking.</div>
 
+{% if bulk_selection_rows %}
+<section class="card de-exam-card mb-4" id="bulk-print-release">
+  <div class="card-header bg-white p-4"><h2 class="h5 mb-1">Bulk Print Release</h2><p class="small text-muted mb-0">Select one exact revision per course and apply one common Faculty Print From / Print Until window. Each course keeps its own independent release record and history.</p></div>
+  <div class="card-body p-4">
+    <form method="post" novalidate id="bulk-print-release-form">
+      {% csrf_token %}<input type="hidden" name="action" value="bulk_release">
+      {% if bulk_form.non_field_errors %}<div class="alert alert-danger">{{ bulk_form.non_field_errors }}</div>{% endif %}
+      {% if bulk_form.selections.errors %}<div class="alert alert-danger">{{ bulk_form.selections.errors }}</div>{% endif %}
+      <div class="table-responsive mb-3"><table class="table table-sm align-middle"><thead><tr><th scope="col">Select</th><th scope="col">Course</th><th scope="col">Exact revision</th><th scope="col">Generated</th></tr></thead><tbody>
+        {% for row in bulk_selection_rows %}<tr><td><input class="form-check-input bulk-release-selection" type="checkbox" name="selections" value="{{ row.value }}" id="bulk-selection-{{ row.course.id }}-{{ row.revision.id }}"{% if row.value in bulk_selected_values %} checked{% endif %}><label class="visually-hidden" for="bulk-selection-{{ row.course.id }}-{{ row.revision.id }}">Select {{ row.course.course.code }} revision R{{ row.revision.revision_number }}</label></td><td><strong>{{ row.course.course.code }}</strong> &mdash; {{ row.course.course.title }}</td><td><strong>R{{ row.revision.revision_number }}</strong> <span class="small text-muted">{{ row.revision.get_status_display }}</span></td><td>{{ row.revision.generated_at|localtime|date:"M j, Y g:i A" }}</td></tr>{% endfor %}
+      </tbody></table></div>
+      <div class="row g-3 align-items-start">
+        <div class="col-lg-3"><div class="form-label">Selected</div><div class="form-control-plaintext"><strong id="bulk-selected-count">0</strong> revision<span class="visually-hidden">s</span></div></div>
+        <div class="col-lg-3"><label class="form-label" for="{{ bulk_form.print_from.id_for_label }}">Common Print From</label>{{ bulk_form.print_from }}{{ bulk_form.print_from.errors }}<div class="form-text">Asia/Manila</div></div>
+        <div class="col-lg-3"><label class="form-label" for="{{ bulk_form.print_until.id_for_label }}">Common Print Until</label>{{ bulk_form.print_until }}{{ bulk_form.print_until.errors }}<div class="form-text">Asia/Manila</div></div>
+        <div class="col-lg-3 d-grid"><label class="form-label invisible" aria-hidden="true">Action</label><button class="btn btn-primary" type="submit">Release Selected Revisions</button></div>
+      </div>
+      <div class="form-text mt-2">The batch is all-or-nothing. Any invalid, unauthorized, cross-tenant, or incomplete selection prevents every release in this submission.</div>
+    </form>
+  </div>
+</section>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const selections = Array.from(document.querySelectorAll(".bulk-release-selection"));
+  const count = document.getElementById("bulk-selected-count");
+  const updateCount = function () {
+    count.textContent = selections.filter(function (selection) { return selection.checked; }).length;
+  };
+  selections.forEach(function (selection) { selection.addEventListener("change", updateCount); });
+  updateCount();
+});
+</script>
+{% endif %}
+
 {% for course in courses %}
 <section class="card de-exam-card mb-4" id="course-{{ course.id }}">
   <div class="card-header bg-white p-4 d-flex flex-wrap justify-content-between gap-3">
-    <div><h2 class="h5 mb-1">{{ course.course.code }} — {{ course.course.title }}</h2><div class="small text-muted">{{ course.cycle.academic_year }} / {{ course.cycle.term }} / {{ course.cycle.get_exam_period_display }} &middot; {% for snapshot in course.offering_snapshots.all %}{% if not forloop.first %}, {% endif %}{{ snapshot.campus.name }}{% endfor %}</div></div>
+    <div><h2 class="h5 mb-1">{{ course.course.code }} — {{ course.course.title }}</h2><div class="small text-muted">{{ course.cycle.academic_year }} / {{ course.cycle.term }} / {{ course.cycle.get_exam_period_display }} &middot; {% for campus in course.print_release_campuses %}{% if not forloop.first %}, {% endif %}{{ campus.name }}{% endfor %}</div></div>
     <span class="badge {% if course.print_window_status == 'Printable now' %}text-bg-success{% elif course.print_window_status == 'Scheduled' %}text-bg-info{% elif course.print_window_status == 'Window ended' %}text-bg-secondary{% else %}text-bg-light text-dark border{% endif %}">{{ course.print_window_status }}</span>
   </div>
   <div class="card-body p-4">

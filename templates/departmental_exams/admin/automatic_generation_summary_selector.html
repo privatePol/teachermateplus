@@ -1,0 +1,13 @@
+{% extends "admin_portal/base.html" %}
+{% block title %}Automatic Generation Summary | TeacherMate+{% endblock %}
+{% block admin_content %}
+<nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li><li class="breadcrumb-item active">Automatic Generation Summary</li></ol></nav>
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3"><div><h1 class="h3 mb-1">Automatic Generation Summary</h1><p class="text-muted mb-0">Choose an applicable Automatic exam cycle.</p></div></div>
+{% if cycles %}
+<div class="list-group">
+  {% for cycle in cycles %}<a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center gap-3" href="{% url 'departmental_exams:automatic_generation_summary' cycle.id %}"><span><strong>{{ cycle.academic_year }}</strong> &middot; {{ cycle.term }} &middot; {{ cycle.get_exam_period_display }}</span><span class="btn btn-sm btn-primary">Open Summary</span></a>{% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info mb-0">No applicable Automatic exam cycles are available within your current tenant and authority.</div>
+{% endif %}
+{% endblock %}

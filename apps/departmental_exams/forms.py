@@ -492,6 +492,63 @@ class QuestionnairePrintReleaseForm(forms.Form):
         return cleaned
 
 
+class BulkQuestionnairePrintReleaseForm(forms.Form):
+    selections = forms.MultipleChoiceField(
+        choices=(),
+        error_messages={
+            "required": "Select at least one generated course revision.",
+            "invalid_choice": "One or more selected revisions are unavailable.",
+        },
+    )
+    print_from = forms.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local", "class": "form-control"},
+        ),
+    )
+    print_until = forms.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M"],
+        widget=forms.DateTimeInput(
+            format="%Y-%m-%dT%H:%M",
+            attrs={"type": "datetime-local", "class": "form-control"},
+        ),
+    )
+
+    def __init__(self, *args, selection_choices=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["selections"].choices = tuple(selection_choices)
+
+    def clean_selections(self):
+        selections = []
+        course_ids = set()
+        for value in self.cleaned_data["selections"]:
+            try:
+                course_id, revision_id = (int(part) for part in value.split(":", 1))
+            except (TypeError, ValueError) as exc:
+                raise forms.ValidationError(
+                    "One or more selected revisions are invalid."
+                ) from exc
+            if course_id in course_ids:
+                raise forms.ValidationError(
+                    "Select only one revision for each course examination."
+                )
+            course_ids.add(course_id)
+            selections.append((course_id, revision_id))
+        return tuple(selections)
+
+    def clean(self):
+        cleaned = super().clean()
+        print_from = cleaned.get("print_from")
+        print_until = cleaned.get("print_until")
+        if print_from and print_until and print_until <= print_from:
+            self.add_error(
+                "print_until",
+                "Print Until must be later than Print From.",
+            )
+        return cleaned
+
+
 class _ReasonedConfigurationActionForm(_ConfigurationActionForm):
     reason = forms.CharField(min_length=10, max_length=500, widget=forms.Textarea(attrs={"rows": 3}))
 

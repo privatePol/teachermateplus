@@ -7,7 +7,14 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.academics.models import FacultyAssignment
+from apps.academics.models import (
+    AcademicYear,
+    Course,
+    CourseOffering,
+    FacultyAssignment,
+    Section,
+    Term,
+)
 from apps.auditlog.models import AuditLog
 from apps.core.services.settings import SystemSettingService
 from apps.rbac.models import Permission, UserPermission
@@ -16,6 +23,7 @@ from .automatic_workflow import AutomaticGenerationSummaryService
 from .models import (
     CourseExamConfiguration,
     CycleCourse,
+    CycleCourseOffering,
     ExamGenerationRevision,
     ExaminationCycle,
     FacultyContribution,
@@ -192,6 +200,53 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             print_until=print_until or now + timezone.timedelta(hours=2),
         )
 
+    def _second_bulk_target(self):
+        parent = self.make_course(
+            cycle=self.parent.cycle,
+            department=None,
+            code="PRINT-BULK",
+        )
+        return parent, self._make_revision(parent, revision_number=2)
+
+    @staticmethod
+    def _bulk_window():
+        print_from = timezone.localtime(timezone.now()).replace(
+            second=0,
+            microsecond=0,
+        ) + timezone.timedelta(hours=1)
+        return print_from, print_from + timezone.timedelta(days=1)
+
+    def _bulk_post(self, selections, *, print_from=None, print_until=None, user=None):
+        default_from, default_until = self._bulk_window()
+        print_from = print_from or default_from
+        print_until = print_until or default_until
+        client = Client()
+        client.force_login(user or self.manager_user)
+        return client.post(
+            reverse("departmental_exams:questionnaire_print_release"),
+            {
+                "action": "bulk_release",
+                "selections": [
+                    f"{course.id}:{revision.id}"
+                    for course, revision in selections
+                ],
+                "print_from": print_from.strftime("%Y-%m-%dT%H:%M"),
+                "print_until": print_until.strftime("%Y-%m-%dT%H:%M"),
+            },
+        )
+
+    def _newer_revision(self, parent, revision):
+        ExamGenerationRevision.objects.filter(pk=revision.pk).update(
+            status=ExamGenerationRevision.Status.SUPERSEDED,
+            current_marker=None,
+        )
+        revision.refresh_from_db()
+        return self._make_revision(
+            parent,
+            revision_number=revision.revision_number + 1,
+            supersedes=revision,
+        )
+
     def _faculty_client(self, user=None):
         client = Client()
         client.force_login(user or self.faculty)
@@ -248,6 +303,279 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             self.assertNotIn("answer", metadata)
             self.assertNotIn("question_text", metadata)
             self.assertNotIn("fingerprint", metadata)
+
+    def test_release_page_renders_each_campus_once_for_repeated_offerings(self):
+        original_offering = self.parent.offering_snapshots.get().offering
+        section = Section.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=original_offering.program,
+            code="PRINT-DUPLICATE-CAMPUS",
+            name="Print Duplicate Campus Section",
+        )
+        repeated_campus_offering = CourseOffering.objects.create(
+            tenant=self.tenant,
+            campus=self.campus,
+            department=self.department,
+            program=original_offering.program,
+            academic_year=self.parent.cycle.academic_year,
+            term=self.parent.cycle.term,
+            course=self.parent.course,
+            section=section,
+        )
+        CycleCourseOffering.objects.create(
+            cycle_course=self.parent,
+            offering=repeated_campus_offering,
+            campus=self.campus,
+        )
+        client = Client()
+        client.force_login(self.manager_user)
+
+        response = client.get(
+            reverse("departmental_exams:questionnaire_print_release")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        course = next(
+            item for item in response.context["courses"] if item.id == self.parent.id
+        )
+        self.assertEqual(
+            tuple(campus.id for campus in course.print_release_campuses),
+            (self.campus.id,),
+        )
+        self.assertContains(
+            response,
+            f"&middot; {self.campus.name}</div>",
+            count=1,
+            html=False,
+        )
+
+    def test_bulk_release_authorized_multiple_revisions(self):
+        second_parent, second_revision = self._second_bulk_target()
+
+        response = self._bulk_post(
+            ((self.parent, self.r2), (second_parent, second_revision))
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            QuestionnairePrintRelease.objects.filter(
+                status=QuestionnairePrintRelease.Status.ACTIVE,
+                active_marker=1,
+            ).count(),
+            2,
+        )
+
+    def test_bulk_release_applies_same_window_to_each_record(self):
+        second_parent, second_revision = self._second_bulk_target()
+        print_from, print_until = self._bulk_window()
+
+        response = self._bulk_post(
+            ((self.parent, self.r2), (second_parent, second_revision)),
+            print_from=print_from,
+            print_until=print_until,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        releases = list(
+            QuestionnairePrintRelease.objects.filter(
+                status=QuestionnairePrintRelease.Status.ACTIVE,
+                active_marker=1,
+            ).order_by("cycle_course_id")
+        )
+        self.assertEqual({release.print_from for release in releases}, {print_from})
+        self.assertEqual({release.print_until for release in releases}, {print_until})
+
+    def test_bulk_release_records_remain_independently_revision_bound(self):
+        second_parent, second_revision = self._second_bulk_target()
+
+        self._bulk_post(
+            ((self.parent, self.r2), (second_parent, second_revision))
+        )
+
+        self.assertEqual(
+            QuestionnairePrintRelease.objects.get(
+                cycle_course=self.parent,
+                status=QuestionnairePrintRelease.Status.ACTIVE,
+            ).generation_revision_id,
+            self.r2.id,
+        )
+        self.assertEqual(
+            QuestionnairePrintRelease.objects.get(
+                cycle_course=second_parent,
+                status=QuestionnairePrintRelease.Status.ACTIVE,
+            ).generation_revision_id,
+            second_revision.id,
+        )
+
+    def test_bulk_release_replaces_active_release_and_preserves_history(self):
+        previous = self._release()
+        newer = self._newer_revision(self.parent, self.r2)
+
+        response = self._bulk_post(((self.parent, newer),))
+
+        self.assertEqual(response.status_code, 302)
+        previous.refresh_from_db()
+        self.assertEqual(previous.status, QuestionnairePrintRelease.Status.REVOKED)
+        self.assertIsNone(previous.active_marker)
+        active = QuestionnairePrintRelease.objects.get(
+            cycle_course=self.parent,
+            status=QuestionnairePrintRelease.Status.ACTIVE,
+            active_marker=1,
+        )
+        self.assertEqual(active.generation_revision_id, newer.id)
+        self.assertEqual(
+            QuestionnairePrintRelease.objects.filter(cycle_course=self.parent).count(),
+            2,
+        )
+
+    def test_bulk_release_invalid_item_rolls_back_entire_batch(self):
+        second_parent, _second_revision = self._second_bulk_target()
+        print_from, print_until = self._bulk_window()
+
+        with self.assertRaises(ValidationError):
+            QuestionnairePrintReleaseService.bulk_release(
+                selections=(
+                    (self.parent.id, self.r2.id),
+                    (second_parent.id, self.r2.id),
+                ),
+                tenant_id=self.tenant.id,
+                actor=self.manager_user,
+                print_from=print_from,
+                print_until=print_until,
+            )
+
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+
+    def test_bulk_release_invalid_window_is_rejected_without_writes(self):
+        print_from, _print_until = self._bulk_window()
+
+        response = self._bulk_post(
+            ((self.parent, self.r2),),
+            print_from=print_from,
+            print_until=print_from,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(
+            response,
+            "Print Until must be later than Print From.",
+            status_code=400,
+        )
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+
+    def test_bulk_release_cross_tenant_selection_rolls_back_entire_batch(self):
+        foreign_year = AcademicYear.objects.create(
+            tenant=self.other_tenant,
+            code="FOREIGN-AY",
+            name="Foreign AY",
+            start_date="2026-06-01",
+            end_date="2027-05-31",
+        )
+        foreign_term = Term.objects.create(
+            tenant=self.other_tenant,
+            academic_year=foreign_year,
+            code="FOREIGN-T1",
+            name="Foreign Term",
+        )
+        foreign_cycle = ExaminationCycle.objects.create(
+            tenant=self.other_tenant,
+            academic_year=foreign_year,
+            term=foreign_term,
+            exam_period=ExaminationCycle.ExamPeriod.MIDTERM,
+            processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+            created_by=self.admin,
+        )
+        foreign_course = Course.objects.create(
+            tenant=self.other_tenant,
+            code="FOREIGN-101",
+            title="Foreign Course",
+        )
+        foreign_parent = CycleCourse.objects.create(
+            cycle=foreign_cycle,
+            course=foreign_course,
+        )
+        foreign_revision = ExamGenerationRevision.objects.create(
+            cycle_course=foreign_parent,
+            revision_number=1,
+            source_input_fingerprint="f" * 64,
+            algorithm_version="foreign-test-v1",
+            generation_trigger=ExamGenerationRevision.GenerationTrigger.AUTOMATIC,
+            configuration_revision_snapshot=1,
+            blueprint_revision_snapshot=1,
+            roster_boundary_snapshot="r" * 64,
+            final_item_count_snapshot=2,
+            request_token_digest="d" * 64,
+            minimum_overlap=0,
+            proportional_score=0,
+            contributors_represented=0,
+            squared_contributor_concentration=0,
+        )
+        print_from, print_until = self._bulk_window()
+
+        with self.assertRaises(Http404):
+            QuestionnairePrintReleaseService.bulk_release(
+                selections=(
+                    (self.parent.id, self.r2.id),
+                    (foreign_parent.id, foreign_revision.id),
+                ),
+                tenant_id=self.tenant.id,
+                actor=self.manager_user,
+                print_from=print_from,
+                print_until=print_until,
+            )
+
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+
+    def test_bulk_release_direct_deny_and_unauthorized_users_are_blocked(self):
+        print_from, print_until = self._bulk_window()
+        UserPermission.objects.create(
+            user=self.manager_user,
+            permission=Permission.objects.get(
+                code="departmental_exams.manage_exam_generation"
+            ),
+            grant_type=UserPermission.GrantType.DENY,
+            tenant=self.tenant,
+            campus=self.campus,
+        )
+
+        with self.assertRaises(PermissionDenied):
+            QuestionnairePrintReleaseService.bulk_release(
+                selections=((self.parent.id, self.r2.id),),
+                tenant_id=self.tenant.id,
+                actor=self.manager_user,
+                print_from=print_from,
+                print_until=print_until,
+            )
+        self.assertEqual(
+            self._bulk_post(
+                ((self.parent, self.r2),),
+                print_from=print_from,
+                print_until=print_until,
+                user=self.configurer,
+            ).status_code,
+            403,
+        )
+        self.assertFalse(QuestionnairePrintRelease.objects.exists())
+
+    def test_bulk_release_does_not_auto_release_regenerated_revision(self):
+        self._bulk_post(((self.parent, self.r2),))
+        newer = self._newer_revision(self.parent, self.r2)
+
+        active = QuestionnairePrintRelease.objects.get(
+            cycle_course=self.parent,
+            status=QuestionnairePrintRelease.Status.ACTIVE,
+            active_marker=1,
+        )
+
+        self.assertEqual(active.generation_revision_id, self.r2.id)
+        self.assertFalse(
+            QuestionnairePrintRelease.objects.filter(
+                cycle_course=self.parent,
+                generation_revision=newer,
+            ).exists()
+        )
 
     def test_admin_direct_print_preserves_requested_historical_revision(self):
         ExamGenerationRevision.objects.filter(pk=self.r2.pk).update(

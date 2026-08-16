@@ -99,6 +99,7 @@ urlpatterns = [
         name="assigned_course_examinations",
     ),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/courses/", views.cycle_course_list_view, name="cycle_course_list"),
+    path("admin-portal/departmental-exams/automatic-summary/", stage6_views.automatic_generation_summary_entry_view, name="automatic_generation_summary_entry"),
     path("admin-portal/departmental-exams/cycles/<int:cycle_id>/automatic-summary/", stage6_views.automatic_generation_summary_view, name="automatic_generation_summary"),
     path("admin-portal/departmental-exams/questionnaire-print-release/", stage6_views.questionnaire_print_release_view, name="questionnaire_print_release"),
     path("admin-portal/departmental-exams/courses/<int:cycle_course_id>/administration/", views.cycle_course_administration_view, name="cycle_course_administration"),

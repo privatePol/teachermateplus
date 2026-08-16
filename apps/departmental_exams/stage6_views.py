@@ -40,6 +40,7 @@ from .models import (
     AutomaticGenerationAuditRun,
     CourseExamConfiguration,
     CycleCourse,
+    CycleCourseOffering,
     ExamBlueprint,
     ExamScenario,
     ExamScenarioMember,
@@ -48,7 +49,11 @@ from .models import (
     ExaminationCycle,
     QuestionnairePrintRelease,
 )
-from .forms import AutomaticContributionReopenForm, QuestionnairePrintReleaseForm
+from .forms import (
+    AutomaticContributionReopenForm,
+    BulkQuestionnairePrintReleaseForm,
+    QuestionnairePrintReleaseForm,
+)
 from .questionnaire_printing import QuestionnairePrintReleaseService
 from .services import (
     CourseExamConfigurationConflict,
@@ -753,19 +758,11 @@ def automatic_generation_summary_view(request, cycle_id):
     )
     if not courses:
         raise PermissionDenied("No applicable automatic course examinations exist.")
-    permission_map = DepartmentalExamAuthorizationService.automatic_permission_map(
+    permission_map = _automatic_summary_permission_map(
         user=request.user,
         courses=courses,
-        permissions=(
-            DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
-            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
-        ),
     )
-    if any(
-        DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION
-        not in permission_map[course.id]
-        for course in courses
-    ):
+    if not _has_automatic_summary_access(courses, permission_map):
         raise PermissionDenied(
             "You do not have automatic examination authority for every participating campus."
         )
@@ -798,6 +795,64 @@ def automatic_generation_summary_view(request, cycle_id):
     )
 
 
+def _automatic_summary_permission_map(*, user, courses):
+    return DepartmentalExamAuthorizationService.automatic_permission_map(
+        user=user,
+        courses=courses,
+        permissions=(
+            DepartmentalExamAuthorizationService.VIEW_GENERATED_PERMISSION,
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION,
+        ),
+    )
+
+
+def _has_automatic_summary_access(courses, permission_map):
+    return bool(courses) and all(
+        DepartmentalExamAuthorizationService.ANY_AUTOMATIC_PERMISSION
+        in permission_map[course.id]
+        for course in courses
+    )
+
+
+@portal_required("ADMIN")
+@require_GET
+def automatic_generation_summary_entry_view(request):
+    tenant_id = _tenant_id(request)
+    DepartmentalExamAuthorizationService.require_enabled(tenant_id=tenant_id)
+    courses = list(
+        CycleCourse.objects.filter(
+            cycle__tenant_id=tenant_id,
+            cycle__processing_mode=ExaminationCycle.ProcessingMode.AUTOMATIC_GENERATION,
+            inclusion_status=CycleCourse.InclusionStatus.INCLUDED,
+        )
+        .select_related("cycle", "cycle__academic_year", "cycle__term")
+        .prefetch_related("offering_snapshots")
+        .order_by("-cycle__created_at", "-cycle_id", "course__code", "id")
+    )
+    permission_map = _automatic_summary_permission_map(
+        user=request.user,
+        courses=courses,
+    )
+    courses_by_cycle = {}
+    for course in courses:
+        courses_by_cycle.setdefault(course.cycle_id, []).append(course)
+    cycles = tuple(
+        cycle_courses[0].cycle
+        for cycle_courses in courses_by_cycle.values()
+        if _has_automatic_summary_access(cycle_courses, permission_map)
+    )
+    if len(cycles) == 1:
+        return redirect(
+            "departmental_exams:automatic_generation_summary",
+            cycle_id=cycles[0].id,
+        )
+    return render(
+        request,
+        "departmental_exams/admin/automatic_generation_summary_selector.html",
+        {"cycles": cycles},
+    )
+
+
 @portal_required("ADMIN")
 @require_http_methods(["GET", "POST"])
 def questionnaire_print_release_view(request):
@@ -816,7 +871,12 @@ def questionnaire_print_release_view(request):
             "course",
         )
         .prefetch_related(
-            "offering_snapshots__campus",
+            Prefetch(
+                "offering_snapshots",
+                queryset=CycleCourseOffering.objects.select_related("campus").order_by(
+                    "id"
+                ),
+            ),
             Prefetch(
                 "generation_revisions",
                 queryset=ExamGenerationRevision.objects.prefetch_related(
@@ -882,6 +942,15 @@ def questionnaire_print_release_view(request):
         raise PermissionDenied(
             "No generated course examination is available within your output authority."
         )
+    for course in courses:
+        seen_campus_ids = set()
+        print_release_campuses = []
+        for snapshot in course.offering_snapshots.all():
+            if snapshot.campus_id in seen_campus_ids:
+                continue
+            seen_campus_ids.add(snapshot.campus_id)
+            print_release_campuses.append(snapshot.campus)
+        course.print_release_campuses = tuple(print_release_campuses)
 
     course_by_id = {course.id: course for course in courses}
     revision_by_id = {
@@ -889,12 +958,76 @@ def questionnaire_print_release_view(request):
         for course in courses
         for revision in course.generation_revisions.all()
     }
+    bulk_selection_rows = []
+    for course in courses:
+        if (
+            DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
+            not in management_map[course.id]
+        ):
+            continue
+        for revision in course.generation_revisions.all():
+            value = f"{course.id}:{revision.id}"
+            bulk_selection_rows.append(
+                {
+                    "value": value,
+                    "course": course,
+                    "revision": revision,
+                }
+            )
+    bulk_selection_choices = tuple(
+        (
+            row["value"],
+            f"{row['course'].course.code} R{row['revision'].revision_number}",
+        )
+        for row in bulk_selection_rows
+    )
     bound_course_id = None
     bound_form = None
     status = 200
+    now = timezone.now()
+    local_now = timezone.localtime(now).replace(second=0, microsecond=0)
+    bulk_form = BulkQuestionnairePrintReleaseForm(
+        selection_choices=bulk_selection_choices,
+        initial={
+            "print_from": local_now,
+            "print_until": local_now + timezone.timedelta(days=1),
+        },
+    )
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "revoke":
+        if action == "bulk_release":
+            bulk_form = BulkQuestionnairePrintReleaseForm(
+                request.POST,
+                selection_choices=bulk_selection_choices,
+            )
+            if bulk_form.is_valid():
+                try:
+                    releases = QuestionnairePrintReleaseService.bulk_release(
+                        selections=bulk_form.cleaned_data["selections"],
+                        tenant_id=tenant_id,
+                        actor=request.user,
+                        print_from=bulk_form.cleaned_data["print_from"],
+                        print_until=bulk_form.cleaned_data["print_until"],
+                        request=request,
+                    )
+                except ValidationError as exc:
+                    if hasattr(exc, "message_dict"):
+                        for field, errors in exc.message_dict.items():
+                            target = field if field in bulk_form.fields else None
+                            for error in errors:
+                                bulk_form.add_error(target, error)
+                    else:
+                        bulk_form.add_error(None, exc)
+                    status = 400
+                else:
+                    messages.success(
+                        request,
+                        f"Released {len(releases)} exact questionnaire revisions with the common faculty print window.",
+                    )
+                    return redirect("departmental_exams:questionnaire_print_release")
+            else:
+                status = 400
+        elif action == "revoke":
             try:
                 QuestionnairePrintReleaseService.revoke(
                     release_id=int(request.POST.get("release_id") or 0),
@@ -978,8 +1111,6 @@ def questionnaire_print_release_view(request):
         else:
             raise Http404("Unknown questionnaire print release action.")
 
-    now = timezone.now()
-    local_now = timezone.localtime(now).replace(second=0, microsecond=0)
     for course in courses:
         course.can_manage_release = (
             DepartmentalExamAuthorizationService.MANAGE_GENERATION_PERMISSION
@@ -1063,7 +1194,13 @@ def questionnaire_print_release_view(request):
     return render(
         request,
         "departmental_exams/admin/questionnaire_print_release.html",
-        {"courses": courses, "now": now},
+        {
+            "courses": courses,
+            "now": now,
+            "bulk_form": bulk_form,
+            "bulk_selection_rows": bulk_selection_rows,
+            "bulk_selected_values": set(bulk_form["selections"].value() or ()),
+        },
         status=status,
     )
 

@@ -71,6 +71,14 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, reverse("faculty_portal:operational_policies"))
         self.assertContains(response, "Semester Faculty Workflow")
         self.assertContains(response, "Daily Faculty Workflow")
+        self.assertContains(response, "separate Print Set A and Print Set B actions")
+        self.assertContains(response, "inside its Print From/Print Until window")
+        self.assertContains(response, "regenerated revision")
+        self.assertContains(response, "new release")
+        self.assertContains(
+            response,
+            "Faculty do not receive Answer Keys, Question Selection Audit reports, or Automatic Generation Audit reports.",
+        )
         self.assertContains(response, "portal-img/semester_workflow.png")
         self.assertContains(response, "imahe/faculty_workflow.png")
         self.assertNotContains(response, "Top Faculty Tasks")

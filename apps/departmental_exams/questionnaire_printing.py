@@ -252,6 +252,58 @@ class QuestionnairePrintReleaseService:
 
     @classmethod
     @transaction.atomic
+    def bulk_release(
+        cls,
+        *,
+        selections,
+        tenant_id,
+        actor,
+        print_from,
+        print_until,
+        request=None,
+    ):
+        cls._validate_window(print_from=print_from, print_until=print_until)
+        normalized = []
+        course_ids = set()
+        for selection in selections:
+            try:
+                cycle_course_id, revision_id = (int(value) for value in selection)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(
+                    {"selections": "One or more selected revisions are invalid."}
+                ) from exc
+            if cycle_course_id < 1 or revision_id < 1:
+                raise ValidationError(
+                    {"selections": "One or more selected revisions are invalid."}
+                )
+            if cycle_course_id in course_ids:
+                raise ValidationError(
+                    {"selections": "Select only one revision for each course examination."}
+                )
+            course_ids.add(cycle_course_id)
+            normalized.append((cycle_course_id, revision_id))
+        if not normalized:
+            raise ValidationError(
+                {"selections": "Select at least one generated course revision."}
+            )
+
+        releases = []
+        for cycle_course_id, revision_id in sorted(normalized):
+            releases.append(
+                cls.release(
+                    cycle_course_id=cycle_course_id,
+                    revision_id=revision_id,
+                    tenant_id=tenant_id,
+                    actor=actor,
+                    print_from=print_from,
+                    print_until=print_until,
+                    request=request,
+                )
+            )
+        return tuple(releases)
+
+    @classmethod
+    @transaction.atomic
     def revoke(cls, *, release_id, tenant_id, actor, request=None):
         course_id = (
             QuestionnairePrintRelease.objects.filter(
