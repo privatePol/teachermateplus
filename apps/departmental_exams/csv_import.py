@@ -6,7 +6,7 @@ import io
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
@@ -17,6 +17,7 @@ from .contribution_authorization import (
     ContributionAuthorizationService,
     ContributionConflict,
     ContributionExpired,
+    ContributionQuotaReached,
 )
 from .contribution_services import (
     QuestionPayloadService,
@@ -37,6 +38,7 @@ CSV_HEADERS = (
 CSV_FILENAME = "TeacherMatePlus_Departmental_Exam_Questions.csv"
 CSV_MAX_BYTES = 2 * 1024 * 1024
 CSV_MAX_ROWS = 200
+IMPORT_CHUNK_SIZE = 10
 PREVIEW_LIFETIME = timedelta(minutes=30)
 SHELL_RETENTION = timedelta(days=30)
 
@@ -186,10 +188,22 @@ class QuestionCSVParser:
                 else:
                     for message in exc.messages:
                         row.errors.append({"field": "row", "message": str(message)})
-                row.payload = {
-                    field_name: QuestionPayloadService.normalize_text(raw_payload.get(field_name))
-                    for field_name in CSV_HEADERS
-                }
+                contains_unsupported_text = any(
+                    QuestionPayloadService.has_unsupported_characters(
+                        raw_payload.get(field_name)
+                    )
+                    for field_name in QuestionPayloadService.TEXT_FIELDS
+                )
+                row.payload = (
+                    {}
+                    if contains_unsupported_text
+                    else {
+                        field_name: QuestionPayloadService.normalize_text(
+                            raw_payload.get(field_name)
+                        )
+                        for field_name in CSV_HEADERS
+                    }
+                )
             rows.append(row)
         return ParsedImport(
             raw_sha256=raw_hash,
@@ -199,6 +213,14 @@ class QuestionCSVParser:
 
 
 class QuestionCSVImportService:
+    SAFE_FAILURE_MESSAGES = {
+        "AUTHORIZATION_CHANGED": "Import stopped because current access or assignment eligibility changed. Partial imported rows were discarded; start a fresh CSV preview when access is restored.",
+        "STALE_CONTRIBUTION": "Import stopped because the contribution changed after preview. Partial imported rows were discarded; start a fresh CSV preview.",
+        "QUOTA_CHANGED": "Import stopped because the available question quota changed. Partial imported rows were discarded; review the workspace and start a fresh CSV preview.",
+        "INVALID_IMPORT_STATE": "Import stopped because its persisted state could not be validated safely. Partial imported rows were discarded; start a fresh CSV preview.",
+        "PROCESSING_INTERRUPTED": "Import paused after an unexpected processing interruption. Persisted progress is safe to retry.",
+    }
+
     @staticmethod
     def template_bytes():
         output = io.StringIO(newline="")
@@ -252,6 +274,9 @@ class QuestionCSVImportService:
             configuration=configuration,
             request_tenant_id=tenant_id,
             request_campus_id=campus_id,
+        )
+        ContributionAuthorizationService.require_no_active_import(
+            contribution=contribution,
         )
         ContributionAuthorizationService.require_revision(
             contribution=contribution,
@@ -374,8 +399,39 @@ class QuestionCSVImportService:
         return batch
 
     @classmethod
-    @transaction.atomic
-    def confirm(
+    def active_batch_for_contribution(cls, *, contribution, user, tenant_id):
+        return (
+            QuestionImportBatch.objects.filter(
+                contribution=contribution,
+                tenant_id=tenant_id,
+                uploading_user=user,
+                status__in=QuestionImportBatch.active_statuses(),
+            )
+            .order_by("created_at", "id")
+            .first()
+        )
+
+    @staticmethod
+    def status_payload(batch):
+        percentage = (
+            round((batch.committed_rows / batch.total_rows) * 100)
+            if batch.total_rows
+            else 0
+        )
+        return {
+            "status": batch.status,
+            "committed_rows": batch.committed_rows,
+            "total_rows": batch.total_rows,
+            "percentage": percentage,
+            "can_resume": batch.status in QuestionImportBatch.resumable_statuses(),
+            "completed": batch.status == QuestionImportBatch.Status.CONFIRMED,
+            "failure_code": batch.failure_code,
+            "failure_message": batch.failure_message,
+            "contribution_id": batch.contribution_id,
+        }
+
+    @classmethod
+    def _locked_import_state(
         cls,
         *,
         token,
@@ -383,7 +439,6 @@ class QuestionCSVImportService:
         user,
         tenant_id,
         campus_id,
-        request=None,
     ):
         identity = cls._owner_batch_identity(token=token, user=user, tenant_id=tenant_id)
         _cycle, _course, configuration, contribution = Stage5LockService.lock_contribution(
@@ -401,75 +456,189 @@ class QuestionCSVImportService:
         if batch is None or batch.file_sha256 != expected_file_sha256:
             raise Http404
         if batch.status == QuestionImportBatch.Status.CONFIRMED:
-            return batch, False
-        if timezone.now() >= batch.expires_at:
+            return configuration, contribution, batch, [], [], []
+        if batch.status == QuestionImportBatch.Status.FAILED:
+            if batch.failure_code == "QUOTA_CHANGED":
+                raise ContributionQuotaReached(contribution.quota_snapshot)
+            if batch.failure_code == "STALE_CONTRIBUTION":
+                raise ContributionConflict(batch.failure_message)
+            if batch.failure_code == "AUTHORIZATION_CHANGED":
+                raise PermissionDenied(batch.failure_message)
+            raise ValidationError(batch.failure_message or "The import cannot be resumed safely.")
+        if (
+            batch.status in {QuestionImportBatch.Status.READY, QuestionImportBatch.Status.INVALID}
+            and timezone.now() >= batch.expires_at
+        ):
             raise ContributionExpired("This confidential preview has expired. Upload the CSV again.")
-        if batch.status != QuestionImportBatch.Status.READY or batch.error_count:
-            raise ValidationError("Only a Ready preview without blocking errors can be confirmed.")
+        if batch.status not in QuestionImportBatch.resumable_statuses() or batch.error_count:
+            raise ValidationError("Only a valid resumable preview can be imported.")
         ContributionAuthorizationService.require_mutable_locked(
             contribution=contribution,
             configuration=configuration,
             request_tenant_id=tenant_id,
             request_campus_id=campus_id,
         )
-        existing_questions = list(
-            Question.objects.select_for_update()
-            .filter(contribution=contribution)
-            .order_by("pk")
-        )
-        ContributionAuthorizationService.require_add_capacity(
+        if batch.status == QuestionImportBatch.Status.READY and QuestionImportBatch.objects.filter(
             contribution=contribution,
-            question_count=len(existing_questions),
-        )
-        if contribution.revision != batch.contribution_revision_snapshot:
+            status__in=QuestionImportBatch.active_statuses(),
+        ).exclude(pk=batch.pk).exists():
             raise ContributionConflict(
-                "This preview is stale because the contribution changed. Upload the CSV again."
+                "Another interrupted question import must be completed before this preview can start."
             )
         rows = list(
             QuestionImportRow.objects.select_for_update()
             .filter(batch=batch)
             .order_by("row_number")
         )
+        if len(rows) != batch.total_rows or any(row.errors for row in rows):
+            raise ValidationError("The persisted preview rows are not valid for import.")
+        imported_questions = list(
+            Question.objects.select_for_update()
+            .filter(contribution=contribution, import_batch=batch)
+            .order_by("import_row_number", "pk")
+        )
+        other_questions = list(
+            Question.objects.select_for_update()
+            .filter(contribution=contribution)
+            .exclude(import_batch=batch)
+            .order_by("position", "pk")
+        )
+        imported_row_numbers = [item.import_row_number for item in imported_questions]
+        staged_row_numbers = [row.row_number for row in rows]
         if (
-            len(rows) != batch.total_rows
-            or any(row.errors for row in rows)
-            or len(existing_questions) + len(rows) > contribution.quota_snapshot
+            len(imported_questions) != batch.committed_rows
+            or any(row_number is None for row_number in imported_row_numbers)
+            or len(imported_row_numbers) != len(set(imported_row_numbers))
+            or not set(imported_row_numbers).issubset(staged_row_numbers)
         ):
-            raise ValidationError("The preview is no longer valid for atomic confirmation.")
-        cleaned_rows = [QuestionPayloadService.validate(row.payload) for row in rows]
-        start_position = len(existing_questions) + 1
-        questions = [
-            Question(
-                contribution=contribution,
-                position=start_position + offset,
-                revision=1,
-                entry_method=Question.EntryMethod.CSV,
-                import_batch=batch,
-                **payload,
+            raise ValidationError("The persisted committed-row progress is inconsistent.")
+        ContributionAuthorizationService.require_add_capacity(
+            contribution=contribution,
+            question_count=len(other_questions),
+        )
+        if len(other_questions) + batch.total_rows > contribution.quota_snapshot:
+            raise ContributionConflict(
+                "The available question quota changed after this preview was created."
             )
-            for offset, payload in enumerate(cleaned_rows)
+        if contribution.revision != batch.contribution_revision_snapshot:
+            raise ContributionConflict(
+                "This preview is stale because the contribution changed. Upload the CSV again."
+            )
+        return configuration, contribution, batch, rows, imported_questions, other_questions
+
+    @classmethod
+    @transaction.atomic
+    def _process_next_chunk_atomic(
+        cls,
+        *,
+        token,
+        expected_file_sha256,
+        user,
+        tenant_id,
+        campus_id,
+        request=None,
+        chunk_size=IMPORT_CHUNK_SIZE,
+    ):
+        (
+            _configuration,
+            contribution,
+            batch,
+            rows,
+            imported_questions,
+            other_questions,
+        ) = cls._locked_import_state(
+            token=token,
+            expected_file_sha256=expected_file_sha256,
+            user=user,
+            tenant_id=tenant_id,
+            campus_id=campus_id,
+        )
+        if batch.status == QuestionImportBatch.Status.CONFIRMED:
+            return batch, 0
+        imported_row_numbers = {item.import_row_number for item in imported_questions}
+        pending_rows = [row for row in rows if row.row_number not in imported_row_numbers]
+        if not pending_rows:
+            raise ValidationError("The persisted import has no remaining rows but is not complete.")
+        chunk_rows = pending_rows[: max(1, min(int(chunk_size), CSV_MAX_ROWS))]
+        row_positions = {
+            row.row_number: len(other_questions) + index
+            for index, row in enumerate(rows, start=1)
+        }
+        cleaned_rows = [
+            (row, QuestionPayloadService.validate(row.payload)) for row in chunk_rows
         ]
-        Question.objects.bulk_create(questions, batch_size=CSV_MAX_ROWS)
+        Question.objects.bulk_create(
+            [
+                Question(
+                    contribution=contribution,
+                    position=row_positions[row.row_number],
+                    revision=1,
+                    entry_method=Question.EntryMethod.CSV,
+                    import_batch=batch,
+                    import_row_number=row.row_number,
+                    **payload,
+                )
+                for row, payload in cleaned_rows
+            ],
+            batch_size=IMPORT_CHUNK_SIZE,
+        )
+        committed_rows = len(imported_questions) + len(chunk_rows)
+        now = timezone.now()
+        batch.started_at = batch.started_at or now
+        batch.progress_updated_at = now
+        batch.committed_rows = committed_rows
+        batch.failure_code = ""
+        batch.failure_message = ""
+        remaining_rows = pending_rows[len(chunk_rows):]
+        if remaining_rows:
+            batch.status = QuestionImportBatch.Status.IMPORTING
+            batch.active_contribution = contribution
+            batch.next_row_number = remaining_rows[0].row_number
+            batch.save(update_fields=[
+                "status",
+                "active_contribution",
+                "committed_rows",
+                "next_row_number",
+                "started_at",
+                "progress_updated_at",
+                "failure_code",
+                "failure_message",
+                "updated_at",
+            ])
+            return batch, len(chunk_rows)
+
         revision_before = contribution.revision
         contribution.revision += 1
         contribution.save(update_fields=["revision", "updated_at"])
-        now = timezone.now()
         batch.status = QuestionImportBatch.Status.CONFIRMED
+        batch.active_contribution = None
+        batch.next_row_number = None
         batch.confirming_user = user
         batch.confirmed_at = now
         batch.payload_purged_at = now
         batch.save(update_fields=[
             "status",
+            "active_contribution",
+            "committed_rows",
+            "next_row_number",
+            "started_at",
+            "progress_updated_at",
+            "failure_code",
+            "failure_message",
             "confirming_user",
             "confirmed_at",
             "payload_purged_at",
             "updated_at",
         ])
         QuestionImportRow.objects.filter(batch=batch).delete()
+        all_imported = list(
+            Question.objects.filter(import_batch=batch).order_by("import_row_number", "pk")
+        )
         difficulty_counts = {}
-        for payload in cleaned_rows:
-            difficulty = payload["difficulty"]
-            difficulty_counts[difficulty] = difficulty_counts.get(difficulty, 0) + 1
+        for question in all_imported:
+            difficulty_counts[question.difficulty] = (
+                difficulty_counts.get(question.difficulty, 0) + 1
+            )
         AuditService.log_event(
             action="DE_EXAM_QUESTION_CSV_IMPORTED",
             portal="FACULTY",
@@ -484,17 +653,228 @@ class QuestionCSVImportService:
                 "batch_id": batch.id,
                 "token_sha256": hashlib.sha256(str(batch.token).encode("ascii")).hexdigest(),
                 "filename_sha256": batch.filename_sha256,
-                "row_count": len(cleaned_rows),
+                "row_count": batch.total_rows,
                 "warning_count": batch.warning_count,
                 "quota": contribution.quota_snapshot,
-                "resulting_count": len(existing_questions) + len(cleaned_rows),
+                "resulting_count": len(other_questions) + batch.total_rows,
                 "revision_before": revision_before,
                 "revision_after": contribution.revision,
                 "difficulty_counts": difficulty_counts,
             },
             request=request,
         )
-        return batch, True
+        return batch, len(chunk_rows)
+
+    @classmethod
+    @transaction.atomic
+    def _record_resumable_failure(
+        cls,
+        *,
+        token,
+        user,
+        tenant_id,
+        failure_code,
+    ):
+        identity = cls._owner_batch_identity(token=token, user=user, tenant_id=tenant_id)
+        _cycle, _course, _configuration, contribution = Stage5LockService.lock_contribution(
+            contribution_id=identity["contribution_id"],
+            user=user,
+            tenant_id=tenant_id,
+        )
+        batch = QuestionImportBatch.objects.select_for_update().filter(
+            pk=identity["id"],
+            contribution=contribution,
+            uploading_user=user,
+            tenant_id=tenant_id,
+        ).first()
+        if batch is None or batch.status in {
+            QuestionImportBatch.Status.CONFIRMED,
+            QuestionImportBatch.Status.EXPIRED,
+            QuestionImportBatch.Status.INVALID,
+            QuestionImportBatch.Status.FAILED,
+        }:
+            return
+        if batch.status == QuestionImportBatch.Status.READY and QuestionImportBatch.objects.filter(
+            contribution=contribution,
+            status__in=QuestionImportBatch.active_statuses(),
+        ).exclude(pk=batch.pk).exists():
+            return
+        committed_row_numbers = set(
+            Question.objects.filter(import_batch=batch).values_list(
+                "import_row_number", flat=True
+            )
+        )
+        next_row_number = (
+            QuestionImportRow.objects.filter(batch=batch)
+            .exclude(row_number__in=committed_row_numbers)
+            .order_by("row_number")
+            .values_list("row_number", flat=True)
+            .first()
+        )
+        if next_row_number is None:
+            return
+        now = timezone.now()
+        batch.status = QuestionImportBatch.Status.PAUSED
+        batch.active_contribution = contribution
+        batch.committed_rows = len(committed_row_numbers)
+        batch.next_row_number = next_row_number
+        batch.started_at = batch.started_at or now
+        batch.progress_updated_at = now
+        batch.failure_code = failure_code
+        batch.failure_message = cls.SAFE_FAILURE_MESSAGES[failure_code]
+        batch.save(update_fields=[
+            "status",
+            "active_contribution",
+            "committed_rows",
+            "next_row_number",
+            "started_at",
+            "progress_updated_at",
+            "failure_code",
+            "failure_message",
+            "updated_at",
+        ])
+
+    @classmethod
+    @transaction.atomic
+    def _record_terminal_failure(
+        cls,
+        *,
+        token,
+        user,
+        tenant_id,
+        failure_code,
+    ):
+        identity = cls._owner_batch_identity(token=token, user=user, tenant_id=tenant_id)
+        _cycle, _course, _configuration, contribution = Stage5LockService.lock_contribution(
+            contribution_id=identity["contribution_id"],
+            user=user,
+            tenant_id=tenant_id,
+        )
+        batch = QuestionImportBatch.objects.select_for_update().filter(
+            pk=identity["id"],
+            contribution=contribution,
+            uploading_user=user,
+            tenant_id=tenant_id,
+        ).first()
+        if batch is None or batch.status in {
+            QuestionImportBatch.Status.CONFIRMED,
+            QuestionImportBatch.Status.EXPIRED,
+            QuestionImportBatch.Status.INVALID,
+            QuestionImportBatch.Status.FAILED,
+        }:
+            return
+        if batch.status == QuestionImportBatch.Status.READY and QuestionImportBatch.objects.filter(
+            contribution=contribution,
+            status__in=QuestionImportBatch.active_statuses(),
+        ).exclude(pk=batch.pk).exists():
+            return
+        list(
+            Question.objects.select_for_update()
+            .filter(contribution=contribution, import_batch=batch)
+            .order_by("pk")
+        )
+        Question.objects.filter(contribution=contribution, import_batch=batch).delete()
+        QuestionImportRow.objects.filter(batch=batch).delete()
+        now = timezone.now()
+        batch.status = QuestionImportBatch.Status.FAILED
+        batch.active_contribution = None
+        batch.committed_rows = 0
+        batch.next_row_number = None
+        batch.started_at = batch.started_at or now
+        batch.progress_updated_at = now
+        batch.confirmed_at = None
+        batch.payload_purged_at = now
+        batch.failure_code = failure_code
+        batch.failure_message = cls.SAFE_FAILURE_MESSAGES[failure_code]
+        batch.save(update_fields=[
+            "status",
+            "active_contribution",
+            "committed_rows",
+            "next_row_number",
+            "started_at",
+            "progress_updated_at",
+            "confirmed_at",
+            "payload_purged_at",
+            "failure_code",
+            "failure_message",
+            "updated_at",
+        ])
+
+    @classmethod
+    def process_next_chunk(cls, **kwargs):
+        try:
+            return cls._process_next_chunk_atomic(**kwargs)
+        except Http404:
+            raise
+        except ContributionExpired:
+            raise
+        except PermissionDenied:
+            cls._record_terminal_failure(
+                token=kwargs["token"],
+                user=kwargs["user"],
+                tenant_id=kwargs["tenant_id"],
+                failure_code="AUTHORIZATION_CHANGED",
+            )
+            raise
+        except ContributionConflict as exc:
+            if "Another interrupted question import" not in str(exc):
+                code = (
+                    "QUOTA_CHANGED"
+                    if "quota" in str(exc).lower()
+                    else "STALE_CONTRIBUTION"
+                )
+                cls._record_terminal_failure(
+                    token=kwargs["token"],
+                    user=kwargs["user"],
+                    tenant_id=kwargs["tenant_id"],
+                    failure_code=code,
+                )
+            raise
+        except ValidationError:
+            cls._record_terminal_failure(
+                token=kwargs["token"],
+                user=kwargs["user"],
+                tenant_id=kwargs["tenant_id"],
+                failure_code="INVALID_IMPORT_STATE",
+            )
+            raise
+        except Exception:
+            cls._record_resumable_failure(
+                token=kwargs["token"],
+                user=kwargs["user"],
+                tenant_id=kwargs["tenant_id"],
+                failure_code="PROCESSING_INTERRUPTED",
+            )
+            raise
+
+    @classmethod
+    def confirm(
+        cls,
+        *,
+        token,
+        expected_file_sha256,
+        user,
+        tenant_id,
+        campus_id,
+        request=None,
+    ):
+        before = cls.owner_batch(token=token, user=user, tenant_id=tenant_id)
+        changed = before.status != QuestionImportBatch.Status.CONFIRMED
+        if not changed:
+            return before, False
+        max_chunks = max(1, before.total_rows) + 1
+        for _index in range(max_chunks):
+            batch, _created = cls.process_next_chunk(
+                token=token,
+                expected_file_sha256=expected_file_sha256,
+                user=user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                request=request,
+            )
+            if batch.status == QuestionImportBatch.Status.CONFIRMED:
+                return batch, True
+        raise ValidationError("The import did not reach a terminal state safely.")
 
 
 class QuestionImportCleanupService:
@@ -531,7 +911,11 @@ class QuestionImportCleanupService:
         if remaining:
             shell_ids = list(
                 QuestionImportBatch.objects.filter(
-                    status__in=[QuestionImportBatch.Status.CONFIRMED, QuestionImportBatch.Status.EXPIRED],
+                    status__in=[
+                        QuestionImportBatch.Status.FAILED,
+                        QuestionImportBatch.Status.CONFIRMED,
+                        QuestionImportBatch.Status.EXPIRED,
+                    ],
                     created_at__lte=now - SHELL_RETENTION,
                 )
                 .order_by("created_at", "id")
@@ -541,7 +925,11 @@ class QuestionImportCleanupService:
                 with transaction.atomic():
                     batch = QuestionImportBatch.objects.select_for_update().filter(
                         pk=batch_id,
-                        status__in=[QuestionImportBatch.Status.CONFIRMED, QuestionImportBatch.Status.EXPIRED],
+                        status__in=[
+                            QuestionImportBatch.Status.FAILED,
+                            QuestionImportBatch.Status.CONFIRMED,
+                            QuestionImportBatch.Status.EXPIRED,
+                        ],
                         created_at__lte=now - SHELL_RETENTION,
                     ).first()
                     if batch is None:

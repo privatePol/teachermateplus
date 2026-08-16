@@ -6,6 +6,7 @@ from django.http import Http404
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import escape
 
 from apps.academics.models import (
     AcademicYear,
@@ -437,6 +438,80 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                 self.assertEqual(response.context["paper_size"], "letter")
                 self.assertContains(response, "@page { size: Letter portrait;")
                 self.assertNotContains(response, unsafe_value)
+
+    def test_html_and_link_shaped_snapshots_remain_escaped_across_confidential_outputs(self):
+        html_fragments = (
+            "<script>alert(1)</script>",
+            "<img src=x onerror=alert(1)>",
+            "<svg onload=alert(1)>",
+            '<a href="javascript:alert(1)">click</a>',
+        )
+        question_text = "\n".join(html_fragments)
+        choices = [
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+            "https://example.invalid/exam",
+        ]
+        GeneratedExamItem.objects.filter(
+            generated_set__generation_revision=self.r2,
+            generated_set__set_code=GeneratedExamSet.SetCode.A,
+            position=1,
+        ).update(
+            question_text_snapshot=question_text,
+            choices_snapshot=choices,
+        )
+
+        admin_client = Client()
+        admin_client.force_login(self.manager_user)
+        release = self._release()
+        responses = (
+            (
+                "generated revision",
+                admin_client.get(
+                    reverse(
+                        "departmental_exams:generated_revision_detail",
+                        args=[self.r2.id],
+                    )
+                ),
+                True,
+            ),
+            (
+                "selection audit",
+                admin_client.get(
+                    reverse(
+                        "departmental_exams:generation_selection_audit",
+                        args=[self.r2.id],
+                    )
+                ),
+                False,
+            ),
+            (
+                "admin questionnaire print",
+                admin_client.get(self._admin_print_url(set_code="A")),
+                True,
+            ),
+            (
+                "faculty questionnaire print",
+                self._faculty_client().get(self._print_url(release, "A")),
+                True,
+            ),
+        )
+        for label, response, exposes_choices in responses:
+            with self.subTest(output=label):
+                self.assertEqual(response.status_code, 200)
+                body = response.content.decode()
+                for fragment in html_fragments:
+                    self.assertIn(escape(fragment), body)
+                    self.assertNotIn(fragment, body)
+                if exposes_choices:
+                    for choice in choices:
+                        self.assertIn(escape(choice), body)
+                lowered = body.lower()
+                self.assertNotIn('href="javascript:', lowered)
+                self.assertNotIn('href="data:', lowered)
+                self.assertNotIn('href="vbscript:', lowered)
+                self.assertNotIn('<a href="https://example.invalid/exam', lowered)
 
     def test_release_page_renders_each_campus_once_for_repeated_offerings(self):
         original_offering = self.parent.offering_snapshots.get().offering

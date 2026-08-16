@@ -66,6 +66,11 @@ urlpatterns = [
         name="csv_confirm",
     ),
     path(
+        "faculty/departmental-exams/imports/<uuid:token>/status/",
+        faculty_views.csv_status_view,
+        name="csv_status",
+    ),
+    path(
         "faculty/departmental-exams/contributions/<int:contribution_id>/submit/",
         faculty_views.contribution_submit_view,
         name="contribution_submit",

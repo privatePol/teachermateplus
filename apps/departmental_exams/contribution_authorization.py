@@ -12,7 +12,12 @@ from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
 from apps.rbac.models import UserPermission, UserRole
 
-from .models import CourseExamConfiguration, CycleCourse, FacultyContribution
+from .models import (
+    CourseExamConfiguration,
+    CycleCourse,
+    FacultyContribution,
+    QuestionImportBatch,
+)
 
 
 class ContributionConflict(ValidationError):
@@ -336,6 +341,16 @@ class ContributorEligibilityService:
 
 
 class ContributionAuthorizationService:
+    @staticmethod
+    def require_no_active_import(*, contribution):
+        if QuestionImportBatch.objects.filter(
+            contribution=contribution,
+            status__in=QuestionImportBatch.active_statuses(),
+        ).exists():
+            raise PermissionDenied(
+                "An interrupted question import must be completed before other changes are allowed."
+            )
+
     @staticmethod
     def _retained_source_intersects(*, contribution, assignments):
         eligible_source_keys = {

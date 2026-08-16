@@ -5,7 +5,8 @@ from functools import wraps
 
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.http import Http404, HttpResponse
+from django.db.models import Q
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -31,7 +32,7 @@ from .contribution_forms import (
 from .contribution_selectors import ContributionSelector
 from .contribution_services import QuestionMutationService
 from .csv_import import CSV_FILENAME, QuestionCSVImportService
-from .models import FacultyContribution, Question
+from .models import FacultyContribution, Question, QuestionImportBatch
 from .questionnaire_printing import FacultyQuestionnairePrintService
 
 
@@ -128,7 +129,12 @@ def _owner_contribution(request, contribution_id):
 
 
 def _workspace_context(contribution):
-    questions = list(contribution.questions.order_by("position", "id"))
+    questions = list(
+        contribution.questions.filter(
+            Q(import_batch__isnull=True)
+            | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
+        ).order_by("position", "id")
+    )
     saved_count = len(questions)
     quota = contribution.quota_snapshot
     configuration = contribution.cycle_course.configuration
@@ -151,7 +157,17 @@ def _workspace_context(contribution):
             contribution=contribution
         )
     )
-    is_mutable = otherwise_mutable and has_retained_live_eligibility
+    active_import = (
+        contribution.question_import_batches.filter(
+            uploading_user=contribution.faculty_user,
+            status__in=QuestionImportBatch.active_statuses(),
+        )
+        .order_by("created_at", "id")
+        .first()
+    )
+    is_mutable = (
+        otherwise_mutable and has_retained_live_eligibility and active_import is None
+    )
     quota_reached = is_mutable and saved_count >= quota
     return {
         "contribution": contribution,
@@ -167,6 +183,17 @@ def _workspace_context(contribution):
             otherwise_mutable and not has_retained_live_eligibility
         ),
         "quota_reached": quota_reached,
+        "active_import": active_import,
+        "active_import_progress": (
+            QuestionCSVImportService.status_payload(active_import)
+            if active_import
+            else None
+        ),
+        "active_import_form": (
+            QuestionCSVConfirmForm(initial={"file_sha256": active_import.file_sha256})
+            if active_import
+            else None
+        ),
     }
 
 
@@ -178,12 +205,18 @@ def _require_currently_mutable(request, contribution):
         request_tenant_id=tenant_id,
         request_campus_id=campus_id,
     )
+    ContributionAuthorizationService.require_no_active_import(
+        contribution=contribution,
+    )
 
 
 def _require_add_capacity(contribution):
     ContributionAuthorizationService.require_add_capacity(
         contribution=contribution,
-        question_count=contribution.questions.count(),
+        question_count=contribution.questions.filter(
+            Q(import_batch__isnull=True)
+            | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
+        ).count(),
     )
 
 
@@ -448,7 +481,10 @@ def csv_upload_view(request, contribution_id):
     contribution = _owner_contribution(request, contribution_id)
     _require_currently_mutable(request, contribution)
     _require_add_capacity(contribution)
-    saved_count = contribution.questions.count()
+    saved_count = contribution.questions.filter(
+        Q(import_batch__isnull=True)
+        | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
+    ).count()
     form = QuestionCSVUploadForm(
         request.POST or None,
         request.FILES or None,
@@ -497,7 +533,10 @@ def csv_preview_view(request, token):
         request_tenant_id=tenant_id,
         request_campus_id=campus_id,
     )
-    existing_count = batch.contribution.questions.count()
+    existing_count = batch.contribution.questions.filter(
+        Q(import_batch__isnull=True)
+        | Q(import_batch__status=QuestionImportBatch.Status.CONFIRMED)
+    ).count()
     if (
         batch.status == batch.Status.READY
         and not batch.error_count
@@ -508,7 +547,7 @@ def csv_preview_view(request, token):
             ContributionQuotaReached(batch.contribution.quota_snapshot),
         )
     can_confirm = (
-        batch.status == batch.Status.READY and not batch.error_count
+        batch.status in QuestionImportBatch.resumable_statuses() and not batch.error_count
     )
     if can_confirm:
         try:
@@ -530,6 +569,7 @@ def csv_preview_view(request, token):
             "remaining": max(batch.contribution.quota_snapshot - existing_count, 0),
             "can_confirm": can_confirm,
             "confirm_form": QuestionCSVConfirmForm(initial={"file_sha256": batch.file_sha256}),
+            "import_progress": QuestionCSVImportService.status_payload(batch),
         },
     )
 
@@ -568,7 +608,27 @@ def csv_confirm_view(request, token):
     if not form.is_valid():
         return _error_response(request, default_status=400)
     tenant_id, campus_id = _scope(request)
+    is_async = request.headers.get("x-requested-with") == "XMLHttpRequest"
     try:
+        if is_async:
+            batch, _created = QuestionCSVImportService.process_next_chunk(
+                token=token,
+                expected_file_sha256=form.cleaned_data["file_sha256"],
+                user=request.user,
+                tenant_id=tenant_id,
+                campus_id=campus_id,
+                request=request,
+            )
+            payload = QuestionCSVImportService.status_payload(batch)
+            payload.update({
+                "status_url": reverse("departmental_exams:csv_status", args=[batch.token]),
+                "resume_url": reverse("departmental_exams:csv_confirm", args=[batch.token]),
+                "workspace_url": reverse(
+                    "departmental_exams:contribution_workspace",
+                    args=[batch.contribution_id],
+                ),
+            })
+            return JsonResponse(payload)
         batch, changed = QuestionCSVImportService.confirm(
             token=token,
             expected_file_sha256=form.cleaned_data["file_sha256"],
@@ -577,13 +637,74 @@ def csv_confirm_view(request, token):
             campus_id=campus_id,
             request=request,
         )
-    except (ContributionConflict, ContributionExpired, ValidationError) as exc:
+    except (PermissionDenied, ContributionConflict, ContributionExpired, ValidationError) as exc:
+        if is_async:
+            status = (
+                403
+                if isinstance(exc, PermissionDenied)
+                else 410
+                if isinstance(exc, ContributionExpired)
+                else 409
+                if isinstance(exc, ContributionConflict)
+                else 400
+            )
+            try:
+                failed_batch = QuestionCSVImportService.owner_batch(
+                    token=token,
+                    user=request.user,
+                    tenant_id=tenant_id,
+                )
+                payload = QuestionCSVImportService.status_payload(failed_batch)
+            except (Http404, ContributionExpired):
+                payload = {
+                    "status": "UNAVAILABLE",
+                    "committed_rows": 0,
+                    "total_rows": 0,
+                    "percentage": 0,
+                    "can_resume": False,
+                    "completed": False,
+                    "failure_code": "UNAVAILABLE",
+                    "failure_message": "The import is no longer available.",
+                }
+            payload["error"] = payload.get("failure_message") or "The import could not continue safely."
+            return JsonResponse(payload, status=status)
         return _error_response(request, exc)
     messages.success(request, "CSV questions imported." if changed else "This CSV was already imported.")
     return redirect(
         "departmental_exams:contribution_workspace",
         contribution_id=batch.contribution_id,
     )
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def csv_status_view(request, token):
+    tenant_id, campus_id = _scope(request)
+    try:
+        batch = QuestionCSVImportService.owner_batch(
+            token=token,
+            user=request.user,
+            tenant_id=tenant_id,
+        )
+    except ContributionExpired as exc:
+        return _error_response(request, exc)
+    ContributionAuthorizationService.require_common_read_access(
+        user=request.user,
+        tenant=batch.contribution.cycle_course.cycle.tenant,
+        request_tenant_id=tenant_id,
+        request_campus_id=campus_id,
+    )
+    payload = QuestionCSVImportService.status_payload(batch)
+    payload.update({
+        "status_url": reverse("departmental_exams:csv_status", args=[batch.token]),
+        "resume_url": reverse("departmental_exams:csv_confirm", args=[batch.token]),
+        "workspace_url": reverse(
+            "departmental_exams:contribution_workspace",
+            args=[batch.contribution_id],
+        ),
+    })
+    return JsonResponse(payload)
 
 
 @_faculty_error_page

@@ -12,6 +12,7 @@ from .models import (
     CycleCourseOffering,
     FacultyContribution,
     FacultyContributionEligibilitySource,
+    QuestionImportBatch,
 )
 from .services import DepartmentalExamAuthorizationService
 
@@ -37,7 +38,18 @@ class ContributionSelector:
                 "cycle_course__offering_snapshots__campus",
                 "cycle_course__offering_snapshots__offering",
             )
-            .annotate(saved_question_count=Count("questions"))
+            .annotate(
+                saved_question_count=Count(
+                    "questions",
+                    filter=(
+                        Q(questions__import_batch__isnull=True)
+                        | Q(
+                            questions__import_batch__status=QuestionImportBatch.Status.CONFIRMED
+                        )
+                    ),
+                    distinct=True,
+                )
+            )
             .order_by("cycle_course__cycle__exam_period", "cycle_course__course__code")
         )
 
@@ -140,7 +152,18 @@ class ContributionMonitoringSelector:
                 Prefetch("eligibility_sources", queryset=contribution_sources),
                 "blocked_resolution_events",
             )
-            .annotate(saved_question_count=Count("questions"))
+            .annotate(
+                saved_question_count=Count(
+                    "questions",
+                    filter=(
+                        Q(questions__import_batch__isnull=True)
+                        | Q(
+                            questions__import_batch__status=QuestionImportBatch.Status.CONFIRMED
+                        )
+                    ),
+                    distinct=True,
+                )
+            )
             .order_by("faculty_user__last_name", "faculty_user__first_name", "id")
         )
         offering_snapshots = CycleCourseOffering.objects.select_related(
@@ -163,7 +186,16 @@ class ContributionMonitoringSelector:
             )
             .annotate(
                 contribution_count=Count("faculty_contributions", distinct=True),
-                question_count=Count("faculty_contributions__questions", distinct=True),
+                question_count=Count(
+                    "faculty_contributions__questions",
+                    filter=(
+                        Q(faculty_contributions__questions__import_batch__isnull=True)
+                        | Q(
+                            faculty_contributions__questions__import_batch__status=QuestionImportBatch.Status.CONFIRMED
+                        )
+                    ),
+                    distinct=True,
+                ),
             )
             .order_by("cycle__academic_year__name", "cycle__term__name", "course__code")
         )

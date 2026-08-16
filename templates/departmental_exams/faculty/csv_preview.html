@@ -1,5 +1,7 @@
 {% extends "faculty_portal/base.html" %}
+{% load static %}
 {% block faculty_content %}
+<div data-import-page data-question-import-controller data-status-url="{% url 'departmental_exams:csv_status' batch.token %}">
 <h1 class="h3">Confidential CSV preview</h1>
 <p class="text-muted">This owner-only preview expires {{ batch.expires_at|date:"M j, Y g:i A" }}. Confirmation uses the server-stored rows, not browser-submitted question content.</p>
 <div class="row g-2 mb-3">
@@ -12,6 +14,19 @@
   <div class="col-6 col-md-3 col-xl"><div class="card h-100"><div class="card-body"><strong>{{ batch.warning_count }}</strong><br>Warnings</div></div></div>
   <div class="col-6 col-md-3 col-xl"><div class="card h-100"><div class="card-body"><strong>{{ batch.resulting_question_count }}</strong><br>Result</div></div></div>
 </div>
+{% if batch.status == 'CONFIRMED' %}
+  <div class="alert alert-success" role="status">This CSV import completed successfully. All {{ batch.total_rows }} rows were committed.</div>
+{% elif batch.status == 'IMPORTING' or batch.status == 'PAUSED' or batch.status == 'FAILED' %}
+  <div class="alert alert-info" role="status">
+    <strong>Persisted import progress:</strong>
+    <span data-import-progress-text>{{ batch.committed_rows }} / {{ batch.total_rows }} rows committed ({{ import_progress.percentage }}%).</span>
+    {% if batch.failure_message %}<div class="mt-2" data-import-server-message>{{ batch.failure_message }}</div>{% else %}<div class="mt-2" data-import-server-message hidden></div>{% endif %}
+    <div class="progress mt-2" role="progressbar" aria-label="Persisted question import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ import_progress.percentage }}">
+      <div class="progress-bar" data-import-progress-bar style="width: {{ import_progress.percentage }}%"></div>
+    </div>
+  </div>
+{% endif %}
+<div class="alert alert-danger" data-import-error role="alert" hidden></div>
 {% if batch.error_count %}<div class="alert alert-danger">Blocking errors must be corrected in a new CSV before confirmation. <a href="{% url 'departmental_exams:csv_error_report' batch.token %}">Download non-confidential error CSV</a>.</div>{% endif %}
 {% for row in rows %}
 <div class="card mb-3"><div class="card-body">
@@ -21,5 +36,16 @@
   {% for warning in row.warnings %}<div class="alert alert-warning py-2 mb-2 text-break" role="alert"><strong>Warning:</strong> {{ warning.message }}</div>{% endfor %}
 </div></div>
 {% endfor %}
-{% if can_confirm %}<form method="post" action="{% url 'departmental_exams:csv_confirm' batch.token %}">{% csrf_token %}{% for hidden in confirm_form.hidden_fields %}{{ hidden }}{% endfor %}<div class="d-flex flex-wrap gap-2"><button class="btn btn-success" type="submit">Confirm atomic import</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' batch.contribution_id %}">Return to workspace</a></div></form>{% elif batch.status == 'READY' and not batch.error_count %}<div class="alert alert-warning">This preview cannot currently be confirmed because the contribution is read-only. Return to the workspace or contact an authorized administrator.</div><div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' batch.contribution_id %}">Return to workspace</a></div>{% else %}<div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' batch.contribution_id %}">Return to workspace</a></div>{% endif %}
+{% if can_confirm %}<form method="post" action="{% url 'departmental_exams:csv_confirm' batch.token %}" data-import-resume-form>{% csrf_token %}{% for hidden in confirm_form.hidden_fields %}{{ hidden }}{% endfor %}<div class="d-flex flex-wrap gap-2"><button class="btn btn-success" type="submit">{% if batch.status == 'READY' %}Start resumable import{% else %}Resume import{% endif %}</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' batch.contribution_id %}">Return to workspace</a></div></form>{% elif batch.status == 'READY' and not batch.error_count %}<div class="alert alert-warning">This preview cannot currently be confirmed because the contribution is read-only. Return to the workspace or contact an authorized administrator.</div><div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' batch.contribution_id %}">Return to workspace</a></div>{% else %}<div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' batch.contribution_id %}">Return to workspace</a></div>{% endif %}
+</div>
+<div class="position-fixed top-0 start-0 w-100 h-100 bg-body bg-opacity-75 d-flex align-items-center justify-content-center p-3" data-import-overlay role="status" aria-live="assertive" hidden style="z-index: 1080;">
+  <div class="card shadow border-primary" style="max-width: 34rem;"><div class="card-body">
+    <p class="fw-semibold mb-2">Importing questions...</p>
+    <p>Question import is in progress. Please keep this page open and do not navigate away.</p>
+    <div data-import-overlay-progress>Persisted progress will update after each committed chunk.</div>
+  </div></div>
+</div>
+{% endblock %}
+{% block extra_js %}{{ block.super }}
+<script src="{% static 'js/departmental_exam_csv_import.js' %}"></script>
 {% endblock %}

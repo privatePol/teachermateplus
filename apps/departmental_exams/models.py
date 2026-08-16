@@ -526,6 +526,7 @@ class Question(TimeStampedModel):
         null=True,
         blank=True,
     )
+    import_row_number = models.PositiveSmallIntegerField(null=True, blank=True)
 
     class Meta:
         db_table = "departmental_exam_questions"
@@ -541,6 +542,10 @@ class Question(TimeStampedModel):
                 ),
                 name="ck_de_question_codes",
             ),
+            models.UniqueConstraint(
+                fields=["import_batch", "import_row_number"],
+                name="uq_de_question_import_row",
+            ),
         ]
         indexes = [models.Index(fields=["contribution", "difficulty"], name="idx_de_q_contrib_difficulty")]
 
@@ -549,6 +554,9 @@ class QuestionImportBatch(TimeStampedModel):
     class Status(models.TextChoices):
         INVALID = "INVALID", "Invalid"
         READY = "READY", "Ready"
+        IMPORTING = "IMPORTING", "Importing"
+        PAUSED = "PAUSED", "Paused"
+        FAILED = "FAILED", "Failed"
         CONFIRMED = "CONFIRMED", "Confirmed"
         EXPIRED = "EXPIRED", "Expired"
 
@@ -562,6 +570,13 @@ class QuestionImportBatch(TimeStampedModel):
         FacultyContribution,
         on_delete=models.PROTECT,
         related_name="question_import_batches",
+    )
+    active_contribution = models.OneToOneField(
+        FacultyContribution,
+        on_delete=models.PROTECT,
+        related_name="active_question_import_batch",
+        null=True,
+        blank=True,
     )
     uploading_user = models.ForeignKey(
         "accounts.User",
@@ -584,9 +599,23 @@ class QuestionImportBatch(TimeStampedModel):
     error_count = models.PositiveSmallIntegerField(default=0)
     warning_count = models.PositiveSmallIntegerField(default=0)
     resulting_question_count = models.PositiveSmallIntegerField(default=0)
+    committed_rows = models.PositiveSmallIntegerField(default=0)
+    next_row_number = models.PositiveSmallIntegerField(null=True, blank=True)
     expires_at = models.DateTimeField()
+    started_at = models.DateTimeField(null=True, blank=True)
+    progress_updated_at = models.DateTimeField(null=True, blank=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     payload_purged_at = models.DateTimeField(null=True, blank=True)
+    failure_code = models.CharField(max_length=40, blank=True, default="")
+    failure_message = models.CharField(max_length=255, blank=True, default="")
+
+    @classmethod
+    def active_statuses(cls):
+        return (cls.Status.IMPORTING, cls.Status.PAUSED)
+
+    @classmethod
+    def resumable_statuses(cls):
+        return (cls.Status.READY, *cls.active_statuses())
 
     class Meta:
         db_table = "departmental_exam_question_import_batches"
@@ -595,7 +624,23 @@ class QuestionImportBatch(TimeStampedModel):
                 condition=(
                     models.Q(status="CONFIRMED", confirmed_at__isnull=False, payload_purged_at__isnull=False)
                     | models.Q(status="EXPIRED", confirmed_at__isnull=True, payload_purged_at__isnull=False)
-                    | models.Q(status__in=["INVALID", "READY"], confirmed_at__isnull=True)
+                    | models.Q(
+                        status__in=["INVALID", "READY"],
+                        confirmed_at__isnull=True,
+                        payload_purged_at__isnull=True,
+                    )
+                    | models.Q(
+                        status="FAILED",
+                        confirmed_at__isnull=True,
+                        payload_purged_at__isnull=False,
+                    )
+                    | models.Q(
+                        status__in=["IMPORTING", "PAUSED"],
+                        confirmed_at__isnull=True,
+                        payload_purged_at__isnull=True,
+                        started_at__isnull=False,
+                        progress_updated_at__isnull=False,
+                    )
                 ),
                 name="ck_de_batch_status_times",
             ),
@@ -606,14 +651,47 @@ class QuestionImportBatch(TimeStampedModel):
             models.CheckConstraint(
                 condition=(
                     models.Q(
-                        status__in=["READY", "CONFIRMED"],
+                        status__in=["READY", "IMPORTING", "PAUSED", "CONFIRMED"],
                         error_count=0,
                         valid_rows__gte=1,
                     )
                     | models.Q(status="INVALID", error_count__gte=1)
-                    | models.Q(status="EXPIRED")
+                    | models.Q(status__in=["FAILED", "EXPIRED"])
                 ),
                 name="ck_de_batch_validity",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status__in=["INVALID", "READY", "FAILED", "EXPIRED"],
+                        committed_rows=0,
+                        next_row_number__isnull=True,
+                    )
+                    | models.Q(
+                        status="CONFIRMED",
+                        committed_rows=models.F("total_rows"),
+                        next_row_number__isnull=True,
+                    )
+                    | models.Q(
+                        status__in=["IMPORTING", "PAUSED"],
+                        committed_rows__lt=models.F("total_rows"),
+                        next_row_number__isnull=False,
+                    )
+                ),
+                name="ck_de_batch_progress",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status__in=["IMPORTING", "PAUSED"],
+                        active_contribution=models.F("contribution"),
+                    )
+                    | models.Q(
+                        status__in=["INVALID", "READY", "FAILED", "CONFIRMED", "EXPIRED"],
+                        active_contribution__isnull=True,
+                    )
+                ),
+                name="ck_de_batch_active_contrib",
             ),
         ]
         indexes = [

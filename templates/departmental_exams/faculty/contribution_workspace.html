@@ -1,6 +1,8 @@
 {% extends "faculty_portal/base.html" %}
+{% load static %}
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
 {% block faculty_content %}
+<div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% url 'departmental_exams:csv_status' active_import.token %}"{% endif %}>
 <a class="btn btn-sm btn-outline-secondary mb-3" href="{% url 'departmental_exams:contribution_list' %}">Back to contributions</a>
 <div class="card shadow-sm mb-3">
   <div class="card-body">
@@ -21,7 +23,21 @@
     {% if configuration.additional_instructions %}<div class="mt-2"><strong>Course instructions:</strong><br>{{ configuration.additional_instructions|linebreaksbr }}</div>{% endif %}
   </div>
 </div>
-{% if contribution.status == 'SUBMITTED' %}
+{% if active_import %}
+  <div class="alert alert-info" role="status">
+    <strong>An interrupted question import is available.</strong>
+    <div data-import-progress-text>{{ active_import.committed_rows }} / {{ active_import.total_rows }} rows committed ({{ active_import_progress.percentage }}%).</div>
+    {% if active_import.failure_message %}<div class="mt-2" data-import-server-message>{{ active_import.failure_message }}</div>{% else %}<div class="mt-2" data-import-server-message hidden></div>{% endif %}
+    <div class="progress mt-2" role="progressbar" aria-label="Persisted question import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ active_import_progress.percentage }}">
+      <div class="progress-bar" data-import-progress-bar style="width: {{ active_import_progress.percentage }}%"></div>
+    </div>
+    <form method="post" action="{% url 'departmental_exams:csv_confirm' active_import.token %}" data-import-resume-form class="mt-3">
+      {% csrf_token %}{% for hidden in active_import_form.hidden_fields %}{{ hidden }}{% endfor %}
+      <button class="btn btn-primary" type="submit">Resume import</button>
+    </form>
+  </div>
+  <div class="alert alert-danger" data-import-error role="alert" hidden></div>
+{% elif contribution.status == 'SUBMITTED' %}
   <div class="alert alert-success"><strong>Submitted and read-only.</strong> Submitted {{ contribution.submitted_at|date:"M j, Y g:i A" }}. Your questions remain visible to you, but no further changes are allowed.</div>
 {% elif contribution.roster_status == 'BLOCKED' %}
   <div class="alert alert-warning"><strong>This Draft is blocked and read-only.</strong> Your current teaching-assignment eligibility is no longer valid. Your saved content remains private and visible here; contact an authorized administrator.</div>
@@ -83,6 +99,16 @@
 {% else %}
   <div class="alert alert-info">No questions have been saved.</div>
 {% endif %}
+</div>
+{% if active_import %}
+<div class="position-fixed top-0 start-0 w-100 h-100 bg-body bg-opacity-75 d-flex align-items-center justify-content-center p-3" data-import-overlay role="status" aria-live="assertive" hidden style="z-index: 1080;">
+  <div class="card shadow border-primary" style="max-width: 34rem;"><div class="card-body">
+    <p class="fw-semibold mb-2">Importing questions...</p>
+    <p>Question import is in progress. Please keep this page open and do not navigate away.</p>
+    <div data-import-overlay-progress>Persisted progress will update after each committed chunk.</div>
+  </div></div>
+</div>
+{% endif %}
 {% endblock %}
 {% block extra_js %}{{ block.super }}
 <script>
@@ -101,4 +127,5 @@
   form.addEventListener("submit", () => document.getElementById("ordered-question-ids").value = [...list.querySelectorAll(".question-card")].map(card => card.dataset.questionId).join(","));
 })();
 </script>
+{% if active_import %}<script src="{% static 'js/departmental_exam_csv_import.js' %}"></script>{% endif %}
 {% endblock %}

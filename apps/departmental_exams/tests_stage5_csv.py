@@ -1,13 +1,14 @@
 import csv
 import io
 
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import Http404
 
 from apps.auditlog.models import AuditLog
 
 from .contribution_authorization import ContributionQuotaReached
-from .contribution_services import QuestionMutationService
+from .contribution_services import QuestionMutationService, QuestionPayloadService
 from .csv_import import (
     CSV_FILENAME,
     CSV_HEADERS,
@@ -53,6 +54,30 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
             expected_contribution_revision=self.contribution.revision,
         )
 
+    def assert_rejected_question_character(self, character):
+        payload = dict(zip(CSV_HEADERS, self.row(f"Question{character}text")))
+        with self.assertRaises(ValidationError) as captured:
+            QuestionPayloadService.validate(payload)
+        self.assertEqual(
+            captured.exception.message_dict["question_text"],
+            [QuestionPayloadService.UNSUPPORTED_CHARACTER_MESSAGE],
+        )
+
+        parsed = QuestionCSVParser.parse(
+            self.csv_upload([self.row(f"Question{character}text")])
+        )
+        self.assertGreater(parsed.error_count, 0)
+        self.assertEqual(
+            parsed.data_rows[0].errors,
+            [
+                {
+                    "field": "question_text",
+                    "message": QuestionPayloadService.UNSUPPORTED_CHARACTER_MESSAGE,
+                }
+            ],
+        )
+        self.assertEqual(parsed.data_rows[0].payload, {})
+
     def test_template_has_exact_filename_headers_and_labeled_sample(self):
         decoded = QuestionCSVImportService.template_bytes().decode("utf-8")
         rows = list(csv.reader(io.StringIO(decoded)))
@@ -66,6 +91,77 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertEqual(batch.status, "READY")
         self.assertEqual(preview.payload["correct_answer"], "A")
         self.assertEqual(preview.payload["difficulty"], "MODERATE")
+
+    def test_nul_is_rejected_with_safe_error(self):
+        self.assert_rejected_question_character("\x00")
+        batch = self.create_preview(
+            self.csv_upload([self.row("Question\x00text")])
+        )
+        self.assertEqual(batch.status, QuestionImportBatch.Status.INVALID)
+        self.assertEqual(batch.rows.get().payload, {})
+
+    def test_disallowed_c0_c1_and_del_are_rejected(self):
+        codepoints = (
+            0x0001,
+            0x0008,
+            0x0009,
+            0x000B,
+            0x001F,
+            0x007F,
+            0x0080,
+            0x0085,
+            0x009F,
+        )
+        for codepoint in codepoints:
+            with self.subTest(codepoint=f"U+{codepoint:04X}"):
+                self.assert_rejected_question_character(chr(codepoint))
+
+    def test_bidi_controls_and_embedded_bom_are_rejected(self):
+        codepoints = (
+            0x061C,
+            0x200E,
+            0x200F,
+            *range(0x202A, 0x202F),
+            *range(0x2066, 0x206A),
+            0xFEFF,
+        )
+        for codepoint in codepoints:
+            with self.subTest(codepoint=f"U+{codepoint:04X}"):
+                self.assert_rejected_question_character(chr(codepoint))
+
+    def test_surrogate_input_is_rejected_when_shared_service_is_called_directly(self):
+        payload = dict(zip(CSV_HEADERS, self.row(f"Question{chr(0xD800)}text")))
+        with self.assertRaises(ValidationError) as captured:
+            QuestionPayloadService.validate(payload)
+        self.assertEqual(
+            captured.exception.message_dict["question_text"],
+            [QuestionPayloadService.UNSUPPORTED_CHARACTER_MESSAGE],
+        )
+
+    def test_supported_newlines_and_legitimate_unicode_are_preserved(self):
+        payload = {
+            "question_text": (
+                "Ano ang kabuluhan ng pananaliksik sa Filipino?\r\n"
+                "Ipaliwanag ang ugnayan ng wika, kultura, at edukasyon.\r"
+                "Gamitin ang mga salitang piñata, résumé, at Ω."
+            ),
+            "choice_a": "Wika at kultura lamang",
+            "choice_b": "Edukasyon at lipunan",
+            "choice_c": "Lahat ng nabanggit — may saysay",
+            "choice_d": "Wala sa mga nabanggit",
+            "correct_answer": "C",
+            "difficulty": "Moderate",
+        }
+        cleaned = QuestionPayloadService.validate(payload)
+        self.assertEqual(
+            cleaned["question_text"],
+            (
+                "Ano ang kabuluhan ng pananaliksik sa Filipino?\n"
+                "Ipaliwanag ang ugnayan ng wika, kultura, at edukasyon.\n"
+                "Gamitin ang mga salitang piñata, résumé, at Ω."
+            ),
+        )
+        self.assertEqual(cleaned["choice_c"], "Lahat ng nabanggit — may saysay")
 
     def test_wrong_headers_internal_blank_and_trailing_blank_rules(self):
         wrong = self.create_preview(
@@ -244,8 +340,9 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
         batch.refresh_from_db()
         self.assertEqual(self.contribution.questions.count(), 50)
         self.assertEqual(self.contribution.revision, revision_after_fill)
-        self.assertEqual(batch.status, QuestionImportBatch.Status.READY)
-        self.assertTrue(batch.rows.exists())
+        self.assertEqual(batch.status, QuestionImportBatch.Status.FAILED)
+        self.assertEqual(batch.failure_code, "QUOTA_CHANGED")
+        self.assertFalse(batch.rows.exists())
         self.assertEqual(
             AuditLog.objects.filter(action="DE_EXAM_QUESTION_CSV_IMPORTED").count(),
             audit_count,
@@ -268,6 +365,12 @@ class Stage5CSVTests(Stage5FixtureMixin, Stage4TestCase):
                 tenant_id=self.tenant.id,
                 campus_id=self.campus.id,
             )
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, QuestionImportBatch.Status.READY)
+        self.assertEqual(batch.committed_rows, 0)
+        self.assertIsNone(batch.active_contribution_id)
+        self.assertEqual(batch.failure_code, "")
+        self.assertEqual(batch.failure_message, "")
 
     def test_error_rows_never_repeat_confidential_content(self):
         batch = self.create_preview(self.csv_upload([["SECRET TEXT", "A", "A", "C", "D", "A", "Easy"]]))

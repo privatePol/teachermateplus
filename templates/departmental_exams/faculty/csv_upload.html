@@ -1,13 +1,16 @@
 {% extends "faculty_portal/base.html" %}
+{% load static %}
 {% block faculty_content %}
+<div data-import-page>
 <h1 class="h3">Upload question CSV</h1>
 <div class="alert alert-info">
   Use UTF-8 CSV with the exact headers <code>question_text,choice_a,choice_b,choice_c,choice_d,correct_answer,difficulty</code>.
-  Replace or delete the clearly labeled sample row. Upload is append-only and confirmation imports every valid row or none. Maximum 2 MB and 200 nonblank technical rows.
+  Replace or delete the clearly labeled sample row. Upload is append-only; confirmation uses durable resumable chunks and exposes questions only after every row completes. Maximum 2 MB and 200 nonblank technical rows.
   You have {{ saved_count }} of {{ contribution.quota_snapshot }} questions saved, leaving exactly {{ remaining }} import slots.
 </div>
 <p><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:csv_template' contribution.id %}">Download template</a></p>
-<form method="post" enctype="multipart/form-data" class="card shadow-sm" novalidate><div class="card-body">
+<div class="alert alert-danger" data-import-error role="alert" hidden></div>
+<form method="post" enctype="multipart/form-data" class="card shadow-sm" data-csv-upload-form novalidate><div class="card-body">
   {% csrf_token %}
   {% if form.non_field_errors %}<div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>{% endif %}
   {% for hidden in form.hidden_fields %}{{ hidden }}{% if hidden.errors %}<div class="alert alert-danger" role="alert">The page state is missing or invalid. Reload and try again.</div>{% endif %}{% endfor %}
@@ -19,4 +22,17 @@
   </div>
   <div class="d-flex flex-wrap gap-2"><button class="btn btn-primary" type="submit">Validate confidential preview</button><a class="btn btn-outline-secondary" href="{% url 'departmental_exams:contribution_workspace' contribution.id %}">Cancel</a></div>
 </div></form>
+</div>
+<div class="position-fixed top-0 start-0 w-100 h-100 bg-body bg-opacity-75 d-flex align-items-center justify-content-center p-3" data-import-overlay role="status" aria-live="assertive" hidden style="z-index: 1080;">
+  <div class="card shadow border-primary" style="max-width: 34rem;"><div class="card-body">
+    <p class="fw-semibold mb-2" data-import-phase>Preparing CSV upload...</p>
+    <p>Question import is in progress. Please keep this page open and do not navigate away.</p>
+    <div class="progress" role="progressbar" aria-label="Question CSV upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="progress-bar" data-import-progress-bar style="width: 0%"></div>
+    </div>
+  </div></div>
+</div>
+{% endblock %}
+{% block extra_js %}{{ block.super }}
+<script src="{% static 'js/departmental_exam_csv_import.js' %}"></script>
 {% endblock %}

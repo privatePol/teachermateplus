@@ -10,6 +10,7 @@ from django.test import RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.formats import date_format
+from django.utils.html import escape
 from apps.academics.models import CourseOffering, Section
 from apps.core.services.settings import SystemSettingService
 from apps.core.context_processors import portal_menu
@@ -45,10 +46,28 @@ class _ActiveMenuParser(HTMLParser):
             self.active_codes.append(code)
 
 
+class _HrefParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.hrefs = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            href = dict(attrs).get("href")
+            if href:
+                self.hrefs.append(href)
+
+
 def _active_menu_codes(response):
     parser = _ActiveMenuParser()
     parser.feed(response.content.decode())
     return parser.active_codes
+
+
+def _response_hrefs(response):
+    parser = _HrefParser()
+    parser.feed(response.content.decode())
+    return parser.hrefs
 
 
 class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
@@ -93,7 +112,7 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         }
 
     @staticmethod
-    def valid_csv_upload():
+    def valid_csv_upload(row=None):
         stream = io.StringIO(newline="")
         writer = csv.writer(stream)
         writer.writerow(
@@ -107,7 +126,10 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
                 "difficulty",
             )
         )
-        writer.writerow(("Forbidden CSV question", "A", "B", "C", "D", "A", "EASY"))
+        writer.writerow(
+            row
+            or ("Forbidden CSV question", "A", "B", "C", "D", "A", "EASY")
+        )
         return SimpleUploadedFile(
             "questions.csv",
             stream.getvalue().encode("utf-8"),
@@ -652,8 +674,9 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         batch.refresh_from_db()
         self.assertEqual(self.contribution.questions.count(), 50)
         self.assertEqual(self.contribution.revision, revision_after_fill)
-        self.assertEqual(batch.status, QuestionImportBatch.Status.READY)
-        self.assertTrue(batch.rows.exists())
+        self.assertEqual(batch.status, QuestionImportBatch.Status.FAILED)
+        self.assertEqual(batch.failure_code, "QUOTA_CHANGED")
+        self.assertFalse(batch.rows.exists())
         self.assertEqual(
             AuditLog.objects.filter(action="DE_EXAM_QUESTION_CSV_IMPORTED").count(),
             audit_count,
@@ -717,6 +740,74 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertTemplateUsed(denied, "faculty_portal/base.html")
         self.assertContains(denied, 'class="alert alert-danger', status_code=403)
         self.assertNotContains(denied, "<script>alert(1)</script>", status_code=403)
+
+    def test_csv_html_and_link_shaped_content_is_literal_escaped_and_nonclickable(self):
+        html_fragments = (
+            "<script>alert(1)</script>",
+            "<img src=x onerror=alert(1)>",
+            "<svg onload=alert(1)>",
+            '<a href="javascript:alert(1)">click</a>',
+        )
+        question_text = "\n".join(html_fragments)
+        choices = (
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+            "https://example.invalid/exam",
+        )
+        batch = QuestionCSVImportService.create_preview(
+            contribution_id=self.contribution.id,
+            uploaded_file=self.valid_csv_upload(
+                (question_text, *choices, "A", "EASY")
+            ),
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            expected_contribution_revision=self.contribution.revision,
+        )
+        preview = self.client.get(
+            reverse("departmental_exams:csv_preview", args=[batch.token])
+        )
+        self.assertEqual(preview.status_code, 200)
+
+        confirmed, changed = QuestionCSVImportService.confirm(
+            token=batch.token,
+            expected_file_sha256=batch.file_sha256,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+        )
+        self.assertTrue(changed)
+        workspace = self.client.get(
+            reverse(
+                "departmental_exams:contribution_workspace",
+                args=[confirmed.contribution_id],
+            )
+        )
+        self.assertEqual(workspace.status_code, 200)
+        stored = Question.objects.get(import_batch=batch)
+        self.assertEqual(stored.question_text, question_text)
+        self.assertEqual(
+            (stored.choice_a, stored.choice_b, stored.choice_c, stored.choice_d),
+            choices,
+        )
+
+        for response in (preview, workspace):
+            with self.subTest(template=response.templates[0].name):
+                body = response.content.decode()
+                for fragment in html_fragments:
+                    self.assertIn(escape(fragment), body)
+                    self.assertNotIn(fragment, body)
+                for choice in choices:
+                    self.assertIn(escape(choice), body)
+                unsafe_schemes = ("javascript:", "data:", "vbscript:")
+                self.assertFalse(
+                    any(
+                        href.lower().startswith(unsafe_schemes)
+                        or href == "https://example.invalid/exam"
+                        for href in _response_hrefs(response)
+                    )
+                )
 
     def test_deadline_crossing_hides_controls_and_denies_upload(self):
         type(self.configuration).objects.filter(pk=self.configuration.pk).update(

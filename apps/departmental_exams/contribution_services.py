@@ -417,10 +417,39 @@ class ContributionRosterService:
 class QuestionPayloadService:
     TEXT_FIELDS = ("question_text", "choice_a", "choice_b", "choice_c", "choice_d")
     CHOICE_FIELDS = ("choice_a", "choice_b", "choice_c", "choice_d")
+    BIDI_CONTROL_CODEPOINTS = frozenset(
+        {
+            0x061C,
+            0x200E,
+            0x200F,
+            *range(0x202A, 0x202F),
+            *range(0x2066, 0x206A),
+        }
+    )
+    UNSUPPORTED_CHARACTER_MESSAGE = (
+        "Control and bidirectional formatting characters are not allowed."
+    )
 
     @staticmethod
     def normalize_text(value):
         return (value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    @classmethod
+    def has_unsupported_characters(cls, value):
+        normalized_newlines = (
+            (value or "").replace("\r\n", "\n").replace("\r", "\n")
+        )
+        for character in normalized_newlines:
+            codepoint = ord(character)
+            if (
+                (codepoint <= 0x001F and codepoint != 0x000A)
+                or 0x007F <= codepoint <= 0x009F
+                or 0xD800 <= codepoint <= 0xDFFF
+                or codepoint == 0xFEFF
+                or codepoint in cls.BIDI_CONTROL_CODEPOINTS
+            ):
+                return True
+        return False
 
     @staticmethod
     def comparison_value(value):
@@ -433,11 +462,18 @@ class QuestionPayloadService:
 
     @classmethod
     def validate(cls, payload):
+        source_text = {
+            field: payload.get(field) or ""
+            for field in cls.TEXT_FIELDS
+        }
         cleaned = {
-            field: cls.normalize_text(payload.get(field))
+            field: cls.normalize_text(source_text[field])
             for field in cls.TEXT_FIELDS
         }
         errors = defaultdict(list)
+        for field, value in source_text.items():
+            if cls.has_unsupported_characters(value):
+                errors[field].append(cls.UNSUPPORTED_CHARACTER_MESSAGE)
         if not cleaned["question_text"]:
             errors["question_text"].append("Question text is required.")
         elif len(cleaned["question_text"]) > 5000:
@@ -510,6 +546,9 @@ class QuestionMutationService:
         ContributionAuthorizationService.require_revision(
             contribution=contribution,
             expected_revision=expected_contribution_revision,
+        )
+        ContributionAuthorizationService.require_no_active_import(
+            contribution=contribution,
         )
         questions = list(
             Question.objects.select_for_update()
@@ -789,6 +828,9 @@ class QuestionMutationService:
         ContributionAuthorizationService.require_revision(
             contribution=contribution,
             expected_revision=expected_contribution_revision,
+        )
+        ContributionAuthorizationService.require_no_active_import(
+            contribution=contribution,
         )
         questions = list(
             Question.objects.select_for_update()
