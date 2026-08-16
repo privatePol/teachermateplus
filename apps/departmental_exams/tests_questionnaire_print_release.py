@@ -304,7 +304,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             self.assertNotIn("question_text", metadata)
             self.assertNotIn("fingerprint", metadata)
 
-    def test_faculty_and_admin_questionnaires_support_letter_and_a4_for_both_sets(self):
+    def test_faculty_and_admin_questionnaires_support_all_paper_sizes_for_both_sets(self):
         release = self._release()
         admin_client = Client()
         admin_client.force_login(self.manager_user)
@@ -323,6 +323,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
         paper_sizes = (
             ("letter", "Letter", "8.5in", "11in"),
             ("a4", "A4", "210mm", "297mm"),
+            ("legal", "Legal", "8.5in", "14in"),
         )
 
         for portal, client, url_for_set in portals:
@@ -361,13 +362,13 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
             AuditLog.objects.filter(
                 action="DE_QUESTIONNAIRE_PRINT_SET_ACCESSED"
             ).count(),
-            4,
+            6,
         )
         self.assertEqual(
             AuditLog.objects.filter(
                 action="DE_ADMIN_QUESTIONNAIRE_PRINT_SET_ACCESSED"
             ).count(),
-            4,
+            6,
         )
         for audit in AuditLog.objects.filter(
             action__in=(

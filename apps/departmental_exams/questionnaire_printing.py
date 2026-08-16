@@ -40,6 +40,13 @@ QUESTIONNAIRE_PAPER_SIZES = {
         "sheet_width": "210mm",
         "sheet_height": "297mm",
     },
+    "legal": {
+        "value": "legal",
+        "label": "Legal",
+        "css_size": "Legal",
+        "sheet_width": "8.5in",
+        "sheet_height": "14in",
+    },
 }
 DEFAULT_QUESTIONNAIRE_PAPER_SIZE = "letter"
 

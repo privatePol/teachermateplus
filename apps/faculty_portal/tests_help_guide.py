@@ -76,6 +76,7 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "regenerated revision")
         self.assertContains(response, "new release")
         self.assertContains(response, "Letter as the default paper size")
+        self.assertContains(response, "A4 or Legal as options")
         self.assertContains(response, "choose the paper size")
         self.assertContains(
             response,
