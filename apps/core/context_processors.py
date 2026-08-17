@@ -1,3 +1,7 @@
+from types import SimpleNamespace
+
+from django.urls import reverse
+
 from apps.core.services.menu import MenuService
 from apps.core.services.features import FeatureSettingsService
 from apps.core.services.permissions import PermissionService
@@ -7,6 +11,10 @@ from apps.rbac.models import UserRole
 
 _DEPARTMENTAL_EXAM_ACTIVE_ROUTES = {
     "FACULTY": {
+        "DE_EXAM_FACULTY_RESOURCES": {
+            "departmental_exams:resources",
+            "departmental_exams:answer_sheet",
+        },
         "DE_EXAM_FACULTY_CONTRIBUTIONS": {
             "departmental_exams:contribution_list",
             "departmental_exams:contribution_workspace",
@@ -60,6 +68,29 @@ _DEPARTMENTAL_EXAM_ACTIVE_ROUTES = {
         },
     },
 }
+
+
+def _add_departmental_exam_resources_menu(menu):
+    for group in menu:
+        if group["group"].code != "DEPARTMENTAL_EXAMS":
+            continue
+        if any(
+            node["item"].code == "DE_EXAM_FACULTY_RESOURCES"
+            for node in group["items"]
+        ):
+            return
+        group["items"].append(
+            {
+                "item": SimpleNamespace(
+                    code="DE_EXAM_FACULTY_RESOURCES",
+                    label="Resources",
+                ),
+                "url": reverse("departmental_exams:resources"),
+                "children": [],
+                "visible": True,
+            }
+        )
+        return
 
 
 def _mark_departmental_exam_active_menu(request, menu, portal):
@@ -156,6 +187,8 @@ def portal_menu(request):
                 campus_id=scope.get("campus_id"),
             )
             stage5_code = "DE_EXAM_FACULTY_CONTRIBUTIONS"
+            if stage5_visible:
+                _add_departmental_exam_resources_menu(menu)
         else:
             stage5_visible = ContributionMonitoringSelector.navigation_visible(
                 user=request.user,

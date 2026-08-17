@@ -4,7 +4,7 @@ from __future__ import annotations
 FACULTY_HELP_SECTIONS = [
     {
         "code": "departmental-exam-contributions",
-        "title": "Departmental Exam Question Contributions",
+        "title": "Departmental Exam Builder",
         "topics": [
             {
                 "code": "question-contribution-workspace",
@@ -21,7 +21,20 @@ FACULTY_HELP_SECTIONS = [
                 ],
                 "avoid": "Never share another contributor's questions, preview link, correct answers, or confidential CSV content.",
                 "next_step": "If contribution or print access is blocked or missing, contact the authorized academic office to verify your current assignment and the exact questionnaire release window.",
-            }
+            },
+            {
+                "code": "departmental-exam-resources",
+                "title": "Open and Print Departmental Exam Resources",
+                "purpose": "Provides built-in printable materials for departmental examinations without exposing questions, answer keys, or contribution data.",
+                "how_to_open": ["From the Faculty Portal navigation, open Departmental Exam Builder.", "Choose Resources, then open NCBA 75-Item Answer Sheet."],
+                "check_first": ["Confirm you need a 75-item, A-D multiple-choice answer sheet.", "Use Letter portrait paper when available; A4 remains usable."],
+                "actions": [
+                    {"name": "Open / View", "does": "Opens the NCBA-branded 75-item answer sheet in the Faculty Portal.", "when": "Use it before printing to confirm the header fields and 1-75 numbering.", "avoid": "Do not write answers on the on-screen preview.", "result": "A three-column sheet with A, B, C, and D bubbles is displayed.", "editable": "No. This is a built-in printable resource."},
+                    {"name": "Print Answer Sheet", "does": "Opens the browser print dialog and removes portal navigation from the printed copy.", "when": "Use it after checking printer paper size, scale, and orientation.", "avoid": "Do not select landscape orientation or enlarge beyond the printable area.", "result": "A clean single-page portrait answer sheet is printed.", "editable": "No application data changes."},
+                ],
+                "avoid": "Do not treat the blank answer sheet as an answer key or a stored student record.",
+                "next_step": "Complete the Campus, Period, Date, Student Number, Name of Student, Course, and Year fields on the printed sheet.",
+            },
         ],
     },
     {

@@ -220,6 +220,49 @@ def _require_add_capacity(contribution):
     )
 
 
+def _require_faculty_builder_access(request):
+    tenant_id, campus_id = _scope(request)
+    tenant = get_object_or_404(Tenant, pk=tenant_id, is_active=True)
+    ContributionAuthorizationService.require_common_read_access(
+        user=request.user,
+        tenant=tenant,
+        request_tenant_id=tenant_id,
+        request_campus_id=campus_id,
+    )
+    if not ContributionSelector.faculty_navigation_visible(
+        user=request.user,
+        tenant_id=tenant_id,
+        campus_id=campus_id,
+    ):
+        raise PermissionDenied("Departmental Exam Builder access is unavailable.")
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def resources_view(request):
+    _require_faculty_builder_access(request)
+    return render(request, "departmental_exams/faculty/resources.html")
+
+
+@_faculty_error_page
+@portal_required("FACULTY")
+@require_GET
+def answer_sheet_view(request):
+    _require_faculty_builder_access(request)
+    return render(
+        request,
+        "departmental_exams/faculty/answer_sheet.html",
+        {
+            "answer_columns": (
+                range(1, 26),
+                range(26, 51),
+                range(51, 76),
+            )
+        },
+    )
+
+
 @_faculty_error_page
 @portal_required("FACULTY")
 def contribution_list_view(request):

@@ -107,6 +107,9 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "Component Average Trend")
         self.assertContains(response, "Which section has the most missing outputs?")
         self.assertContains(response, "Rule-based interpretation")
+        self.assertContains(response, "Open and Print Departmental Exam Resources")
+        self.assertContains(response, "NCBA 75-Item Answer Sheet")
+        self.assertContains(response, "A three-column sheet with A, B, C, and D bubbles")
 
     def test_grouped_help_link_opens_faculty_quick_guide(self):
         response = self.client.get(reverse("faculty_portal:my_courses"))

@@ -6,6 +6,16 @@ app_name = "departmental_exams"
 
 urlpatterns = [
     path(
+        "faculty/departmental-exams/resources/",
+        faculty_views.resources_view,
+        name="resources",
+    ),
+    path(
+        "faculty/departmental-exams/resources/answer-sheet/",
+        faculty_views.answer_sheet_view,
+        name="answer_sheet",
+    ),
+    path(
         "faculty/departmental-exams/contributions/",
         faculty_views.contribution_list_view,
         name="contribution_list",
