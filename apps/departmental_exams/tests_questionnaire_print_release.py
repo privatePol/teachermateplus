@@ -358,6 +358,11 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                             f'<option value="{paper_value}" selected>{css_size}</option>',
                             html=True,
                         )
+                        self.assertContains(response, "vendor/katex/0.18.4/katex.min.css")
+                        self.assertContains(response, "vendor/katex/0.18.4/katex.min.js")
+                        self.assertContains(response, "departmental_exam_scientific_notation.js")
+                        self.assertContains(response, "data-scientific-print", html=False)
+                        self.assertContains(response, "data-scientific-content", html=False)
 
         self.assertEqual(
             AuditLog.objects.filter(
@@ -512,6 +517,41 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                 self.assertNotIn('href="data:', lowered)
                 self.assertNotIn('href="vbscript:', lowered)
                 self.assertNotIn('<a href="https://example.invalid/exam', lowered)
+
+    def test_questionnaire_outputs_preserve_scientific_notation_for_question_and_choices(self):
+        notation_question = (
+            r"\(\frac{x}{y}\) \(\sqrt{x}\) \(x^2\) \(x_n\) "
+            r"\(\alpha + \theta\) \(\sum_i^n i\) \(\int_0^1 x\,dx\)"
+        )
+        notation_choices = [
+            r"\(\ce{2H2 + O2 -> 2H2O}\)",
+            r"\[\begin{bmatrix}a & b \\ c & d\end{bmatrix}\]",
+            r"\(\pi \le \infty\)",
+            r"ordinary text",
+        ]
+        GeneratedExamItem.objects.filter(
+            generated_set__generation_revision=self.r2,
+            generated_set__set_code=GeneratedExamSet.SetCode.A,
+            position=1,
+        ).update(
+            question_text_snapshot=notation_question,
+            choices_snapshot=notation_choices,
+        )
+        release = self._release()
+        admin_client = Client()
+        admin_client.force_login(self.manager_user)
+        responses = (
+            admin_client.get(self._admin_print_url(set_code="A")),
+            self._faculty_client().get(self._print_url(release, "A")),
+        )
+        for response in responses:
+            with self.subTest(portal=response.request["PATH_INFO"]):
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, notation_question)
+                for choice in notation_choices:
+                    self.assertContains(response, escape(choice))
+                self.assertContains(response, "data-scientific-content", html=False)
+                self.assertContains(response, "vendor/katex/0.18.4/contrib/mhchem.min.js")
 
     def test_release_page_renders_each_campus_once_for_repeated_offerings(self):
         original_offering = self.parent.offering_snapshots.get().offering
@@ -1041,7 +1081,7 @@ class QuestionnairePrintReleaseTests(Stage4TestCase):
                 self.assertContains(
                     response,
                     (
-                        '<div class="question-line"><span>1.</span><span>'
+                        '<div class="question-line"><span>1.</span><span data-scientific-content>'
                         f"Released {set_code} question 1</span></div>"
                     ),
                     html=True,

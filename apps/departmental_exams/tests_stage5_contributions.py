@@ -1016,6 +1016,60 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
         self.contribution.refresh_from_db()
         self.assertEqual(self.contribution.revision, 2)
 
+    def test_create_and_update_preserve_scientific_notation_in_all_text_fields(self):
+        payload = {
+            "question_text": r"Solve \(\frac{x+2}{x-3} + \sqrt{x^2+y^2}\).",
+            "choice_a": r"\(x^{2}\)",
+            "choice_b": r"\(x_{n}\)",
+            "choice_c": r"\(\sum_{i=1}^{n} i + \int_0^1 x\,dx\)",
+            "choice_d": r"\(\ce{2H2 + O2 -> 2H2O}\)",
+            "correct_answer": "d",
+            "difficulty": "moderate",
+        }
+        question = self.create_question(payload)
+        for field_name in (
+            "question_text",
+            "choice_a",
+            "choice_b",
+            "choice_c",
+            "choice_d",
+        ):
+            self.assertEqual(getattr(question, field_name), payload[field_name])
+
+        self.contribution.refresh_from_db()
+        updated_payload = dict(payload)
+        updated_payload["question_text"] = (
+            r"Evaluate \[\begin{bmatrix}a & b \\ c & d\end{bmatrix}\] exactly."
+        )
+        updated, changed = QuestionMutationService.update(
+            contribution_id=self.contribution.id,
+            question_id=question.id,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            expected_contribution_revision=self.contribution.revision,
+            expected_question_revision=question.revision,
+            payload=updated_payload,
+        )
+        self.assertTrue(changed)
+        for field_name in (
+            "question_text",
+            "choice_a",
+            "choice_b",
+            "choice_c",
+            "choice_d",
+        ):
+            self.assertEqual(getattr(updated, field_name), updated_payload[field_name])
+
+    def test_ordinary_text_is_unchanged_by_scientific_notation_support(self):
+        payload = self.payload("Which ordinary-text answer is correct?")
+        question = self.create_question(payload)
+        self.assertEqual(question.question_text, payload["question_text"])
+        self.assertEqual(
+            [question.choice_a, question.choice_b, question.choice_c, question.choice_d],
+            [payload["choice_a"], payload["choice_b"], payload["choice_c"], payload["choice_d"]],
+        )
+
     def test_duplicate_normalized_choices_are_rejected(self):
         payload = self.payload()
         payload["choice_a"] = "Ｆoo"
@@ -1188,6 +1242,46 @@ class Stage5ManualQuestionTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertFalse(replay_changed)
         self.assertEqual(replay.pk, submitted.pk)
         self.assertEqual(AuditLog.objects.filter(action="DE_EXAM_CONTRIBUTION_SUBMITTED").count(), 1)
+
+    def test_submitted_scientific_notation_remains_immutable(self):
+        notation = r"\(\frac{\alpha}{\beta}\) and \(\ce{H2O}\)"
+        questions = [
+            Question(
+                contribution=self.contribution,
+                question_text=(notation if index == 1 else f"Question {index}"),
+                choice_a=(r"\(x^2\)" if index == 1 else "A"),
+                choice_b="B",
+                choice_c="C",
+                choice_d="D",
+                correct_answer="A",
+                difficulty="EASY",
+                position=index,
+            )
+            for index in range(1, 51)
+        ]
+        Question.objects.bulk_create(questions)
+        submitted, _changed = QuestionMutationService.submit(
+            contribution_id=self.contribution.id,
+            user=self.faculty,
+            tenant_id=self.tenant.id,
+            campus_id=self.campus.id,
+            expected_contribution_revision=self.contribution.revision,
+        )
+        frozen = submitted.questions.get(position=1)
+        with self.assertRaises(PermissionDenied):
+            QuestionMutationService.update(
+                contribution_id=submitted.id,
+                question_id=frozen.id,
+                user=self.faculty,
+                tenant_id=self.tenant.id,
+                campus_id=self.campus.id,
+                expected_contribution_revision=submitted.revision,
+                expected_question_revision=frozen.revision,
+                payload=self.payload("Attempted replacement"),
+            )
+        frozen.refresh_from_db()
+        self.assertEqual(frozen.question_text, notation)
+        self.assertEqual(frozen.choice_a, r"\(x^2\)")
 
     def test_submission_under_quota_and_past_deadline_are_denied(self):
         with self.assertRaises(ValidationError):

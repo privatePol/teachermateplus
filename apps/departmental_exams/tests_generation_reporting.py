@@ -165,9 +165,26 @@ class GenerationReportingTests(Stage6BGenerationFixtureMixin, Stage4TestCase):
                         )
                         self.assertContains(
                             response,
-                            f"{number_cell}<td>{row['question']}</td>",
+                            f'{number_cell}<td data-scientific-content>{row["question"]}</td>',
                             html=True,
                         )
+
+    def test_screen_and_print_audits_include_scientific_renderer(self):
+        notation = r"\(\frac{\alpha}{\beta}\) \(\ce{H2O}\)"
+        GenerationSourceQuestionSnapshot.objects.filter(
+            audit_snapshot__generation_revision=self.revision
+        ).order_by("id").update(question_text_snapshot=notation)
+        for printable in (False, True):
+            with self.subTest(printable=printable):
+                response = self.client.get(self.audit_url(printable=printable))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "vendor/katex/0.18.4/katex.min.css")
+                self.assertContains(response, "vendor/katex/0.18.4/katex.min.js")
+                self.assertContains(response, "departmental_exam_scientific_notation.js")
+                self.assertContains(response, "data-scientific-content", html=False)
+                self.assertContains(response, notation)
+                if printable:
+                    self.assertContains(response, "data-scientific-print", html=False)
 
     def test_legacy_revision_discloses_only_exact_selected_membership(self):
         selected_item = GeneratedExamItem.objects.filter(

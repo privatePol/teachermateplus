@@ -5,6 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ course_code }} — Set {{ set_code }} Questionnaire</title>
+  {% include "departmental_exams/_scientific_notation_assets.html" %}
   <style>
     @page { size: {{ paper_css_size }} portrait; margin: 0.55in 0.6in 0.85in; }
     * { box-sizing: border-box; }
@@ -58,7 +59,7 @@
       </select>
       <button class="apply-paper" type="submit">Apply</button>
     </form>
-    <button type="button" onclick="window.print()">Print Questionnaire</button>
+    <button type="button" data-scientific-print disabled>Print Questionnaire</button>
   </div>
   <main class="questionnaire">
     <div class="running-header" aria-label="Course running header">
@@ -91,9 +92,9 @@
     </div>
     <section class="questions" aria-label="Multiple-choice questions">
       {% for item in items %}
-        <article class="question">
-          <div class="question-line"><span>{{ item.position }}.</span><span>{{ item.question_text }}</span></div>
-          <ol class="choices" type="A">{% for choice in item.choices %}<li>{{ choice }}</li>{% endfor %}</ol>
+        <article class="question" data-scientific-group>
+          <div class="question-line"><span>{{ item.position }}.</span><span data-scientific-content>{{ item.question_text }}</span></div>
+          <ol class="choices" type="A">{% for choice in item.choices %}<li><span data-scientific-content>{{ choice }}</span></li>{% endfor %}</ol>
         </article>
       {% endfor %}
     </section>

@@ -214,6 +214,8 @@ class AdminHelpGuideTests(TestCase):
         self.assertIn("Bulk Print Release", guide_text)
         self.assertIn("Admin Direct Print", guide_text)
         self.assertIn("Letter (default), A4, or Legal", guide_text)
+        self.assertIn("scientific notation", guide_text)
+        self.assertIn("escaped immutable snapshots", guide_text)
         self.assertIn("Submitted Questions", guide_text)
         self.assertIn("Duplicate/Equivalent Copies", guide_text)
         self.assertIn("Source (Q### r#)", guide_text)
@@ -227,6 +229,7 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(practical, "Questionnaire Output, Answer Keys, and Generation Audits")
         self.assertContains(practical, "select one generated revision per course")
         self.assertContains(practical, "Letter (default), A4, or Legal")
+        self.assertContains(practical, "scientific notation")
         self.assertContains(practical, "Equivalent copy not selected (EQ-###)")
         self.assertContains(practical, "PASS, WARNING, or FAIL")
         full = self.client.get(reverse("admin_portal:guide"), {"view": "full"})
@@ -236,6 +239,7 @@ class AdminHelpGuideTests(TestCase):
         self.assertContains(full, "not a raw hash")
         self.assertContains(full, "not AI judgment")
         self.assertContains(full, "default to Letter paper and also support A4 and Legal")
+        self.assertContains(full, "Supported scientific notation")
 
     def test_admin_guide_can_restore_legacy_template(self):
         user = User.objects.create_superuser(

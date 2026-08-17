@@ -1,4 +1,5 @@
 {% extends "admin_portal/base.html" %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
 {% block admin_content %}
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:generated_revision_detail' revision.id %}">Generation R{{ revision.revision_number }}</a></li><li class="breadcrumb-item active">Question Selection Audit</li></ol></nav>
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
@@ -19,6 +20,6 @@
 </div>
 <nav class="d-flex flex-wrap gap-2 mb-3" aria-label="Audit report filters">{% for code, label in filters %}<a class="btn btn-sm {% if active_filter == code %}btn-dark{% else %}btn-outline-dark{% endif %}" href="?filter={{ code }}">{{ label }}</a>{% endfor %}</nav>
 <div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead class="table-light"><tr><th>No.</th><th>Question</th><th>Contributor</th><th>Campus / Context</th><th>Difficulty</th><th>Correct Answer</th><th>Source</th><th>Set A</th><th>Set B</th><th>Equivalence Status</th></tr></thead><tbody>
-{% for row in rows %}<tr><td class="text-center">{{ forloop.counter }}</td><td>{{ row.question }}</td><td>{{ row.contributor }}</td><td><strong>{{ row.campus }}</strong><div class="small text-muted">{{ row.context }}</div></td><td>{{ row.difficulty }}</td><td class="text-center fw-bold">{{ row.correct_answer }}</td><td>{{ row.source_reference }}</td><td class="text-center">{% if row.set_a_position %}{{ row.set_a_position }}{% else %}&mdash;{% endif %}</td><td class="text-center">{% if row.set_b_position %}{{ row.set_b_position }}{% else %}&mdash;{% endif %}</td><td>{{ row.equivalence_status }}</td></tr>{% empty %}<tr><td colspan="10" class="text-muted text-center py-4">No rows match this filter.</td></tr>{% endfor %}
+{% for row in rows %}<tr data-scientific-group><td class="text-center">{{ forloop.counter }}</td><td data-scientific-content>{{ row.question }}</td><td>{{ row.contributor }}</td><td><strong>{{ row.campus }}</strong><div class="small text-muted">{{ row.context }}</div></td><td>{{ row.difficulty }}</td><td class="text-center fw-bold">{{ row.correct_answer }}</td><td>{{ row.source_reference }}</td><td class="text-center">{% if row.set_a_position %}{{ row.set_a_position }}{% else %}&mdash;{% endif %}</td><td class="text-center">{% if row.set_b_position %}{{ row.set_b_position }}{% else %}&mdash;{% endif %}</td><td>{{ row.equivalence_status }}</td></tr>{% empty %}<tr><td colspan="10" class="text-muted text-center py-4">No rows match this filter.</td></tr>{% endfor %}
 </tbody></table></div>
 {% endblock %}

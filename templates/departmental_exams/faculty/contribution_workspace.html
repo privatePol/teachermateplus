@@ -1,6 +1,7 @@
 {% extends "faculty_portal/base.html" %}
 {% load static %}
 {% block title %}Contribution Workspace | TeacherMate+{% endblock %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
 {% block faculty_content %}
 <div data-import-page{% if active_import %} data-question-import-controller data-status-url="{% url 'departmental_exams:csv_status' active_import.token %}"{% endif %}>
 <a class="btn btn-sm btn-outline-secondary mb-3" href="{% url 'departmental_exams:contribution_list' %}">Back to contributions</a>
@@ -70,18 +71,18 @@
   {% endif %}
   <div id="question-list">
     {% for question in questions %}
-      <article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}">
+      <article class="card shadow-sm mb-3 question-card" data-question-id="{{ question.id }}" data-scientific-group>
         <div class="card-body">
           <div class="d-flex justify-content-between gap-3">
             <h2 class="h5">Question <span class="question-position">{{ question.position }}</span></h2>
             <span class="badge text-bg-light">{{ question.get_difficulty_display }} · {{ question.get_entry_method_display }}</span>
           </div>
-          <div class="mb-2">{{ question.question_text|linebreaksbr }}</div>
+          <div class="mb-2" data-scientific-content>{{ question.question_text }}</div>
           <ol type="A" class="mb-2">
-            <li{% if question.correct_answer == 'A' %} class="fw-bold"{% endif %}>{{ question.choice_a|linebreaksbr }}</li>
-            <li{% if question.correct_answer == 'B' %} class="fw-bold"{% endif %}>{{ question.choice_b|linebreaksbr }}</li>
-            <li{% if question.correct_answer == 'C' %} class="fw-bold"{% endif %}>{{ question.choice_c|linebreaksbr }}</li>
-            <li{% if question.correct_answer == 'D' %} class="fw-bold"{% endif %}>{{ question.choice_d|linebreaksbr }}</li>
+            <li{% if question.correct_answer == 'A' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_a }}</span></li>
+            <li{% if question.correct_answer == 'B' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_b }}</span></li>
+            <li{% if question.correct_answer == 'C' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_c }}</span></li>
+            <li{% if question.correct_answer == 'D' %} class="fw-bold"{% endif %}><span data-scientific-content>{{ question.choice_d }}</span></li>
           </ol>
           <p class="small mb-2"><strong>Correct answer:</strong> {{ question.correct_answer }}</p>
           {% if is_mutable %}

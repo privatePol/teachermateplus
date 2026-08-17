@@ -78,6 +78,10 @@ class FacultyHelpGuideTests(TestCase):
         self.assertContains(response, "Letter as the default paper size")
         self.assertContains(response, "A4 or Legal as options")
         self.assertContains(response, "choose the paper size")
+        self.assertContains(response, "Insert Equation")
+        self.assertContains(response, "Chemical Formula")
+        self.assertContains(response, "not dollar-sign delimiters")
+        self.assertContains(response, "scientific notation renders before the print dialog")
         self.assertContains(
             response,
             "Faculty do not receive Answer Keys, Question Selection Audit reports, or Automatic Generation Audit reports.",

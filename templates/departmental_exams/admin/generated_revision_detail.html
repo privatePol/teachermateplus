@@ -1,4 +1,5 @@
 {% extends "admin_portal/base.html" %}
+{% block extra_head %}{{ block.super }}{% include "departmental_exams/_scientific_notation_assets.html" %}{% endblock %}
 {% block admin_content %}
 {% include "departmental_exams/admin/_stage41_styles.html" %}
 <nav aria-label="breadcrumb" class="mb-2"><ol class="breadcrumb small"><li class="breadcrumb-item"><a href="{% url 'departmental_exams:assigned_course_examinations' %}">Departmental Exam Builder</a></li>{% if automatic_mode %}<li class="breadcrumb-item"><a href="{% url 'departmental_exams:automatic_generation_summary' cycle_course.cycle_id %}">Automatic Generation Summary</a></li>{% endif %}<li class="breadcrumb-item active">Generated Revision</li></ol></nav>
@@ -32,10 +33,10 @@
     {% for item in generated_set.ordered_items %}
       {% ifchanged item.section_id_snapshot %}<div class="de-generation-section rounded p-3 mb-3 mt-2"><h3 class="h5 mb-1">{{ item.section_title_snapshot }}</h3>{% if item.section_instructions_snapshot %}<p class="text-muted mb-0">{{ item.section_instructions_snapshot }}</p>{% endif %}</div>{% endifchanged %}
       {% if item.scenario_id_snapshot and item.scenario_member_position_snapshot == 1 %}<aside class="de-generation-scenario mb-2"><div class="small text-uppercase fw-bold text-warning-emphasis">Scenario{% if item.scenario_title_snapshot %}: {{ item.scenario_title_snapshot }}{% endif %}</div><p class="mb-0 mt-2">{{ item.scenario_stimulus_snapshot }}</p></aside>{% endif %}
-      <article class="de-generation-question mb-3{% if item.scenario_id_snapshot %} ms-md-3{% endif %}">
+      <article class="de-generation-question mb-3{% if item.scenario_id_snapshot %} ms-md-3{% endif %}" data-scientific-group>
         <div class="d-flex flex-wrap justify-content-between gap-2 mb-2"><span class="badge text-bg-light border text-dark">Item {{ item.position }}</span><span class="small text-muted">{{ item.campus_code_snapshot }} &middot; {{ item.get_difficulty_snapshot_display }}{% if item.scenario_id_snapshot %} &middot; Scenario member {{ item.scenario_member_position_snapshot }}{% endif %}</span></div>
-        <p class="fw-semibold mb-2">{{ item.question_text_snapshot }}</p>
-        <ol type="A" class="mb-2">{% for choice in item.choices_snapshot %}<li>{{ choice }}</li>{% endfor %}</ol>
+        <p class="fw-semibold mb-2" data-scientific-content>{{ item.question_text_snapshot }}</p>
+        <ol type="A" class="mb-2">{% for choice in item.choices_snapshot %}<li><span data-scientific-content>{{ choice }}</span></li>{% endfor %}</ol>
         <div class="small"><strong>Correct answer:</strong> {{ item.correct_answer_snapshot }} <span class="text-muted ms-2">Source snapshot Q{{ item.source_question_id }} r{{ item.source_question_revision }}</span></div>
       </article>
     {% empty %}<div class="de-empty"><h3 class="h5">No generated items</h3><p class="text-muted mb-0">This revision is incomplete and must not be used.</p></div>{% endfor %}

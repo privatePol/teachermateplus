@@ -1007,6 +1007,18 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
         self.assertIn("form-control", question_form.fields["question_text"].widget.attrs["class"])
         self.assertIn("form-select", question_form.fields["correct_answer"].widget.attrs["class"])
         self.assertContains(question_get, 'name="csrfmiddlewaretoken"')
+        self.assertEqual(
+            question_get.content.decode().count("data-scientific-field"),
+            5,
+        )
+        self.assertEqual(
+            question_get.content.decode().count("data-scientific-preview"),
+            5,
+        )
+        self.assertContains(question_get, "vendor/katex/0.18.4/katex.min.css")
+        self.assertContains(question_get, "vendor/katex/0.18.4/katex.min.js")
+        self.assertContains(question_get, "vendor/katex/0.18.4/contrib/mhchem.min.js")
+        self.assertContains(question_get, "departmental_exam_scientific_notation.js")
 
         question_invalid = self.client.post(
             create_url,
@@ -1049,6 +1061,49 @@ class Stage5FacultyViewTests(Stage5FixtureMixin, Stage4TestCase):
             "form-check-input", roster.context["form"].fields["confirm"].widget.attrs["class"]
         )
         self.assertContains(roster, 'name="csrfmiddlewaretoken"')
+
+    def test_manual_html_and_link_shaped_content_stays_literal_in_workspace_and_delete(self):
+        payload = self.valid_question_post(self.contribution.revision)
+        payload.update(
+            {
+                "question_text": r'<script>alert(1)</script> \(\frac{x}{y}\)',
+                "choice_a": '<a href="javascript:alert(1)">A</a>',
+                "choice_b": "data:text/html,<img src=x onerror=alert(1)>",
+                "choice_c": "vbscript:msgbox(1)",
+                "choice_d": r"\(\ce{H2O}\)",
+            }
+        )
+        created = self.client.post(
+            reverse("departmental_exams:question_create", args=[self.contribution.id]),
+            payload,
+        )
+        self.assertEqual(created.status_code, 302)
+        question = self.contribution.questions.get()
+        responses = (
+            self.client.get(
+                reverse(
+                    "departmental_exams:contribution_workspace",
+                    args=[self.contribution.id],
+                )
+            ),
+            self.client.get(
+                reverse(
+                    "departmental_exams:question_delete",
+                    args=[self.contribution.id, question.id],
+                )
+            ),
+        )
+        for response in responses:
+            with self.subTest(path=response.request["PATH_INFO"]):
+                self.assertEqual(response.status_code, 200)
+                body = response.content.decode()
+                self.assertIn(escape(payload["question_text"]), body)
+                self.assertNotIn("<script>alert(1)</script>", body)
+                self.assertNotIn('<a href="javascript:alert(1)">', body.lower())
+                self.assertNotIn('href="data:', body.lower())
+                self.assertNotIn('href="vbscript:', body.lower())
+                self.assertIn("data-scientific-content", body)
+                self.assertIn("departmental_exam_scientific_notation.js", body)
 
     def test_conflict_expiry_and_malformed_responses_use_safe_faculty_shell(self):
         question = Question.objects.create(

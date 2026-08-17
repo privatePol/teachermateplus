@@ -303,6 +303,34 @@ class Stage6BGenerationServiceTests(Stage6BGenerationFixtureMixin, Stage4TestCas
         self.assertNotIn("correct_answer", rendered)
         self.assertNotIn("hmac", rendered.lower())
 
+    def test_generated_snapshots_preserve_scientific_notation_exactly(self):
+        parent, _problem = self.ready_generation_course()
+        questions = list(
+            Question.objects.filter(contribution__cycle_course=parent).order_by("id")
+        )
+        for question in questions:
+            question.question_text = rf"\(\frac{{x_{{{question.id}}}^2}}{{\sqrt{{y}}}}\)"
+            question.choice_a = r"\(\alpha + \theta\)"
+            question.choice_b = r"\(\sum_{i=1}^{n} i\)"
+            question.choice_c = r"\(\int_0^1 x\,dx\)"
+            question.choice_d = r"\(\ce{2H2 + O2 -> 2H2O}\)"
+        Question.objects.bulk_update(
+            questions,
+            ["question_text", "choice_a", "choice_b", "choice_c", "choice_d"],
+        )
+        problem, readiness = Stage6ReadinessService.build_problem(cycle_course=parent)
+        self.assertTrue(readiness["ready"], readiness["blockers"])
+        outcome = self.generate_with_proved_selection(parent=parent, problem=problem)
+        item = GeneratedExamItem.objects.filter(
+            generated_set__generation_revision=outcome.revision
+        ).select_related("source_question").first()
+        source = item.source_question
+        self.assertEqual(item.question_text_snapshot, source.question_text)
+        self.assertEqual(
+            item.choices_snapshot,
+            [source.choice_a, source.choice_b, source.choice_c, source.choice_d],
+        )
+
     def test_duplicate_token_reuses_revision_before_stale_revision_check(self):
         parent, problem = self.ready_generation_course()
         first = self.generate_with_proved_selection(parent=parent, problem=problem)

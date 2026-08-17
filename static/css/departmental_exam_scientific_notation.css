@@ -1,0 +1,78 @@
+[data-scientific-content] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.scientific-editor-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.scientific-editor-tools .btn {
+  --bs-btn-padding-y: 0.2rem;
+  --bs-btn-padding-x: 0.5rem;
+  --bs-btn-font-size: 0.78rem;
+}
+
+.scientific-editor-tools .scientific-primary-action {
+  font-weight: 700;
+}
+
+.scientific-editor-tools .scientific-greek-select {
+  width: auto;
+  min-width: 8.75rem;
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+  font-size: 0.78rem;
+}
+
+.scientific-preview-wrap {
+  margin-top: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #d7dfd5;
+  border-radius: 0.4rem;
+  background: #f8faf8;
+}
+
+.scientific-preview-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #52665a;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.scientific-preview {
+  min-height: 1.5rem;
+}
+
+.scientific-preview.is-empty {
+  color: #6c757d;
+  font-style: italic;
+}
+
+[data-scientific-content] .katex-display {
+  max-width: 100%;
+  margin: 0.35em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.has-scientific-notation .choices {
+  columns: 1 !important;
+}
+
+@media print {
+  [data-scientific-content] .katex-display {
+    overflow: visible;
+  }
+
+  .question.has-scientific-notation .katex-display > .katex {
+    font-size: 0.9em;
+  }
+}
